@@ -264,7 +264,9 @@ export function planAppDefaults(
   files[SW_HREF.replace(/^\//, '')] = swJs();             // network-first service worker (PWA, works offline)
   // 📱 The native-feel baseline as a FILE, not inline: one <link> in the document instead of ~2.5 KB of
   // our CSS persisted into the user's index.html. See NATIVE_FEEL_HREF for the guard that proved it.
-  if (nativeFeelEnabled()) files[NATIVE_FEEL_HREF.replace(/^\//, '')] = nativeFeelStylesheet();
+  // Only where the <link> below goes in: with no index.html (Astro, Next, SvelteKit) nothing links it, and an
+  // unlinked stylesheet of ours sat in the project as an orphan the integrity check reported (failedbr #2133).
+  if (nativeFeelEnabled() && indexHtml != null) files[NATIVE_FEEL_HREF.replace(/^\//, '')] = nativeFeelStylesheet();
 
   if (indexHtml == null) {
     return { indexHtml: null, files, added };

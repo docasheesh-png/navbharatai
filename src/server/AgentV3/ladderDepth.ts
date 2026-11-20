@@ -24,11 +24,14 @@
 
 import type { LadderRung } from './tierLadder';
 import { UNATTRIBUTED_PROVIDER } from './ProviderUsageLedger';
+import { PHASE_SCOPE } from './billingPhase';
 
 /** The slice of a provider-ledger entry this module needs. Structural, so the ledger can grow. */
 export interface DeliveredSlice {
   provider: string;
   model?: string;
+  /** Which part of the build made the call; a pre-build scope check (`PHASE_SCOPE`) is not a slice of the build. */
+  phase?: string;
   usage: { outputTokens: number };
 }
 
@@ -47,6 +50,8 @@ export interface LadderDepth {
    * is a fact about routing, not an unknown).
    */
   offLadder?: Record<string, number>;
+  /** Slices with output but no provider on record (the ledger's unattributed remainder). Present only when > 0. */
+  unattributedOutput?: number;
 }
 
 /** Engines that serve a build instead of the ladder, by design. Their slices are named, never "unknown". */
@@ -120,12 +125,15 @@ export function ladderDepthUsed(
   let depth: number | null = null;
   let matched = 0;
   let unmatched = 0;
+  let unattributedOutput = 0;
   const offLadder: Record<string, number> = {};
 
   for (const slice of slices) {
     const out = Number(slice?.usage?.outputTokens);
     if (!Number.isFinite(out) || out <= 0) continue;
-    if (normalise(slice.provider) === UNATTRIBUTED_PROVIDER) continue;
+    if (normalise(slice.provider) === UNATTRIBUTED_PROVIDER) { unattributedOutput++; continue; }
+    // Q-2751: the scope classification ran before the build and delivered no part of it.
+    if (slice.phase === PHASE_SCOPE) continue;
 
     const idx = rungIndexFor(slice, rungs);
     if (idx == null) {
@@ -139,7 +147,8 @@ export function ladderDepthUsed(
     if (depth == null || oneBased > depth) depth = oneBased;
   }
 
-  return Object.keys(offLadder).length ? { depth, rungCount: rungs.length, matched, unmatched, offLadder } : { depth, rungCount: rungs.length, matched, unmatched };
+  const base: LadderDepth = Object.keys(offLadder).length ? { depth, rungCount: rungs.length, matched, unmatched, offLadder } : { depth, rungCount: rungs.length, matched, unmatched };
+  return unattributedOutput > 0 ? { ...base, unattributedOutput } : base;
 }
 
 /**
@@ -168,7 +177,11 @@ export function describeLadderDepth(d: LadderDepth, openedAt?: number): string {
   if (d.depth == null) {
     return d.unmatched > 0
       ? `Ladder depth unknown — ${d.unmatched} delivered slice(s) named a model no rung of this tier claims.`
-      : 'Ladder depth unknown — no delivered slice could be attributed to a rung.';
+      // Q-2751: when we KNOW no build call delivered output (none matched, none named a stray model, none sat in the
+      // unattributed remainder), say so. Output without a provider on record is still genuinely unknown.
+      : d.unattributedOutput === undefined
+        ? 'No call of this build delivered output, so no rung of the ladder was used.'
+        : 'Ladder depth unknown — no delivered slice could be attributed to a rung.';
   }
   const opened = Number.isFinite(Number(openedAt)) && Number(openedAt) >= 1
     ? Math.floor(Number(openedAt))

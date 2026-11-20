@@ -240,6 +240,11 @@ export function recordAndCheckRepeat(
   state.seenAt?.set(sig, mutations);
   const n = (state.counts.get(sig) ?? 0) + 1;
   state.counts.set(sig, n);
+  // 🔁 A REFUSED REFRESH IS ALREADY THE FIRST WARNING (failedbr #2478, Q-3018): with no file changed, the 2nd identical
+  // update_preview has already been answered "nothing to refresh — Do NOT call update_preview again". A Weak model ignored
+  // that twice (276 s, 306 s) and the steer came only on the 3rd call (346 s), ~70 s of model time later. For update_preview
+  // the steer is due on the 2nd unchanged repeat; every other tool keeps the configured threshold.
+  threshold = toolName === 'update_preview' ? Math.min(threshold, 2) : threshold;
   const due = state.steerAt.get(sig) ?? threshold;
   if (n < due) return null;
   // ESCALATE (autopsy 2026-08-02): the guard used to steer ONCE per signature and then stay silent

@@ -56,7 +56,7 @@ import { groundScene } from './three/surfaces';
 import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
-import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift } from './three/objects';
+import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
@@ -183,6 +183,20 @@ export interface GameOptions {
   music?: false | Partial<Record<string, string | null>>;
 }
 
+/** ctx.vehicles — see GameContext.vehicles. */
+export interface VehicleSeats {
+  /** A vehicle the player may get into. */
+  add: (vehicle: THREE.Object3D) => void;
+  /** Put the player in this vehicle now (it must have been added). */
+  enter: (vehicle: THREE.Object3D) => boolean;
+  /** Get out now, beside the vehicle (a fast one brakes to a stop first). */
+  exit: () => boolean;
+  /** The vehicle the player is in, or null on foot. */
+  readonly seated: THREE.Object3D | null;
+  /** The added vehicle near enough to get into, or null — show "Press E to get in" while it is set. */
+  readonly inReach: THREE.Object3D | null;
+}
+
 export interface GameContext {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -210,6 +224,15 @@ export interface GameContext {
   players: Input[];
   /** Split the screen: player 1's camera on the left (or top), this one on the right (or bottom). null = one view. */
   splitScreen: (camera: THREE.Camera | null) => void;
+  /**
+   * GET IN AND OUT OF VEHICLES (2026-11-20 game-gap audit: every walk-and-drive game hand-wrote it, and the walking body
+   * kept moving, unseen, while the player drove). Call ctx.vehicles.add(car) once in setup() for each car or bike the
+   * player may take. The player walks up to it and presses Use (E, or the Use button) to get in: the body is hidden and
+   * held still, the camera chases the vehicle and the same keys or joystick drive it. Use again gets out beside it — a
+   * fast vehicle brakes to a stop first. The shell drives the vehicle the player is in; if your own code drives it with
+   * driveVehicle(), your code wins and the shell stops driving that vehicle.
+   */
+  vehicles: VehicleSeats;
 }
 
 export class Game {
@@ -263,6 +286,12 @@ export class Game {
    * with a parked car, used to have that car chased from the first frame.
    */
   private readonly otherVehicles = new Set<THREE.Object3D>();
+  /** ctx.vehicles: what the player may get into, its driving state, and whether the shell drives it. */
+  private readonly seats = new Map<THREE.Object3D, { state: VehicleState; shellDrives: boolean }>();
+  /** The vehicle the player is in. */
+  private seated: THREE.Object3D | null = null;
+  /** Use was pressed at speed: brake to a stop, then get out. */
+  private leaving = false;
   /** Every axis object ctx.input.axis() has handed out — how a driveVehicle() call is known to be the player's. */
   private readonly playerAxes = new WeakSet<object>();
   private setupDone = false;
@@ -536,6 +565,13 @@ export class Game {
       get hero() { return game.hero; },
       get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
       splitScreen: (camera) => { this.secondCamera = camera; },
+      vehicles: {
+        add: (vehicle) => game.addSeat(vehicle),
+        enter: (vehicle) => game.enterSeat(vehicle),
+        exit: () => game.leaveSeat(),
+        get seated() { return game.seated; },
+        get inReach() { return game.seatInReach(); },
+      },
     };
     return this.ctxObject;
   }
@@ -548,6 +584,9 @@ export class Game {
 
   /** createVehicleState()/driveVehicle() was handed this vehicle inside setup() or update(). */
   private noteVehicle(vehicle: THREE.Object3D, axis: { x: number; y: number } | null): void {
+    // The game drives a vehicle it gave to ctx.vehicles itself: its code wins, the shell stops driving it.
+    const seat = this.seats.get(vehicle);
+    if (seat) seat.shellDrives = false;
     // The one already chosen stays until it leaves the scene; during setup nothing is in the scene yet.
     const keep = (current: THREE.Object3D | null) => !!current && current !== vehicle && (!this.setupDone || this.inScene(current));
     if (axis && this.playerAxes.has(axis)) {
@@ -576,6 +615,7 @@ export class Game {
    */
   private get chased(): THREE.Object3D | null {
     if (this.followChosen) return this.followTarget;
+    if (this.seated && this.inScene(this.seated)) return this.seated;
     if (this.playerVehicle && this.inScene(this.playerVehicle)) return this.playerVehicle;
     if (this.options.camera === 'chase' && this.firstVehicle && this.inScene(this.firstVehicle)
       && !this.gameReadsButtons && this.vehiclesInScene() === 1) return this.firstVehicle;
@@ -597,7 +637,8 @@ export class Game {
   private syncTouchLayout(): void {
     if (!this.touch || !this.touchLayoutIsOurs) return;
     const chased = this.chased;
-    this.touch.setLayout(chased && isVehicle(chased) && !this.gameReadsButtons ? 'drive' : 'move');
+    // A game with ctx.vehicles keeps the joystick and the Use button: Use is the way out of the vehicle.
+    this.touch.setLayout(chased && isVehicle(chased) && !this.gameReadsButtons && this.seats.size === 0 ? 'drive' : 'move');
   }
 
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
@@ -620,10 +661,14 @@ export class Game {
     const talking = dialogue.active || dialogue.takeJustEnded();
     if (!this.feel.frozen && !talking) {
       const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), radius: 0.4, height: 1.8 };
-      if (!this.chased && this.input.wasPressed('interact')) interactHouseDoor(this.scene, doorActor);
+      // Use gets in or out of a vehicle first (ctx.vehicles); only a press that did neither opens a door.
+      const usedSeat = this.input.wasPressed('interact') && this.useSeat();
+      if (!this.chased && !usedSeat && this.input.wasPressed('interact')) interactHouseDoor(this.scene, doorActor);
       updateHouseDoors(this.scene, delta, [doorActor, ...(this.options.doorOccupants?.(this.context) ?? [])]);
       const axis = this.input.axis();
-      this.player.update(
+      // In a vehicle the body is held still (it used to keep walking, unseen); the vehicle is driven instead.
+      if (this.seated) this.driveSeat(delta, axis);
+      else this.player.update(
         delta,
         {
           moveX: axis.x,
@@ -667,6 +712,91 @@ export class Game {
     // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
     this.input.endFrame(this.feel.frozen && !talking);
     this.input2?.endFrame(this.feel.frozen && !talking);
+  }
+
+  /** What Use would do now with ctx.vehicles — 'in', 'out' or null. The Hud shows it as a prompt. */
+  get seatPrompt(): 'in' | 'out' | null {
+    if (this.seated) return this.leaving ? null : 'out';
+    return this.seatInReach() ? 'in' : null;
+  }
+
+  /** The furthest a player can be from a vehicle's side and still get in, in metres. */
+  private static readonly SEAT_REACH = 2.2;
+
+  private addSeat(vehicle: THREE.Object3D): void {
+    if (!vehicle || this.seats.has(vehicle)) return;
+    // Parked: speed 0 (a new state starts rolling at 5 m/s). Made outside the watch, so it is not read as the game driving it.
+    const state = watchVehicles(() => undefined, () => createVehicleState(vehicle, { startSpeed: 0 }));
+    this.seats.set(vehicle, { state, shellDrives: true });
+    this.syncTouchLayout();
+  }
+
+  /** The nearest added vehicle whose side is within reach of the player on foot. */
+  private seatInReach(): THREE.Object3D | null {
+    if (this.seated) return null;
+    const feet = this.player.object.getWorldPosition(new THREE.Vector3());
+    let best: THREE.Object3D | null = null;
+    let bestGap = Infinity;
+    const box = new THREE.Box3();
+    for (const v of this.seats.keys()) {
+      if (!this.inScene(v)) continue;
+      box.setFromObject(v);
+      if (box.isEmpty()) continue;
+      const gap = Math.hypot(Math.max(box.min.x - feet.x, 0, feet.x - box.max.x), Math.max(box.min.z - feet.z, 0, feet.z - box.max.z));
+      if (gap <= Game.SEAT_REACH && gap < bestGap) { best = v; bestGap = gap; }
+    }
+    return best;
+  }
+
+  private enterSeat(vehicle: THREE.Object3D): boolean {
+    if (!this.seats.has(vehicle) || !this.inScene(vehicle) || this.seated) return false;
+    this.seated = vehicle;
+    this.leaving = false;
+    this.syncTouchLayout();
+    return true;
+  }
+
+  /** Get out beside the vehicle now, or brake first when it is moving fast. */
+  private leaveSeat(): boolean {
+    const v = this.seated;
+    if (!v) return false;
+    const seat = this.seats.get(v);
+    if (seat && Math.abs(seat.state.speed) > 1.5) { this.leaving = true; return true; }
+    // Beside the vehicle on its right, clear of its body: half its width plus a step.
+    const box = new THREE.Box3().setFromObject(v);
+    const size = box.getSize(new THREE.Vector3());
+    const side = Math.min(size.x, size.z) / 2 + 0.9;
+    const h = v.rotation.y;
+    const at = v.getWorldPosition(new THREE.Vector3());
+    this.player.reset(at.x + Math.cos(h) * side, at.y + 0.1, at.z - Math.sin(h) * side);
+    if (seat) seat.state = { ...seat.state, speed: 0 };
+    // A game that drove it with the player's keys made it "the player's car"; on foot, the camera follows the player again.
+    if (this.playerVehicle === v) this.playerVehicle = null;
+    this.seated = null;
+    this.leaving = false;
+    this.syncTouchLayout();
+    return true;
+  }
+
+  /** Use: out of the vehicle the player is in, or into the one in reach. True when it did either. */
+  private useSeat(): boolean {
+    if (this.seated) return this.leaveSeat();
+    const v = this.seatInReach();
+    return v ? this.enterSeat(v) : false;
+  }
+
+  /** Drive the vehicle the player is in (unless the game drives it itself); brake to a stop while getting out. */
+  private driveSeat(delta: number, axis: { x: number; y: number }): void {
+    const v = this.seated;
+    const seat = v ? this.seats.get(v) : undefined;
+    if (!v || !seat) return;
+    if (!this.inScene(v)) { this.seated = null; this.leaving = false; this.syncTouchLayout(); return; }
+    if (seat.shellDrives) {
+      // The axis's y is -1 for forward; braking is +1 (driveVehicle brakes before it reverses).
+      const brake = { x: 0, y: seat.state.speed > 0 ? 1 : -1 };
+      seat.state = driveVehicle(v, seat.state, this.leaving ? brake : axis, delta, {}, { drift: !this.leaving && this.input.isDown('drift') });
+    }
+    if (this.leaving && Math.abs(seat.state.speed) <= 1.5) this.leaveSeat();
   }
 
   /** Play a pose on the default body, if there is one and the player is on foot. */
@@ -1774,6 +1904,22 @@ function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
   );
 }
 
+/** "E — get in" beside a vehicle the player may take (ctx.vehicles), "E — get out" inside one. */
+function SeatPrompt({ game }: { game: Game }) {
+  const [what, setWhat] = useState<'in' | 'out' | null>(null);
+  useEffect(() => {
+    const id = window.setInterval(() => setWhat(game.seatPrompt), 200);
+    return () => window.clearInterval(id);
+  }, [game]);
+  if (!what) return null;
+  const key = prefersTouch() ? t('use') : 'E';
+  return (
+    <div role="status" style={{ position: 'absolute', left: '50%', bottom: '22%', transform: 'translateX(-50%)', padding: '8px 16px', borderRadius: 999, background: 'rgba(0,0,0,0.6)', color: '#fff', fontWeight: 700, pointerEvents: 'none' }}>
+      {t(what === 'in' ? 'getIn' : 'getOut', { key })}
+    </div>
+  );
+}
+
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
@@ -1890,6 +2036,7 @@ export function Hud({ game }: { game: Game }) {
       {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' ? <DialogueBox /> : null}
+      {s.status === 'playing' ? <SeatPrompt game={game} /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <PowerUpBar /> : null}
       {prefs.captions && s.status === 'playing' ? <CaptionBar /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
@@ -2103,7 +2250,9 @@ export class TouchControls {
   private current: TouchLayout = 'move';
 
   constructor(
-    private readonly container: HTMLElement,
+    // A plain parameter, not a field: it is only used here, and an unread field fails an app whose tsconfig has
+    // noUnusedLocals (TS6138, failedbr #2036).
+    container: HTMLElement,
     private readonly input: Input,
     private readonly options: TouchControlsOptions = {},
   ) {
@@ -2611,6 +2760,10 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '    },\n' +
       '  }} />;\n' +
       '}\n' +
+      '// WALK AND DRIVE (get in and out with E / the Use button): hand the car to ctx.vehicles — NEVER hand-write it.\n' +
+      '//   setup: (ctx) => { const car = createCar(); car.position.set(4, 0, 0); ctx.scene.add(car); ctx.vehicles.add(car); }\n' +
+      '// The shell shows "E — get in" beside it, hides and holds the body, chases and DRIVES the car, and puts the player\n' +
+      '// beside it on the way out (braking first). Read ctx.vehicles.seated for whether the player is in one.\n' +
       '```\n' +
       'WHAT THE SHELL ALREADY GUARANTEES — do not re-implement these:\n' +
       '- Gameplay runs at a FIXED 60Hz and the camera at the display rate. Physics in render makes the\n' +

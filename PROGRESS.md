@@ -103261,6 +103261,16 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
   count (now 0); stale-module `combo` (Q-2732); the 22× preview loop (Q-3018); kit colours (BR1954); ETA of a stopped build
   (cut short). Providers (flashx silent, glm-5.3 reasoning-only, Nemotron crawl, KIMI balance) stay with Q-962, Q-1121,
   Q-1211, Q-1212, Q-1210. Open: Q-3135–Q-3152.
+- Batch #1262–#1177 (25 reports, 2026-11-20; bulk-indexed by the 2026-10-20 audit with completion "not established").
+  Fixed: Q-3153 (best-guess note: present tense, user's script), Q-3154 (planners are not ladder rungs), Q-3155 (planner
+  seconds named, not "0s of preparation"), Q-3156 (an AI with no API dependency gets no API client). Already fixed on main
+  when checked: stopped calls name the served engine (03368870 = #1215), decline/question turns are answers (r6–r10 =
+  #1220), STUCK_TOOL on a Stop is "cut off", "हिंदी में" binds the reply voice (#1225), online classes is education and a
+  404 names its URL (#1182), the starter preview is named to the model (Q-3127, #1188's 76 publishes), the engine stop
+  code (Q-3141, #1202), GTA (Q-3121), stale tier labels (Q-2748), partial batch writes lead with what failed (#1182/#1234),
+  the overdraft floor records debited vs absorbed (#1258/#1234 debit gap), the audit-fix line (npm exits 1 while
+  vulnerabilities remain). Blocked: Q-3157 (dependency-only stop charge — admin), Q-3158 (composer of a "Fix this error"
+  prompt — missing information).
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

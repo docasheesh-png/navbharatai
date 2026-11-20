@@ -311,6 +311,7 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
+import { pathsAShellRemovalIsCheckedAgainst } from '../AgentV3/shellWriteTargets';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
@@ -17230,7 +17231,8 @@ async function noteBuildOutcome(
       // Files the fast lane salvaged into the workspace for the full builder (deadSalvage.ts).
       const salvagedThisBuild: string[] = [];
       // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
-      dispatcher.setRecordedPaths(() => [...writtenFiles.keys()]);
+      // …and every path the saved project held at the start (Q-3202): an earlier build's file is the app's too.
+      dispatcher.setRecordedPaths(() => pathsAShellRemovalIsCheckedAgainst(writtenFiles.keys(), durableFilePaths));
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);

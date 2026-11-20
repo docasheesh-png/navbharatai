@@ -102891,6 +102891,15 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
 
+## 2026-11-20 — Game audit 2 (#2): the seed lays down the genre's own kit (branch `claude/game-seed-by-genre`)
+- Evidence: failedbr #2435 (Mario) got only loop/sound/music and hand-wrote platformer physics, renderer and touch; #2470
+  (Monopoly-style "business game") got the real-time kit and no rules engine. generate_game_2d / generate_board_games
+  existed but ran only if the model chose to.
+- `gameKitPlan`: a 2D game that moves a body (platformer, runner, shooter, arcade, fighting) adds `generate_game_2d`; board
+  and card games, and cricket, add `generate_board_games`. 3D plans unchanged. The handoff names each kit (2D: never a
+  hand-written jump or tile collision; board: rules come from the pack, card games never for real money).
+- `theRacingCarShowedItsHeadlights` updated to its real point (never 3D; the 2D kit may follow the shared three).
+- Locked by `tests/aGameGetsItsGenresKit.test.ts` (reversion: no genre push → 3 fail).
 ## 2026-11-20 — Game audit 2 (#4): a browser intervention is not a crash (branch `claude/playtest-honest`)
 - Evidence: failedbr #2477 — a game scoring 86 (answered up/W, left/A, right/D, Space, drag) was gated "the game was played
   and is not playable (runtime error)" because Chrome logged "Unable to preventDefault inside passive event listener".
@@ -102931,6 +102940,16 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
 
+## 2026-11-20 — Build report 05eb30ba: five report-honesty rows (Q-2746, Q-2747, Q-2748, Q-2751, Q-2752)
+| ID | Problem → root cause → class | Fix · lock (each proven by reversion) |
+|---|---|---|
+| Q-2747 | "$0.0000 instead of $0.0000" → `toFixed(4)` rounds < $0.00005 to zero → 15 report amounts in 8 files | `usdAmount` (sub-cent keeps 2 significant digits) · `aSmallAmountIsNotPrintedAsZero` + census |
+| Q-2746 | "longer than the 0s build timing window" → a pre-build check that ran before the timer was taken as the build's first call → the class five earlier autopsies (BR1958/84/85/86/95) only reworded | plain note, replaced by the build's own first call · `aPreBuildCallIsNotTheBuildsFirstCall` |
+| Q-2748 | `startTier: "sonnet"` on Weak builds → the report printed the band key (historical model names); 2b0a3ed5 added a label but kept the key | report carries only `complexityBand`; telemetry keeps the key; legacy reports map back · `aBandIsNotAModelInTheReport` |
+| Q-2751 | LADDER_DEPTH counted the scope call on an empty build → scope tokens share the build's ledger | `PHASE_SCOPE` at both scope writers; ladder skips it; bill unchanged (tested) · `aScopeCheckIsNotALadderSlice` |
+| Q-2752 | domain stems inside unrelated words → census vs 275k words found 9 (parental→booking, impatient→healthcare, blending→fintech, …) | each guarded against that word only · `aWordInsideAWordIsNotADomain` (old code: 8 fail) |
+
+**Discovered, not folded in:** Q-3020 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
 ## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
 
 Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
@@ -102980,6 +102999,18 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (bloc
   `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
 - **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
   12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
+## 2026-11-20 — Game kit: get in and out of vehicles (game-gap audit item)
+
+- **Gap:** walk-and-drive games hand-wrote Use + ctx.follow, and the walking body kept moving, unseen, while the player
+  drove (player.update ran every step with the same axis), so getting out put the player wherever it had wandered.
+- **Fix (opt-in, so no existing game changes):** `ctx.vehicles.add(car)` in the shell. Use beside it gets in (body held
+  still and hidden, camera chases the car, the shell drives it); Use again gets out beside it, braking first at speed;
+  the parked car is created at speed 0 and stays put. If the game drives it itself, the game wins (no double driving).
+  On exit the car stops being "the player's car" so the camera returns to the player. Phones keep the Use button.
+  Hud shows "E — get in / get out" (EN + HI). Shell instructions + AppKnowledgeBase updated.
+- **Lock:** `tests/aPlayerGetsInAndOutOfACar.test.ts` (7, real Game.ts/objects/input/controller). 9 reversion proofs fail.
+  Generated kit tsc before/after: identical 33 pre-existing errors (missing @types/three). The typecheck caught an
+  unescaped apostrophe in the new knowledge-base text before push.
 ## 2026-11-20 — Game kit: key rebinding (game-gap audit item)
 
 - **Gap:** keys were fixed; the Input constructor took a map but nothing saved or changed one, and Settings had no Controls.

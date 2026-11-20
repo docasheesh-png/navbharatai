@@ -6,6 +6,7 @@ import { abandonedTurnUsage } from '../../AgentV3/unbilledTurns';
 import type { TurnRunner } from '../../AgentV3/ClaudeClient';
 import type { OpenAiChatClient, OpenAiChatStream } from '../../AgentV3/providers/OpenAiToolRunner';
 import { audit } from '../../lib/audit';
+import { PHASE_SCOPE } from '../../AgentV3/billingPhase';
 import { BoundedCache } from '../../lib/boundedCache';
 import { getServerDb } from '../../lib/serverDb';
 import { calculateCatalogueChatCost, catalogueSnapshotIssue, estimateCatalogueChatCost, type CatalogueEstimateBasis } from './catalogueMath';
@@ -519,7 +520,7 @@ export function recordRouterOneScopeUsage(ledger: Pick<import('../../AgentV3/Pro
   for (const receipt of currentRouterOneCatalogueReceipts()) ledger.add('ENGINE_R1', {
     inputTokens: receipt.inputTokens, outputTokens: receipt.outputTokens,
     cacheReadInputTokens: receipt.cacheReadTokens ?? 0, routerOneReceipt: receipt,
-  }, receipt.model);
+  }, receipt.model, { phase: PHASE_SCOPE });
 }
 export function routerOneCostUnconfirmed(provider: string, receipt: unknown): boolean {
   return isRouterOneAccountingProvider(provider) && !isRouterOneCatalogueReceipt(receipt);

@@ -134,7 +134,8 @@ describe('E2 — already closed on main: a backfilled pre-build admission call i
     now += 5;
     d.recordLlmCall({ model: 'x', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 2_461, ok: true } as never);
     const line = d.report().issues.find((i) => i.code === 'TIME_TO_FIRST_CALL');
-    expect(line?.message).toMatch(/longer than the 0s build timing window|longer than the 0\.0s build timing window/);
+    // Q-2746: the pre-build call is now named in plain words (started before the build's timer, not counted).
+    expect(line?.message).toContain("started before this build's timer");
     expect(line?.message).not.toMatch(/^0s of preparation/);
     expect(line?.message).not.toMatch(/first call itself then took 0s/);
   });

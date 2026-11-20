@@ -441,3 +441,54 @@ export async function landUserModels(models: readonly UserModel[], workspaceId: 
   }
   return { landed, failed };
 }
+
+/** Everything the chat handler needs before routing, in ONE call (the handler is at its branch budget, Q-979 / TS2563). */
+export async function planUserModels<T extends { name?: unknown; base64?: unknown }>(atts: readonly T[]): Promise<{ rest: T[]; attached: boolean; models: UserModel[]; refused: UserModelRefusal[]; pendingNote: string }> {
+  const split = await splitUserModelAttachments(atts);
+  if (!split.models.length) return { rest: split.rest, attached: false, models: [], refused: [], pendingNote: '' };
+  const files = await userModelFilesFromAttachments(split.models);
+  const plan = userModelsFromFiles(files.files);
+  const refused = [...files.refused, ...plan.refused];
+  // Until they are really in the project, the note says only that they were attached (a chat answer writes nothing).
+  const pendingNote = `[USER MODELS ATTACHED] ${plan.models.length} 3D model(s) the user attached (${plan.models.map(m => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
+    + (refused.length ? ` Not usable: ${refused.slice(0, 8).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : '');
+  return { rest: split.rest, attached: true, models: plan.models, refused, pendingNote };
+}
+
+type LandIssue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
+/**
+ * On the build path, once the workspace exists: land the planned models inside the caller's timed step, record the
+ * outcome, and return the attachment context with the pending note replaced by what REALLY landed. One call, no branch
+ * in the handler. Never throws: a failure is a named "not added", never a claimed success.
+ */
+export async function landPlannedUserModels(
+  plan: { attached: boolean; models: readonly UserModel[]; refused: readonly UserModelRefusal[]; pendingNote: string },
+  context: string,
+  io: {
+    workspaceId: string;
+    actuator: { writeBinaryFile?: (workspaceId: string, path: string, base64: string) => Promise<void> };
+    store: Pick<GameAssetPersistence, 'saveBinary' | 'readBinary'>;
+    step: (label: string, run: () => Promise<unknown>) => Promise<unknown>;
+    record: (issue: LandIssue) => void;
+  },
+): Promise<string> {
+  if (!plan.attached) return context;
+  const notSaved = (reason: string) => plan.models.map(m => ({ from: m.from, reason }));
+  let landing: { landed: UserModel[]; failed: UserModelRefusal[] } = { landed: [], failed: notSaved('it could not be saved into the project this time — attach it again in a moment') };
+  const write = io.actuator.writeBinaryFile;
+  try {
+    await io.step('user models', async () => {
+      landing = typeof write === 'function'
+        ? await landUserModels(plan.models, io.workspaceId, { writeBinaryFile: (id, p, b) => write.call(io.actuator, id, p, b) }, io.store)
+        : { landed: [], failed: notSaved('this project cannot take binary files right now') };
+    });
+  } catch { /* landing keeps its "not saved" default */ }
+  const notAdded = [...plan.refused, ...landing.failed];
+  try {
+    io.record(landing.landed.length && !notAdded.length
+      ? { phase: 'build', severity: 'info', code: 'USER_MODELS_ADDED', autoResolved: true, message: `The user's own 3D model(s) were added to the project: ${landing.landed.map(m => m.path).join(', ')}.` }
+      : { phase: 'build', severity: 'warning', code: 'USER_MODELS_NOT_ALL_ADDED', autoResolved: false, message: `Added: ${landing.landed.map(m => m.path).join(', ') || 'none'}. Not added: ${notAdded.map(r => `${r.from} (${r.reason})`).join('; ')}.` });
+  } catch { /* observation only */ }
+  const real = userModelNote(landing.landed, notAdded);
+  return plan.pendingNote && context.includes(plan.pendingNote) ? context.replace(plan.pendingNote, real) : [context, real].filter(Boolean).join('\n\n');
+}

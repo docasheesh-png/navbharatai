@@ -789,7 +789,7 @@ import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
 import { attachmentFilesForProject, attachmentFilesNote, writeAttachmentFilesInStep } from '../AgentV3/attachmentFilesOnDisk';
-import { splitUserModelAttachments, userModelFilesFromAttachments, userModelsFromFiles, landUserModels, userModelNote, type UserModel, type UserModelRefusal } from '../AgentV3/gameAssets/userModels';
+import { planUserModels, landPlannedUserModels } from '../AgentV3/gameAssets/userModels';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
@@ -11308,19 +11308,11 @@ async function noteBuildOutcome(
     // THE USER'S OWN 3D MODELS (userModels.ts, admin 2026-11-20): loose .glb/.gltf/.obj/.fbx and zips of models go to
     // the game, not to the project-import or document paths (a .glb used to land in private storage, a model zip was
     // refused as a second project and its .glb read as text). Converted and checked here; written only on the build path.
-    const userModelSplit = await splitUserModelAttachments(rawAttachments);
-    const userModelFiles = userModelSplit.models.length ? await userModelFilesFromAttachments(userModelSplit.models) : { files: new Map<string, Uint8Array>(), refused: [] as UserModelRefusal[] };
-    const userModelPlan = userModelSplit.models.length ? userModelsFromFiles(userModelFiles.files) : { models: [] as UserModel[], refused: [] as UserModelRefusal[] };
-    userModelPlan.refused.unshift(...userModelFiles.refused);
-    const zipImports = userModelSplit.rest.filter((a) => isZipAttachment(a));
-    const docAttachments = userModelSplit.rest.filter((a) => !isZipAttachment(a));
-    let attachmentContext = '';
-    // Until they are really in the project, the note says only that they were attached (a chat answer writes nothing).
-    const userModelsPendingNote = userModelSplit.models.length
-      ? `[USER MODELS ATTACHED] ${userModelPlan.models.length} 3D model(s) the user attached (${userModelPlan.models.map((m) => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
-        + (userModelPlan.refused.length ? ` Not usable: ${userModelPlan.refused.slice(0, 8).map((r) => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : '')
-      : '';
-    if (userModelsPendingNote) attachmentContext = userModelsPendingNote;
+    const userModels = await planUserModels(rawAttachments);
+    const zipImports = userModels.rest.filter((a) => isZipAttachment(a));
+    const docAttachments = userModels.rest.filter((a) => !isZipAttachment(a));
+    // Until they are really in the project, this says only that they were attached (a chat answer writes nothing).
+    let attachmentContext = userModels.pendingNote;
     // Text attachments written whole into the project once the workspace exists (failedbr #2415).
     let attachmentFilesToWrite: ReturnType<typeof attachmentFilesForProject> = [];
     // AP-8 — the structured design contract extracted from an uploaded mockup, when there was one.
@@ -17698,23 +17690,7 @@ async function noteBuildOutcome(
       // failedbr #2415: the whole attached text files, where the builder's note says they are (no branch here: TS2563).
       await writeAttachmentFilesInStep(attachmentFilesToWrite, (label, run) => wiringSteps.step(label, run), (p, c) => actuator.writeFile(workspaceId, p, c), (r) => buildDiag.record(r));
       // The user's own models, durably then into the sandbox; the builder's note says only what really landed.
-      if (userModelSplit.models.length) {
-        let landing = { landed: [] as UserModel[], failed: [] as UserModelRefusal[] };
-        try {
-          await wiringSteps.step('user models', async () => {
-            landing = typeof actuator.writeBinaryFile === 'function'
-              ? await landUserModels(userModelPlan.models, workspaceId, { writeBinaryFile: (id, p, b) => actuator.writeBinaryFile!(id, p, b) }, workspaceGameAssetPersistence(verified?.uid))
-              : { landed: [], failed: userModelPlan.models.map((m) => ({ from: m.from, reason: 'this project cannot take binary files right now' })) };
-          });
-        } catch { landing = { landed: [], failed: userModelPlan.models.map((m) => ({ from: m.from, reason: 'it could not be saved into the project this time — attach it again in a moment' })) }; }
-        const realNote = userModelNote(landing.landed, [...userModelPlan.refused, ...landing.failed]);
-        attachmentContext = userModelsPendingNote && attachmentContext.includes(userModelsPendingNote) ? attachmentContext.replace(userModelsPendingNote, realNote) : [attachmentContext, realNote].filter(Boolean).join('\n\n');
-        try {
-          buildDiag.record(landing.landed.length && !landing.failed.length && !userModelPlan.refused.length
-            ? { phase: 'build', severity: 'info', code: 'USER_MODELS_ADDED', autoResolved: true, message: `The user's own 3D model(s) were added to the project: ${landing.landed.map((m) => m.path).join(', ')}.` }
-            : { phase: 'build', severity: 'warning', code: 'USER_MODELS_NOT_ALL_ADDED', autoResolved: false, message: `Added: ${landing.landed.map((m) => m.path).join(', ') || 'none'}. Not added: ${[...userModelPlan.refused, ...landing.failed].map((r) => `${r.from} (${r.reason})`).join('; ')}.` });
-        } catch { /* observation only */ }
-      }
+      attachmentContext = await landPlannedUserModels(userModels, attachmentContext, { workspaceId, actuator, store: workspaceGameAssetPersistence(verified?.uid), step: (label, run) => wiringSteps.step(label, run), record: (r) => buildDiag.record(r) });
       try { buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list()); } catch { /* timing is observation only */ }
       const contextT0 = Date.now();
       const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([

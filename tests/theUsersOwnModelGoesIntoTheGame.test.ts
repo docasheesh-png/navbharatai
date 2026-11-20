@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import {
   userModelsFromFiles, userModelFilesFromAttachments, splitUserModelAttachments, zipIsModelPack, landUserModels, userModelNote,
-  userModelSubject, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS,
+  userModelSubject, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS, planUserModels, landPlannedUserModels,
 } from '../src/server/AgentV3/gameAssets/userModels';
 import { validateGlb } from '../src/server/AgentV3/gameAssets/assetPolicy';
 import { needsOpaqueStorage } from '../src/lib/proAttachmentClient';
@@ -160,10 +160,28 @@ describe('landing: durable first, read back, then the sandbox — and only what 
 
   it('the build route splits models off before the project-zip and document paths, and announces only what landed', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toMatch(/const userModelSplit = await splitUserModelAttachments\(rawAttachments\);[\s\S]{0,900}const zipImports = userModelSplit\.rest\.filter/);
-    expect(route).toMatch(/const docAttachments = userModelSplit\.rest\.filter/);
-    expect(route).toMatch(/attachmentContext\.replace\(userModelsPendingNote, realNote\)/);
-    expect(route).toMatch(/are added to the project when the game is built or edited in this turn — not before/);
+    expect(route).toMatch(/const userModels = await planUserModels\(rawAttachments\);\s*const zipImports = userModels\.rest\.filter/);
+    expect(route).toMatch(/const docAttachments = userModels\.rest\.filter/);
+    expect(route).toMatch(/attachmentContext = await landPlannedUserModels\(userModels, attachmentContext,/);
+  });
+
+  it('planned → landed: the pending note says only "attached", and is replaced by what really landed (and the outcome recorded)', async () => {
+    const plan = await planUserModels([{ name: 'car.glb', base64: Buffer.from(syntheticGlb()).toString('base64') }, { name: 'x.fbx', base64: Buffer.from('fbx').toString('base64') }, { name: 'brief.pdf', base64: 'JVBERg==' }]);
+    expect(plan.rest.map(a => a.name)).toEqual(['brief.pdf']);
+    expect(plan.pendingNote).toMatch(/are added to the project when the game is built or edited in this turn — not before/);
+    expect(plan.pendingNote).not.toMatch(/→ public\/models/);
+    const saved = new Map<string, string>(); const records: { code: string }[] = [];
+    const io = (writeBinaryFile?: (id: string, p: string, b: string) => Promise<void>) => ({ workspaceId: 'w', actuator: { writeBinaryFile },
+      store: { saveBinary: async (_: string, f: Record<string, string>) => { for (const [p, c] of Object.entries(f)) saved.set(p, c); }, readBinary: async (_: string, p: string) => saved.has(p) ? Buffer.from(saved.get(p)!.split(',')[1], 'base64') : null },
+      step: async (_: string, run: () => Promise<unknown>) => run(), record: (r: { code: string }) => records.push(r) });
+    const context = await landPlannedUserModels(plan, `${plan.pendingNote}\n\nother`, io(async () => {}));
+    expect(context).toMatch(/^\[USER MODELS ADDED\][\s\S]*"car" → public\/models\/car\.glb[\s\S]*\[USER MODELS NOT ADDED\][\s\S]*x\.fbx[\s\S]*\n\nother$/);
+    expect(records.map(r => r.code)).toEqual(['USER_MODELS_NOT_ALL_ADDED']);
+    // A sandbox that cannot take binary files: nothing is claimed.
+    const none = await landPlannedUserModels(plan, plan.pendingNote, io(undefined));
+    expect(none).not.toMatch(/USER MODELS ADDED/); expect(none).toMatch(/cannot take binary files/);
+    // No model attached: the context is untouched.
+    expect(await landPlannedUserModels(await planUserModels([]), 'ctx', io(async () => {}))).toBe('ctx');
   });
 
   it('the Pro client sends model files to the build instead of private storage', async () => {

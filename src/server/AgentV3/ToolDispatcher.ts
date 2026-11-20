@@ -10,6 +10,7 @@ import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
+import { systemPackageInstallRefusal } from './systemPackageInstall';
 import { PARTIAL_CONTENT_KEY, PendingWrites, resumeTruncatedEnabled, truncatedWriteNotice } from './reliability/resumeWrite';
 import { recordingActuator } from './recordedWrites';
 import { markPreviewGaveUp, previewGaveUp } from './previewGiveUp';
@@ -6238,6 +6239,9 @@ export class ToolDispatcher {
           const refusal = bannedInstallRefusal(rawCommand);
           if (refusal) throw new Error(refusal);
         }
+        // failedbr #1803: apt/yum/apk/brew need root this sandbox does not have — answered before they fail.
+        const systemInstall = systemPackageInstallRefusal(rawCommand);
+        if (systemInstall) throw new Error(systemInstall);
         const typoFix = fixNodeModulesTypo(rawCommand);
         const cdFix = fixSandboxWorkspaceCd(typoFix.command);
         const command = sharedBareTypecheckCommand(cdFix.command, this.tsBuildInfoId);

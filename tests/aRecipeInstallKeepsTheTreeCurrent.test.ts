@@ -31,7 +31,7 @@ const sh = (cmd: string, dir: string, bin: string) => execFileSync('bash', ['-c'
 
 describe('after the recipe installs, the write-time typecheck sees a current tree', () => {
   it('the stamp is in the command, after a SUCCESSFUL install only', () => {
-    expect(recipeInstallCommand([{ name: '@types/three', version: '^0.180.0', dev: true }])).toMatch(/npm install --no-audit --no-fund -D @types\/three@\^0\.180\.0 && touch node_modules; _nbs=\$\?/);
+    expect(recipeInstallCommand([{ name: '@types/three', version: '^0.180.0', dev: true }])).toMatch(/npm install --no-audit --no-fund -D @types\/three@\^0\.180\.0 && \{ \[ -f node_modules \] && rm -f node_modules; mkdir -p node_modules && touch node_modules; \}; _nbs=\$\?/);
   });
   it('in a real shell: installed → MANIFEST_CURRENT holds (it failed before the stamp)', () => {
     const { dir, bin } = project();

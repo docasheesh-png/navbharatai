@@ -75,3 +75,8 @@ describe('a static file server keeps its own host binding (failedbr #2224)', () 
     expect(ensureHostBinding('npm run dev', 'vite', 'vite')).toContain('--host 0.0.0.0');
   });
 });
+describe('…and "serve" as a subcommand is not a static server', () => {
+  it('`ng serve` still gets its host', () => {
+    expect(ensureHostBinding('npm run dev', 'angular', 'ng serve --port 4201')).toContain('--host 0.0.0.0');
+  });
+});

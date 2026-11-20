@@ -280,7 +280,7 @@ export function resolvePmScript(command: string, scripts: Record<string, string>
  * existing callers and the common Vite scaffold are byte-for-byte unchanged.
  */
 /** A static file server that binds all interfaces by default and takes no Vite-style `--host` (failedbr #2224). */
-export const STATIC_FILE_SERVER_RE = /(?:^|[\s;&|(])(?:npx\s+(?:-y\s+)?)?(?:http-server|live-server|serve|python3?\s+-m\s+http\.server)(?=\s|$)/;
+export const STATIC_FILE_SERVER_RE = /(?:^\s*|[;&|(]\s*|\bnpx\s+(?:-y\s+)?)(?:http-server|live-server|serve|python3?\s+-m\s+http\.server)(?=\s|$)/;
 
 export function ensureHostBinding(command: string, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;

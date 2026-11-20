@@ -1,6 +1,6 @@
 /** Planning evidence only: no inferred phone model, benchmark or automatic asset activation. */
 import { buildGameContract } from '../gameIntent';
-import { gameAssetRequirements } from './assetPlan';
+import { gameAssetRequirements, externalGameAssetsEnabled } from './assetPlan';
 import { REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
 import { sceneryFor } from './worldDressing';
 import { searchGameLibrary } from './gameLibrary';
@@ -79,4 +79,24 @@ export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REV
     + `and when the user asked for a SPECIFIC thing that is not listed and a code-built version would not be what they meant (a particular creature, `
     + `vehicle or character look), also tell them where to get it free and how to attach it — the guide below.\n`
     + lines.join('\n') + '\n' + ownModelGuide([]);
+}
+
+/** The file only NavBharatAI's 3D game kit writes: its presence is what makes a project a game library models can join. */
+export const THREE_KIT_MARKER = 'src/game/three/objects.ts';
+
+/**
+ * THE LIBRARY IN EVERY TURN OF A 3D GAME, NOT ONLY ITS FIRST (admin 2026-11-20: "jab user game banayega, to navbharatai
+ * library ka use karega bhi ya nahi?"). The menu reached only the turn that CREATED a game; a later "add a cow to my
+ * game" left the builder to guess that a library existed and search for it. So any later turn on a project holding the
+ * 3D kit gets the same menu, when the library is on for the account. One call, no branch in the chat handler (Q-979).
+ * Never throws: a read that fails is "not a 3D kit game", and the prompt is returned unchanged.
+ */
+export async function withLibraryMenuForExistingGame(prompt: string, opts: {
+  intent: string; read: (path: string) => Promise<unknown>; uid?: string | null; env?: NodeJS.ProcessEnv;
+}): Promise<string> {
+  if (opts.intent === 'new_build' || !externalGameAssetsEnabled(opts.env ?? process.env, opts.uid)) return prompt;
+  let marker: unknown = null;
+  try { marker = await opts.read(THREE_KIT_MARKER); } catch { return prompt; }
+  if (typeof marker !== 'string' || !marker.trim()) return prompt;
+  return `${gameLibraryMenuHandoff()}\n\n${prompt}`;
 }

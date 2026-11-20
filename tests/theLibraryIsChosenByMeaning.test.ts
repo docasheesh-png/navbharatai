@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { gameLibraryMenuHandoff } from '../src/server/AgentV3/gameAssets/gameLibrarySelection';
+import { gameLibraryMenuHandoff, withLibraryMenuForExistingGame, THREE_KIT_MARKER } from '../src/server/AgentV3/gameAssets/gameLibrarySelection';
 import { libraryRequirement } from '../src/server/AgentV3/gameAssets/assetPlan';
 import { REVIEWED_GAME_ASSETS } from '../src/server/AgentV3/gameAssets/providers';
 import { defaultToolCatalog } from '../src/server/AgentV3/ToolCatalog';
@@ -53,5 +53,29 @@ describe('the builder chooses library models by meaning', () => {
   it('a role no model of that subject plays keeps the model and reports the dropped role (it used to lose the model)', () => {
     expect(libraryRequirement('cow', 'fly', REVIEWED_GAME_ASSETS)).toEqual({ requirement: { subject: 'cow' }, droppedRole: 'fly' });
     expect(readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8')).toMatch(/Added without that animation/);
+  });
+});
+
+describe('an EXISTING 3D game sees the library on every later turn (admin 2026-11-20)', () => {
+  const read = (files: Record<string, string>) => async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return files[p]; };
+  const on = { AGENTV3_EXTERNAL_GAME_ASSETS: 'on' } as NodeJS.ProcessEnv;
+
+  it('a later turn on a project with the 3D kit gets the menu first; the prompt itself is kept whole', async () => {
+    const out = await withLibraryMenuForExistingGame('add a cow to my game', { intent: 'edit_existing', read: read({ [THREE_KIT_MARKER]: 'export const x = 1;' }), env: on });
+    expect(out.startsWith('[GAME_LIBRARY_MENU]')).toBe(true);
+    expect(out.endsWith('\n\nadd a cow to my game')).toBe(true);
+  });
+
+  it('unchanged when: the first turn (the seed already sent it), no 3D kit, the library is off, or the read fails', async () => {
+    const kit = read({ [THREE_KIT_MARKER]: 'x' });
+    expect(await withLibraryMenuForExistingGame('p', { intent: 'new_build', read: kit, env: on })).toBe('p');
+    expect(await withLibraryMenuForExistingGame('p', { intent: 'edit_existing', read: read({}), env: on })).toBe('p');
+    expect(await withLibraryMenuForExistingGame('p', { intent: 'edit_existing', read: read({ [THREE_KIT_MARKER]: '  ' }), env: on })).toBe('p');
+    expect(await withLibraryMenuForExistingGame('p', { intent: 'edit_existing', read: kit, env: { AGENTV3_EXTERNAL_GAME_ASSETS: 'off' } as NodeJS.ProcessEnv })).toBe('p');
+    expect(await withLibraryMenuForExistingGame('p', { intent: 'edit_existing', read: kit, env: { AGENTV3_EXTERNAL_GAME_ASSETS: 'admin' } as NodeJS.ProcessEnv, uid: null })).toBe('p');
+  });
+
+  it('the chat route calls it before the new-game seed, with the workspace reader', () => {
+    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toMatch(/buildPrompt = await withLibraryMenuForExistingGame\(buildPrompt, \{ intent, read: \(p\) => actuator\.readFile\(workspaceId, p\), uid: verified\?\.uid \}\);\n\s+if \(intent === 'new_build' && !projectModuleRef/);
   });
 });

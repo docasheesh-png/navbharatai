@@ -88,6 +88,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['enterable house', 'door', 'interior', 'stairs', 'game house'],
   },
   {
+    id: 'game_city_blocks',
+    name: 'City blocks for 3D games (streets, crossings, shops, apartments, offices, parks)',
+    path: 'NavBharatAI Pro → chat → ask for a 3D city game (for example "3D city driving game banao", "shehar mein taxi game", "open city game with shops")',
+    description: 'A 3D game that needs a city gets a whole grid of city blocks from the game kit (2026-11-20), not hand-placed boxes: streets that meet at crossings with centre lines and zebra crossings, raised pavements with a kerb, and buildings on every block — shops with an awning and a signboard (with a spot for the shop name), apartment blocks with balconies and the black water tank on the roof, glass office towers in the middle of the city, houses with a front yard and a compound wall, parks with trees, paths, benches and a fountain, and street lights at the corners. Choose how many blocks, how big, how tall the tallest building is, and the style: a town (shops and houses), downtown (towers in the middle) or mixed. Every building stands on its own lot facing a street and never in the road; the player starts on a street in the left lane; a car stops at walls; and routes along the streets keep to the left lane, for AI cars, taxi rides and deliveries to a shop\'s door. The same seed gives the same city. CITY TRAFFIC (2026-11-20): cars, autos and buses drive the streets in the left lane, turn at crossings, stop at red traffic lights (one street green at a time, with amber), keep a safe gap, never stop inside a crossing, take turns through it, and stop for the player. Not built yet: people walking on the pavements.',
+    howToUse: 'Ask for a city game and say what kind of city — a small town, a big city with towers, how many streets. Ask for missions in the city ("deliver to the shops", "taxi game") and the routes come from the city itself.',
+    relatedFeatures: ['game_enterable_house_kit', 'game_menus_settings'],
+    keywords: ['city game', 'city', 'shehar', 'sheher', 'town', 'street', 'streets', 'road grid', 'crossing', 'chauraha', 'zebra crossing', 'buildings', 'imarat', 'skyscraper', 'tower', 'apartment', 'flats', 'shops', 'dukaan', 'market street', 'park', 'street light', 'open city', 'taxi game', 'delivery game', 'gta jaisa', 'city driving'],
+  },
+  {
     id: 'game_asset_librarian',
     name: 'Game asset library and compatibility search',
     path: 'NavBharatAI Pro → describe a game or ask about available game objects',

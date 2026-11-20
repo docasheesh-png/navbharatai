@@ -103225,6 +103225,22 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Proof:** `tests/theGameSpeaksIndianLanguages.test.ts` (24 tests; five reversions each failed).
 - 🟡 **Open:** the nine tables were written without a native speaker reviewing every word. They are ordinary words, and any
   word can be changed with `options.strings`, but a native-speaker pass per language is recommended.
+## 2026-11-20 — City blocks in the 3D game kit (game-gap audit)
+
+- **Problem:** a "city" game was one straight road with houses beside it — the kit had `createRoad()` (one strip),
+  `createTraffic()` (one strip) and one/two-storey houses. Builders hand-placed boxes: streets that did not meet,
+  buildings in the road, pavements at the wrong height, and a draw call per box.
+- **Fix:** `src/server/lib/GameCityGenerator.ts` → kit file `src/game/three/city.ts`:
+  - `planCity()` (pure, seeded): streets, crossings, lots (two rows per block, so every lot faces a street), parks (never
+    every block), street lights, a spawn in the left lane. Styles: town / mixed / downtown; size and tallest floor bounded.
+  - `cityRoute()`: along the streets, turning only at crossings, in the LEFT lane (India), ending at a door.
+  - `createCity()`: asphalt with centre dashes and zebra crossings, raised pavements, shops (awning, signboard + `lot.sign`
+    anchor for the name), apartments (balconies, water tanks), office towers, houses (yard + compound wall), parks (trees,
+    paths, benches, fountain), street lights — merged per block (a 6×6 city ≈ 180 meshes). Streets/pavements are ground
+    colliders, buildings solid. `city.heightAt` is the ground for `driveVehicle`, which already stops at the solid buildings; `city.solidAt` is for movers a game positions by hand. (An earlier draft said driveVehicle had no walls — wrong; measured, it sweeps against solid colliders.)
+  - 3D instructions + kit handoff name `createCity()`; AppKnowledgeBase `game_city_blocks`.
+- **Proof:** `tests/aCityHasStreetsAndBlocks.test.ts` (10 tests; seven reversions each failed).
+- 🟡 **Not built yet:** traffic that turns at crossings, traffic lights, pedestrians.
 ## 2026-11-20 — #4389 merged (Q-2750/2753/2766/2769 closed; Surplus retries reported); game library batch 6
 - #4389 merged: every failed Surplus attempt (benched or retried by the stay-alive loop) now reaches the build report as one `SURPLUS` provider notice with codes only (`aRetriedAttemptIsReported`). Q-3019 stays IN PROGRESS for its speed half (retry the same model before benching, decided from the new notices).
 - **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
@@ -103261,3 +103277,21 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
   - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
 - **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.
+
+## 2026-11-20 — City traffic: the grid comes alive (engine plan, item 4)
+
+- **Gap:** city.ts gave streets and buildings, and nothing moved on them — `createTraffic()` drives one straight road.
+- **Fix:** `src/server/lib/GameCityTrafficGenerator.ts` → kit file `src/game/three/citytraffic.ts`: the kit's cars, autos
+  and buses drive the city grid in the LEFT lane, turn at crossings (never a U-turn unless the street ends), obey traffic
+  lights (one street green at a time, amber between, neighbouring crossings offset; two instanced meshes for every lamp
+  in the city), keep a gap to the vehicle ahead, stop for the player, and are deterministic per seed.
+- **Found by the test, fixed at the class:** the first version checked the gap only within a street — measured, a vehicle
+  turned onto a street on top of one that had just entered it 52 times in two minutes. Now a vehicle passes its stop line
+  only when its light is green, the crossing is EMPTY (one vehicle in a crossing at a time) and the street it turns into
+  has room (so a queue never blocks the crossing). Each vehicle chooses its next street in advance.
+- `dispose()` never frees the vehicles' geometry: the kit shares parts between all vehicles, the player's car included.
+- **Proof:** `tests/cityTrafficObeysTheRoad.test.ts` (8): two minutes of 20 vehicles checked every frame (on the street,
+  left lane, never through red, never inside the gap, never two in a crossing, everyone moves, most turn); rush hour of
+  45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
+  player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
+- 🟡 **Not built yet:** pedestrians.

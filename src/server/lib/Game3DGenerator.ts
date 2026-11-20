@@ -29,6 +29,8 @@
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
+import { GAME_CITY } from './GameCityGenerator';
+import { GAME_CITY_TRAFFIC } from './GameCityTrafficGenerator';
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
 // L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
@@ -6983,10 +6985,14 @@ const FILES: Record<string, string> = {
   'src/game/three/atmosphere.ts': ATMOSPHERE,
   // Crates, barrels and walls that break into debris under the player's shots and swings (2026-11-20).
   'src/game/three/breakable.ts': BREAKABLE,
+  // A grid of city blocks: streets, crossings, pavements, shops, apartments, offices, houses, parks (2026-11-20).
+  'src/game/three/city.ts': GAME_CITY,
+  // Traffic that drives the city's grid: left lane, turns at crossings, obeys the lights (2026-11-20).
+  'src/game/three/citytraffic.ts': GAME_CITY_TRAFFIC,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic',
 ];
 
 /**
@@ -7010,6 +7016,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     // race.ts drives rival cars on the streamed road (objects.ts) — first, so objects' own dependencies follow below.
     if (files['src/game/three/race.ts']) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
+    // City traffic drives the kit's vehicles (objects.ts) on the city's grid (city.ts).
+    if (files['src/game/three/citytraffic.ts']) { files['src/game/three/city.ts'] = FILES['src/game/three/city.ts']; files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts']; }
     if (files['src/game/three/world.ts']) {
       files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
       // The ground is textured in the real tier and reads the detail level, both from surfaces.ts.
@@ -7031,7 +7039,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
-    if (files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
+    if (files['src/game/three/city.ts'] || files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
       files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];
     }
     // atmosphere.ts drives the lights lighting.ts makes (it imports AppliedLighting).
@@ -7052,6 +7060,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
       'Explorable houses: createHouse({ enterable: true }) or createEnterableHouse(). Flat roof, one/two storeys, real doorway and stairs. Legacy createHouse() is solid scenery. Game shell wires E/mobile Use; custom loops must call interactHouseDoor and updateHouseDoors. Supply all NPC occupants. Do not replace interiors with decorative assets.\n' +
+      (files['src/game/three/city.ts'] ? 'City: const city = createCity({ blocksX: 5, blocksZ: 5, style: \'mixed\' }); scene.add(city.root) — streets, crossings, pavements, shops, apartments, offices, houses, parks, street lights, centred on the origin. Put the player at city.spawn facing city.spawnHeading. Driving: pass { ground: city.heightAt } to driveVehicle; driveVehicle already stops a car at the city\'s buildings and poles (they are solid), so nothing more is needed — city.solidAt(x, z, radius) is only for a mover your own code positions by hand. city.route(from, to) gives left-lane waypoints for AI cars, taxis and deliveries; city.lotsOf(\'shop\') and lot.entrance give mission targets; lot.sign is where to write a shop name. Never hand-place a street grid.\n' : '') +
+      (files['src/game/three/citytraffic.ts'] ? 'City traffic: const traffic = createCityTraffic(city, { count: 15 }); scene.add(traffic.root); then traffic.update(dt, [playerObject]) every frame — cars, autos and buses drive the grid in the left lane, turn at crossings, obey the traffic lights (traffic.lightAt), keep their gap and stop for the player. Never animate city traffic by hand.\n' : '') +
       `${kitTypeContract(files)}\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +

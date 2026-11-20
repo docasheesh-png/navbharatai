@@ -104,6 +104,8 @@ export function generateMissingCssModules(files: Record<string, string>, existin
   // Presence metadata protects unread scaffold files without pretending their source is empty.
   const existing = new Set([...Object.keys(files), ...existingPaths]);
   const targets = new Map<string, Set<string>>();
+  /** Plain (non-module) stylesheet targets → the first file that imports them. */
+  const plain = new Map<string, string>();
   for (const [path, content] of Object.entries(files)) {
     if (!EXPORT_CODE_FILE.test(path) || typeof content !== 'string') continue;
     const source = parseSource(content, path);
@@ -112,7 +114,18 @@ export function generateMissingCssModules(files: Record<string, string>, existin
     for (const statement of source.statements) {
       if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
       const clause = statement.importClause;
-      if (!clause?.name || clause.isTypeOnly || !statement.moduleSpecifier.text.endsWith('.module.css')) continue;
+      // 🔴 A PLAIN STYLESHEET IMPORT IS GENERATABLE TOO (failedbr #2155, 2026-11-20). `src/main.tsx` imported
+      // `./index.css`, the file did not exist, the model's creation pass did not produce it, and the build ended RED on
+      // "1 local module(s) are STILL missing". A side-effect `import './x.css'` asks only for the file to exist: an
+      // empty stylesheet is a valid one and ends the runtime crash; the missing RULES are reported separately
+      // (CSS_CLASSES_UNDEFINED). Never a `*.module.css` here (its class names come from the branch below).
+      const spec = statement.moduleSpecifier.text;
+      if (!clause && /\.css$/.test(spec) && !spec.endsWith('.module.css')) {
+        const plainTarget = resolveCssTarget(path, spec);
+        if (plainTarget && !existing.has(plainTarget) && !targets.has(plainTarget)) { targets.set(plainTarget, new Set()); plain.set(plainTarget, path); }
+        continue;
+      }
+      if (!clause?.name || clause.isTypeOnly || !spec.endsWith('.module.css')) continue;
       const target = resolveCssTarget(path, statement.moduleSpecifier.text);
       if (!target || existing.has(target)) continue;
       const classes = targets.get(target) ?? new Set<string>();
@@ -122,6 +135,8 @@ export function generateMissingCssModules(files: Record<string, string>, existin
   }
   // Render only after every consumer has contributed, including multiple aliases in the same file.
   return [...targets].map(([path, names]) => {
+    const importer = plain.get(path);
+    if (importer) return { path, content: `/* ${importer} imports this stylesheet and it did not exist, so NavBharatAI created it empty. */\n`, classes: [] };
     const classes = [...names].sort();
     return { path, content: renderCssModule(path, classes), classes };
   });

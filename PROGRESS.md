@@ -102898,3 +102898,12 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2963 (#2342): on an edit, the aggregate project-score blocker no longer forces an unfinished-resume (`isProjectScoreBlocker`); the verdict half is Q-2964 (admin decision).
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
+
+## 2026-11-20 — failedbr #2318 / #2306 / #2399 resolved (#4361 merged)
+
+Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2966 (#2318): no style/accessibility hand-back once the build has said "wrapping" (75%) or "final" (90%) — a ready app is delivered, not polished into the cap (`polishHandBackAllowed`, both sites).
+- Q-2968 (#2306): the `coming-soon` fake marker ignores the honest disclosure NO_FAKE_FEATURE_RULE demands (a line naming a credential and where to add it).
+- Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
+- Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).

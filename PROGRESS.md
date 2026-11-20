@@ -102949,7 +102949,7 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with w
 | Q-2751 | LADDER_DEPTH counted the scope call on an empty build → scope tokens share the build's ledger | `PHASE_SCOPE` at both scope writers; ladder skips it; bill unchanged (tested) · `aScopeCheckIsNotALadderSlice` |
 | Q-2752 | domain stems inside unrelated words → census vs 275k words found 9 (parental→booking, impatient→healthcare, blending→fintech, …) | each guarded against that word only · `aWordInsideAWordIsNotADomain` (old code: 8 fail) |
 
-**Discovered, not folded in:** Q-3020 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
+**Discovered, not folded in:** Q-3101 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
 ## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
 
 Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
@@ -102981,6 +102981,24 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
 
+## 2026-11-20 — Business (vyapaar) board game + "a game is not its theme" (game-gap audit item)
+
+- **Gap 1 (missing engine):** no rules for the property-trading board game. `BoardGamesGenerator` now writes
+  `src/game/board/business.ts` — original 36-square board (Indian cities, 4 transport, 2 utilities), pretend money only:
+  buy/decline, rent (set doubles, houses, hotel), chance, taxes, Start, doubles/three-doubles jail, jail fine/tries,
+  even building, mortgages, automatic fund-raising, bankruptcy to the creditor, winner, computer player. Not built:
+  auctions, trading (stated in the engine, the instructions and the AppKnowledgeBase entry).
+- **Gap 2 (root cause, wider class):** the request never reached a game engine. `selectDomain` let a game's THEME
+  pick the domain — 10 of 14 themed game prompts measured (restaurant, hospital, bank, shop, school, stock-market,
+  gym, pizza, real-estate) and every "gaadi wala" racing game (logistics) were read as a business, and `gameKitPlan`
+  seeds the kit only for domain 'game'. Class: a word that describes the game's world chose the app type.
+  Fix in the ONE place a domain is chosen: `asksForAGame` — a game as the thing built, with no app/website/portal
+  named beside it, is a game; "game" as a modifier (schedules, slots, store, tickets) names no game (the reverse slip:
+  "cricket academy app with game schedules" was a game); a game moving real money keeps the BR1985 fintech precedent.
+  Corpus diff over 1,630 game-mentioning test strings: 44 changed, every real prompt in the right direction.
+  `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
+- **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
+  12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
 ## 2026-11-20 — Game kit: swipe input + endless-runner rules (game-gap audit item)
 
 - **Gap:** no swipe and no runner in the kit, so every runner was hand-written: a row with no way through, a fast
@@ -103092,6 +103110,17 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — #4365 merged (Q-2746/2747/2748/2751/2752 closed); four more 05eb30ba-era rows fixed
+Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2746, Q-2747, Q-2748, Q-2751, Q-2752 — ledger in the entry above.
+
+| ID | Problem → root cause → class | Fix · lock (each proven by reversion) |
+|---|---|---|
+| Q-2750 | "a paid build would get 58 min" vs "29 min" in the same hour → both true: a deep build's window is doubled, the line never said so | `freeWindowLine` names the size when scaled · `aPaidWindowSaysWhyItDiffers` |
+| Q-2753 | four file counts in one report (28/21/30/30) → four different sets, CHANGE_RECORDED the only one naming none | its scope is in the line · `everyFileCountNamesItsScope` |
+| Q-2769 | JOURNEY_NOT_DERIVED told a list-driven form (`name={field.name}`) it had no names while accessibility scored 100 → the check reads names from source | the limit is said as the check's; real unnamed forms keep the remedy · `aFormBuiltFromAListIsNotUnnamed` |
+| Q-2766 | `{ ReactComponent }` + `?react` (two SVG plugins' styles) → preview errors until rewired | named on write with the exact default-import fix · `anSvgImportUsesOnePluginsStyle` |
+
+**Opened:** Q-3102 — a list-driven form gets no journey at all; the real fix reads field names from the running page.
 ## 2026-11-20 — #4377 merged (failedbr #2169 / #2163 / #2155 / #2141); autopsies #2158, #2133, #2122, #2116 (next PR)
 
 Closed Q-2994, Q-2995, Q-2996, Q-2997 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): our browser's media limits are not an app defect; "game" in the Indian scripts is a game; a missing plain stylesheet import is created; Hinglish fillers are not subjects in the "add to this app or a new one?" check.
@@ -103113,6 +103142,8 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
 
+
+Note (2026-11-20): the feature-stem row first opened as Q-2972, then Q-3020, and the list-form row as Q-3021 were renumbered Q-3101 / Q-3102 — each earlier number was taken by another session in parallel (two Q-3020 rows briefly existed on main).
 ## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)
 
 Closed Q-3021, Q-3023, Q-3025, Q-3029, Q-3031, Q-3032, Q-3033, Q-3034 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a rule about how to build and the staples of a small game are not features; a numbered list with a few sub-bullets is not a spec in sections; a stylesheet wired by an Astro/Vue/Svelte component is wired; exam words are not services; a game that names a hospital is a game (unless it handles real money); a package-manager query is a read; a roadmap step cannot invent a native mobile stack; every game-kit file compiles under a strict app tsconfig.
@@ -103130,3 +103161,7 @@ Ledger, older reports (2026-11-20, next PR):
 - #1994 — no new rows, and my first attempt WITHDRAWN before merge. Reports #1950–#2003 had already been autopsied by another session (the BRxxxx series). BR1994 had recorded both of my findings: the recovered `npm install` still counted on a failed build's gate is **Q-2707**, 🟡 blocked on an owner billing decision (a red gate is what makes a failed build free, so forgiving a recovered failure there can newly charge a build). The YouTube-downloader policy is **Q-1005**, 🟡 blocked on the admin. I had changed `recordCommand` to make exactly the Q-2707 change without that decision; it was reverted in #4387 before merging, and Q-3037/Q-3038 (which never reached `main`) were removed. Lesson: check the `BRxxxx` series for a report number before autopsying it.
 - #1987 — no new row: the workspace was already a Spring Boot project (its saved starter), so a PUBG-style request was built on it without the game kit by design; its `npm install` without a package.json blocker is BR1987, fixed.
 - #1995, #1993, #1986, #1984, #1983 — no new rows: all five are SANDBOX_RECOVERY_UNAVAILABLE ("could not be safely reconnected") within 1–19 s, not the E2B cap (read, not assumed). The refusal's reason has been in the report since #4253. #1995 and #1984 were "Fix this error and continue building the app: <that refusal>", the Fix-with-AI-on-our-own-notice class BR1995 fixed (2026-11-17).
+- #1941, #1940, #1938, #1933 — no new rows (each read; none in the BR1950–2003 series): #1941's guessed `Input.bind` is BR1954's kit-type-contract class; #1940 rendered at 761 s and was stopped by the user at 782 s (the free-tier ceiling, Q-2240); #1938's "kit laid down (0 files)" after the E2B cap is BR1977's `downgradeEmptyKitSeedSuccesses`; #1933 rendered at 359 s as an original runner before the user stopped it.
+- #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
+- #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
+- #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.

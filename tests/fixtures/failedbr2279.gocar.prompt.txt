@@ -1,0 +1,379 @@
+CREATE AN ORIGINAL 3D MULTIPLAYER GAME – GO CAR
+
+Game Name: GO CAR
+
+Tagline: Race Beyond Limits.
+
+Create a complete, original, high-quality 3D multiplayer obstacle racing and survival game called GO CAR.
+
+IMPORTANT: I want a fully playable game, not just a game concept, static design, prototype screenshot or non-functional UI.
+
+The game should have the excitement and multiplayer obstacle-racing experience of popular party games, but it must have its own original identity, vehicle designs, maps, environments, animations, branding, mechanics and interface. Never copy existing game assets or maps.
+
+━━━━━━━━━━━━━━━━━━
+
+1. GAME STYLE AND WORLD
+   ━━━━━━━━━━━━━━━━━━
+
+Create a beautiful, colourful, magical fantasy 3D world.
+
+VISUAL STYLE:
+
+- High-quality polished cartoon 3D graphics.
+- Beautiful blue skies and fluffy white clouds.
+- Floating fantasy islands.
+- Green hills and colourful mountains.
+- Waterfalls and magical gardens.
+- Rainbow bridges.
+- Giant colourful obstacle platforms.
+- Candy-themed environments.
+- Beautiful lighting, shadows and smooth animations.
+- Bright, cheerful and visually attractive environments.
+
+DO NOT create dark cyberpunk cities, industrial racing tracks, excessive neon environments or realistic car-racing worlds.
+
+The game should look like a beautiful fantasy adventure.
+
+━━━━━━━━━━━━━━━━━━
+2. GAMEPLAY
+━━━━━━━━━━━━━━━━━━
+
+- Cars-only gameplay.
+- No walking or running characters.
+- Third-person 3D camera behind the player's car.
+- 20–32 players per match when multiplayer infrastructure supports it.
+- Multiplayer obstacle survival racing.
+- Multiple elimination rounds and one final round.
+- Last surviving or qualifying cars advance.
+- Exciting race countdowns.
+- Real-time player positions.
+- Smooth car movement and physics.
+- Jumping, drifting, steering, acceleration and braking.
+- Falling off the track eliminates a player.
+- AI opponents for offline testing.
+- Online multiplayer matchmaking when supported.
+
+━━━━━━━━━━━━━━━━━━
+3. UNIQUE GAME MECHANICS
+━━━━━━━━━━━━━━━━━━
+
+Create original gameplay mechanics:
+
+- Turbo Gates: temporarily increase car speed.
+- Gravity Zones: change the gravity behaviour of cars.
+- Energy Bridges: platforms that appear and disappear.
+- Portal Roads: transport cars to other track sections.
+- Moving Platforms.
+- Rotating Obstacles.
+- Giant Rolling Objects.
+- Disappearing Roads.
+- Jump Ramps.
+- Drift Challenges.
+- Temporary Shields.
+- Speed Boosts.
+- Creative Shortcuts.
+
+Make every map exciting and different.
+
+━━━━━━━━━━━━━━━━━━
+4. MULTIPLE MAPS AND WORLDS
+━━━━━━━━━━━━━━━━━━
+
+Create MANY unlockable and selectable maps.
+
+Initial world ideas:
+
+1. Cloud Kingdom – floating islands, clouds and rainbow roads.
+2. Candy Kingdom – colourful candy roads and sweet obstacles.
+3. Jungle Adventure – waterfalls, giant plants and wooden bridges.
+4. Lava World – volcanoes, moving rocks and dangerous platforms.
+5. Crystal Valley – magical crystals and beautiful landscapes.
+6. Sky Paradise – floating castles and aerial obstacle tracks.
+7. Ocean Adventure – underwater-inspired fantasy tracks.
+8. Ice Kingdom – slippery roads and frozen obstacles.
+9. Rainbow Valley – colourful bridges and moving platforms.
+10. Mystery Island – secret paths and unpredictable challenges.
+
+Every world should have multiple original tracks and different obstacle combinations.
+
+Add map selection, map previews, map unlocking and random map selection.
+
+━━━━━━━━━━━━━━━━━━
+5. COMPLETE CAR COLLECTION SYSTEM
+━━━━━━━━━━━━━━━━━━
+
+Cars are the main identity of GO CAR.
+
+Create a large collection of original car designs.
+
+CAR RARITY CATEGORIES:
+
+1. Common
+2. Uncommon
+3. Rare
+4. Epic
+5. Legendary
+6. Mythic
+7. Secret / Ultra Rare
+
+Each rarity should have distinctive designs, animations, visual effects and unlock requirements.
+
+Create many different car designs, including:
+
+- Cute cartoon cars.
+- Sports-style mini cars.
+- Monster-inspired cars.
+- Candy-themed cars.
+- Animal-inspired cars.
+- Magical fantasy cars.
+- Special event cars.
+- Exclusive legendary cars.
+
+Every car must have its own name, appearance, rarity and statistics.
+
+━━━━━━━━━━━━━━━━━━
+6. CAR LEVEL AND UPGRADE SYSTEM
+━━━━━━━━━━━━━━━━━━
+
+Every car should have five upgrade levels:
+
+Level 1 – Basic
+Level 2 – Improved
+Level 3 – Advanced
+Level 4 – Pro
+Level 5 – Master
+
+Allow players to upgrade:
+
+- Acceleration.
+- Handling.
+- Jump control.
+- Boost recovery.
+
+Use upgrade parts and earned game currency.
+
+Keep competitive gameplay balanced so that rare or upgraded cars do not automatically guarantee victory.
+
+━━━━━━━━━━━━━━━━━━
+7. CAR CUSTOMISATION
+━━━━━━━━━━━━━━━━━━
+
+Create a fully functional 3D garage.
+
+Players should be able to customise:
+
+- Car body designs.
+- Paint colours.
+- Colour combinations.
+- Wheels and rims.
+- Tyres.
+- Spoilers.
+- Body accessories.
+- Magical trails.
+- Boost effects.
+- Horns.
+- Victory effects.
+
+Allow players to rotate and preview cars in 3D.
+
+Players should be able to select, equip, upgrade and save their favourite car designs.
+
+━━━━━━━━━━━━━━━━━━
+8. CAR UNLOCKING SYSTEM
+━━━━━━━━━━━━━━━━━━
+
+Players must have multiple ways to unlock cars and rewards.
+
+A. QUEST SYSTEM
+
+- Daily quests.
+- Weekly quests.
+- Special missions.
+- Achievement missions.
+
+B. LUCKY SPIN
+
+- Free spin tickets earned through gameplay.
+- Different reward rarities.
+- Transparent reward probabilities.
+- Car skins, tokens, coins and upgrade materials.
+
+C. TOKEN SHOP
+
+- Purchase specific cars using earned Car Tokens.
+- Display car prices and unlock requirements.
+
+D. TROPHY ROAD
+
+- Earn trophies by playing matches.
+- Unlock exclusive cars and rewards.
+
+E. SPECIAL EVENTS
+
+- Limited-time maps.
+- Event missions.
+- Exclusive car designs.
+- Special trophies and rewards.
+
+F. DAILY REWARDS
+
+- Daily login rewards.
+- Free coins.
+- Spin tickets.
+- Upgrade materials.
+
+No real-money gambling or pay-to-win mechanics.
+
+━━━━━━━━━━━━━━━━━━
+9. GAME CURRENCIES
+━━━━━━━━━━━━━━━━━━
+
+Create these separate currencies:
+
+- Gold Coins: regular gameplay rewards.
+- Gems: premium-style currency, also earnable through gameplay.
+- Car Tokens: [REDACTED:secret] specific vehicles.
+- Upgrade Parts: upgrade vehicles.
+- Spin Tickets: use in the lucky spin.
+
+Show balances clearly in the game interface.
+
+━━━━━━━━━━━━━━━━━━
+10. MULTIPLAYER AND GAME MODES
+━━━━━━━━━━━━━━━━━━
+
+Create these game modes:
+
+- Classic Survival Race.
+- Elimination Challenge.
+- Time Trial.
+- Team Race.
+- Private Room with friends.
+- Special Event Mode.
+- Final Championship.
+
+Include matchmaking, player names, lobby, countdown, qualifying rounds, spectator mode and winner celebrations.
+
+If online multiplayer requires a separate backend, create the architecture for it and clearly explain what needs to be connected. Do not pretend offline AI matches are real online multiplayer.
+
+━━━━━━━━━━━━━━━━━━
+11. MAIN MENU AND SCREENS
+━━━━━━━━━━━━━━━━━━
+
+Create a beautiful professional mobile-game interface.
+
+MAIN MENU:
+
+- PLAY
+- GARAGE
+- MAPS
+- SHOP
+- LUCKY SPIN
+- QUESTS
+- EVENTS
+- LEADERBOARD
+- FRIENDS
+- PROFILE
+- SETTINGS
+
+Also create:
+
+- Loading screen.
+- Matchmaking screen.
+- Multiplayer lobby.
+- Car selection screen.
+- Map selection screen.
+- Gameplay HUD.
+- Round qualification screen.
+- Elimination screen.
+- Final round screen.
+- Winner podium.
+- Rewards screen.
+- Car collection screen.
+- Upgrade screen.
+- Customisation screen.
+
+All buttons should work wherever the underlying functionality is implemented.
+
+━━━━━━━━━━━━━━━━━━
+12. MOBILE CONTROLS
+━━━━━━━━━━━━━━━━━━
+
+Optimise the game for Android mobile devices.
+
+Include:
+
+- Left steering button.
+- Right steering button.
+- Accelerate button.
+- Brake button.
+- Jump button.
+- Boost button.
+
+Add smooth responsive controls, camera following, sound effects and vibration settings.
+
+━━━━━━━━━━━━━━━━━━
+13. PROGRESSION AND REWARDS
+━━━━━━━━━━━━━━━━━━
+
+Include:
+
+- Player XP and levels.
+- Player profiles.
+- Match statistics.
+- Wins and trophies.
+- Achievement badges.
+- Daily and weekly quests.
+- Reward chests.
+- Car collection progress.
+- Leaderboards.
+- Seasonal progression.
+- Victory animations.
+- Reward celebrations.
+
+━━━━━━━━━━━━━━━━━━
+14. SOUND AND ANIMATIONS
+━━━━━━━━━━━━━━━━━━
+
+Add:
+
+- Attractive background music.
+- Engine sounds.
+- Jump and landing sounds.
+- Boost sounds.
+- Collision sounds.
+- Menu sound effects.
+- Victory music.
+- Smooth car animations.
+- Exciting elimination animations.
+- Beautiful reward animations.
+
+━━━━━━━━━━━━━━━━━━
+15. TECHNICAL REQUIREMENTS
+━━━━━━━━━━━━━━━━━━
+
+- Build a real playable 3D game.
+- Optimise for Android phones.
+- Use smooth and responsive car physics.
+- Optimise graphics and performance.
+- Use modular architecture.
+- Save player progress and unlocked rewards.
+- Maintain currency balances and car upgrades.
+- Create functional menus and navigation.
+- Support expansion with more maps, cars and events.
+- Implement secure multiplayer architecture where supported.
+- Use original assets and original GO CAR branding.
+
+IMPORTANT DEVELOPMENT PRIORITY:
+
+First build a working main menu, a beautiful fantasy floating-island map, a controllable 3D car, mobile controls and basic race gameplay.
+
+Then integrate the garage, car collection, rarity, upgrades, currencies, quests, spin wheel, map selection, rewards and multiplayer systems.
+
+Do not create fake buttons or pretend that unsupported features are functional. Clearly identify any features requiring additional development or backend services.
+
+FINAL GOAL:
+
+GO CAR should become a complete, beautiful, colourful, original 3D multiplayer car obstacle-survival game with hundreds of possibilities for future cars, maps, events, rewards and customisation.
+
+Make GO CAR feel like its own unique gaming universe.

@@ -388,6 +388,7 @@ import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/B
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
+import { exportRepairRequest, exportFindingText } from '../AgentV3/exportRepairDirection';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision, choosePublishRoute } from '../AgentV3/deployPlan';
@@ -458,7 +459,7 @@ import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, salvageReadInstruction, repairCompilerFiles, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -750,7 +751,7 @@ import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort, changeWasStopped } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
-import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
+import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate, recordDeclinedOutcome } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -14876,7 +14877,7 @@ async function noteBuildOutcome(
       // 🔒 ONE SCOPE VERDICT FOR THE WHOLE BUILD (Q-138, admin 2026-10-11): sized once, here, and read by the
       // report line below, the mega-app roadmap and Software Project Mode alike. Project Mode no longer sizes
       // a request on its own — it splits only what this verdict calls large (scopeVerdict).
-      const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex });
+      const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex, gameOnKit: gameKitOwnsTheBuild(planning.sizing, framework) });
       try {
         const scope = appScope.scope;
         buildDiag.record({
@@ -19049,7 +19050,7 @@ async function noteBuildOutcome(
           isEditMode,
           // The text the gate sized and the verdict it read — never a second derivation (Q-138).
           prompt: planning.sizing,
-          scope: { large: appScope.large, signals: appScope.scope.signals },
+          scope: { large: appScope.large, signals: appScope.scope.signals, gameOnKit: appScope.gameOnKit },
           templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
@@ -21025,6 +21026,7 @@ async function noteBuildOutcome(
               + 'not retried, not replaced with "please try again", and no upsell was offered. Before 2026-09-26 the '
               + 'empty-build flip overwrote the refusal and the free-tier upsell then asked the user to add credits.',
           });
+          recordDeclinedOutcome(buildDiag); // …and the outcome that sentence implies (failedbr #2246)
         } catch { /* a note must never fail a build */ }
       }
       /**
@@ -21554,20 +21556,16 @@ async function noteBuildOutcome(
           }
           let targets = firstPass.ours;
           if (targets.length > 0) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportRegenInstruction(targets)}`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportFindingText(targets, writtenFiles, exportGateBase)}`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${targets.length} file(s) are missing an export another file needs — regenerating them…`, ts: Date.now() });
             try {
-              const targetFiles = targets
-                .map((t) => ({ path: t.target, content: writtenFiles.get(t.target) || '' }))
-                .filter((f) => f.content);
+              // A file the platform seeded (the game kit, a golden scaffold) is a fixed library: its IMPORTER is rewritten
+              // against its real exports, and the library itself is never sent (exportRepairDirection.ts, failedbr #2278).
+              const exportRepair = exportRepairRequest(targets, writtenFiles, { ...exportGateBase, ...Object.fromEntries(writtenFiles) });
+              const targetFiles = exportRepair.files;
               // Q-1125: through the one recording door — this pass used to leave no row at all.
               const t = await recordedRepairCall(repairSystemPrompt(framework),
-                  `The app was built for this request:\n${prompt}\n\n` +
-                  `These files are imported by other modules for specific bindings, but they DO NOT export those ` +
-                  `bindings (usually a generation that was cut off before the export). Rewrite EACH file in full ` +
-                  `so it exports EXACTLY the required names, keeping all its existing logic/UI and adding the ` +
-                  `missing export(s) with real implementations (no stubs). Change nothing else.\n\n` +
-                  `REQUIRED EXPORTS:\n${exportRegenInstruction(targets)}\n\n` +
+                  `The app was built for this request:\n${prompt}\n\n${exportRepair.instruction}\n\n` +
                   `The files to rewrite (complete each one, exports included):\n` +
                   targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n'));
               const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
@@ -21585,7 +21583,7 @@ async function noteBuildOutcome(
               events.emit({ type: 'narration', agent: 'architect', text: '✅ Restored the missing exports — the imports resolve now.', ts: Date.now() });
               if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save best-effort */ } }
             } else {
-              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_MISSING_EXPORT', message: `After one repair pass, ${targets.length} file(s) STILL miss an imported export — the build will fail:\n${exportRegenInstruction(targets)}`, autoResolved: false });
+              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_MISSING_EXPORT', message: `After one repair pass, ${targets.length} file(s) STILL miss an imported export — the build will fail:\n${exportFindingText(targets, writtenFiles, exportGateBase)}`, autoResolved: false });
               events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some imports still reference exports that could not be restored. Your files are saved — send a follow-up and I\'ll finish the fix.', ts: Date.now() });
             }
           }

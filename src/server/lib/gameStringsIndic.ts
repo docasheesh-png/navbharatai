@@ -52,6 +52,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "அதிகபட்சம்", levelShort: "நி {n}", controls: "கட்டுப்பாடுகள்", pressKey: "ஒரு விசையை அழுத்தவும் (ரத்து செய்ய Esc)",
     resetControls: "கட்டுப்பாடுகளை மீட்டமை", up: "மேலே", down: "கீழே", reload: "ரீலோட்",
     crouch: "குனி / மூழ்கு",
+    language: "மொழி",
   },
   // Telugu
   te: {
@@ -84,6 +85,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "గరిష్ఠం", levelShort: "లె {n}", controls: "కంట్రోల్స్", pressKey: "ఒక కీ నొక్కండి (రద్దు చేయడానికి Esc)",
     resetControls: "కంట్రోల్స్ రీసెట్ చేయండి", up: "పైకి", down: "కిందికి", reload: "రీలోడ్",
     crouch: "వంగు / మునుగు",
+    language: "భాష",
   },
   // Bangla
   bn: {
@@ -116,6 +118,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "সর্বোচ্চ", levelShort: "লে {n}", controls: "কন্ট্রোল", pressKey: "একটি কী টিপুন (বাতিল করতে Esc)",
     resetControls: "কন্ট্রোল রিসেট করুন", up: "উপরে", down: "নিচে", reload: "রিলোড",
     crouch: "নিচু হন / ডুব দিন",
+    language: "ভাষা",
   },
   // Marathi
   mr: {
@@ -148,6 +151,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "पूर्ण", levelShort: "लेव्हल {n}", controls: "कंट्रोल्स", pressKey: "एखादी कळ दाबा (रद्द करण्यासाठी Esc)",
     resetControls: "कंट्रोल्स रीसेट करा", up: "वर", down: "खाली", reload: "रीलोड",
     crouch: "वाका / सूर मारा",
+    language: "भाषा",
   },
   // Gujarati
   gu: {
@@ -180,6 +184,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "પૂરું", levelShort: "લેવલ {n}", controls: "કંટ્રોલ્સ", pressKey: "કોઈ કી દબાવો (રદ કરવા Esc)",
     resetControls: "કંટ્રોલ્સ રીસેટ કરો", up: "ઉપર", down: "નીચે", reload: "રીલોડ",
     crouch: "નમો / ડૂબકી",
+    language: "ભાષા",
   },
   // Kannada
   kn: {
@@ -212,6 +217,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "ಗರಿಷ್ಠ", levelShort: "ಹಂ {n}", controls: "ನಿಯಂತ್ರಣಗಳು", pressKey: "ಒಂದು ಕೀ ಒತ್ತಿ (ರದ್ದುಮಾಡಲು Esc)",
     resetControls: "ನಿಯಂತ್ರಣಗಳನ್ನು ಮರುಹೊಂದಿಸಿ", up: "ಮೇಲೆ", down: "ಕೆಳಗೆ", reload: "ರೀಲೋಡ್",
     crouch: "ಬಾಗಿ / ಮುಳುಗಿ",
+    language: "ಭಾಷೆ",
   },
   // Malayalam
   ml: {
@@ -244,6 +250,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "പരമാവധി", levelShort: "ലെ {n}", controls: "നിയന്ത്രണങ്ങൾ", pressKey: "ഒരു കീ അമർത്തൂ (റദ്ദാക്കാൻ Esc)",
     resetControls: "നിയന്ത്രണങ്ങൾ പുനഃക്രമീകരിക്കൂ", up: "മുകളിലേക്ക്", down: "താഴേക്ക്", reload: "റീലോഡ്",
     crouch: "കുനിയൂ / മുങ്ങൂ",
+    language: "ഭാഷ",
   },
   // Punjabi (Gurmukhi)
   pa: {
@@ -276,6 +283,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "ਪੂਰਾ", levelShort: "ਲੈਵਲ {n}", controls: "ਕੰਟਰੋਲ", pressKey: "ਕੋਈ ਕੁੰਜੀ ਦਬਾਓ (ਰੱਦ ਕਰਨ ਲਈ Esc)",
     resetControls: "ਕੰਟਰੋਲ ਰੀਸੈੱਟ ਕਰੋ", up: "ਉੱਪਰ", down: "ਹੇਠਾਂ", reload: "ਰੀਲੋਡ",
     crouch: "ਝੁਕੋ / ਡੁਬਕੀ",
+    language: "ਭਾਸ਼ਾ",
   },
   // Odia
   or: {
@@ -308,5 +316,6 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     maxed: "ପୂର୍ଣ୍ଣ", levelShort: "ଲେଭେଲ {n}", controls: "କଣ୍ଟ୍ରୋଲ", pressKey: "ଗୋଟିଏ କି ଦବାନ୍ତୁ (ବାତିଲ ପାଇଁ Esc)",
     resetControls: "କଣ୍ଟ୍ରୋଲ ରିସେଟ କରନ୍ତୁ", up: "ଉପରକୁ", down: "ତଳକୁ", reload: "ରିଲୋଡ",
     crouch: "ନଇଁ ପଡ଼ନ୍ତୁ / ବୁଡ଼ନ୍ତୁ",
+    language: "ଭାଷା",
   },
 };

@@ -103125,3 +103125,16 @@ Ledger, older reports (2026-11-20, next PR):
 - #1913 — Q-3041 the Play Store / App Store are where an app is published, not a shop: a game that mentioned uploading to the play store was read as ecommerce and got no kit.
 - #1930, #1914 — no defect: a user stop at 18 s before any write; the write guard refused a duplicate declaration, then the user stopped.
 - #1910, #1909, #1906, #1898 — no new rows (each read): a user stop at 9 s; #1909 and #1906 rendered at 451 s and 415 s before user stops (#1906's unreported Surplus usage only under-counts our own cost); #1898's guessed `createTerrain` is BR1954's kit-contract class and its skipped write-time typecheck is autopsy 61279465, both fixed.
+- #1896 — Q-3106: the clarity judge's decision (or why it was not consulted) is now a CLARITY_DECISION line in the build report. "Make the game you were going to make" was built without a question, and the report could not say why.
+- #1890 — no defect: a Ludo board stopped by the user at 61 s in the fast lane.
+- #1888 — Q-3103: CGST, SGST and the other GST/invoice terms are ordinary words, not unknown services.
+- #1881 — Q-3104: screens written in Tailwind utilities in a project without Tailwind are named as such in every undefined-class note (they asked for one hand-written rule per utility). Its CSS warning on a user stop of a starter-seeded build is BR1988's boundary (edit-mode turns carry no readyAt).
+- #1879 — Q-3105: a remark ("I saw your ad on YouTube… you don't even make games") no longer confirms a build on the word "game", and "YouTube dekh raha tha" (watching YouTube) is no longer a clone request.
+- #1876 — already ledgered above.
+- #1871 — no defect: a "Continue" turn stopped by the user at 43 s while reading the project.
+- #1870 — Q-3028 again (the Panchang chip rendered at 43 s, then about 130 s of invented polish and three missed edits until a user stop); the row is blocked on the admin's decision and now names this report.
+- #1857 — Q-3040's class (fixed in #4388): "Fix this error and continue building the app: network error" was a NavBharatAI-composed fix request for a dropped connection, stopped at 9 s.
+- #1847 — no new rows: the scope classification ran its full 30 s deadline and failed (Q-2949, which now names this report); a `claude-sonnet-4-6` label on an unanswered Weak builder call is Q-970 (blocked on the admin's routing decision); the user then sent a different request mid-build and stopped.
+- #1846, #1845, #1844, #1843, #1836 — already autopsied by build ID (rows exist).
+- #1838 — Q-3107: the `.env` read rule (and five sibling verb-and-argument rules) crossed `;` and `&&`, so `cat a.ts; ls -la .env` or `git push && rm -f tmp` were refused or flagged; each now reads one command. Its failed `ls` of missing directories as a gate blocker is already fixed on main (`isReadOnlyInspection`). Whether this report's own truncated command had that shape cannot be read from the report; the class is proven.
+

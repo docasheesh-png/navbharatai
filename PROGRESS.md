@@ -103285,6 +103285,13 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
   the stopped lane's file count (31254f9a), a stopped call is LLM_CALL_STOPPED (#919), STUCK_TOOL on a Stop (#959), the
   per-module starter (6a5fb04b, #961's 19 minutes), the roadmap's simulated-reply guardrail (#947), design observations
   on untouched code (obs()). Open: Q-3188–Q-3198.
+- Batches #898–#796 and #755–#698 (23 reports, 2026-11-20, mostly late-September builds). Fixed: Q-3188 (an unfilled
+  template names no app), Q-3199 (Hinglish "bus" is not a vehicle), Q-3200 (the shim repair stays inside the app).
+  Already fixed on main when checked: a user-stop RED gate is info, LLM_CALL_STOPPED, the stopped-build upsell, "I made
+  your change" on a zero-change stop, "send me the code" is answered, compiled Android CSS and vendored CSS are not
+  graded, the "fake/incomplete" blocker names its files, the 45-token grounding warning (Q-3140), pipe-masked tsc errors
+  are counted. Half-charges on stopped builds with no agent change (#733, #732, #749) are Q-3148/Q-3157's policy.
+  Open: Q-3201–Q-3208.
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

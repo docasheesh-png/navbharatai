@@ -102999,6 +102999,18 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (bloc
   `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
 - **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
   12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
+## 2026-11-20 — Game kit: get in and out of vehicles (game-gap audit item)
+
+- **Gap:** walk-and-drive games hand-wrote Use + ctx.follow, and the walking body kept moving, unseen, while the player
+  drove (player.update ran every step with the same axis), so getting out put the player wherever it had wandered.
+- **Fix (opt-in, so no existing game changes):** `ctx.vehicles.add(car)` in the shell. Use beside it gets in (body held
+  still and hidden, camera chases the car, the shell drives it); Use again gets out beside it, braking first at speed;
+  the parked car is created at speed 0 and stays put. If the game drives it itself, the game wins (no double driving).
+  On exit the car stops being "the player's car" so the camera returns to the player. Phones keep the Use button.
+  Hud shows "E — get in / get out" (EN + HI). Shell instructions + AppKnowledgeBase updated.
+- **Lock:** `tests/aPlayerGetsInAndOutOfACar.test.ts` (7, real Game.ts/objects/input/controller). 9 reversion proofs fail.
+  Generated kit tsc before/after: identical 33 pre-existing errors (missing @types/three). The typecheck caught an
+  unescaped apostrophe in the new knowledge-base text before push.
 ## 2026-11-20 — Game kit: key rebinding (game-gap audit item)
 
 - **Gap:** keys were fixed; the Input constructor took a map but nothing saved or changed one, and Settings had no Controls.

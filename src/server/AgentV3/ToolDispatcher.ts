@@ -1543,7 +1543,7 @@ export class ToolDispatcher {
    * final save persists. The freeze held in the sandbox and was bypassed in the saved app, which is why
    * that report's saved copy no longer matched the snapshot. Nothing after a refused write may pretend.
    */
-  private async landHealWrite(file: string, content: string, before: string | undefined): Promise<boolean> {
+  private async landHealWrite(file: string, content: string, before: string | undefined, by: string): Promise<boolean> {
     let wrote: { content: string };
     try {
       // NAMED, so a refusal says who asked (autopsy e725e002: the reviewer's evaluate tried to add a
@@ -1555,7 +1555,7 @@ export class ToolDispatcher {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }
     try { getWorkspaceMemory(this.workspaceId).indexFile(file, wrote.content); } catch { /* best-effort */ }
-    try { noteHeal(this.workspaceId, file, wrote.content, before); } catch { /* best-effort */ }
+    try { noteHeal(this.workspaceId, file, wrote.content, before, by); } catch { /* best-effort */ }
     return true;
   }
 
@@ -4463,7 +4463,7 @@ export class ToolDispatcher {
         const after = fix.files[file];
         if (typeof after !== 'string' || after === before[file]) continue;
         if (healWouldOscillate(this.workspaceId, file, after)) continue;
-        if (await this.landHealWrite(file, after, before[file])) { healed.set(file, names); files[file] = after; }
+        if (await this.landHealWrite(file, after, before[file], 'type-only-value-import')) { healed.set(file, names); files[file] = after; }
       }
       return { healed, files };
     } catch {
@@ -4514,7 +4514,7 @@ export class ToolDispatcher {
         const after = fix.files[file];
         if (typeof after !== 'string' || after === before[file]) continue;
         if (healWouldOscillate(this.workspaceId, file, after)) continue;
-        if (await this.landHealWrite(file, after, before[file])) { landed.add(file); files[file] = after; }
+        if (await this.landHealWrite(file, after, before[file], 'recorded-type-rename')) { landed.add(file); files[file] = after; }
       }
       if (landed.size === 0) return withContract;
       return {
@@ -7263,7 +7263,7 @@ export class ToolDispatcher {
                 // file; if two disagree about a symbol it goes X → Y → X for as many passes as the
                 // build allows, costing a write and a step every round and converging on nothing.
                 if (healWouldOscillate(this.workspaceId, fx.file, content)) continue;
-                if (await this.landHealWrite(fx.file, content, before)) { astFiles[fx.file] = content; landed += 1; }
+                if (await this.landHealWrite(fx.file, content, before, 'import-export-reconcile')) { astFiles[fx.file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.importKind', { count: landed });
             }
@@ -7288,7 +7288,7 @@ export class ToolDispatcher {
                 // This heal was MISSING from the ledger, and it is the one the 2026-08-09 report showed
                 // repeating first ("Added 2 missing import(s)" at t=126s/216s/313s) — so the very
                 // evidence the ledger exists to capture was being dropped for it.
-                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+                if (await this.landHealWrite(file, content, before, 'add-missing-import')) { astFiles[file] = content; landed += 1; }
               }
               // Counted per IMPORT, as before — but only for files whose write actually landed.
               if (landed > 0) this.narrate('fix.missingImports', { count: addRes.added.filter((a) => astFiles[a.file] === addRes.files[a.file]).length });
@@ -7309,7 +7309,7 @@ export class ToolDispatcher {
                 // Same oscillation guard as the reconcile above — every heal site, or the loop survives
                 // through whichever one was left out.
                 if (healWouldOscillate(this.workspaceId, file, content)) continue;
-                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+                if (await this.landHealWrite(file, content, before, 'wrong-source-import')) { astFiles[file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.repointedImports', { count: wrongRes.fixes.filter((f) => astFiles[f.file] === wrongRes.files[f.file]).length });
             }
@@ -7326,7 +7326,7 @@ export class ToolDispatcher {
                 if (typeof content !== 'string') continue;
                 const before = astFiles[file];
                 if (healWouldOscillate(this.workspaceId, file, content)) continue;
-                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+                if (await this.landHealWrite(file, content, before, 'type-only-value-import')) { astFiles[file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.typeOnlyValueImports', { count: tov.fixes.filter((f) => astFiles[f.file] === tov.files[f.file]).length });
             }
@@ -7348,7 +7348,7 @@ export class ToolDispatcher {
               if (deduped !== content && !healWouldOscillate(this.workspaceId, file, deduped)) {
                 // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
                 // This one already holds both halves: `content` is what it read, `deduped` what it wrote.
-                if (await this.landHealWrite(file, deduped, content)) {
+                if (await this.landHealWrite(file, deduped, content, 'dedupe-same-module-import')) {
                   astFiles[file] = deduped;
                   this.narrate('fix.duplicateImport', { file });
                 }
@@ -7377,7 +7377,7 @@ export class ToolDispatcher {
                   // Said only when it LANDED (autopsy SignBridge, 2026-09-26): on a verified-working app
                   // Green Freeze refuses this write, and the user was told twice that two packages had
                   // been added while package.json never changed.
-                  if (await this.landHealWrite('package.json', newPkg, pkgJson)) {
+                  if (await this.landHealWrite('package.json', newPkg, pkgJson, 'add-missing-dependency')) {
                     this.narrate('fix.missingDeps', { count: depRes.added.length, packages: depRes.added.map((d) => d.package).join(', ') });
                   }
                 }

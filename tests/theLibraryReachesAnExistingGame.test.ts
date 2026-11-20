@@ -68,7 +68,7 @@ describe('add_library_models merges a library model into an existing game', () =
   });
   it('respects the rollout switch exactly like the seed', async () => {
     const r = rig();
-    const out = await addLibraryModels({ requirements: [{ subject: 'cow' }], workspaceId: 'w', workspace: r.workspace, signal: new AbortController().signal, env: {}, catalogue: [r.candidate], dependencies: r.dependencies, persistence: r.persistence });
+    const out = await addLibraryModels({ requirements: [{ subject: 'cow' }], workspaceId: 'w', workspace: r.workspace, signal: new AbortController().signal, env: { AGENTV3_EXTERNAL_GAME_ASSETS: 'off' }, catalogue: [r.candidate], dependencies: r.dependencies, persistence: r.persistence });
     expect(out.status).toBe('off'); expect(r.dependencies.download).not.toHaveBeenCalled();
   });
 });
@@ -87,9 +87,9 @@ describe('the add_library_models tool', () => {
   });
   it('asks for names when given none, and says honestly when the library is off — never claims a model was added', async () => {
     expect(await call({ models: [] })).toMatch(/Name the library models to add/);
-    const prev = process.env.AGENTV3_EXTERNAL_GAME_ASSETS; delete process.env.AGENTV3_EXTERNAL_GAME_ASSETS;
+    const prev = process.env.AGENTV3_EXTERNAL_GAME_ASSETS; process.env.AGENTV3_EXTERNAL_GAME_ASSETS = 'off'; // the kill switch (default is ON since 2026-11-20)
     try { expect(await call({ models: [{ subject: 'cow' }] })).toMatch(/not switched on for this account, so no model was added/); }
-    finally { if (prev !== undefined) process.env.AGENTV3_EXTERNAL_GAME_ASSETS = prev; }
+    finally { if (prev !== undefined) process.env.AGENTV3_EXTERNAL_GAME_ASSETS = prev; else delete process.env.AGENTV3_EXTERNAL_GAME_ASSETS; }
   });
   it('a sandbox without binary writes, and a name not in the library, are answered honestly', async () => {
     const prev = process.env.AGENTV3_EXTERNAL_GAME_ASSETS; process.env.AGENTV3_EXTERNAL_GAME_ASSETS = 'on';

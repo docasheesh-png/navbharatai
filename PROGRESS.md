@@ -103079,6 +103079,21 @@ Ledger for the next PR (rows Q-2987…Q-2989):
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).
 
+## 2026-11-20 — Real-money betting apps are not built; pretend-chip games are (admin point 9)
+
+- **Admin decision:** "other app builder jo karte hai, same karo". Published policies: Bolt (StackBlitz) and Builder.io
+  forbid UNLAWFUL gambling (Builder.io: only with licences); Replit lists gambling among illegal uses. India's Promotion
+  and Regulation of Online Gaming Act, 2025 bans every real-money online game (offering/facilitating: cognizable,
+  non-bailable). Same standard for an Indian platform ⇒ never the real-money part.
+- **Fix:** `REAL_MONEY_GAMBLING` (`illegal`) in `illegalContentRules.ts` — subject (betting/casino/satta/poker/rummy/
+  teen patti/fantasy league/lottery) AND context (deposit, withdraw, cash out, real money, cash prizes, UPI top-up,
+  paise lagao/jeeto). Negated mentions skipped inside the pattern (before AND after), because the publish scanner has no
+  exempt step and our own board-games kit says "Real-money play is not something this pack supports" beside Teen Patti.
+  Exempt: de-addiction/helpline/awareness apps. All nine other Indian scripts (census), with word-end guards
+  (ಚಟ/ಚಟುವಟಿಕೆ). The refusal now names the 2025 Act and offers the same game with pretend chips (EN + HI); all 7
+  `blockMessage` callers pass `triage.ruleId` (census test). AppKnowledgeBase updated.
+- **Lock:** `tests/realMoneyBettingIsNotBuilt.test.ts` (24). Reversion proofs: class, leading negation, trailing
+  negation, exemption, generic message, a caller dropping the rule, the ಚಟ word-end — each fails.
 ## 2026-11-20 — #4375 merged (failedbr #2263 / #2255 / #2246 / #2224 / #2216 / #2208)
 
 Closed Q-2987, Q-2988, Q-2989, Q-2990, Q-2991, Q-2992, Q-2993 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handled missing camera/microphone in our checking browser is not an app defect; "make the internet faster" is the fifth impossible power; a declined turn records OUTCOME_DECLINED; the node_modules stamp never creates a file (and a static file server keeps its own host); a model write that removes an untouched kit file's exports or class members is refused; music-genre and AI terms are one unknown-name family; "<framework> Vite plugin not found in Vite config" is a configuration error. CI caught one defect of the PR's own (an install-stamp test leaving temp dirs behind — moved to makeTempDir) before merge.
@@ -103095,6 +103110,27 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — Game kit: swimming (game-gap audit item)
+
+- **Gap:** nothing in the kit knew what water was — a player who walked into a lake sank and walked along the bottom.
+- **Fix:** motor `stepSwim` (pure: float at head-out depth by buoyancy spring, water drag, slower swim speed, Jump held
+  up / dive held down, Jump at the surface climbs out); controller `setWater(level | (x,z)=>level|null)` with a 0.25 m
+  exit margin so the edge does not flicker, breath (runs down under water, refills 4× faster, `onOutOfBreath` once a
+  second), `swimming` / `underwater` / `breath` getters, reset clears it. New `crouch` action (C / Left Ctrl / Pad:11),
+  rebindable in Settings → Controls (EN + HI label); the shell passes `diveHeld`. Instructions + AppKnowledgeBase.
+  Not built (stated): swim animation, a phone dive button.
+- **Lock:** `tests/aPlayerSwims.test.ts` (9, real motor/controller/terrain, incl. the sink-to-the-bottom baseline).
+  8 reversion proofs fail. Generated kit tsc before/after: identical 33 pre-existing errors.
+## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
+
+- **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after
+  cascades, swaps accepted without a match) — and a match-3 request (genre `puzzle`) was never seeded with any engine.
+- **Fix:** `src/game/board/match3.ts` in the board pack: deal with no runs and a guaranteed move; adjacent swaps only,
+  refused without a match; cascades with chain scoring (10 × tiles × chain); line (4), area (L/T), bomb (5) tiles that
+  chain-fire; gravity + seeded refill; reshuffle (same tiles) when stuck, fresh deal if no order works; hint; moves and
+  target → won/lost; per-cascade steps for animation; deterministic per seed. `gameKitSeed` seeds the pack for match-3
+  words (MATCH3, not other puzzles). ToolCatalog, instructions, handoff line, AppKnowledgeBase updated.
+- **Lock:** `tests/aMatch3BoardIsAlwaysFair.test.ts` (10). 9 reversion proofs fail. Strict compile of the pack clean.
 ## 2026-11-20 — #4365 merged (Q-2746/2747/2748/2751/2752 closed); four more 05eb30ba-era rows fixed
 Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2746, Q-2747, Q-2748, Q-2751, Q-2752 — ledger in the entry above.
 
@@ -103127,6 +103163,17 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
 
+## 2026-11-20 — Game kit: breakable objects (game-gap audit item)
+
+- **Gap:** no breakables — a crate took hits and nothing happened, or a builder hid it and it kept blocking invisibly.
+- **Fix:** 3D kit `src/game/three/breakable.ts`: `makeBreakable(obj, { health, pieces, color, debrisSeconds, onBreak })`;
+  `breakableTargets()` joins the weapon's own target list and `hitBreakables(hits, from)` routes hits back (enemies
+  untouched, stale hits on a broken crate ignored); at zero the object LEAVES the scene (stops blocking) and shatters
+  into debris (object colour, flies away from the hit, gravity, bounce, settle, shrink, dispose geometry + material);
+  broken objects leave the registry (WeakSet remembers them). The shell steps debris every frame and clears on dispose.
+  ToolCatalog, 3D instructions, AppKnowledgeBase updated; lifecycle harness stub added.
+- **Lock:** `tests/aCrateBreaksWhenHit.test.ts` (7, real breakable + real ProjectileSystem). 11 reversion proofs fail
+  (three first slipped through — two were real test gaps, now covered; one was a dead mutation, redone on the guard).
 
 Note (2026-11-20): the feature-stem row first opened as Q-2972, then Q-3020, and the list-form row as Q-3021 were renumbered Q-3101 / Q-3102 — each earlier number was taken by another session in parallel (two Q-3020 rows briefly existed on main).
 ## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)
@@ -103146,6 +103193,14 @@ Ledger, older reports (2026-11-20, next PR):
 - #1994 — no new rows, and my first attempt WITHDRAWN before merge. Reports #1950–#2003 had already been autopsied by another session (the BRxxxx series). BR1994 had recorded both of my findings: the recovered `npm install` still counted on a failed build's gate is **Q-2707**, 🟡 blocked on an owner billing decision (a red gate is what makes a failed build free, so forgiving a recovered failure there can newly charge a build). The YouTube-downloader policy is **Q-1005**, 🟡 blocked on the admin. I had changed `recordCommand` to make exactly the Q-2707 change without that decision; it was reverted in #4387 before merging, and Q-3037/Q-3038 (which never reached `main`) were removed. Lesson: check the `BRxxxx` series for a report number before autopsying it.
 - #1987 — no new row: the workspace was already a Spring Boot project (its saved starter), so a PUBG-style request was built on it without the game kit by design; its `npm install` without a package.json blocker is BR1987, fixed.
 - #1995, #1993, #1986, #1984, #1983 — no new rows: all five are SANDBOX_RECOVERY_UNAVAILABLE ("could not be safely reconnected") within 1–19 s, not the E2B cap (read, not assumed). The refusal's reason has been in the report since #4253. #1995 and #1984 were "Fix this error and continue building the app: <that refusal>", the Fix-with-AI-on-our-own-notice class BR1995 fixed (2026-11-17).
+
+
+## 2026-11-20 — #4383 merged (Q-2750/2753/2766/2769 closed); Q-3019 traced, its visibility half fixed
+Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2750, Q-2753, Q-2766, Q-2769.
+
+**25-minute investigation (last 50 builds, #2430–#2479):** 3 of 50 hit the wall-clock cap; ~10 games were judged "not playable" (Controls 0 / 0 fps / no canvas), all BEFORE the WebGL checker fix (#4358). #2478 (bgmi, the only post-fix cap) was already autopsied (Q-3010–Q-3019); its 15-minute false Rules-of-Hooks chase (Q-3014) is fixed on main — verified: the kit Hud.tsx is now clean.
+
+**Q-3019 traced:** ~63k input tokens per call for ~160 output; the 8 slow calls (40–122 s) each followed a model switch inside Surplus (same-model median 4.6 s vs 36.7 s after a switch), ~7.5 of 25 min. Each switch follows a failed attempt the session retried silently (`console.warn` only), so the report said every call was ok. Fixed here: `onAttemptFailed` (one notice per failure, codes only) → `onProviderError('SURPLUS')` at both runner sites · `aRetriedAttemptIsReported`. Open: retry the same model once before benching.
 - #1941, #1940, #1938, #1933 — no new rows (each read; none in the BR1950–2003 series): #1941's guessed `Input.bind` is BR1954's kit-type-contract class; #1940 rendered at 761 s and was stopped by the user at 782 s (the free-tier ceiling, Q-2240); #1938's "kit laid down (0 files)" after the E2B cap is BR1977's `downgradeEmptyKitSeedSuccesses`; #1933 rendered at 359 s as an original runner before the user stopped it.
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
@@ -103163,7 +103218,43 @@ Ledger, older reports (2026-11-20, next PR):
   - `createCity()`: asphalt with centre dashes and zebra crossings, raised pavements, shops (awning, signboard + `lot.sign`
     anchor for the name), apartments (balconies, water tanks), office towers, houses (yard + compound wall), parks (trees,
     paths, benches, fountain), street lights — merged per block (a 6×6 city ≈ 180 meshes). Streets/pavements are ground
-    colliders, buildings solid. `city.heightAt` / `city.solidAt` give cars a ground and walls (driveVehicle has neither).
+    colliders, buildings solid. `city.heightAt` is the ground for `driveVehicle`, which already stops at the solid buildings; `city.solidAt` is for movers a game positions by hand. (An earlier draft said driveVehicle had no walls — wrong; measured, it sweeps against solid colliders.)
   - 3D instructions + kit handoff name `createCity()`; AppKnowledgeBase `game_city_blocks`.
 - **Proof:** `tests/aCityHasStreetsAndBlocks.test.ts` (10 tests; seven reversions each failed).
 - 🟡 **Not built yet:** traffic that turns at crossings, traffic lights, pedestrians.
+## 2026-11-20 — #4389 merged (Q-2750/2753/2766/2769 closed; Surplus retries reported); game library batch 6
+- #4389 merged: every failed Surplus attempt (benched or retried by the stay-alive loop) now reaches the build report as one `SURPLUS` provider notice with codes only (`aRetriedAttemptIsReported`). Q-3019 stays IN PROGRESS for its speed half (retry the same model before benching, decided from the new notices).
+- **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
+- Drive review (2026-11-20): accepted N1, N2, N3, N4, N8, N9, N16, Downtown City, Medieval Village, KayKit Adventurers 2.0, SBS textures (CC0 per the archive's licence file). Rejected: N5 (licence forbids redistribution), N6 (paid, attribution), N10 (Cenji licence), Bestiary (not CC0), and every archive with no licence file (sounds, PSX cars, retro weapons, furniture, rooms, etc.) until a source page shows its licence.
+- Next: animated clothed characters (Universal Base Characters + Modular Outfits + Universal Animation Library, same 65-joint rig; four built under 5 MB with 16 animations each).
+
+## 2026-11-20 — Game maker: Indian characters, library chosen by meaning, the user's own models (admin: "a. b. sab karo")
+- **Library batch 7:** the first clothed, fully animated characters: village man, village woman, and ranger man/woman (archer, hunter).
+  - Built from three of the admin's CC0 Quaternius packs on one 65-joint rig.
+  - Indian look by default, set as material colours: skin tone, black hair, a white kurta-like shirt, red for the village woman.
+  - Plain part names so a user can change any part: materials Skin/Hair/Eyes/Clothes; nodes Head/Body/Arms/Legs/Hood….
+  - 12 animation roles, every moving one proven in the live admission.
+  - New subjects only, so man/woman keep their models. Test: `libraryBatch7`.
+- **By meaning, not by word:** a new game's builder gets the whole library as a menu (`gameLibraryMenuHandoff`), only when the library is on for the account.
+  - `add_library_models` takes every role.
+  - A role the model lacks keeps the model and is reported; it used to make the model unavailable.
+  - Test: `theLibraryIsChosenByMeaning`.
+- **The user's own models** (`userModels.ts`): attach .glb / .gltf (+bin, textures) / .obj (+mtl, textures), loose or as a zip of models.
+  - Each model is converted to one checked GLB, saved durably, then written to the sandbox at public/models/<name>.glb.
+  - The builder is told the parts and animations of what really landed.
+  - FBX and Draco/Meshopt are refused, with the exact export step.
+  - A missing texture loads without it and the user is told.
+  - Limits: 8 MB, 200k triangles, 4096 px, 8 per message.
+  - Test: `theUsersOwnModelGoesIntoTheGame`.
+- **Sibling bug fixed:** a 3D app imported as a PROJECT zip had its .glb read as text (corrupted) and its glTF .bin dropped. Both are now kept byte-exact.
+- **Open:** real Indian clothing (saree/dhoti/kurta/turban) geometry. No CC0 rigged model exists. The admin decides: accept CC-BY with an automatic credit, or buy a pack whose licence allows redistribution. FBX conversion is also open: no converter we can trust in the server yet.
+
+## 2026-11-20 — #4392 and #4394 merged; library batch 8 (KayKit Adventurers 2.0)
+- #4392 (batch 6: guns and cars) and #4394 (Indian characters, library by meaning, user's own models) merged. The full local gate was green on each final tree (#4394: 3656 files, 55562 tests).
+- **Batch 8** (this PR): the admin's KayKit Adventurers 2.0 download (Kay Lousberg, CC0 per the archive's License.txt: "free to use in personal, educational and commercial projects").
+  - A cartoon bowman with 15 clips; all 9 moving roles proven animated in the live admission.
+  - 15 props the library lacked: bow, arrow, arrow bundle, quiver, dagger, greatsword, battle axe, round/spiked shields, magic staff/wand, spellbook, book, mug, smoke bomb.
+  - Packaged in the image. KayKit joins Quaternius as a packaged provider; every other provider is still refused.
+  - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
+  - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
+- **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.

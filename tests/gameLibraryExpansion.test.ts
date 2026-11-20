@@ -4,13 +4,16 @@ import { REVIEWED_LIBRARY_BATCH_2 } from '../src/server/AgentV3/gameAssets/revie
 import { REVIEWED_LIBRARY_BATCH_3 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch3';
 import { REVIEWED_LIBRARY_BATCH_4 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch4';
 import { REVIEWED_LIBRARY_BATCH_5 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch5';
+import { REVIEWED_LIBRARY_BATCH_6 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch6';
+import { REVIEWED_LIBRARY_BATCH_7 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch7';
+import { REVIEWED_LIBRARY_BATCH_8 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch8';
 import { REVIEWED_GAME_ASSETS,validateCatalogue } from '../src/server/AgentV3/gameAssets/providers';
 import { gameAssetRequirements,externalGameAssetsEnabled } from '../src/server/AgentV3/gameAssets/assetPlan';
 import { searchGameLibrary } from '../src/server/AgentV3/gameAssets/gameLibrary';
 describe('licensed library expansion admission',()=>{
- it('adds eleven pinned models without changing default rollout',()=>{
-  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length);
-  expect(()=>validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();expect(externalGameAssetsEnabled({})).toBe(false);
+ it('adds eleven pinned models; the library is on by default (admin 2026-11-20)',()=>{
+  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length);
+  expect(()=>validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();expect(externalGameAssetsEnabled({})).toBe(true);expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:'off'})).toBe(false);
  });
  it('selects exact characters and locomotion, not a neighbouring substitute',()=>{
   expect(gameAssetRequirements('running hooded rogue',REVIEWED_GAME_ASSETS)).toEqual([{subject:'hooded rogue',animation:'run'}]);

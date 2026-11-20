@@ -199,6 +199,27 @@ describe('🏙️ city blocks', () => {
     expect(freed).toBe(meshes.length);
   });
 
+  it('a car driven with the kit\'s driveVehicle stops at a city building by itself (the buildings are solid)', async () => {
+    const files = generateGame3D(['city', 'objects']).files;
+    for (const [p, c] of Object.entries(files)) { mkdirSync(dirname(join(DIR, p)), { recursive: true }); writeFileSync(join(DIR, p), c); }
+    const O = await import(join(DIR, 'src/game/three/objects.ts'));
+    const city = C.createCity({ blocksX: 2, blocksZ: 2, seed: 4 });
+    const scene = new THREE.Scene(); scene.add(city.root);
+    const lot = city.plan.lots.find((l: any) => l.kind !== 'house' && l.kind !== 'park')!;
+    const f = C.buildingFootprint(lot);
+    // Start on the pavement in front of the building, nose toward it.
+    const car = O.createCar({ detail: 'lite' });
+    car.position.set(f.x, C.CITY_ROAD_Y + C.CITY_KERB, f.z + lot.facing.z * (f.d / 2 + 4));
+    car.rotation.y = lot.facing.z > 0 ? Math.PI : 0;
+    scene.add(car); scene.updateMatrixWorld(true);
+    const tuning = { ground: city.heightAt };
+    const st = O.createVehicleState(car, tuning);
+    for (let i = 0; i < 180; i++) O.driveVehicle(car, st, { x: 0, y: -1 }, 1 / 60, tuning);
+    expect(Math.abs(car.position.z - f.z)).toBeGreaterThan(f.d / 2);   // never inside the walls
+    expect(st.speed).toBe(0);
+    city.dispose();
+  });
+
   it('street lights can be left out', () => {
     expect(C.planCity({}).lights.length).toBe(4 * 16);
     expect(C.planCity({ streetLights: false }).lights).toEqual([]);

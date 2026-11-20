@@ -1,14 +1,19 @@
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isZTestAccount } from '../../lib/zTestAccount';
-import type { AssetRequirement } from './assetPolicy';
+import { candidateMatches, type AssetRequirement } from './assetPolicy';
 import { CATALOGUE_MAX_ENTRIES, type ReviewedAsset } from './providers';
 
 /**
- * Default OFF; enabling does not approve any unreviewed catalogue entry or paid service.
- *   AGENTV3_EXTERNAL_GAME_ASSETS=on     ⇒ every user
- *   AGENTV3_EXTERNAL_GAME_ASSETS=admin  ⇒ limited rollout: only the owner test uid (z@gmail.com) plus
- *                                         verified uids listed in AGENTV3_EXTERNAL_GAME_ASSETS_UIDS (comma list)
- *   unset / off / anything else         ⇒ nobody
+ * 🟢 DEFAULT ON (admin 2026-11-20, verbatim: "mujhe cloud run me kuch nahi dalna aap default on kar dena"). failedbr #2478
+ * showed "3D assets 0.0 s (off)": the reviewed model library (characters, vehicles, buildings, props) never reached a
+ * user's game because the switch was default OFF and nobody set it. ON does not approve any unreviewed catalogue entry
+ * or paid service — only the reviewed, hash-pinned library is used, and a model that does not arrive leaves the
+ * procedural kit in place (assetSeed: "the procedural kit remains the floor").
+ *   unset / empty / on / true / 1 / yes  ⇒ every user
+ *   AGENTV3_EXTERNAL_GAME_ASSETS=off      ⇒ nobody (kill switch; also false / 0 / no)
+ *   any OTHER value (a typo)              ⇒ nobody — someone tried to configure it, so fail safe
+ *   AGENTV3_EXTERNAL_GAME_ASSETS=admin   ⇒ limited rollout: only the owner test uid plus verified uids listed in
+ *                                          AGENTV3_EXTERNAL_GAME_ASSETS_UIDS (comma list)
  * Uid must be the server-verified owner uid; no uid ⇒ not admitted in `admin` mode.
  */
 export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env, verifiedUid?: string | null): boolean {
@@ -19,13 +24,20 @@ export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env, 
     const list = String(env.AGENTV3_EXTERNAL_GAME_ASSETS_UIDS ?? '').split(',').map(v => v.trim()).filter(Boolean);
     return list.includes(verifiedUid);
   }
-  return parseEnvFlag(env.AGENTV3_EXTERNAL_GAME_ASSETS) ?? false;
+  if (raw === '') return true;
+  return parseEnvFlag(raw) ?? false;
 }
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
   mage: ['mage', 'mages', 'जादूगर'], wizard: ['wizard', 'wizards'], barbarian: ['barbarian', 'barbarians'], rogue: ['rogue', 'rogues'],
   'hooded rogue': ['hooded rogue', 'hooded rogues'], hatchback: ['hatchback'], 'station wagon': ['station wagon'],
   'straight road tile': ['straight road tile'], 'road corner tile': ['road corner tile'], 'fire hydrant': ['fire hydrant'], dumpster: ['dumpster'], crate: ['crate', 'crates'],
   car: ['car', 'cars', 'कार', 'कारें', 'coche', 'coches', 'auto'],
+  // Library batch 6 (2026-11-20): the library's first firearms and more cars — the words a BGMI-style prompt uses.
+  gun: ['gun', 'guns', 'बंदूक', 'बंदूकें', 'bandook', 'bandooq'], pistol: ['pistol', 'pistols', 'पिस्तौल', 'पिस्टल'],
+  rifle: ['rifle', 'rifles', 'राइफल'], 'assault rifle': ['assault rifle', 'assault rifles', 'ak47', 'ak-47', 'm4', 'm416'],
+  'sniper rifle': ['sniper rifle', 'sniper rifles', 'sniper', 'snipers', 'स्नाइपर', 'awm', 'kar98'], shotgun: ['shotgun', 'shotguns', 'शॉटगन'],
+  smg: ['smg', 'smgs', 'submachine gun', 'submachine guns', 'uzi', 'ump'], revolver: ['revolver', 'revolvers', 'रिवॉल्वर'],
+  suv: ['suv', 'suvs', 'jeep', 'jeeps', 'जीप'], 'sports car': ['sports car', 'sports cars', 'स्पोर्ट्स कार'],
   train: ['train', 'trains', 'locomotive', 'ट्रेन', 'रेलगाड़ी', 'tren', 'trenes'],
   'railway station': ['railway station', 'train station', 'रेलवे स्टेशन', 'ट्रेन स्टेशन', 'estación de tren'],
   bird: ['bird', 'birds', 'पक्षी', 'चिड़िया', 'चिड़ियाँ', 'pájaro', 'pájaros'],
@@ -123,6 +135,21 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'stop sign': ['stop sign', 'stop signs'], 'bus stop': ['bus stop', 'bus stops', 'बस स्टॉप'], playground: ['playground', 'park swings', 'झूला'],
   wheelbarrow: ['wheelbarrow'], 'dirt road tile': ['dirt road tile', 'kaccha road tile', 'kachcha road tile'], 'dirt road curve tile': ['dirt road curve tile'],
   'road bridge': ['road bridge', 'flyover'],
+  // 2026-11-20 library batch 7: clothed, animated characters (walk/run/jump/crouch/aim/shoot/reload/die/hit/drive).
+  villager: ['villager', 'villagers', 'गाँव वाला', 'गांव वाला', 'गाँव वाले', 'गांव वाले', 'ग्रामीण', 'gaon wala', 'gaonwala'],
+  peasant: ['peasant', 'peasants'], 'village man': ['village man', 'village men'],
+  'village woman': ['village woman', 'village women', 'गाँव की औरत', 'गांव की औरत', 'गाँव की महिला', 'गांव की महिला'],
+  ranger: ['ranger', 'rangers'], 'female ranger': ['female ranger', 'female rangers'],
+  archer: ['archer', 'archers', 'तीरंदाज', 'तीरंदाज़'], 'female archer': ['female archer', 'female archers', 'woman archer', 'archer girl'],
+  hunter: ['hunter', 'hunters', 'शिकारी', 'shikari'],
+  // 2026-11-20 library batch 8 (KayKit Adventurers 2.0): a bowman and fantasy props.
+  bowman: ['bowman', 'bowmen'], 'cartoon archer': ['cartoon archer', 'chibi archer'],
+  bow: ['bow', 'bows', 'bow and arrow', 'धनुष', 'dhanush'], arrow: ['arrow', 'arrows', 'तीर', 'teer'], 'arrow bundle': ['arrow bundle', 'bundle of arrows'],
+  quiver: ['quiver', 'तरकश'], dagger: ['dagger', 'daggers', 'knife', 'चाकू', 'खंजर', 'chaku'],
+  greatsword: ['greatsword', 'great sword', 'two handed sword', 'big sword'], 'battle axe': ['battle axe', 'war axe'],
+  'round shield': ['round shield'], 'spiked shield': ['spiked shield'], 'magic staff': ['magic staff', 'wizard staff', 'mage staff'],
+  'magic wand': ['magic wand', 'wand', 'जादू की छड़ी'], spellbook: ['spellbook', 'spell book', 'magic book'],
+  book: ['book', 'books', 'किताब', 'kitab'], mug: ['mug', 'beer mug', 'tankard'], 'smoke bomb': ['smoke bomb', 'smoke grenade'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -150,12 +177,25 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
       lamp: ['street lamp', 'traffic lamp'],
       rogue: ['hooded rogue', 'hooded rogues'],
-      flag: ['feature flag', 'red flag'], man: ['pac man', 'spider man', 'iron man', 'snow man', 'super man', 'he man', 'ant man', 'old man', 'old men'],
-      woman: ['old woman', 'old women', 'wonder woman'], bat: ['cricket bat', 'baseball bat', 'bat and ball', 'bat ball'], mechanic: ['game mechanic', 'game mechanics'],
+      flag: ['feature flag', 'red flag'],
+      woman: ['old woman', 'old women', 'wonder woman', 'village woman', 'village women', 'woman archer'], bat: ['cricket bat', 'baseball bat', 'bat and ball', 'bat ball'], mechanic: ['game mechanic', 'game mechanics'],
       worker: ['service worker', 'web worker', 'office worker'], bus: ['bus stop', 'bus stops', 'school bus stop'], school: ['school bus'], bank: ['river bank', 'blood bank'],
       ant: ['ant man'], log: ['log in', 'login', 'log file', 'log out'],
-      bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
-      car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
+      bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'],
+      car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car',
+        // A named kind of car is that model, not "a car" too (police car → car + police car was the old double).
+        'police car', 'police cars', 'sports car', 'sports cars', 'पुलिस कार', 'स्पोर्ट्स कार'],
+      building: ['building a', 'building the'],
+      rifle: ['assault rifle', 'assault rifles', 'sniper rifle', 'sniper rifles'],
+      // A named kind of character is that model, not the generic one too.
+      ranger: ['power ranger', 'power rangers', 'female ranger', 'female rangers'], archer: ['female archer', 'female archers', 'woman archer', 'archer girl'],
+      hunter: ['treasure hunter', 'treasure hunters', 'bug hunter', 'bug hunters', 'job hunter'],
+      man: ['pac man', 'spider man', 'iron man', 'snow man', 'super man', 'he man', 'ant man', 'old man', 'old men', 'village man', 'village men'],
+      arrow: ['arrow key', 'arrow keys', 'arrow button', 'arrow buttons', 'arrow bundle', 'bundle of arrows'],
+      bow: ['bow tie', 'take a bow', 'rainbow'], book: ['book a', 'book now', 'book ticket', 'book tickets', 'book appointment', 'spell book', 'magic book'],
+      sword: ['great sword', 'two handed sword', 'big sword'], axe: ['battle axe', 'war axe'], shield: ['shield powerup', 'shield power up', 'round shield', 'spiked shield'],
+      dagger: ['knife and fork'],
+      gun: ['laser gun', 'laser guns', 'ray gun', 'submachine gun', 'submachine guns', 'water gun', 'nail gun', 'glue gun'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
 
@@ -167,8 +207,27 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman'].includes(subject)
+      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
+        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });
+}
+
+/**
+ * One add_library_models entry → a catalogue requirement. The name may be a subject or any word the plan knows ("gaon
+ * wala" → villager). An animation role is kept only when some model of that subject plays it: a role no model has would
+ * otherwise make the subject itself unavailable (the model is still wanted; it just stands). The dropped role is returned
+ * so the tool can say so instead of silently ignoring it.
+ */
+export function libraryRequirement(name: string, animation: unknown, catalogue: readonly ReviewedAsset[]): { requirement: AssetRequirement; droppedRole?: string } | null {
+  const served = new Set(catalogue.slice(0, CATALOGUE_MAX_ENTRIES).flatMap(c => c.subjects));
+  const wanted = name.trim().toLowerCase().slice(0, 64);
+  const subject = served.has(wanted) ? wanted : gameAssetRequirements(wanted, catalogue).map(r => r.subject).find(s => served.has(s));
+  if (!subject) return null;
+  const role = typeof animation === 'string' ? animation.trim().toLowerCase().slice(0, 32) : '';
+  if (!role) return { requirement: { subject } };
+  return catalogue.some(c => candidateMatches(c, { subject, animation: role }))
+    ? { requirement: { subject, animation: role } }
+    : { requirement: { subject }, droppedRole: role };
 }

@@ -14,8 +14,8 @@
  *     compound wall, parks with trees, benches and a fountain, and street lights. Each block is merged into a
  *     handful of meshes, so a 6 x 6 city is about 200 draw calls, not thousands.
  *
- * Vehicles: driveVehicle() follows a ground function and does not collide with walls, so the city gives both —
- * city.heightAt for the ground and city.solidAt to stop a car at a wall.
+ * Vehicles: buildings and poles are solid colliders, so driveVehicle() already stops a car at them; city.heightAt is
+ * the ground to pass it, and city.solidAt answers the same question for a mover the game positions by hand.
  *
  * String.raw: no backticks and no dollar-brace sequences inside the module text.
  */
@@ -360,7 +360,7 @@ export interface City {
   route(from: CityPoint, to: CityPoint, options?: { lane?: boolean }): THREE.Vector3[];
   /** The ground under (x, z) — pass { ground: city.heightAt } to driveVehicle's tuning. */
   heightAt(x: number, z: number): number;
-  /** A car of this radius here would be inside a building or a pole: put it back and stop it. */
+  /** A body of this radius here would be inside a building or a pole — for a mover your own code positions (driveVehicle already stops at them). */
   solidAt(x: number, z: number, radius?: number): boolean;
   onStreet(x: number, z: number): boolean;
   lotAt(x: number, z: number): CityLot | null;

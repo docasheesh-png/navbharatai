@@ -24,7 +24,7 @@ import {
   SURPLUS_STOP_COST_ESTIMATED,
 } from '../AgentV3/surplusStopTokenFloor';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
-import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
+import { type SurplusBuildSession, surplusBuilderEnabled, describeSurplusAttemptFailure } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
 import { withEngineSafeDiag, stripEngineSafeDiag } from '../lib/engineSafeDiag';
@@ -454,7 +454,7 @@ import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gameAssets/assetSeed';
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
-import { gameLibraryPlanningHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
+import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
@@ -789,6 +789,7 @@ import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
 import { attachmentFilesForProject, attachmentFilesNote, writeAttachmentFilesInStep } from '../AgentV3/attachmentFilesOnDisk';
+import { planUserModels, landPlannedUserModels } from '../AgentV3/gameAssets/userModels';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
@@ -3680,6 +3681,7 @@ function proChainV2TurnRunner(opts: Parameters<typeof buildTurnRunner>[0], v2: P
   const surplus = opts.surplusSession?.runner({
     onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
     onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+    onAttemptFailed: (failure) => opts.onProviderError?.('SURPLUS', new Error(describeSurplusAttemptFailure(failure))),
   });
   const r1Key = routerOneApiKey();
   return v2.agentRunner({
@@ -3816,6 +3818,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     const surplusRunner = opts.surplusSession.runner({
       onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
       onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+      // Q-3019 (failedbr #2478): a retried Surplus attempt reaches the report and the AI Engines page, not only the log.
+      onAttemptFailed: (failure) => opts.onProviderError?.('SURPLUS', new Error(describeSurplusAttemptFailure(failure))),
     });
     if (!opts.surplusPreWriteFailOpen) return surplusRunner;
     // Drop Surplus from the recursive Weak factory so we never wrap Surplus again after fail-open.
@@ -10800,7 +10804,7 @@ async function noteBuildOutcome(
           uid: flaggedUid, triage, surface: 'build', excerpt: safetyExcerpt(prompt), at: Date.now(),
         })).catch(() => { /* the decision stands either way — see recordSafetyFlag */ });
         if (triage.verdict === 'block') {
-          res.status(403).json({ error: blockMessage(triage.contentClass, prompt) });
+          res.status(403).json({ error: blockMessage(triage.contentClass, prompt, triage.ruleId) });
           return;
         }
       }
@@ -11301,9 +11305,14 @@ async function noteBuildOutcome(
     // so Files/IDE stayed empty and there was nothing to preview. Zips are diverted to the real
     // import pipeline below (extract → validate → dual-write → preview boot); every OTHER
     // attachment keeps the existing document/vision path.
-    const zipImports = rawAttachments.filter((a) => isZipAttachment(a));
-    const docAttachments = rawAttachments.filter((a) => !isZipAttachment(a));
-    let attachmentContext = '';
+    // THE USER'S OWN 3D MODELS (userModels.ts, admin 2026-11-20): loose .glb/.gltf/.obj/.fbx and zips of models go to
+    // the game, not to the project-import or document paths (a .glb used to land in private storage, a model zip was
+    // refused as a second project and its .glb read as text). Converted and checked here; written only on the build path.
+    const userModels = await planUserModels(rawAttachments);
+    const zipImports = userModels.rest.filter((a) => isZipAttachment(a));
+    const docAttachments = userModels.rest.filter((a) => !isZipAttachment(a));
+    // Until they are really in the project, this says only that they were attached (a chat answer writes nothing).
+    let attachmentContext = userModels.pendingNote;
     // Text attachments written whole into the project once the workspace exists (failedbr #2415).
     let attachmentFilesToWrite: ReturnType<typeof attachmentFilesForProject> = [];
     // AP-8 — the structured design contract extracted from an uploaded mockup, when there was one.
@@ -17680,6 +17689,8 @@ async function noteBuildOutcome(
       // Everything since the project check, as one window — named steps, and the rest as `other`.
       // failedbr #2415: the whole attached text files, where the builder's note says they are (no branch here: TS2563).
       await writeAttachmentFilesInStep(attachmentFilesToWrite, (label, run) => wiringSteps.step(label, run), (p, c) => actuator.writeFile(workspaceId, p, c), (r) => buildDiag.record(r));
+      // The user's own models, durably then into the sandbox; the builder's note says only what really landed.
+      attachmentContext = await landPlannedUserModels(userModels, attachmentContext, { workspaceId, actuator, store: workspaceGameAssetPersistence(verified?.uid), step: (label, run) => wiringSteps.step(label, run), record: (r) => buildDiag.record(r) });
       try { buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list()); } catch { /* timing is observation only */ }
       const contextT0 = Date.now();
       const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([
@@ -19521,7 +19532,8 @@ async function noteBuildOutcome(
                     kitAssetsMs = Date.now() - assetsStartedAt;
                     kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
-                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt)].filter(Boolean).join('\n');
+                    // The menu only when the library is on for this account (status 'off' = gated): choosing by meaning needs it.
+                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt), assets.status !== 'off' ? gameLibraryMenuHandoff() : ''].filter(Boolean).join('\n');
                   } catch { /* The procedural kit remains the floor. */ }
                 }
                 // Recorded sounds (soundSeed.ts): only when the kit laid down the audio module they replace voices in.

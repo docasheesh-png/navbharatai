@@ -30,8 +30,9 @@ export const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 /** Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep. */
 export const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
 
-/** Files with no useful text form. Small images/fonts are rescued separately via `assetMimeFor`. */
-export const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
+/** Files with no useful text form. Small images/fonts/3D models are rescued separately via `assetMimeFor`.
+ * glb/fbx (2026-11-20): a three.js app's public/models/car.glb used to be read as TEXT and arrive corrupted. */
+export const BINARY_EXT_RE = /\.(glb|fbx|png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
 
 /**
  * Small binary ASSETS worth keeping (an imported app's logo/favicon/icons/fonts) so the preview isn't
@@ -42,6 +43,10 @@ const ASSET_MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
   avif: 'image/avif', ico: 'image/x-icon', bmp: 'image/bmp',
   woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject',
+  // A 3D app's own models are kept byte-exact like its images (FBX stays dropped: no browser loads it).
+  glb: 'model/gltf-binary',
+  // A .gltf model's geometry lives in its .bin: dropping it broke every glTF app that was imported.
+  bin: 'application/octet-stream',
 };
 
 /** The asset MIME for a path, or null when it is not a keepable small-asset type. Pure. */

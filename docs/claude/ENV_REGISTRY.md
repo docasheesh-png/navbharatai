@@ -5263,3 +5263,18 @@ Gateways with no per-model price (BluesMinds, DiscountedTokens, Mitrify) run onl
   `public/sfx/library/SOUND_CREDITS.txt`), downloaded from raw.githubusercontent.com with size + sha256 checked. A sound that
   fails keeps its built-in voice; the kit is never undone for it. Costs no AI and no paid service. Off-switch only if a recorded
   sound is ever found to harm games.
+
+## 2026-11-20 — `AGENTV3_EXTERNAL_GAME_ASSETS` is now DEFAULT ON (admin decision)
+
+Admin, verbatim: *"mujhe cloud run me kuch nahi dalna aap default on kar dena"* — after failedbr #2478 showed
+"3D assets 0.0 s (off)": the reviewed model library never reached a user's game because the switch was default OFF.
+- **Unset / empty / on / true / 1 / yes ⇒ every user.** `off` / `false` / `0` / `no` ⇒ nobody (the kill switch).
+  `admin` keeps its limited rollout (owner test uid + `AGENTV3_EXTERNAL_GAME_ASSETS_UIDS`). Any other value (a typo)
+  ⇒ nobody — someone tried to configure it, so it fails safe.
+- Read by `gameAssets/assetPlan.externalGameAssetsEnabled`, used by the kit seed (`assetSeed.prepareGameAssets`), the
+  `add_library_models` tool and the admin library status route.
+- ON uses only the reviewed, hash-pinned catalogue; it approves no unreviewed entry and no paid provider. A model that
+  does not arrive leaves the procedural kit in place.
+- No Cloud Run variable is needed or was changed. The earlier note that live-download and mobile/publication
+  acceptance were incomplete still stands; the admin chose to turn it on with the procedural floor as the fallback.
+  **Watch the next game builds' reports:** `3D assets … s (prepared, N ready)` instead of `(off)`.

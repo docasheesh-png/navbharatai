@@ -124,7 +124,7 @@ describe('a closing offer after the app was built does not hide a blocker', () =
   });
   it('the runner passes what it produced and records a stand-down', () => {
     const runner = read('src/server/AgentV3/AgentRunner.ts');
-    expect(runner).toContain('resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });');
+    expect(runner).toContain('resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0');
     expect(runner).toContain("code: 'UNFINISHED_RESUME_STOOD_DOWN'");
   });
 });

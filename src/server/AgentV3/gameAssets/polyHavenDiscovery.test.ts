@@ -45,7 +45,7 @@ it('wires requested discovery through the actual build seed and persists visible
 it('keeps feature-off, unsupported subjects and required animations network-free',async()=>{
   const f=fixture(),discover=f.deps().discover,signal=new AbortController().signal;
   expect(await discover({subject:'bird',animation:'fly'},signal)).toBeNull();expect(await discover({subject:'railway station'},signal)).toBeNull();
-  await prepareGameAssets({prompt:'table',workspaceId:'fixture',workspace:{} as any,env:{},signal,dependencies:f.deps()});
+  await prepareGameAssets({prompt:'table',workspaceId:'fixture',workspace:{} as any,env:{AGENTV3_EXTERNAL_GAME_ASSETS:'off'},signal,dependencies:f.deps()});
   expect(f.get).not.toHaveBeenCalled();expect(f.download).not.toHaveBeenCalled();
 });
 it.each(['wrong-category','future','over-budget','foreign-origin','changed-revision','bad-md5','external-reference','parser-failure','persistence-failure'])('falls back without caching a failed admission: %s',async(reason)=>{

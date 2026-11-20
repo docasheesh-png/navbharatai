@@ -10804,7 +10804,7 @@ async function noteBuildOutcome(
           uid: flaggedUid, triage, surface: 'build', excerpt: safetyExcerpt(prompt), at: Date.now(),
         })).catch(() => { /* the decision stands either way — see recordSafetyFlag */ });
         if (triage.verdict === 'block') {
-          res.status(403).json({ error: blockMessage(triage.contentClass, prompt) });
+          res.status(403).json({ error: blockMessage(triage.contentClass, prompt, triage.ruleId) });
           return;
         }
       }

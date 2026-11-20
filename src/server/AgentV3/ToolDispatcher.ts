@@ -150,8 +150,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
-  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome,
-} from './writeTimeTypecheck';
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { browserAiKeyWriteNote } from './browserAiKeyScan';
@@ -4252,6 +4251,8 @@ export class ToolDispatcher {
     }
   }
 
+  /** The previous whole-project write-time error count (failedbr #1248) — null until the first run. */
+  private _lastWriteTscErrors: number | null = null;
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -4361,6 +4362,9 @@ export class ToolDispatcher {
         return '';
       }
       if (run.neverRan) return '';
+      // failedbr #1248: a whole-project run that jumped by ≥3 errors since the last one says so first.
+      const trendNote = writeErrorTrendNote(this._lastWriteTscErrors, errors.length);
+      this._lastWriteTscErrors = errors.length;
       // A type-only import of a value is a string edit with one correct form — done here, not asked of the
       // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote. ONCE per run:
       // every writer that joined it shares the one heal (autopsy 9c612cdb).
@@ -4407,8 +4411,8 @@ export class ToolDispatcher {
       }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
-      return healedNote + writeTypecheckNote(errors, tsPaths, sources);
+      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
+      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }

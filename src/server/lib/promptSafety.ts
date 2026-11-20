@@ -173,7 +173,20 @@ export function prefersHindi(text: string | null | undefined): boolean {
  * It also ends by offering to build something else, because a person testing the boundary is often a
  * real user on their first day.
  */
-export function blockMessage(contentClass: PublishContentClass = 'illegal', prompt?: string): string {
+export function blockMessage(contentClass: PublishContentClass = 'illegal', prompt?: string, ruleId?: string): string {
+  // REAL-MONEY GAMBLING (admin 2026-11-20): say WHY, and offer the game the person can have — the same one with pretend
+  // chips. A bare "cannot help" would leave a Teen Patti creator thinking card games are banned; they are not.
+  if (ruleId === 'REAL_MONEY_GAMBLING') {
+    return prefersHindi(prompt)
+      ? 'असली पैसों वाले सट्टे या बेटिंग ऐप यहाँ नहीं बनते।\n\n'
+        + 'भारत का ऑनलाइन गेमिंग (प्रोत्साहन और विनियमन) अधिनियम, 2025 असली पैसों से खेले जाने वाले ऑनलाइन गेम पर रोक लगाता है — '
+        + 'पैसे जमा करना, दांव लगाना, पैसे निकालना या कैश प्राइज़। मैं यही गेम नकली चिप्स या सिक्कों के साथ बना सकता हूँ '
+        + '(बिना असली पैसे) — चिप्स का वॉलेट, लीडरबोर्ड और रिवॉर्ड सब रहेंगे। ऐसे बना दूँ?'
+      : 'Real-money betting apps are not built here.\n\n'
+        + 'India\'s Promotion and Regulation of Online Gaming Act, 2025 bans online games played for real money — deposits, '
+        + 'bets, withdrawals or cash prizes. I can build the same game with pretend chips or coins instead (no real money), '
+        + 'and it can still have a chip wallet, a leaderboard and rewards. Shall I build it that way?';
+  }
   if (contentClass === 'adult') {
     return prefersHindi(prompt)
       ? 'पोर्नोग्राफी बैन है।\n\n'

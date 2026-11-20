@@ -35,7 +35,7 @@ export type ImageSafetyOutcome =
 export function decideImageSafety(words: string | null | undefined): ImageSafetyOutcome {
   const triage = triagePrompt(words);
   if (triage.verdict === 'block') {
-    return { blocked: true, triage, message: blockMessage(triage.contentClass, String(words ?? '')) };
+    return { blocked: true, triage, message: blockMessage(triage.contentClass, String(words ?? ''), triage.ruleId) };
   }
   return { blocked: false, triage };
 }

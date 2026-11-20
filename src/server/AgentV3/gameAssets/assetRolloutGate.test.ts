@@ -4,8 +4,9 @@ import { prepareGameAssets } from './assetSeed';
 
 const Z = 'GiYNmFcDMVYSWW48Nrurm7j41gv1';
 describe('L3 limited rollout gate (AGENTV3_EXTERNAL_GAME_ASSETS=admin)', () => {
-  it('default stays off for everyone, including z', () => {
-    expect(externalGameAssetsEnabled({}, Z)).toBe(false);
+  it('default is ON for everyone (admin 2026-11-20); the kill switch turns it off for everyone, including z', () => {
+    expect(externalGameAssetsEnabled({}, Z)).toBe(true);
+    expect(externalGameAssetsEnabled({}, 'normal-user')).toBe(true);
     expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS: 'off' }, Z)).toBe(false);
   });
   it('admin mode admits only z uid and allowlisted verified uids', () => {
@@ -19,8 +20,9 @@ describe('L3 limited rollout gate (AGENTV3_EXTERNAL_GAME_ASSETS=admin)', () => {
     expect(externalGameAssetsEnabled(allow, 'b2')).toBe(true);
     expect(externalGameAssetsEnabled(allow, 'c3')).toBe(false);
   });
-  it('allowlist alone never enables without admin mode', () => {
-    expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS_UIDS: 'a1' }, 'a1')).toBe(false);
+  it('an allowlist never overrides the kill switch, and only limits anything in admin mode', () => {
+    expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS: 'off', AGENTV3_EXTERNAL_GAME_ASSETS_UIDS: 'a1' }, 'a1')).toBe(false);
+    expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS_UIDS: 'a1' }, 'z9')).toBe(true);
   });
   it('on still means everyone (unchanged)', () => {
     expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS: 'on' }, 'normal-user')).toBe(true);

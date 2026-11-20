@@ -18,6 +18,8 @@
 //      plays a pose on it gets a repair note while the file is open, and a readiness warning at the end.
 // PURE: no I/O.
 
+import { GAME_STARTER_ALTERNATION } from '../lib/gameStarters';
+
 /** The one rule every surface quotes. */
 export const ACTION_VISIBLE_RULE = [
   '🎬 EVERY ACTION BUTTON IS SEEN, NOT ONLY COMPUTED: when the player presses Fire, Attack, Jump, Kick, Throw, Use or',
@@ -48,7 +50,7 @@ export interface ActionPoseHalves {
 const SOURCE = /^src\/.+\.(?:t|j)sx?$/i;
 const TEST_FILE = /\.(?:test|spec)\.[tj]sx?$/i;
 /** Generated kit files define these calls; only the game's own files are read. */
-const KIT_FILE = /^src\/game\/(?:three|core|fx|ui|play|athree|forge|world2d|generatedObjects)\/|^src\/game\/(?:Game|GameCanvas|RacingRoadGame)\.tsx?$|^src\/audio\//i;
+const KIT_FILE = new RegExp(String.raw`^src\/game\/(?:three|core|fx|ui|play|athree|forge|world2d|generatedObjects)\/|^src\/game\/(?:Game|GameCanvas|${GAME_STARTER_ALTERNATION})\.tsx?$|^src\/audio\/`, 'i');
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 /** A source file of the game's OWN (not a test, not a kit file) — the only files worth reading for this check. */

@@ -54,6 +54,7 @@ import { hardConstraintLines } from '../lib/megaRoadmap';
 import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
+import { GAME_STARTERS } from '../lib/gameStarters';
 import { athreeMapIntent } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
@@ -216,7 +217,8 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_game_shell' && typeof request === 'string' && request.trim()) {
     let genre = 'unknown';
     try { genre = buildGameContract(request).genre; } catch { return undefined; }
-    if (genre !== 'racing') return { include: GAME_SHELL_MODULES.filter((m) => m !== 'racingroadgame') };
+    // Each genre starter only for its own genre: the runner starter is no more a BGMI's than the race starter is.
+    return { include: GAME_SHELL_MODULES.filter((m) => { const starter = GAME_STARTERS.find((st) => st.module === m); return !starter || starter.genre === genre; }) };
   }
   return undefined;
 }
@@ -315,6 +317,11 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
         + (has('generate_game_shell')
           ? ' Render it with <GameCanvas> from src/game/GameCanvas.tsx and put your game in its setup() and update().'
             + ' For a car, bike or ridden animal, call ctx.follow(vehicle) in setup() so the camera stays BEHIND it.'
+            + (/src\/game\/LaneRunnerGame\.tsx/.test(done.find((r) => r.recipe === 'generate_game_shell')?.content ?? '')
+              ? ' This is an ENDLESS RUNNER and its game is already on disk: render <LaneRunnerGame title="…" /> from src/game/LaneRunnerGame.tsx'
+                + ' (lanes, obstacles, jump, slide, coins, swipes, start screen, game over) and make it the user\'s game through its props'
+                + ' (colours, title, lanes, speed) or createLaneRunnerScene() — never hand-write the runner\'s rules, lanes or swipes.'
+              : '')
           : ' For a car, bike or ridden animal, keep the camera BEHIND it, opposite its nose.')
         + (has('generate_game_3d')
           ? ' Move a vehicle with driveVehicle(...) and createVehicleState(...) from src/game/three/objects.ts (they'

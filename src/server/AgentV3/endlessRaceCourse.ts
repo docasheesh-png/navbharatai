@@ -23,6 +23,7 @@
 //      platform steers and checks it; it does not rewrite the model's scene).
 // PURE: no I/O.
 import { buildGameContract } from './gameIntent';
+import { GAME_STARTER_ALTERNATION } from '../lib/gameStarters';
 
 /**
  * Words that DESCRIBE a course: its shape, its scenery, its length or where it ends. When any is present the
@@ -94,7 +95,7 @@ export interface RaceCourseHalves {
 const SOURCE = /^src\/.+\.(?:t|j)sx?$/i;
 const TEST_FILE = /\.(?:test|spec)\.[tj]sx?$/i;
 /** Generated kit files define these calls; only the game's own files are read. */
-const KIT_FILE = /^src\/game\/(?:three|core|fx|ui)\/|^src\/game\/(?:Game|GameCanvas|RacingRoadGame)\.tsx?$|^src\/audio\//i;
+const KIT_FILE = new RegExp(String.raw`^src\/game\/(?:three|core|fx|ui)\/|^src\/game\/(?:Game|GameCanvas|${GAME_STARTER_ALTERNATION})\.tsx?$|^src\/audio\/`, 'i');
 
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
 

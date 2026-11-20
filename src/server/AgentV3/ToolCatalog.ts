@@ -2421,7 +2421,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, racingroadgame. Default = all.',
+            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, racingroadgame, lanerunnergame (the ready endless runner). Default = all.',
           },
         },
       },

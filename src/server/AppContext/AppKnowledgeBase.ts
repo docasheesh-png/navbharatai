@@ -2069,6 +2069,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
 
   // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
   {
+    id: 'game_runner_starter',
+    name: 'Endless runner games that work from the first build',
+    path: 'NavBharatAI Pro → chat → ask for an endless runner (for example "Subway Surfers jaisa game banao", "temple run type game", "endless runner with coins")',
+    description: 'An endless runner NavBharatAI builds starts from a complete, working runner game (2026-11-20) instead of being wired from parts: three lanes, obstacles to dodge, low hurdles to jump and bars to slide under (every row always has a way through), coins on the track, speed that rises as you go, and the score. Swipe on a phone (left / right to change lanes, up to jump, down to slide) or use the arrow keys, A / D, Space or W and S. It comes with the start screen, pause, game over with Play again, settings and the language menu of every NavBharatAI game. The game is then made yours: its name, colours, number of lanes, speed, characters and theme. Racing games likewise start from the ready racing game. Not built yet: characters to unlock, power-ups on the track (magnet, jetpack) and missions — they can be asked for and are added on top.',
+    howToUse: 'Ask for an endless runner and describe your theme (for example "Mumbai local train ke upar daudne wala game", "jungle me daudne wala runner"). To change how it plays, ask ("speed dheere badhao", "4 lanes karo").',
+    relatedFeatures: ['game_2d_kit', 'game_menus_settings'],
+    keywords: ['endless runner', 'runner game', 'subway surfers', 'subway surfer jaisa', 'temple run', 'daudne wala game', 'running game', 'lane change', 'jump and slide', 'swipe game', 'coin collect game', 'infinite runner'],
+  },
+  {
     id: 'games_ai',
     name: 'Games, Puzzles & Family-Fun AI',
     path: 'NavBharatAI Free chat → Mode (bottom bar) → Games, Puzzles & Family-Fun',

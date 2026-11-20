@@ -536,6 +536,16 @@ export function liveUserMessageTurn(message: string, etaShown?: string | null): 
  * लगेगा" got "2-3 minutes" from the model while the platform's own line said about four.) Precision-first:
  * a time WORD alone is not the question — "add a time table", "समय सारणी" are features. PURE.
  */
+/** How many times one run may continue a reply that the output limit cut off before its first tool call (Q-3223). */
+export const MAX_CUT_OFF_CONTINUES = 2;
+/** Said to the model when its reply was cut off before it acted. */
+export const CUT_OFF_STEER = '[PLATFORM] Your previous reply was cut off at the output limit before you made any tool call, so nothing you announced has happened yet. '
+  + 'Do NOT restate the plan. Make the next tool call now — one call, with short arguments (one file, or one task to delegate) — and continue from there.';
+/** A build turn that wrote words, no tool call, and was stopped by the output limit (not an empty, starved turn). PURE. */
+export function cutOffBeforeActing(t: { truncated: boolean; toolUses: number; text: string | null | undefined; starved: boolean; expectsArtifacts: boolean }): boolean {
+  return t.expectsArtifacts && t.truncated && t.toolUses === 0 && !t.starved && String(t.text ?? '').trim().length > 0;
+}
+
 export function asksHowLong(message: string): boolean {
   const m = String(message ?? '');
   return /\bhow long\b|\bhow much (?:more )?time\b|\bwhen will (?:it|the app|this|my app) be (?:ready|done|finished)\b|\bkitn[aei] (?:time|der|samay|minute)|\bkab tak\b|\bkitni der\b/i.test(m)
@@ -759,6 +769,8 @@ export class AgentRunner {
     let styleResumeHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
     const previewLiveNow = (): boolean => { try { return typeof (dispatcher as any).hasPublishedPreview === 'function' && (dispatcher as any).hasPublishedPreview() === true; } catch { return false; } };
     const MAX_BUILD_NUDGES = 2;
+    // failedbr #677 / #669 (Q-3223): an announcement cut off at the output limit is not a model that chose not to act.
+    let cutOffContinues = 0;
 
     // The first thing the model reads is the user's request — and a pasted or attached one-file game IS a request that can
     // carry megabytes of base64 media. It is hidden here, once, exactly as the tool results are in `toBlock` (autopsy: single-file game).
@@ -1390,6 +1402,16 @@ export class AgentRunner {
           // overwrite a user's existing 35-file app. `decideBuildNudge` asks what the turn WAS before
           // overriding it, and picks wording that cannot order a rewrite on an edit. See
           // nudgeToBuild.ts for the full incident and the asymmetry that decides the close calls.
+          // ✂️ CUT OFF BEFORE IT COULD ACT (failedbr #677 / #669, Q-3223). "Now I'll dispatch three specialists…" ended at
+          // max_tokens with no tool call, twice; each spent an "act now" nudge, the run counted as built-nothing, and
+          // EMPTY_BUILD_RETRY threw away twelve minutes of planning. A truncated announcement is continued with its own
+          // small allowance and one exact instruction; it never counts against the nudges for a model that chose not to act.
+          if (cutOffBeforeActing({ truncated: Boolean(turn.truncated || turn.stopReason === 'max_tokens'), toolUses: turn.toolUses.length, text: turn.text, starved: starvedTurn, expectsArtifacts }) && cutOffContinues < MAX_CUT_OFF_CONTINUES) {
+            cutOffContinues++;
+            try { this.opts.onNote?.({ code: 'CUT_OFF_BEFORE_ACTING', message: 'The model\'s reply was cut off at the output limit before it made a tool call, so it was asked to make that call now.', detail: `continue ${cutOffContinues} of ${MAX_CUT_OFF_CONTINUES} · its last words: ${String(turn.text ?? '').trim().slice(-160)}` }); } catch { /* a note must never fail a build */ }
+            pushPlatformTurn(CUT_OFF_STEER);
+            continue;
+          }
           const nudge = starvedTurn
             ? { nudge: false as const, message: '', standDown: undefined }
             : decideBuildNudge({

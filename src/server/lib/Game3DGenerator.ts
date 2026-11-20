@@ -3250,7 +3250,7 @@ export function createCar(options: CarOptions = {}): THREE.Group {
       group.add(wheel);
     }
   }
-  return group;
+  return markVehicleBody(group);
 }
 
 /**
@@ -3368,7 +3368,7 @@ export function createAutoRickshaw(options: AutoRickshawOptions = {}): THREE.Gro
     w.position.set(sx * rearX, r, rearZ);
     g.add(w);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 export interface BusOptions extends BaseOpts { color?: number; stripe?: number; length?: number }
@@ -3451,7 +3451,7 @@ export function createBus(options: BusOptions = {}): THREE.Group {
     inner.position.set(sx * (W / 2 - tw * 1.55 - 0.03 * s), r, rearAxle);
     g.add(outer, inner);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 export interface TruckOptions extends BaseOpts { color?: number; cargoColor?: number; length?: number }
@@ -3533,7 +3533,7 @@ export function createTruck(options: TruckOptions = {}): THREE.Group {
     inner.position.set(sx * (W / 2 - tw * 1.55 - 0.04 * s), r, rearAxle);
     g.add(outer, inner);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 export interface TractorOptions extends BaseOpts { color?: number; length?: number }
@@ -3611,7 +3611,7 @@ export function createTractor(options: TractorOptions = {}): THREE.Group {
     front.position.set(sx * 0.66 * s, fr, frontZ);
     g.add(front);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 // ── WEAPONS (models) ─────────────────────────────────────────────────────────────────────────────
@@ -3960,6 +3960,7 @@ let vehicleListener: VehicleListener | null = null;
 
 function noteVehicle(vehicle: THREE.Object3D, axis: { x: number; y: number } | null): void {
   if (vehicleByPosition.get(vehicle.position) !== vehicle) vehicleByPosition.set(vehicle.position, vehicle);
+  markVehicleBody(vehicle);   // a hand-built car the game drives is an obstacle for other cars too
   vehicleListener?.(vehicle, axis);
 }
 
@@ -4150,11 +4151,37 @@ function resolveState(vehicle: THREE.Object3D, state: VehicleState | null | unde
 
 const vehicleBounds = new WeakMap<THREE.Object3D, THREE.Box3>();
 
-/** Sweep the whole vehicle, including its nose and tail, against scenery in its own scene. */
-function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning: VehicleTuning): number {
-  if (movement.lengthSq() === 0) return 1;
-  const colliders = worldColliders(collisionRoot(vehicle), [], vehicle, false);
-  if (!colliders.length) return 1;
+// 🚗 VEHICLES ARE OBSTACLES TO EACH OTHER (admin 2026-11-20 engine audit). The sweep below only ever saw SCENERY, and
+// no vehicle model is scenery, so the player's car drove straight through a parked car, the traffic and every rival
+// at full speed. Every vehicle the kit builds (and every model driveVehicle moves) is now an obstacle for the others.
+const vehicleBodies = new Set<THREE.Object3D>();
+const vehicleWasPlaced = new WeakSet<THREE.Object3D>();
+/** Mark a model as a vehicle body: other vehicles stop at it. The kit's vehicle factories do this themselves. */
+export function markVehicleBody<T extends THREE.Object3D>(vehicle: T): T { vehicleBodies.add(vehicle); return vehicle; }
+
+function carries(outer: THREE.Object3D, inner: THREE.Object3D): boolean {
+  for (let o: THREE.Object3D | null = inner.parent; o; o = o.parent) if (o === outer) return true;
+  return false;
+}
+
+/** The other vehicles in this vehicle's scene. One that has left its scene is forgotten (no leak). */
+function otherVehicles(vehicle: THREE.Object3D, root: THREE.Object3D | null): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  if (!root) return out;
+  for (const other of vehicleBodies) {
+    if (other === vehicle) continue;
+    const r = collisionRoot(other);
+    if (!r) { if (vehicleWasPlaced.has(other)) vehicleBodies.delete(other); continue; }
+    vehicleWasPlaced.add(other);
+    // A trailer this vehicle pulls, or the transporter carrying it, is not something it crashes into.
+    if (r !== root || !other.visible || carries(other, vehicle) || carries(vehicle, other)) continue;
+    out.push(other);
+  }
+  return out;
+}
+
+/** The vehicle as three capsules side by side, in world space — the same body for the sweep and for other cars. */
+function vehicleCapsules(vehicle: THREE.Object3D, tuning: VehicleTuning): Capsule[] {
   let bounds = vehicleBounds.get(vehicle);
   if (!bounds) {
     bounds = colliderLocalBounds(vehicle);
@@ -4172,17 +4199,87 @@ function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning:
   const radius = Math.max(0.05, Math.min(size.x * sx / 3, size.y * Math.abs(scale.y) / 2));
   const side = Math.max(0, size.x / 2 - radius / sx);
   const end = Math.max(0, size.z / 2 - radius / sz);
-  const bodies = [-side, 0, side].map((x) => new Capsule(
+  return [-side, 0, side].map((x) => new Capsule(
     new THREE.Vector3(center.x + x, center.y, center.z - end).applyMatrix4(vehicle.matrixWorld),
     new THREE.Vector3(center.x + x, center.y, center.z + end).applyMatrix4(vehicle.matrixWorld),
     radius,
   ));
+}
+
+/** Closest distance between segments p1-q1 and p2-q2. */
+function segmentDistance(p1: THREE.Vector3, q1: THREE.Vector3, p2: THREE.Vector3, q2: THREE.Vector3): number {
+  const d1 = q1.clone().sub(p1), d2 = q2.clone().sub(p2), r = p1.clone().sub(p2);
+  const a = d1.dot(d1), e = d2.dot(d2), f = d2.dot(r);
+  let s = 0, t = 0;
+  if (a <= 1e-12 && e <= 1e-12) return r.length();
+  if (a <= 1e-12) t = Math.min(1, Math.max(0, f / e));
+  else {
+    const c = d1.dot(r);
+    if (e <= 1e-12) s = Math.min(1, Math.max(0, -c / a));
+    else {
+      const b = d1.dot(d2), denom = a * e - b * b;
+      s = denom > 1e-12 ? Math.min(1, Math.max(0, (b * f - c * e) / denom)) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = Math.min(1, Math.max(0, -c / a)); }
+      else if (t > 1) { t = 1; s = Math.min(1, Math.max(0, (b - c) / a)); }
+    }
+  }
+  return p1.clone().addScaledVector(d1, s).distanceTo(p2.clone().addScaledVector(d2, t));
+}
+
+/** How far apart two capsule bodies are (negative = overlapping), with the first one moved by offset. */
+function bodyGap(a: readonly Capsule[], offset: THREE.Vector3, b: readonly Capsule[]): number {
+  let gap = Infinity;
+  for (const ca of a) {
+    const s = ca.start.clone().add(offset), e = ca.end.clone().add(offset);
+    for (const cb of b) gap = Math.min(gap, segmentDistance(s, e, cb.start, cb.end) - ca.radius - cb.radius);
+  }
+  return gap;
+}
+
+/** The fraction of movement this body can make before touching another vehicle (1 = free). */
+function vehicleFraction(bodies: readonly Capsule[], movement: THREE.Vector3, others: readonly THREE.Object3D[]): number {
+  if (!others.length || !bodies.length) return 1;
+  const reach = movement.length() + Math.max(...bodies.map((c) => c.start.distanceTo(c.end) / 2 + c.radius)) * 2 + 8;
+  const centre = bodies[1 % bodies.length].getCenter(new THREE.Vector3());
+  const near = others.filter((o) => o.getWorldPosition(new THREE.Vector3()).distanceTo(centre) < reach + 12)
+    .map((o) => vehicleCapsules(o, {}));
+  if (!near.length) return 1;
+  const gap = (t: number) => Math.min(...near.map((b) => bodyGap(bodies, movement.clone().multiplyScalar(t), b)));
+  if (gap(1) > 0) return 1;
+  const start = gap(0);
+  // Already touching (a rival that placed itself into this car, a car spawned against another): any move that does
+  // not push further in is allowed — backing away, or driving out alongside — so two cars can never lock together.
+  if (start <= 0) return gap(1) >= start - 1e-6 ? 1 : 0;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (gap(mid) > 0) lo = mid; else hi = mid; }
+  return lo;
+}
+
+/** Sweep the whole vehicle, including its nose and tail, against scenery AND other vehicles in its own scene. */
+function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning: VehicleTuning): number {
+  if (movement.lengthSq() === 0) return 1;
+  const root = collisionRoot(vehicle);
+  const colliders = worldColliders(root, [], vehicle, false);
+  const others = otherVehicles(vehicle, root);
+  if (!colliders.length && !others.length) return 1;
+  const bodies = vehicleCapsules(vehicle, tuning);
   const worldMovement = movement.clone();
   if (vehicle.parent) {
     const parent = vehicle.parent.matrixWorld;
     worldMovement.applyMatrix4(parent).sub(new THREE.Vector3().setFromMatrixPosition(parent));
   }
-  return sweepWorldCapsules(bodies, worldMovement, colliders);
+  const scenery = colliders.length ? sweepWorldCapsules(bodies, worldMovement, colliders) : 1;
+  return Math.min(scenery, vehicleFraction(bodies, worldMovement, others));
+}
+
+/** Told about every crash: where (the nose), which vehicle, and how much speed it lost (m/s). */
+export type VehicleCrashListener = (at: THREE.Vector3, vehicle: THREE.Object3D, impact: number) => void;
+const crashListeners = new Set<VehicleCrashListener>();
+/** Hear a vehicle crash into a wall or another vehicle (losing more than 3 m/s at once). The shell makes it felt. */
+export function onVehicleCrash(handler: VehicleCrashListener): () => void {
+  crashListeners.add(handler);
+  return () => { crashListeners.delete(handler); };
 }
 
 /**
@@ -4244,13 +4341,45 @@ export function driveVehicle(
   const travel = vehicleTravel(vehicle, movement, tuning);
   vehicle.position.x += movement.x * travel;
   vehicle.position.z += movement.z * travel;
+  // 🧱 SLIDE, DO NOT STICK (admin 2026-11-20 engine audit): a car that clipped a wall at an angle used to stop dead
+  // and stay glued to it. Now the part of the move that runs ALONG what it hit goes on, and keeps that share of the
+  // speed; a head-on hit has nothing left to slide and stops, as before.
+  let keep = 1;
+  if (travel < 1) {
+    const rest = movement.clone().multiplyScalar(1 - travel);
+    const restLength = rest.length();
+    vehicle.updateMatrixWorld(true);
+    let best: THREE.Vector3 | null = null;
+    for (const along of [new THREE.Vector3(rest.x, 0, 0), new THREE.Vector3(0, 0, rest.z)]) {
+      if (along.lengthSq() < 1e-10) continue;
+      const f = vehicleTravel(vehicle, along, tuning);
+      if (f > 0 && (!best || along.length() * f > best.length())) best = along.multiplyScalar(f);
+    }
+    keep = best && restLength > 1e-9 ? best.length() / restLength : 0;
+    if (keep < 0.15) keep = 0;
+    else if (best) { vehicle.position.x += best.x; vehicle.position.z += best.z; }
+  }
+  // The speed lost at the moment of contact is paid ONCE; scraping along the same wall after that only rubs a little
+  // off (otherwise the cut compounded every frame and a glancing hit still ended glued to the wall).
+  const contact = vehicle.userData as { nbScraping?: boolean };
+  if (keep > 0 && contact.nbScraping) keep = 1 - Math.min(0.5, 1.2 * dt);
+  contact.nbScraping = travel < 1 && keep > 0;
   // 🔴 FOLLOW THE GROUND. This used to stop at x/z, so y stayed wherever the car was born and every
   // racing game drove into its first hill. settleOnGround reads the same heights the terrain is drawn from.
   const slope = settleOnGround(vehicle, heading, dt, tuning, state);
   rollWheels(vehicle, speed * travel, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
   noteVehicle(vehicle, axis);
   // IN PLACE: the game's own state object now holds the new values, whether or not it keeps the return.
-  state.speed = travel < 1 ? 0 : speed;
+  const impact = Math.abs(speed) * (1 - keep);
+  state.speed = travel < 1 ? speed * keep : speed;
+  const crashClock = vehicle.userData as { nbCrashClock?: number };
+  crashClock.nbCrashClock = Math.max(0, (crashClock.nbCrashClock ?? 0) - dt);
+  if (travel < 1 && impact > 3 && crashClock.nbCrashClock === 0 && crashListeners.size > 0) {
+    crashClock.nbCrashClock = 0.3;   // one crash, not one per frame while the bumper rests on the wall
+    const nose = new THREE.Vector3(Math.sin(course), 0, Math.cos(course)).multiplyScalar(Math.sign(speed) * (tuning.length ?? 2.6) / 2);
+    const at = vehicle.position.clone().add(nose).add(new THREE.Vector3(0, 0.6, 0));
+    for (const listener of crashListeners) listener(at, vehicle, impact);
+  }
   state.heading = heading;
   if (slope) { state.pitch = slope.pitch; state.roll = slope.roll; }
   // A slide is SEEN: the body leans to the outside of the slide, and smoke pours from the rear tyres.
@@ -5964,6 +6093,7 @@ export function createMotorcycle(options: MotorcycleOptions = {}): Motorcycle {
   tailLight.position.set(0, seatY * 1.08, -L * 0.375);
   root.add(tailLight);
 
+  markVehicleBody(root);
   return {
     root,
     seat: seatAnchor,
@@ -6070,6 +6200,7 @@ export function createBicycle(options: BicycleOptions = {}): Motorcycle {
   bars.rotation.z = Math.PI / 2;
   steerGroup.add(bars);
 
+  markVehicleBody(root);
   return {
     root,
     seat: seatAnchor,

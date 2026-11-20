@@ -103179,3 +103179,22 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
 - #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.
+
+## 2026-11-20 — Cars crash into walls and into each other (engine audit, item 1 of the admin-approved plan)
+
+- **Measured first, with the real kit:** cars already stopped at walls (an earlier claim of mine in this session that
+  they did not was wrong — `vehicleTravel` sweeps the body against scenery). Two real defects:
+  1. a car drove straight THROUGH a parked car at full speed — vehicles were never obstacles, only scenery was;
+  2. a car that clipped a wall at an angle stopped dead and stayed glued to it.
+- **Class:** the vehicle sweep knew one kind of obstacle (scenery) and one outcome (full stop).
+- **Fix (shared `objects.ts`, so every driving game gets it):**
+  - every kit vehicle (car, auto, bus, truck, tractor, motorcycle, bicycle) and every model `driveVehicle` moves is a
+    vehicle body; the sweep also tests the other bodies in the same scene (capsule–capsule, binary-searched fraction);
+    bodies that left their scene are forgotten; overlapping cars can always separate (never lock together);
+  - a blocked car slides along what it hit; the speed loss is paid once at contact, then only scraping friction;
+    a head-on hit still stops dead (existing tests pin it);
+  - `onVehicleCrash(at, vehicle, impact)` once per hit (> 3 m/s lost, 0.3 s apart); the shell turns the PLAYER's crash
+    into `VEHICLE_CRASHED` → sparks, impact sound, trauma, haptic via the feedback table.
+- **Proof:** `tests/aCarHitsWhatItDrivesInto.test.ts` (9 tests, eight reversions each failed); all 28 existing vehicle
+  test files (485 tests) pass.
+- 🟡 **Not built yet:** pushing the other car, dents and damage.

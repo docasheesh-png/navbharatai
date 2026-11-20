@@ -769,6 +769,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['race', 'racing game', 'countdown', '3 2 1', 'rival cars', 'dusri gaadiyan', 'opponent', 'position', 'lap time', 'timer', 'finish line', 'results', 'crosshair', 'ammo', 'goliyan', 'damage number', 'health bar', 'boss', 'fire animation', 'goli chalate hue dikhe', 'character hilta nahi', 'action dikhta nahi', 'attack animation', 'punch', 'kick', 'sword swing', 'talwar', 'jump animation', 'recoil', 'drift', 'drift button', 'handbrake', 'tyre smoke', 'button kaam nahi karta', 'fire button', 'shooting game', 'pubg jaisa', 'fight game', 'action button', 'grenade', 'bomb fenko', 'blast', 'aim assist', 'auto aim', 'nishana'],
   },
   {
+    id: 'game_vehicle_crashes',
+    name: 'Cars crash into walls and into each other',
+    path: 'NavBharatAI Pro → chat → ask for any driving game (racing, city driving, traffic, bike game); it works by itself',
+    description: 'In every driving game NavBharatAI builds, vehicles are solid (2026-11-20): a car stops at a parked car, a bus, a truck, an auto-rickshaw, a tractor, a bike or a rival instead of driving through it, as well as at walls, buildings, trees and rocks. A car that hits a wall at an angle slides along it and keeps some of its speed instead of sticking to it; a head-on hit stops it. A real crash is felt: sparks at the bumper, a crunch, the camera jolts and the phone buzzes (a gentle nudge is not a crash, and Reduce motion keeps the camera still). Two cars that end up overlapping can always drive apart. Not built yet: cars that get pushed or dented by a hit, and damage that slows a car down.',
+    howToUse: 'Nothing to switch on. To change it, ask in your own words (for example "takkar hone par car ka health kam ho", "crash pe zor ki awaaz aaye").',
+    relatedFeatures: ['game_actions_visible', 'game_menus_settings'],
+    keywords: ['crash', 'car crash', 'takkar', 'gaadi takrayi', 'car takrati nahi', 'car ke aar paar', 'car goes through car', 'collision', 'car diwar me', 'wall se takkar', 'bumper', 'sparks', 'car fas jati hai', 'car chipak jati hai', 'stuck on wall', 'traffic se takkar'],
+  },
+  {
     id: 'india_board_games',
     name: 'Ludo, Snakes & Ladders, chess, carrom, cricket, Business, match-3, Teen Patti and rummy with the real rules',
     path: 'NavBharatAI Pro → chat → ask for the game (for example "Ludo game banao 4 players", "saanp seedhi game banao computer ke saath")',

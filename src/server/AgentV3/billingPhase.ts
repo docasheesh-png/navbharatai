@@ -49,6 +49,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * is one `runInBillingPhase` call plus the rule that decides it is barren — never a rule alone.
  */
 export const PHASE_POST_BUILD_REVIEW = 'post-build-review';
+/**
+ * The pre-build scope/admission check (Weak admission, Router One scope). Billed like any call; tagged so routing
+ * measures (LADDER_DEPTH) do not count a classification as a slice of the build (Q-2751, autopsy 05eb30ba).
+ */
+export const PHASE_SCOPE = 'scope';
 
 /**
  * The click explorer's verified repair (explorerRepair.ts, 2026-09-28). Its "delivered nothing" rule

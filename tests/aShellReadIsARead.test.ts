@@ -64,3 +64,21 @@ describe('a failed read is not a build failure', () => {
     expect(d.report().issues.map((i) => i.code)).toContain('SANDBOX_CMD_FAILED');
   });
 });
+
+// failedbr #2090: `npm list three @react-three/fiber @react-three/drei` exited 1 (not installed yet) and the release
+// gate listed it as a "build-breaking blocker" — the third sibling of the failed `cat` (#2452) and the probe (#2306).
+describe('a package-manager query is a read (failedbr #2090)', () => {
+  it.each(['npm list three @react-three/fiber @react-three/drei', 'npm ls three 2>/dev/null', 'npm view three version',
+    'npm outdated', 'pnpm why react', 'yarn info react', 'node -v', 'npx tsc --version', 'cd /home/user/workspace && npm list three'])('%s reads', (c) => {
+    expect(isReadOnlyInspection(c)).toBe(true);
+  });
+  it.each(['npm install three', 'npm i', 'npm audit fix', 'npm run build', 'npm list > deps.txt', 'npm ls; rm -rf node_modules',
+    'npx vite', 'npm exec x', 'yarn add three'])('%s is not a read', (c) => {
+    expect(isReadOnlyInspection(c)).toBe(false);
+  });
+  it('the report\'s own command no longer becomes SANDBOX_CMD_FAILED', () => {
+    const d = new BuildDiagnostics();
+    d.recordCommand({ command: 'npm list three @react-three/fiber @react-three/drei', exitCode: 1, stdout: 'project@0.1.0 /home/user/workspace\n`-- (empty)', durationMs: 900 });
+    expect(d.report().issues.map((i) => i.code)).not.toContain('SANDBOX_CMD_FAILED');
+  });
+});

@@ -1,4 +1,5 @@
 /** Shared schema and writer for the ONE owner-funded platform-free budget. No database initialization. */
+import { usdAmount } from '../../lib/usdAmount';
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { checkedAdd, DAY_MS, FreeChainDataError, nonnegativeInteger, validTime, type DayWindow } from './quota';
@@ -50,7 +51,7 @@ export function writeSpendDay(tx: Transaction, db: Pick<Firestore, 'doc'>, day: 
     const id = `${collection === 'free_chat_chain' ? 'free-chat' : 'professional-inference'}-spend_${day.key}_${threshold}_${hash(email)}`;
     tx.set(db.doc(`admin_notifications/${id}`), {
       id, message: `${collection === 'professional_inference' ? 'Professional supplier' : 'FREE chat paid-fallback'} budget reached ${threshold}% for ${day.key} (Asia/Kolkata): `
-        + `$${(committed / NANO_USD).toFixed(4)} committed of $${(capNanoUsd / NANO_USD).toFixed(2)}. `
+        + `$${usdAmount((committed / NANO_USD))} committed of $${(capNanoUsd / NANO_USD).toFixed(2)}. `
         + 'Committed includes maximum-cost holds with unknown usage. '
         + (collection === 'free_chat_chain' ? 'Open Admin → FREE Chat Chain.' : 'Review the professional_inference supplier ledger.'),
       target: { type: 'user', email }, createdAt: now, createdBy: collection === 'free_chat_chain' ? 'free-chat-chain' : 'professional-inference',

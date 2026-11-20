@@ -158,6 +158,11 @@ const PROHIBITED_BEFORE = /\b(?:do\s+not|don'?t|dont|never|avoid|must\s+not)\b(?
 // the name always wins. "for" before the name ("an app for Free Fire players") is the same audience shape.
 const AUDIENCE_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:tournaments?|turnaments?|players?|gamers?|fans?|lovers|community|communities|e-?sports|scrims?|squads?|guilds?|clans?|uids?|ids?|room\s+ids?|custom\s+rooms?|leaderboards?|diamonds?|top[\s-]?ups?|redeem\s+codes?|rank(?:s|ing|ings)?|tips|tricks|guides?|news|stats|wiki|creators?|influencers?|followers)\b/i;
 const AUDIENCE_BEFORE = /\bfor\s+(?:the\s+|all\s+|our\s+|my\s+)?$/i;
+// 🔴 "FREE FIRE KE LIYE" IS "FOR FREE FIRE" (failedbr #1620, 2026-11-20). "Muje free fire app ke lia panel app bana kar do"
+// — a panel app FOR Free Fire players — was "LARGE — clone of Free Fire", and the planner gave it a six-step battle-royale
+// roadmap. English "for" before the name was already the audience shape (AUDIENCE_BEFORE); Hindi puts its postposition
+// AFTER the name ("X ke liye", typed liye / lie / lia / liya / lye), optionally with "app" / "game" in between.
+const HINDI_FOR_AFTER = /^[\s/-]*(?:(?:app|apps|game|games|ka\s+app)\s+)?(?:ke|ki|ka)\s+(?:liye|lie|lia|liya|lye|liay)\b/i;
 const LIKENESS_AFTER = /^[^.,;:!?\n]{0,40}\b(?:jaisa|jaise|jaisi|clone|replica|copy\s+(?:of|bana\w*))\b/i;
 const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar\s+to|inspired\s+by|copy\s+of|replica\s+of|version\s+of)\s+(?:the\s+|a\s+)?$/i;
 
@@ -226,7 +231,7 @@ export function namesAsProduct(text: string, re: RegExp, opts: ProductMentionOpt
     const listHead = before.replace(/(?:[\w.-]+\s*\/\s*)+$/, '');
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
     const after40 = noise(text.slice(at + m[0].length, at + m[0].length + 48));
-    if (!hasLikeness(before, after, after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
+    if (!hasLikeness(before, after, after40) && (AUDIENCE_AFTER.test(after) || HINDI_FOR_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
     if (!hasLikeness(before, after, after40) && TOOL_FOR_AFTER.test(after)) continue;
     if (opts.needsIntent && !hasLikeness(before, after, after40)
       && !(opts.subject && new RegExp(re.source, re.flags.replace('g', '')).test(opts.subject))) continue;

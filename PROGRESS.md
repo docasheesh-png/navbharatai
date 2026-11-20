@@ -103280,6 +103280,11 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
   (Q-3154/Q-3155), the 99% index.html rewrite (#1022: it removed an overlaid old app — the fix, not a loss). Charges on
   stopped builds (#1161, #1111, #1077, #1049, #1046, #1022, #1021) are Q-3148/Q-3157's policy; vague prompts built at once
   (#1142, #1078) are Q-3137's. Open: Q-3173–Q-3184.
+- Batch #1020–#919 (11 reports, 2026-11-20). Fixed: Q-3185 (deployment instructions are not a publish order), Q-3186 (a
+  Hindi admin panel is an access gate), Q-3187 (an indirect question is a question). Already fixed on main when checked:
+  the stopped lane's file count (31254f9a), a stopped call is LLM_CALL_STOPPED (#919), STUCK_TOOL on a Stop (#959), the
+  per-module starter (6a5fb04b, #961's 19 minutes), the roadmap's simulated-reply guardrail (#947), design observations
+  on untouched code (obs()). Open: Q-3188–Q-3198.
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

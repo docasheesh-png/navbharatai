@@ -632,6 +632,7 @@ const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'STRICT_TRIAL', 'SAVED_SOURCE_DIVERGES', 'ATTACHMENTS_READ', 'ATTACHMENTS_ON_DISK', 'ATTACHMENTS_NOT_ON_DISK',
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED', // our free-tier time policy (freeBuildTimeCap.ts)
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
+  'STYLE_RESUME_STOOD_DOWN', // that steer withheld at wrapping time (failedbr #2318)
   'STYLE_PASS_CAPPED', // our own time cap on that pass (stylePassCap.ts), never a finding
   'POST_GREEN_RECHECK_OK', 'POST_GREEN_RECHECK_INCONCLUSIVE', // the finishing re-check's own heartbeat (finishingRecheck.ts), never a finding
   'REDTEAM_RAN', // our red-team pass's timing line (FuzzProbe.ts), never a finding

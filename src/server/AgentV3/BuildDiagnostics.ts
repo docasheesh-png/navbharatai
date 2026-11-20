@@ -216,6 +216,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
   // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
   'STYLE_RULES_RESUMED',
+  'STYLE_RESUME_STOOD_DOWN', // our hand-back withheld at wrapping time (failedbr #2318), never a finding
   // OUR style pass ended by its own time cap (stylePassCap.ts) — a policy of ours, never the app.
   'STYLE_PASS_CAPPED',
   // OUR red-team pass's own timing line (FuzzProbe.redTeamRunNote) — a measurement of ours, never the app.

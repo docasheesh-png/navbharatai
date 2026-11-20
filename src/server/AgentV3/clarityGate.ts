@@ -119,6 +119,26 @@ export function shouldJudgeClarity(i: {
     && !i.importing && i.attachments === 0 && !i.askedLastTurn && !i.alreadyAsking;
 }
 
+/**
+ * Why the judge was NOT consulted — the first condition of `shouldJudgeClarity` that failed — or `null` when it
+ * runs. 🔴 failedbr #1896 (2026-11-20): "Ham tumko jo banane wale game banakar do" (make the game you were going to
+ * make) was built as a space shooter without a question, and the report could not say whether the judge had read
+ * it as clear or had never been asked: its decision went only to the server log. The report now carries it. PURE.
+ */
+export function clarityJudgeSkipReason(i: Parameters<typeof shouldJudgeClarity>[0]): string | null {
+  if (shouldJudgeClarity(i)) return null;
+  if (i.isStarterPrompt) return 'the request is a starter chip';
+  if (typeof i.prompt === 'string' && (i.prompt.match(/\S+/g) ?? []).length >= LONG_SPEC_WORDS) return `the request has ${LONG_SPEC_WORDS} or more words`;
+  if (!i.enabled) return 'the clarity gate is off';
+  if (!i.newBuild) return 'this turn is not a new build';
+  if (!i.workspaceHoldsOnlyOurStarter) return 'the workspace already holds an app';
+  if (i.earlierBuildableRequest) return 'an earlier message in this conversation names an app';
+  if (i.importing) return 'a project is being imported';
+  if (i.attachments > 0) return 'a file is attached';
+  if (i.askedLastTurn) return 'we asked last turn';
+  return 'a question is already being asked';
+}
+
 /** At or above this many words a request is a spec, not a vague order — the judge is not consulted. */
 export const LONG_SPEC_WORDS = 15;
 

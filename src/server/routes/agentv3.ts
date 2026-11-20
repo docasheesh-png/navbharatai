@@ -35,7 +35,7 @@ import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmiss
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction, weakForceContinueDecision } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
-import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
+import { clarityGateEnabled, shouldJudgeClarity, clarityJudgeSkipReason, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
 import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
@@ -11680,6 +11680,8 @@ async function noteBuildOutcome(
      */
     // CLARITY GATE (clarityGate.ts) — we asked ONCE already and this is the reply: never ask again; build
     // the best guess from both messages and say what was assumed.
+    /** What the clarity judge decided on this turn, for the build report (failedbr #1896). */
+    let clarityReportLine: string | null = null;
     const askedClarifyLastTurn = clarityGateEnabled()
       && lastRequestTurn !== null && lastRequestTurn.lane === 'clarify'
       && Date.now() - lastRequestTurn.ts <= OFFER_LIFETIME_MS
@@ -11707,21 +11709,28 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] clarity gate: this is the reply to our one question — building the best guess, no second question');
       prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);
       intent = 'new_build';
-    } else if (!askWhatToBuild && intent === 'new_build' && shouldJudgeClarity({
-      enabled: clarityGateEnabled(),
-      newBuild: true,
-      workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
-      earlierBuildableRequest: recentRequests.some((t) => typeof t === 'string' && assessBuildInput(t).buildable && t.trim() !== String(prompt ?? '').trim()),
-      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
-      attachments: rawAttachments.length,
-      askedLastTurn: false,
-      alreadyAsking: false,
-      prompt: String(prompt ?? ''),
-      isStarterPrompt: goldenScaffoldForPrompt(String(prompt ?? '')) !== null,
-    })) {
-      const v = await judgeClarity(prompt, clarityJudgeAsk);
-      console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
-      if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }
+    } else if (!askWhatToBuild && intent === 'new_build') {
+      // failedbr #1896: the judge's decision — or why it was not asked — goes into the build report, not only the log.
+      const judgeInputs = {
+        enabled: clarityGateEnabled(),
+        newBuild: true,
+        workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
+        earlierBuildableRequest: recentRequests.some((t) => typeof t === 'string' && assessBuildInput(t).buildable && t.trim() !== String(prompt ?? '').trim()),
+        importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+        attachments: rawAttachments.length,
+        askedLastTurn: false,
+        alreadyAsking: false,
+        prompt: String(prompt ?? ''),
+        isStarterPrompt: goldenScaffoldForPrompt(String(prompt ?? '')) !== null,
+      };
+      if (shouldJudgeClarity(judgeInputs)) {
+        const v = await judgeClarity(prompt, clarityJudgeAsk);
+        console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
+        clarityReportLine = `The clarity judge read the request as ${v.verdict} (${v.category}, ${v.ms} ms)${v.verdict === 'vague' ? ', so it was answered with one question instead of a build' : ''}.`;
+        if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }
+      } else {
+        clarityReportLine = `The clarity judge was not consulted: ${clarityJudgeSkipReason(judgeInputs) ?? 'its conditions were not met'}.`;
+      }
     }
     /**
      * 🔴 THE APP THEY ASKED ABOUT IS NOT HERE (autopsy 0d297b25). "The WORKNEX app is already developed
@@ -14749,6 +14758,11 @@ async function noteBuildOutcome(
       if (offerAccepted) {
         try {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'BUILD_OFFER_ACCEPTED', message: 'The user said yes to our offer to build; this build runs on the request that was offered.', autoResolved: true, detail: `typed: "${typedPrompt.slice(0, 80)}"` });
+        } catch { /* observation only */ }
+      }
+      if (clarityReportLine) {
+        try {
+          buildDiag.record({ phase: 'plan', severity: 'info', code: 'CLARITY_DECISION', message: clarityReportLine, autoResolved: true });
         } catch { /* observation only */ }
       }
       if (recalledAttachment) {

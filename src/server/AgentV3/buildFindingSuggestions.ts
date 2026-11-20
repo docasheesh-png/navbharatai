@@ -79,6 +79,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     detail: 'Your app was opened in a browser and nothing rendered.',
     prompt: 'When the app is opened in a browser it does not render — a blank screen or an error instead of the app. Find the real cause (the mount point, the entry script, an error thrown while loading) and fix it, then confirm the app renders.',
   },
+  // failedbr #745 (Q-3204, hollowFeature.ts): a routed screen that renders nothing, or a hook that returns nothing.
+  // The message names each stub and its file, so the offer can build exactly those.
+  {
+    code: 'HOLLOW_FEATURE',
+    title: 'Build the empty screens',
+    detail: 'Some screens or hooks in your app are empty stubs — they compile, but the feature they stand for is not built yet.',
+    prompt: 'Some parts of the app are empty stubs: a screen that renders nothing (return null) or a hook that returns an empty object or list. Build each one for real — the screen\'s actual content and the hook\'s real data and actions — keep the routes that point at them working, and confirm each screen shows its content in the browser.',
+    withEvidence: true,
+  },
   // ── Q-381 BATCH THREE (2026-10-11): app findings that were shown with nothing to press ──────────
   // Each was a warning about the user's app in their build-health card, with no button. Every one is
   // either the final state of its check or is answered when a later check passes (the HEAL_RESOLVES

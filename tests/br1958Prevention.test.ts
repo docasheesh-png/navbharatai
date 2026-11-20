@@ -233,7 +233,8 @@ describe('BR1958 F11: an admission call outside the timer is not a zero-duration
     let t = 1000; const d = new BuildDiagnostics({ now: () => t }); t += 4;
     d.recordLlmCall({ model: 'fixture', promptPreview: 'Build scope admission classification', latencyMs: 2751, ok: true });
     const report = d.report(); const note = report.issues.find(x => x.code === 'TIME_TO_FIRST_CALL')!.message;
-    expect(note).toContain('2.8s latency'); expect(note).toContain('cannot be separated');
+    // Q-2746: the old wording ("longer than the 0s build timing window") was true but unreadable. Same intent, plain words.
+    expect(note).toContain('2.8s model call'); expect(note).toContain("started before this build's timer");
     expect(note).not.toContain('first call itself then took 0s'); expect(note).not.toContain('0s of preparation');
     expect(report.llmCalls?.[0].latencyMs).toBe(2751);
   });

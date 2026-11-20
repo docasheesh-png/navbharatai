@@ -51,7 +51,8 @@ describe('1 — "fell" is a claim about movement', () => {
   });
 
   it('says nothing it cannot know when no slice could be attributed', () => {
-    expect(describeLadderDepth({ depth: null, rungCount: 5, matched: 0, unmatched: 0 }, 2))
+    // Q-2751: "could not be attributed" means output existed with no provider on record — now an explicit field.
+    expect(describeLadderDepth({ depth: null, rungCount: 5, matched: 0, unmatched: 0, unattributedOutput: 3 }, 2))
       .toContain('unknown');
   });
 });

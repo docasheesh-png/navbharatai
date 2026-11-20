@@ -20,6 +20,7 @@
 //
 // PURE — folds in, ranking out. No clock, no I/O.
 
+import { usdAmount } from '../lib/usdAmount';
 import type { FailureCategory } from '../lib/BuildRetrospectiveEngine';
 
 /** One failed build, as the settle path observes it. */
@@ -220,7 +221,7 @@ function headlineFor(causes: RankedCause[], builds: number, usd: number): string
   const top = causes[0];
   if (!top) return `${builds} failed build(s) recorded, with no cause recorded against any of them.`;
   const pct = Math.round(top.shareOfBuilds * 100);
-  const money = usd > 0 ? ` and $${top.usd.toFixed(4)} of the $${usd.toFixed(4)} spent on builds that produced nothing` : '';
+  const money = usd > 0 ? ` and $${usdAmount(top.usd)} of the $${usdAmount(usd)} spent on builds that produced nothing` : '';
   if (top.category === 'unknown') {
     return `The largest group is UNCLASSIFIED — ${top.builds} of ${builds} failures (${pct}%)${money}. `
       + 'That is a statement about our classifier, not about the builds: it needs a pattern for whatever these errors are, '

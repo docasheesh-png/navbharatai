@@ -102890,3 +102890,14 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2958 (#2415): an attached text file is written whole to `attachments/<name>` before the builder starts (the prompt copy is capped at 20,000 characters); the builder is told the path and not to search the disk. The write lives in `writeAttachmentFilesInStep`, because the chat handler is at its TS2563 branch budget (CI caught the first version at 538/537).
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
+
+## 2026-11-20 — Game audit 2 (#4): a browser intervention is not a crash (branch `claude/playtest-honest`)
+- Evidence: failedbr #2477 — a game scoring 86 (answered up/W, left/A, right/D, Space, drag) was gated "the game was played
+  and is not playable (runtime error)" because Chrome logged "Unable to preventDefault inside passive event listener".
+- The playtest's console watcher now records browser interventions apart (`run.interventions`, BROWSER_INTERVENTION);
+  they no longer count as errors (Stable unaffected) and become the SOFT defect GAME_DEFECT_TOUCH_SCROLLS with the fix
+  ({ passive: false } / touch-action: none) — honest (the page can scroll under the thumb), never "not playable".
+- Not duplicated: the 0-fps / "Controls 0" half of item #4 was already fixed by d54d489d (software WebGL; a checker without
+  WebGL no longer blames the game). The "no on-screen controls" (#2435) and start-button (#2475) items stay UNVERIFIED —
+  the reports do not show why the detector missed; no detector change without that evidence.
+- Locked by `tests/aBrowserInterventionIsNotACrash.test.ts` (real browser; reversion: interventions as errors → fails).

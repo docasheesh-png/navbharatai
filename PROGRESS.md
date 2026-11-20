@@ -103162,4 +103162,5 @@ Ledger, older reports (2026-11-20, next PR):
 - #1817, #1814, #1813 — already autopsied by build ID (rows exist).
 - #1811 — no new rows: the gate's one blocker was the provider sentence "The build engine is temporarily unavailable", already filed in the provider phase on main (#2424's fix maps this exact sentence to OUTCOME_ENGINE_UNAVAILABLE); its `Input.active` guess is BR1954's kit-contract class; "Start Game" threw in model-written code, which the explore pass found correctly before the outage ended the build.
 - #1808 — Q-3109: a durable forget of files that were never stored is complete, so the rollback is no longer called incomplete. Its 38 build-loop files after the 85 s render, then a broken app and a restore, are Q-2305 (post-green writes kept unverified; blocked on the admin's decision).
+- #1803 — Q-3110: a system package install (apt, yum, apk, brew…) is answered at the bash door with the npm route; the 300 s foreground `node server.ts` is backgrounded on main, and the ffmpeg core and EADDRINUSE items are existing rows/rules.
 

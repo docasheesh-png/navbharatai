@@ -103106,3 +103106,12 @@ Still open, our own work: Q-3022, Q-3024, Q-3026, Q-3027, Q-3030. Blocked on the
 Also renumbered the queue-retry-drills row from a duplicate Q-3020 to Q-3035: two sessions had both taken Q-3020 on 2026-11-20 (3eea5cae1 and 6942a03ec), so `theQueueIdsAreUnique` was red on `main`.
 - #2030 — Q-3036 a handler that admits it is pretend ("for demo purposes, we'll just show an alert", "…in a real application") is a HIGH authenticity finding; a fake Download button had shipped unnamed. Its "Play Store button" order enabled the deploy tool (PUBLISH_REQUESTED), which is the designed reading.
 - #2005 — no new row: the E2B concurrency cap (Q-2929) refused setup and the fast lane still ran, with all 22 writes refused; since BR1952 a text-only lane is skipped against an unavailable workspace (`FAST_LANE_SKIPPED_SANDBOX`).
+
+## 2026-11-20 — #4385 merged (failedbr #2030; #4380 rows closed; duplicate Q-3020 renumbered)
+
+Closed Q-3036 (ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handler that admits it is pretend is a HIGH authenticity finding.
+
+Ledger, older reports (2026-11-20, next PR):
+- #1994 — no new rows, and my first attempt WITHDRAWN before merge. Reports #1950–#2003 had already been autopsied by another session (the BRxxxx series). BR1994 had recorded both of my findings: the recovered `npm install` still counted on a failed build's gate is **Q-2707**, 🟡 blocked on an owner billing decision (a red gate is what makes a failed build free, so forgiving a recovered failure there can newly charge a build). The YouTube-downloader policy is **Q-1005**, 🟡 blocked on the admin. I had changed `recordCommand` to make exactly the Q-2707 change without that decision; it was reverted in #4387 before merging, and Q-3037/Q-3038 (which never reached `main`) were removed. Lesson: check the `BRxxxx` series for a report number before autopsying it.
+- #1987 — no new row: the workspace was already a Spring Boot project (its saved starter), so a PUBG-style request was built on it without the game kit by design; its `npm install` without a package.json blocker is BR1987, fixed.
+- #1995, #1993, #1986, #1984, #1983 — no new rows: all five are SANDBOX_RECOVERY_UNAVAILABLE ("could not be safely reconnected") within 1–19 s, not the E2B cap (read, not assumed). The refusal's reason has been in the report since #4253. #1995 and #1984 were "Fix this error and continue building the app: <that refusal>", the Fix-with-AI-on-our-own-notice class BR1995 fixed (2026-11-17).

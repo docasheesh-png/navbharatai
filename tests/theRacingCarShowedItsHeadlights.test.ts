@@ -86,7 +86,10 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
       'piano tiles game', 'Build a space invaders game', 'make a game', 'typing race game', 'Create a battleship game',
     ]) {
       expect(gameKitWants3D(p), p).toBe(false);
-      expect(gameKitPlan(p, 'vite-react'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      // Never the 3D layer; a 2D game that moves a body (flappy, pong, space invaders) also gets the 2D kit (2026-11-20).
+      const plan = gameKitPlan(p, 'vite-react');
+      expect(plan.slice(0, 3), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      expect(plan.filter((r) => r !== 'generate_game_2d'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
     }
   });
 
@@ -116,7 +119,10 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
 
   it('a board, puzzle or candy game never gets three.js or the 3D shell (candy autopsy 7da1cdca)', () => {
     for (const p of ['make a sudoku game', 'Ek puzzle game bnao candy wala', 'Create a candy crush game', 'snake game banao', 'a match-3 game with fruits']) {
-      expect(gameKitPlan(p, 'vite-react'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      // Never the 3D layer; a 2D game that moves a body (flappy, pong, space invaders) also gets the 2D kit (2026-11-20).
+      const plan = gameKitPlan(p, 'vite-react');
+      expect(plan.slice(0, 3), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      expect(plan.filter((r) => r !== 'generate_game_2d'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
     }
   });
 

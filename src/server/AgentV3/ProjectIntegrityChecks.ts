@@ -107,6 +107,13 @@ export interface ProjectIntegrityReport {
 const isSourceFile = (path: string): boolean =>
   /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path) && isAppAnalysisPath(path);
 
+/**
+ * A single-file component: script and template in one file (failedbr #2133, an Astro app). The orphan-stylesheet
+ * check read only `.js`/`.ts` imports and `.html` links, so every stylesheet an Astro, Vue or Svelte app wires up
+ * was reported as "imported by nothing".
+ */
+const isComponentFile = (path: string): boolean => /\.(?:astro|vue|svelte|mdx)$/i.test(path) && isAppAnalysisPath(path);
+
 /** Strip line and block comments so a commented-out `.focus()` / import never counts. Best-effort. */
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
@@ -273,13 +280,26 @@ export function findOrphanStylesheets(files: Record<string, string>): OrphanStyl
         const key = stylesheetKey(files, file, m[1], 'config');
         if (key) referencedKeys.add(key);
       }
-    } else if (isSourceFile(file)) {
+    } else if (isSourceFile(file) || isComponentFile(file)) {
       const src = stripComments(raw);
       let m: RegExpExecArray | null;
       importRe.lastIndex = 0;
       while ((m = importRe.exec(src)) !== null) {
         const key = stylesheetKey(files, file, m[1]);
         if (key) referencedKeys.add(key);
+      }
+      // A component file is also a template: an Astro layout links `/styles/global.css` in its <head>.
+      if (isComponentFile(file)) {
+        linkRe.lastIndex = 0;
+        while ((m = linkRe.exec(raw)) !== null) {
+          const key = stylesheetKey(files, file, m[1], 'url');
+          if (key) referencedKeys.add(key);
+        }
+        // …and its <style> block resolves like a module: `@import '../styles/x.css'`, Vue's `<style src="./x.css">`.
+        for (const sm of src.matchAll(/@import\s+(?:url\(\s*)?['"]([^'"]+\.css)['"]|<style\b[^>]*\bsrc\s*=\s*['"]([^'"]+\.css)['"]/gi)) {
+          const key = stylesheetKey(files, file, sm[1] ?? sm[2]);
+          if (key) referencedKeys.add(key);
+        }
       }
     } else if (/\.css$/i.test(file)) {
       for (const path of cssImportsOf(file, stripComments(raw))) referencedKeys.add(path);

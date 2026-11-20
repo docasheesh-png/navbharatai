@@ -19,7 +19,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "942997fec17b1f897c8141236e11817fc7a831f938d5d5d715143e74a7b63036"
   ],
   "src/game/2d/index.ts": [
-    "2f463474edb8a4b6bf5b27dcccb0f30111a4137f3852f9b7613905778db17f48"
+    "2f463474edb8a4b6bf5b27dcccb0f30111a4137f3852f9b7613905778db17f48",
+    "1e1e93db4e480dccdb3556ba24eaf5b87153a4d5c76158caf17e7896500a8e7a"
   ],
   "src/game/2d/parallax.ts": [
     "19c30493cfa17504e090c3a01ae3f4e2a858de1c66aac7c16ce8bc09450f84c2"
@@ -36,6 +37,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/2d/tilemap.ts": [
     "26924854e974b07a4a51c6ab4ec748abb05000e65f910f7634608d2c0d2c95c6"
+  ],
+  "src/game/2d/touch.ts": [
+    "4e3b49aec25886b634d94a982f4ca68a7d2a8a11630784e5b16d92d4366b8b31"
   ],
   "src/game/Game.ts": [
     "3b59382f3daf5d89b64a8be97aa634f7aa5445c831fd2f1f900199690d1f1483",

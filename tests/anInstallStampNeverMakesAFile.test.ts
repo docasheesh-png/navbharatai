@@ -8,8 +8,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, statSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'fs';
-import { tmpdir } from 'os';
+import { writeFileSync, statSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'fs';
+import { makeTempDir } from './helpers/tempDir';
 import { join } from 'path';
 import { STAMP_NODE_MODULES, recipeInstallCommand } from '../src/server/AgentV3/tscCommand';
 
@@ -17,18 +17,18 @@ const run = (cwd: string) => execFileSync('bash', ['-c', STAMP_NODE_MODULES], { 
 
 describe('the stamp, run for real', () => {
   it('a project with no node_modules gets a directory, never a file', () => {
-    const d = mkdtempSync(join(tmpdir(), 'stamp-'));
+    const d = makeTempDir('stamp-');
     run(d);
     expect(statSync(join(d, 'node_modules')).isDirectory()).toBe(true);
   });
   it("#2224's stray 0-byte FILE is replaced by the directory", () => {
-    const d = mkdtempSync(join(tmpdir(), 'stamp-'));
+    const d = makeTempDir('stamp-');
     writeFileSync(join(d, 'node_modules'), '');
     run(d);
     expect(statSync(join(d, 'node_modules')).isDirectory()).toBe(true);
   });
   it('a real node_modules keeps its contents and is stamped newer than package.json', () => {
-    const d = mkdtempSync(join(tmpdir(), 'stamp-'));
+    const d = makeTempDir('stamp-');
     mkdirSync(join(d, 'node_modules', 'react'), { recursive: true });
     writeFileSync(join(d, 'node_modules', 'react', 'index.js'), 'x');
     writeFileSync(join(d, 'package.json'), '{}');

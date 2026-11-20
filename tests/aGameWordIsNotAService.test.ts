@@ -38,3 +38,13 @@ describe('exam and classroom terms are never unknown service names (failedbr #20
   });
 });
 
+
+// …and from failedbr #1888 (a shop's GST bill: "the CGST and SGST split per slab" was flagged).
+describe('Indian tax and invoice terms are never unknown service names (failedbr #1888)', () => {
+  it('the real #1888 request names no unknown service', () => {
+    expect(unknownNamesInRequest('Build a GST billing app for a shop: show the bill with taxable value, the CGST and SGST split per slab, and the final total in rupees.')).toEqual([]);
+  });
+  it.each(['CGST', 'SGST', 'IGST', 'UTGST', 'SAC', 'TCS', 'GSTR', 'ITC', 'IRN'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Build an invoice app that shows the ${w} amount on every bill.`)).toEqual([]);
+  });
+});

@@ -107,6 +107,16 @@ const EDUCATION_TERMS = [
 ];
 for (const t of EDUCATION_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Indian tax and invoice terms: what a billing app prints, never a service to connect to (failedbr #1888, 2026-11-20: a
+ * shop's GST bill asked for "the CGST and SGST split per slab", and the builder was told CGST and SGST were unknown
+ * names it must not build a client for). GST, GSTIN, HSN and TDS were already known; the GST components were not.
+ */
+const TAX_TERMS = [
+  'CGST', 'SGST', 'IGST', 'UTGST', 'SAC', 'TCS', 'GSTR', 'ITC', 'RCM', 'CESS', 'VAT', 'PTEC', 'TAN', 'EWB', 'IRN',
+];
+for (const t of TAX_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

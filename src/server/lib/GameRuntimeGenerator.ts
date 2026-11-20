@@ -2184,6 +2184,371 @@ export function mountMetaToasts(root?: HTMLElement): () => void {
 }
 `;
 
+const SWIPE = `/**
+ * SWIPE (admin 2026-11-20 game-gap audit: an endless runner on a phone had no swipe — every builder hand-rolled a
+ * touchstart/touchend pair, with a passive listener the browser refused to let it cancel, or LEFT and RIGHT backwards).
+ * A swipe here presses the SAME action a key does, so the game reads one thing whatever the player uses:
+ *
+ *   swipe left  → 'left'  (A / ArrowLeft)       swipe up   → 'jump' (Space)
+ *   swipe right → 'right' (D / ArrowRight)      swipe down → 'down' (S / ArrowDown — slide / duck)
+ *
+ *   const off = bindSwipe(container, input);   // once; call off() when the game is torn down
+ *   if (input.wasPressed('left')) runner.left();  // the same line answers ArrowLeft and a swipe
+ *
+ * Pointer events, never touch events: nothing here calls preventDefault on a passive listener, and the container gets
+ * touch-action: none so the page does not scroll under the swipe. A swipe fires the moment the finger has travelled far
+ * enough, not when it lifts — a runner must turn while the thumb is still moving. A press that starts on a button is the
+ * button's, never a swipe.
+ */
+import type { Input } from './input';
+
+export type SwipeDirection = 'left' | 'right' | 'up' | 'down';
+
+export interface SwipeOptions {
+  /** How far a finger travels before it counts as a swipe, in CSS pixels. Default 30. */
+  minDistance?: number;
+  /** A finger slower than this (ms from touch to threshold) is a drag, not a swipe. Default 600. */
+  maxMs?: number;
+  /** Which action each direction presses. Default DEFAULT_SWIPE_ACTIONS. */
+  actions?: Partial<Record<SwipeDirection, string>>;
+  /** Read mouse drags as swipes too — for testing on a desktop. Default false. */
+  mouse?: boolean;
+  /** Called with each swipe, after its action is pressed. */
+  onSwipe?: (direction: SwipeDirection) => void;
+}
+
+export const DEFAULT_SWIPE_ACTIONS: Readonly<Record<SwipeDirection, string>> = { left: 'left', right: 'right', up: 'jump', down: 'down' };
+
+/**
+ * Which way a finger went, or null when it is not a swipe. PURE. Screen y grows DOWNWARD, so a finger moving up the
+ * screen has a NEGATIVE dy and is 'up'. The longer axis wins; a near-diagonal still picks one.
+ */
+export function swipeDirection(dx: number, dy: number, ms: number, minDistance = 30, maxMs = 600): SwipeDirection | null {
+  if (![dx, dy, ms].every(Number.isFinite)) return null;
+  if (Math.hypot(dx, dy) < minDistance || ms > maxMs) return null;
+  return Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down');
+}
+
+/** One tap of an action: wasPressed(action) is true until the next endFrame(), isDown(action) is not held. */
+export function tapAction(input: Pick<Input, 'setVirtualButton'>, action: string): void {
+  input.setVirtualButton(action, true);
+  input.setVirtualButton(action, false);
+}
+
+const now = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+
+/** Listen for swipes on target and press the matching action. Returns the function that stops listening. */
+export function bindSwipe(target: HTMLElement | Window, input: Pick<Input, 'setVirtualButton'>, options: SwipeOptions = {}): () => void {
+  const min = Number.isFinite(options.minDistance) && (options.minDistance as number) > 0 ? (options.minDistance as number) : 30;
+  const maxMs = Number.isFinite(options.maxMs) && (options.maxMs as number) > 0 ? (options.maxMs as number) : 600;
+  const actions = { ...DEFAULT_SWIPE_ACTIONS, ...(options.actions ?? {}) };
+  const live = new Map<number, { x: number; y: number; t: number; done: boolean }>();
+  const el = target as HTMLElement;
+  let oldTouchAction: string | null = null;
+  if (el && el.style && typeof el.style === 'object') { oldTouchAction = el.style.touchAction ?? ''; el.style.touchAction = 'none'; }
+
+  const onDown = (ev: Event): void => {
+    const e = ev as PointerEvent;
+    if (e.pointerType === 'mouse' && !options.mouse) return;
+    const from = e.target as Element | null;
+    if (from && typeof from.closest === 'function' && from.closest('button, a, input, select, textarea, [role="button"]')) return;
+    live.set(e.pointerId, { x: e.clientX, y: e.clientY, t: now(), done: false });
+  };
+  const onMove = (ev: Event): void => {
+    const e = ev as PointerEvent;
+    const s = live.get(e.pointerId);
+    if (!s || s.done) return;
+    const dir = swipeDirection(e.clientX - s.x, e.clientY - s.y, now() - s.t, min, maxMs);
+    if (!dir) {
+      // Too slow: start measuring again from here, so a pause and then a flick still swipes.
+      if (now() - s.t > maxMs) { s.x = e.clientX; s.y = e.clientY; s.t = now(); }
+      return;
+    }
+    s.done = true; // one swipe per finger-down
+    tapAction(input, actions[dir]);
+    try { options.onSwipe?.(dir); } catch (err) { console.error('[swipe]', err); }
+  };
+  const onEnd = (ev: Event): void => {
+    const e = ev as PointerEvent;
+    const s = live.get(e.pointerId);
+    if (s && !s.done) onMove(ev); // a fast flick can lift before its next move event
+    live.delete(e.pointerId);
+  };
+  const pairs: Array<[string, (e: Event) => void]> = [['pointerdown', onDown], ['pointermove', onMove], ['pointerup', onEnd], ['pointercancel', onEnd]];
+  for (const [type, fn] of pairs) target.addEventListener(type, fn);
+  return () => {
+    for (const [type, fn] of pairs) target.removeEventListener(type, fn);
+    live.clear();
+    if (oldTouchAction !== null) el.style.touchAction = oldTouchAction;
+  };
+}
+`;
+
+const RUNNER = `/**
+ * THE ENDLESS RUNNER (admin 2026-11-20 game-gap audit: every runner was hand-written, and the same three bugs kept coming
+ * back — a row of obstacles with no way through, a fast run that jumped clean THROUGH an obstacle between two frames, and
+ * lanes that slid in a different direction from the key). This is the rules of a lane runner, with no drawing in it, so
+ * a 3D runner (z is depth) and a 2D side-scroller (z is across the screen, lanes: 1) share it.
+ *
+ *   const run = new LaneRunner({ lanes: 3, seed: Date.now() });
+ *   // in update(dt), after the input:
+ *   for (const ev of run.update(dt, runnerInput(input))) if (ev.type === 'crash') setStatus('gameover');
+ *   // in render: the player at (run.x, run.y, run.distance); each run.obstacles[i] at (run.laneX(o.lane), 0, o.z)
+ *
+ * WHAT IT GUARANTEES:
+ * - Every row of obstacles leaves at least one lane with no 'block' in it, and the next row is far enough away, at the
+ *   speed when it was laid, to reach that lane from any lane before it arrives. A run is never unwinnable by layout.
+ * - A hit is tested over the WHOLE distance travelled this step, not at the end point, so no speed tunnels through.
+ * - Lane 0 is the LEFT lane: left() lowers the lane, laneX() grows to the right. One convention, everywhere.
+ * - 'block' needs a lane change, 'low' needs a jump, 'high' needs a slide. Coins sit on the ground in a free lane.
+ */
+
+export type RunnerObstacleKind = 'block' | 'low' | 'high';
+export interface RunnerObstacle { id: number; lane: number; z: number; kind: RunnerObstacleKind }
+export interface RunnerCoin { id: number; lane: number; z: number }
+export interface RunnerControls { left?: boolean; right?: boolean; jump?: boolean; slide?: boolean }
+export type RunnerEvent =
+  | { type: 'lane'; lane: number }
+  | { type: 'jump' }
+  | { type: 'slide' }
+  | { type: 'coin'; coin: RunnerCoin; coins: number }
+  | { type: 'crash'; obstacle: RunnerObstacle };
+
+export interface RunnerOptions {
+  /** Number of lanes. Default 3. Use 1 for a one-line side-scroller (jump and slide only). */
+  lanes?: number;
+  /** World units between lane centres. Default 2. */
+  laneWidth?: number;
+  /** World units per second at the start, and the most it ever reaches. Defaults 10 and 30. */
+  startSpeed?: number;
+  maxSpeed?: number;
+  /** Speed gained per second of running. Default 0.25. */
+  acceleration?: number;
+  /** How long a jump lasts and how high it goes. Defaults 0.7 s and 1.6 units. */
+  jumpSeconds?: number;
+  jumpHeight?: number;
+  /** Height a jump must reach to clear a 'low' obstacle. Default 0.6. */
+  lowClearance?: number;
+  /** How long a slide lasts. Default 0.7 s. */
+  slideSeconds?: number;
+  /** Time to move one lane across. Default 0.15 s. */
+  laneChangeSeconds?: number;
+  /** How far ahead rows are laid, in world units. Default 90. */
+  spawnAhead?: number;
+  /** Seconds of reaction the player always gets on top of the lane-change time. Default 0.45. */
+  reactionSeconds?: number;
+  /** Length of an obstacle along the track. Default 1.2. */
+  obstacleDepth?: number;
+  /** A run's layout is decided by this: the same seed gives the same course. Default: random. */
+  seed?: number;
+  /** Chance (0–1) that a row is a coin trail instead of obstacles. Default 0.25. */
+  coinRowChance?: number;
+}
+
+/** A small, fast, seeded random source (mulberry32). PURE given its seed. */
+export function seededRandom(seed: number): () => number {
+  let a = (Math.floor(seed) >>> 0) || 0x9e3779b9;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** The kit's Input (or anything with wasPressed) read as runner controls: arrows/A-D/swipes steer, Space/up/swipe-up jump, down/S/swipe-down slide. */
+export function runnerInput(input: { wasPressed(action: string): boolean }): RunnerControls {
+  return {
+    left: input.wasPressed('left'),
+    right: input.wasPressed('right'),
+    jump: input.wasPressed('jump') || input.wasPressed('up'),
+    slide: input.wasPressed('down'),
+  };
+}
+
+const num = (v: unknown, d: number, min = -Infinity, max = Infinity): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : d;
+
+export class LaneRunner {
+  readonly lanes: number;
+  readonly laneWidth: number;
+  /** The lane the player is in or moving to (0 = left). */
+  lane = 0;
+  /** Sideways position, world units; 0 is the middle of the road. */
+  x = 0;
+  /** Height above the ground, world units. */
+  y = 0;
+  /** How far the player has run; the player stands at z = distance. */
+  distance = 0;
+  speed = 0;
+  coins = 0;
+  alive = true;
+  obstacles: RunnerObstacle[] = [];
+  pickups: RunnerCoin[] = [];
+  private jumpT = -1;
+  private slideT = -1;
+  private nextRowZ = 0;
+  private nextId = 1;
+  private rand: () => number;
+  private readonly o: Required<RunnerOptions>;
+
+  constructor(options: RunnerOptions = {}) {
+    const lanes = Math.round(num(options.lanes, 3, 1, 7));
+    const startSpeed = num(options.startSpeed, 10, 0.1);
+    this.o = {
+      lanes,
+      laneWidth: num(options.laneWidth, 2, 0.01),
+      startSpeed,
+      maxSpeed: Math.max(startSpeed, num(options.maxSpeed, 30, 0.1)),
+      acceleration: num(options.acceleration, 0.25, 0),
+      jumpSeconds: num(options.jumpSeconds, 0.7, 0.05),
+      jumpHeight: num(options.jumpHeight, 1.6, 0.01),
+      lowClearance: num(options.lowClearance, 0.6, 0),
+      slideSeconds: num(options.slideSeconds, 0.7, 0.05),
+      laneChangeSeconds: num(options.laneChangeSeconds, 0.15, 0.01),
+      spawnAhead: num(options.spawnAhead, 90, 10),
+      reactionSeconds: num(options.reactionSeconds, 0.45, 0),
+      obstacleDepth: num(options.obstacleDepth, 1.2, 0.01),
+      seed: num(options.seed, Math.floor(Math.random() * 2 ** 31)),
+      coinRowChance: num(options.coinRowChance, 0.25, 0, 1),
+    };
+    this.lanes = lanes;
+    this.laneWidth = this.o.laneWidth;
+    this.rand = seededRandom(this.o.seed);
+    this.reset();
+  }
+
+  /** Start a fresh run with the same seed (the same course) unless a new one is given. */
+  reset(seed?: number): void {
+    if (typeof seed === 'number' && Number.isFinite(seed)) this.o.seed = seed;
+    this.rand = seededRandom(this.o.seed);
+    this.lane = Math.floor((this.lanes - 1) / 2);
+    this.x = this.laneX(this.lane);
+    this.y = 0; this.distance = 0; this.speed = this.o.startSpeed; this.coins = 0; this.alive = true;
+    this.obstacles = []; this.pickups = []; this.jumpT = -1; this.slideT = -1; this.nextId = 1;
+    // The first row is never on top of the player: a clear run-up of two seconds.
+    this.nextRowZ = this.o.startSpeed * 2;
+    this.fill();
+  }
+
+  /** The sideways position of a lane's centre. Lane 0 is the leftmost. */
+  laneX(lane: number): number { return (lane - (this.lanes - 1) / 2) * this.laneWidth; }
+  get jumping(): boolean { return this.jumpT >= 0; }
+  get sliding(): boolean { return this.slideT >= 0; }
+  /** Distance plus ten per coin. */
+  get score(): number { return Math.floor(this.distance) + this.coins * 10; }
+
+  left(): boolean { return this.changeLane(-1); }
+  right(): boolean { return this.changeLane(1); }
+  jump(): boolean {
+    if (!this.alive || this.jumping) return false;
+    this.slideT = -1; this.jumpT = 0; return true;
+  }
+  /** A slide in mid-air drops the player to the ground first. */
+  slide(): boolean {
+    if (!this.alive) return false;
+    this.jumpT = -1; this.y = 0; this.slideT = 0; return true;
+  }
+
+  /** Advance dt seconds. Returns what happened this step, in order. Nothing moves once the player has crashed. */
+  update(dt: number, controls: RunnerControls = {}): RunnerEvent[] {
+    const out: RunnerEvent[] = [];
+    if (!this.alive || !Number.isFinite(dt) || dt <= 0) return out;
+    dt = Math.min(dt, 0.25);
+    if (controls.left && this.left()) out.push({ type: 'lane', lane: this.lane });
+    if (controls.right && this.right()) out.push({ type: 'lane', lane: this.lane });
+    if (controls.jump && this.jump()) out.push({ type: 'jump' });
+    if (controls.slide && this.slide()) out.push({ type: 'slide' });
+
+    // Sideways: a fixed rate, so one lane always takes laneChangeSeconds.
+    const target = this.laneX(this.lane);
+    const step = (this.laneWidth / this.o.laneChangeSeconds) * dt;
+    this.x = Math.abs(target - this.x) <= step ? target : this.x + Math.sign(target - this.x) * step;
+
+    if (this.jumpT >= 0) {
+      this.jumpT += dt;
+      if (this.jumpT >= this.o.jumpSeconds) { this.jumpT = -1; this.y = 0; }
+      else this.y = this.o.jumpHeight * Math.sin(Math.PI * (this.jumpT / this.o.jumpSeconds));
+    }
+    if (this.slideT >= 0) { this.slideT += dt; if (this.slideT >= this.o.slideSeconds) this.slideT = -1; }
+
+    const from = this.distance;
+    this.speed = Math.min(this.o.maxSpeed, this.speed + this.o.acceleration * dt);
+    this.distance += this.speed * dt;
+    const to = this.distance;
+    const half = this.o.obstacleDepth / 2;
+    // The lane the body is in NOW: during a change it is whichever lane centre is nearer.
+    const bodyLane = Math.round(this.x / this.laneWidth + (this.lanes - 1) / 2);
+
+    for (const ob of this.obstacles) {
+      if (ob.lane !== bodyLane) continue;
+      if (ob.z + half < from || ob.z - half > to) continue; // swept over the whole step
+      if (ob.kind === 'low' && this.y >= this.o.lowClearance) continue;
+      if (ob.kind === 'high' && this.sliding) continue;
+      this.alive = false;
+      out.push({ type: 'crash', obstacle: ob });
+      return out;
+    }
+    const kept: RunnerCoin[] = [];
+    for (const c of this.pickups) {
+      if (c.lane === bodyLane && c.z <= to + 0.5 && c.z >= from - 0.5 && this.y < this.o.jumpHeight * 0.75) {
+        this.coins += 1;
+        out.push({ type: 'coin', coin: c, coins: this.coins });
+      } else kept.push(c);
+    }
+    this.pickups = kept;
+    const behind = this.distance - 10;
+    this.obstacles = this.obstacles.filter((ob) => ob.z > behind);
+    this.pickups = this.pickups.filter((c) => c.z > behind);
+    this.fill();
+    return out;
+  }
+
+  private changeLane(dir: -1 | 1): boolean {
+    if (!this.alive) return false;
+    const next = this.lane + dir;
+    if (next < 0 || next >= this.lanes) return false;
+    this.lane = next;
+    return true;
+  }
+
+  /**
+   * Lay rows up to spawnAhead. Each row keeps a free lane, and the gap to the next row is the time to cross every lane
+   * plus a reaction margin, at the speed the player will have reached by then — so the free lane is always reachable.
+   */
+  private fill(): void {
+    while (this.nextRowZ < this.distance + this.o.spawnAhead) {
+      const z = this.nextRowZ;
+      const arrival = Math.min(this.o.maxSpeed, this.speed + this.o.acceleration * Math.max(0, (z - this.distance) / Math.max(this.speed, 0.1)));
+      const free = Math.floor(this.rand() * this.lanes);
+      if (this.rand() < this.o.coinRowChance) {
+        for (let i = 0; i < 5; i++) this.pickups.push({ id: this.nextId++, lane: free, z: z + i * 1.5 });
+      } else {
+        for (let l = 0; l < this.lanes; l++) {
+          if (l === free) continue;
+          const r = this.rand();
+          if (r < 0.55) this.obstacles.push({ id: this.nextId++, lane: l, z, kind: 'block' });
+          else if (r < 0.8) this.obstacles.push({ id: this.nextId++, lane: l, z, kind: 'low' });
+          else this.obstacles.push({ id: this.nextId++, lane: l, z, kind: 'high' });
+        }
+        if (this.lanes === 1) {
+          // The only lane is the free lane, so the loop laid nothing: one 'low' or 'high' here, never a 'block'.
+          this.obstacles.push({ id: this.nextId++, lane: 0, z, kind: this.rand() < 0.6 ? 'low' : 'high' });
+        } else if (this.rand() < 0.5) {
+          this.pickups.push({ id: this.nextId++, lane: free, z });
+        }
+      }
+      // Worst case: the free lane is at the far side of the road from where the player stands.
+      const crossings = Math.max(1, this.lanes - 1);
+      const needSeconds = crossings * this.o.laneChangeSeconds + this.o.reactionSeconds + Math.max(this.o.jumpSeconds, this.o.slideSeconds) * 0.5;
+      const gap = Math.max(arrival * needSeconds + this.o.obstacleDepth, 6) * (1.2 + this.rand() * 0.6);
+      this.nextRowZ = z + gap;
+    }
+  }
+}
+`;
+
 const KEYBINDS = `/**
  * KEY REBINDING (admin 2026-11-20 game-gap audit: the keys were fixed — a left-handed player, an AZERTY keyboard or a
  * player who wanted Jump on J had no way to change them). The player picks a key for each action in Settings → Controls,
@@ -2337,12 +2702,15 @@ const FILES: Record<string, string> = {
   'src/game/core/loot.ts': LOOT,
   'src/game/core/leaderboard.ts': LEADERBOARD,
   'src/game/core/crafting.ts': CRAFTING,
+  // Swipe input and the lane-runner rules — 2026-11-20 game-gap audit.
+  'src/game/core/swipe.ts': SWIPE,
+  'src/game/core/runner.ts': RUNNER,
   // Saved key bindings and the change-a-key capture — 2026-11-20 game-gap audit.
   'src/game/core/keybinds.ts': KEYBINDS,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'keybinds'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner', 'keybinds'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -2378,6 +2746,8 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts'] || files['src/game/core/leaderboard.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    // swipe.ts presses actions on the Input class.
+    if (files['src/game/core/swipe.ts']) files['src/game/core/input.ts'] = FILES['src/game/core/input.ts'];
     // keybinds.ts reads the default actions from input.ts.
     if (files['src/game/core/keybinds.ts']) files['src/game/core/input.ts'] = FILES['src/game/core/input.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
@@ -2421,6 +2791,12 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
       '- The game-over screen shows summaryLines(meta.lastSummary) — first line is the hook (NEW BEST, or\n' +
       '  "Only 12 more to beat your best") — with a big, already-focused "Play again" that restarts in one\n' +
       '  tap (and on Enter/Space/R). A slow or buried restart is where players stop.\n' +
-      '- Never add loot boxes, paid randomness, fake timers or guilt messages. Reward playing and improving.',
+      '- Never add loot boxes, paid randomness, fake timers or guilt messages. Reward playing and improving.\n' +
+      'ENDLESS RUNNER / SWIPE GAMES (core/runner.ts + core/swipe.ts — never hand-write lanes, obstacle rows or touchstart):\n' +
+      "- bindSwipe(container, input) once: a swipe presses the SAME actions as the keys (left/right, up → 'jump', down → 'down').\n" +
+      '- const run = new LaneRunner({ lanes: 3 }); in update: for (const ev of run.update(dt, runnerInput(input))) react to\n' +
+      "  'crash' (game over), 'coin', 'jump', 'slide'. Draw the player at (run.x, run.y, run.distance) and each obstacle at\n" +
+      '  (run.laneX(o.lane), 0, o.z). Every row leaves a reachable free lane; hits are swept, so no speed tunnels through.\n' +
+      '- A side-scroller (one line, jump and duck) is new LaneRunner({ lanes: 1 }) with z drawn across the screen.',
   };
 }

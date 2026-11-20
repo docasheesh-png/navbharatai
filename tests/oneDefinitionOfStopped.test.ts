@@ -23,7 +23,7 @@ describe('the model\'s stop_build is the same stop as the button', () => {
     const at = route.indexOf('dispatcher.setStopBuild(');
     expect(at).toBeGreaterThan(0);
     const body = route.slice(at, at + 2500);
-    const recorded = body.indexOf("code: 'USER_STOPPED_BUILD'");
+    const recorded = body.indexOf("code: platformComposed ? ENGINE_STOP_CODE : 'USER_STOPPED_BUILD'"); // failedbr #1334
     const aborted = body.indexOf("'user-stop'"); // the typed stop also passes its request time (owner 2026-10-18)
     expect(recorded).toBeGreaterThan(0);
     expect(aborted).toBeGreaterThan(recorded);

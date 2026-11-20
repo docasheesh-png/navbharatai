@@ -561,7 +561,7 @@ import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEn
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
-import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
+import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped, ENGINE_STOP_CODE } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
@@ -17275,7 +17275,8 @@ async function noteBuildOutcome(
           // net rather than the first.
           const platformComposed = isPlatformFixRequest(prompt);
           buildDiag.record({
-            phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
+            // failedbr #1334: an engine stop is filed under its own code, never under one named for the user.
+            phase: 'build', severity: 'info', code: platformComposed ? ENGINE_STOP_CODE : 'USER_STOPPED_BUILD', autoResolved: true,
             message: platformComposed
               ? 'The build was stopped by the engine while working on a request NavBharatAI itself composed — not by the user.'
               : 'The user asked for this build to stop, and it was stopped.',
@@ -20781,7 +20782,7 @@ async function noteBuildOutcome(
           // so the record must not say the user did it (autopsy fdd59ef8).
           const platformComposed = isPlatformFixRequest(prompt);
           buildDiag.record({
-            phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
+            phase: 'build', severity: 'info', code: platformComposed ? ENGINE_STOP_CODE : 'USER_STOPPED_BUILD', autoResolved: true,
             message: platformComposed
               ? 'The build was stopped while working on a request NavBharatAI itself composed — not by the user.'
               : 'The user asked for this build to stop, and it was stopped.',

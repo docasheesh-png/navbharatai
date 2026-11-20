@@ -4213,8 +4213,16 @@ export function outcomeCodeOf(
  */
 export function buildWasStopped(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
-  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD');
+  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD' || i?.code === ENGINE_STOP_CODE);
 }
+
+/**
+ * The code for a stop the ENGINE made while working on a request NavBharatAI itself composed (failedbr #1334, 2026-11-20).
+ * It used to be filed as USER_STOPPED_BUILD with the message "…not by the user" — a code that contradicted its own line,
+ * and a reader (`stoppedByUser`) that had to tell the two apart by matching our prose. `buildWasStopped` counts both;
+ * `stoppedByUser` counts only the user's. Legacy records keep their message check below.
+ */
+export const ENGINE_STOP_CODE = 'ENGINE_STOPPED_BUILD' as const;
 
 export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;

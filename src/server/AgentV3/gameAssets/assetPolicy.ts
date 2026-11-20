@@ -64,8 +64,14 @@ function records(value: unknown, max: number): Record<string, any>[] {
  * geometry and archives rather than invoking untrusted codecs. PNG and bounded baseline/progressive JPEG textures, dimensions
  * checked before the browser decodes them. Full scene parsing remains part of the delivery test.
  */
-export function validateGlb(bytes: Uint8Array): ValidatedModel {
-  if (bytes.byteLength < 28 || bytes.byteLength > ASSET_LIMITS.bytes) fail('size');
+export type GlbLimits = { readonly [K in keyof typeof ASSET_LIMITS]: number };
+/**
+ * `limits` defaults to the library's; a USER's own model (userModels.ts) passes its own larger ones. `allowedExtensions`
+ * names glTF extensions that only change how a material looks (never geometry decoding, never an external reference):
+ * `uri` stays refused for everyone, and so does any extension not on the list.
+ */
+export function validateGlb(bytes: Uint8Array, limits: GlbLimits = ASSET_LIMITS, allowedExtensions: readonly string[] = []): ValidatedModel {
+  if (bytes.byteLength < 28 || bytes.byteLength > limits.bytes) fail('size');
   const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (b.readUInt32LE(0) !== 0x46546c67 || b.readUInt32LE(4) !== 2 || b.readUInt32LE(8) !== b.length) fail('header');
   const jsonLength = b.readUInt32LE(12);
@@ -84,7 +90,12 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
     const value = pending.pop();
     if (typeof value === 'number' && !Number.isFinite(value)) fail('non-finite number');
     if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) {
-      if (['uri', 'extensions', 'extensionsUsed', 'extensionsRequired', '__proto__', 'constructor', 'prototype'].includes(key)) fail('references or extensions');
+      if (['uri', '__proto__', 'constructor', 'prototype'].includes(key)) fail('references or extensions');
+      if (key === 'extensions') {
+        if (!child || typeof child !== 'object' || Object.keys(child).some(name => !allowedExtensions.includes(name))) fail('references or extensions');
+      } else if (key === 'extensionsUsed' || key === 'extensionsRequired') {
+        if (!Array.isArray(child) || child.some(name => !allowedExtensions.includes(name))) fail('references or extensions');
+      }
       pending.push(child);
     }
   }
@@ -108,7 +119,7 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
     const stride = v.byteStride ?? componentBytes * components;
     if (stride < componentBytes * components || integer(a.byteOffset ?? 0, v.byteLength) + (count - 1) * stride + componentBytes * components > v.byteLength) fail('accessor bounds');
   }
-  const meshes = records(doc.meshes, ASSET_LIMITS.meshes); let triangles = 0; let verticesChecked = 0;
+  const meshes = records(doc.meshes, limits.meshes); let triangles = 0; let verticesChecked = 0;
   const meshTriangles = new Map<Record<string, any>, number>();
   for (const mesh of meshes) for (const p of records(mesh.primitives, 64)) {
     if ((p.mode ?? 4) !== 4) fail('non-triangle primitive');
@@ -121,7 +132,7 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
     triangles += count / 3;
     meshTriangles.set(mesh, (meshTriangles.get(mesh) ?? 0) + count / 3);
     verticesChecked += position.count;
-    if (triangles > ASSET_LIMITS.triangles || verticesChecked > ASSET_LIMITS.triangles * 3) fail('geometry work budget');
+    if (triangles > limits.triangles || verticesChecked > limits.triangles * 3) fail('geometry work budget');
     const pv = views[position.bufferView];
     const start = (pv.byteOffset ?? 0) + (position.byteOffset ?? 0);
     for (let i = 0; i < position.count; i++) for (let axis = 0; axis < 3; axis++) {
@@ -140,8 +151,8 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
     }
 
   }
-  if (!triangles || triangles > ASSET_LIMITS.triangles) fail('triangle budget');
-  const nodes = records(doc.nodes, ASSET_LIMITS.nodes);
+  if (!triangles || triangles > limits.triangles) fail('triangle budget');
+  const nodes = records(doc.nodes, limits.nodes);
   const parents = new Set<number>();
   let instancedTriangles = 0;
   for (let i = 0; i < nodes.length; i++) {
@@ -149,7 +160,7 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
     if (n.mesh !== undefined) {
       const index = integer(n.mesh, meshes.length - 1);
       instancedTriangles += meshTriangles.get(meshes[index]) ?? 0;
-      if (instancedTriangles > ASSET_LIMITS.triangles) fail('instanced triangle budget');
+      if (instancedTriangles > limits.triangles) fail('instanced triangle budget');
     }
     if (n.children !== undefined && !Array.isArray(n.children)) fail('children');
     for (const child of n.children ?? []) {
@@ -170,11 +181,11 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
     const v = views[integer(img.bufferView, views.length - 1)];
     const data = bin.subarray(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength);
     const { width: w, height: h } = textureDimensions(data, img.mimeType);
-    if (!w || !h || w * h > ASSET_LIMITS.texturePixels) fail('texture budget');
+    if (!w || !h || w * h > limits.texturePixels) fail('texture budget');
     pixels += w * h;
   }
-  if (pixels > ASSET_LIMITS.totalTexturePixels) fail('total texture budget');
-  const animations = records(doc.animations, ASSET_LIMITS.animations).map(a => typeof a.name === 'string' ? a.name.slice(0, 128) : '');
+  if (pixels > limits.totalTexturePixels) fail('total texture budget');
+  const animations = records(doc.animations, limits.animations).map(a => typeof a.name === 'string' ? a.name.slice(0, 128) : '');
   if (!instancedTriangles) fail('no renderable mesh nodes');
   return { bytes: bytes.byteLength, triangles: instancedTriangles, animations };
 }

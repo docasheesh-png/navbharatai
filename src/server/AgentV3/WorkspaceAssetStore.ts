@@ -351,7 +351,8 @@ export async function restoreWorkspaceAssets(sink: BinaryFileSink, workspaceId: 
 
 /** Read back one indexed asset with a byte ceiling, for delivery-critical L3 acknowledgements. */
 export async function readWorkspaceAssetBytes(workspaceId: string, path: string, maxBytes: number): Promise<Buffer | null> {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 5 * 1024 * 1024) return null;
+  // A user's own model (userModels.ts) is read back at up to 8 MB; the store's own spill ceiling bounds it.
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > IMPORT_LIMITS.maxEmbeddedMediaBytes) return null;
   const db = getDb(); if (!db) return null;
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);

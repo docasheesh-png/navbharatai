@@ -1,3 +1,4 @@
+import { usdAmount } from '../lib/usdAmount';
 import { bindReplyLanguage } from './replyLanguageBinding';
 import { elideEmbeddedMedia } from '../../lib/embeddedMedia';
 import type { PlatformVoice } from './platformVoice';
@@ -2047,7 +2048,7 @@ export class AgentRunner {
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.
         if (maxBudgetUsd !== undefined && billed() >= maxBudgetUsd) {
-          const summary = `Budget reached ($${billed().toFixed(4)} of $${maxBudgetUsd.toFixed(2)}). Your work is saved — continue to keep building.`;
+          const summary = `Budget reached ($${usdAmount(billed())} of $${maxBudgetUsd.toFixed(2)}). Your work is saved — continue to keep building.`;
           await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
           // T1-budget-ux: a budget stop is a resumable PAUSE, not a failure — flag it so the client offers

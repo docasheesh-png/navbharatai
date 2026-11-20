@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { usdAmount } from '../lib/usdAmount';
 import { isReadOnlyInspection } from './shellInspection';
 import { isNpmInstallWithoutPackageJson, isMissingStartToolchain, type DevServerLaunchInput } from './devServerLaunchPlan';
 import { startBandLabel } from './RequestAnalyser';
@@ -4681,7 +4682,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       // A capped debit says so: the bill above is NOT what the wallet paid (lib/chargeRecord.ts).
       const capped = r.billing.partialDebit && typeof r.billing.walletDebitedInr === 'number'
         ? ` · PARTIAL DEBIT: wallet paid ₹${r.billing.walletDebitedInr.toFixed(2)}, ₹${(r.billing.absorbedInr ?? 0).toFixed(2)} absorbed by the overdraft floor` : '';
-      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}${capped}`);
+      lines.push(`Charged to user: ${inr}($${usdAmount(r.billing.billedUsd)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}${capped}`);
     } else if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
       lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }

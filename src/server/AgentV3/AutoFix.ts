@@ -499,6 +499,18 @@ export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerify
  *
  * WHITE-LABEL: never a provider or model name. PURE.
  */
+/**
+ * The admin line for a verdict the RED gate corrected (failedbr #1052, #1043, 2026-11-20). "The build reported success" was
+ * printed on a build that had hit its 25-minute cap: the runner returns ok when files were written before the time ran out,
+ * so the sentence was literally true and misleading. A timed-out run says that it ran out of time. PURE.
+ */
+export function releaseGateRedOutcomeMessage(blockers: number, timedOut: boolean): string {
+  const opening = timedOut
+    ? 'The build ran out of time with files written, and the release gate was RED'
+    : 'The build reported success while the release gate was RED';
+  return `${opening} with ${blockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`;
+}
+
 export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null): string {
   const n = Math.max(1, blockerCount);
   const one = n === 1;

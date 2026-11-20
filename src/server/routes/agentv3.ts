@@ -585,7 +585,7 @@ import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, la
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, runtimeCanBeVerified, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, releaseGateRedOutcomeMessage, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, runtimeCanBeVerified, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { locatedErrorText } from '../AgentV3/runtimeErrorSite';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
@@ -25695,7 +25695,7 @@ async function noteBuildOutcome(
           // null here, which is how the attempt to update it failed to compile.
           buildDiag.record({
             phase: 'readiness', severity: 'error', code: 'OUTCOME_RELEASE_GATE_RED',
-            message: `The build reported success while the release gate was RED with ${gateBlockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`,
+            message: releaseGateRedOutcomeMessage(gateBlockers, (settled as { timedOut?: boolean }).timedOut === true),
             autoResolved: false,
           });
           }

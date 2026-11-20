@@ -571,3 +571,18 @@ export function governanceNote(risk: CommandRisk): string {
   const label = risk.level === 'high' ? 'HIGH-risk' : 'medium-risk';
   return `⚠️ Governance: this command is ${label} — ${risk.reasons.join('; ')}. Recorded to the decision-audit trail.`;
 }
+
+/**
+ * 🔑 WHAT A BLOCKED `.env` READ WAS ASKING (failedbr #2271, 2026-11-20). The builder ran `cat .env … && cat .env.example`
+ * twice to learn which keys the app had; both were refused ("reads a .env secrets file") with no answer, and the turns
+ * were spent rediscovering it. The refusal stays, and the VALUES stay unseen. The block now answers the question the
+ * command was asking: the NAMES of the keys this app has saved (never a value), and that `.env.example` can be read on
+ * its own. '' for any other block. PURE.
+ */
+export function envReadBlockedRemedy(reasons: readonly string[], savedKeyNames: readonly string[]): string {
+  if (!reasons.some((r) => /\.env secrets file/.test(r))) return '';
+  const names = [...new Set(savedKeyNames.filter((n) => /^[A-Z_][A-Z0-9_]*$/i.test(n)))].sort();
+  return `\n\nThe keys this app has saved (names only, values are never shown): ${names.length ? names.join(', ') : 'none yet'}. `
+    + 'A key that is not listed has not been given — show the honest "add your key" notice for it. '
+    + 'To see the template, read .env.example on its own (cat .env.example).';
+}

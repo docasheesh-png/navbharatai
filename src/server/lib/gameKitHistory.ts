@@ -570,7 +570,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "7d8613f9d3a9409db20d532c5b8d00680ab716b06bdad995266d20af28db88b0",
     "9ed85b5c584048f50b94701dbf2aa7a7cec2516e478122d77cdad0dae21eabc2",
     "2871c2d0b8d02e1f9adcef7aabdfe4624d71cd2b28f1c9341c5c1a81c52fe513",
-    "6dac5b20d3be57d8952df9896aed138a2ddf62c73531b69d0bfd8651c110b0ab"
+    "6dac5b20d3be57d8952df9896aed138a2ddf62c73531b69d0bfd8651c110b0ab",
+    "94152bbea352e9ad6187e970552601e373e8b596c3bd9cd17c41b8d56a6c19fe"
   ],
   "src/game/world2d/index.ts": [
     "b294ff67e14198e9b23c99563f6c683d2626b416ca5c64b828dd37baec015291"

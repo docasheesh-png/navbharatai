@@ -723,7 +723,7 @@ import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, 
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler, firstPaintEvents, streamingFirstPaintEnabled } from '../AgentV3/streamingFirstPaint';
@@ -14192,7 +14192,8 @@ async function noteBuildOutcome(
           Object.keys(applied.write).forEach((path) => noteWrite?.(path));
         },
         persist: async (files) => (await mergeWorkspaceFiles(workspaceId, files)).status === 'saved',
-        forget: async (paths) => (await removeWorkspaceFiles(workspaceId, paths)) > 0,
+        // failedbr #1808: "none of these was stored" is a completed forget, not a failed one.
+        forget: async (paths) => (await removeWorkspaceFilesResult(workspaceId, paths)).ok,
       }));
       void sourcePublication.track(restoring.then((outcome) => snapshotRestoreComplete(plan, outcome) ? 'saved' : 'failed')).catch(() => {});
       return restoring;

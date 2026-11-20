@@ -58,6 +58,16 @@ const PATTERNS: Readonly<Record<DevicePower, readonly RegExp[]>> = {
     /\b(?:sms|call\s+log|call\s+history)\s+(?:padh|padhe|padhna|padho)\b/i,
     /\b(?:other\s+apps'?|phone'?s)\s+notifications\b/i,
   ],
+  // failedbr #2255 — a MULTIPLIER or BOOST of the connection / memory / battery. Never a speed TEST, a usage
+  // monitor or "a fast app": the user must ask for the network or the device itself to become faster/bigger.
+  'boost-device-limits': [
+    /\b(?:internet|net|wi-?fi|network|data|connection)\s+(?:ki\s+|ka\s+|ke\s+)?speed\s+(?:ko\s+)?\d+\s*(?:x|guna|gunaa|times)\b/i,
+    /\b\d+\s*(?:x|guna|gunaa|times)\s+(?:faster|tez|tej|fast)\b[^.]{0,40}\b(?:internet|net|wi-?fi|network|connection)\b/i,
+    /\b(?:boost(?:s|ing)?|increas(?:e|es|ing)|doubl(?:e|es|ing)|speed(?:s|ing)?\s+up|badha\w*|tez\s+kar\w*|tej\s+kar\w*)\s+(?:my\s+|the\s+|mera\s+|meri\s+|mere\s+)?(?:internet|wi-?fi|network|net)(?:\s+speed)?\b/i,
+    /\b(?:internet|net|wi-?fi|network)\s+(?:ki\s+|ka\s+)?speed\s+(?:ko\s+)?(?:boost|increase|double|badha\w*|tez|tej)\b/i,
+    /\b(?:ram|battery|storage|memory)\s+(?:booster|boost|badha\w*|increase|double)\b/i,
+    /\b(?:internet|net|wi-?fi|speed|ram|battery)\s+booster\b/i,
+  ],
   'listen-while-closed': [
     /\b(?:listen|hear|wake|voice|sun)\w*\b[^.]{0,60}\b(?:app\s+is\s+closed|app\s+band|in\s+the\s+background|background\s+(?:me|mein)|screen\s+(?:is\s+)?off)\b/i,
     /\b(?:app\s+is\s+closed|app\s+band\s+\w+|in\s+the\s+background|background\s+(?:me|mein))\b[^.]{0,60}\b(?:listen|hear|wake\s+word|sun(?:e|na|ta|ti))\w*\b/i,
@@ -140,7 +150,9 @@ export const DEVICE_POWERS_RULE =
   'with the exact plugin you are given for it, make the web preview show a clear "works in the phone ' +
   'app" note instead of a dead button, and say plainly in your summary, in the user\'s language, which ' +
   'features need the phone app and that they get it from More → Download APK after connecting GitHub. ' +
-  'Four things NO app built here can do, in the web app or the phone app: work on the lock screen; ' +
+  'Five things NO app built here can do, in the web app or the phone app: work on the lock screen; ' +
   'read SMS, call history or other apps\' notifications; control other apps or change the phone\'s ' +
-  'settings (Wi-Fi, Bluetooth, mobile data); listen for the user\'s voice while the app is closed. ' +
+  'settings (Wi-Fi, Bluetooth, mobile data); listen for the user\'s voice while the app is closed; make the ' +
+  'internet faster or add phone memory or battery (an app can only MEASURE them — offer a real speed test or ' +
+  'usage monitor instead, never a "booster" with made-up numbers). ' +
   'Never imitate one with a look-alike screen, never promise it, and say so plainly.';

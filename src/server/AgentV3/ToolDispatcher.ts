@@ -390,6 +390,7 @@ import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { generateWorld2D, world2dEnabled, WORLD2D_DIR } from '../lib/world2d/World2DGenerator';
 import { world2dIntent } from './world2dIntent';
 import { gameKitWants3D, gameTurnRequest } from './gameKitSeed';
+import { forgeNotUsedFor, forgeNotUsedWarning, type MissingObject } from './forgeForMissing';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
@@ -1223,6 +1224,9 @@ export class ToolDispatcher {
 
   /** This build is a race whose course the request did not describe: check its code streams the endless track. */
   requireEndlessRaceCourse(): void { this._endlessRaceCourse = true; }
+  /** The objects the library and kit lack, which the builder was told to make with the Forge (forgeForMissing.ts). */
+  private _forgeSubjects: MissingObject[] = [];
+  requireForgeSubjects(missing: readonly MissingObject[]): void { this._forgeSubjects = [...missing]; }
 
   /**
    * Files the USER put in the workspace, and the request this build answers — so a shell delete of one
@@ -2305,7 +2309,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report))));
+        return await this._warnIfForgeSkipped(await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report)))));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2368,6 +2372,24 @@ export class ToolDispatcher {
    * A 3D game that builds its own renderer and never mounts the kit's shell (shellBypass.ts) — it loses the touch controls,
    * menus, HUD and music. A WARNING: the game may still run on a desktop. Fail-open on its own trouble.
    */
+  /** Advisory: an object the builder was asked to make with the Forge has no Forge object (forgeForMissing.ts). Never blocks. */
+  private async _warnIfForgeSkipped(report: ReadinessReport): Promise<ReadinessReport> {
+    if (this._forgeSubjects.length === 0) return report;
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'forge-used-list');
+      const objects = listed.map((p) => p.replace(/^\.?\//, '')).filter((p) => p.startsWith(OBJECTS_DIR) && /\.[tj]sx?$/.test(p));
+      if (objects.length > RACE_SCAN_MAX_FILES) return report;
+      const files = new Map<string, string>();
+      for (const p of objects) {
+        try { files.set(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'forge-used-read')); }
+        catch { return report; } // an unreadable file is not evidence the Forge was skipped
+      }
+      const skipped = forgeNotUsedFor(this._forgeSubjects, files);
+      if (skipped.length) return { ...report, warnings: [...report.warnings, forgeNotUsedWarning(skipped)] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
+
   private async _warnIfShellSkipped(report: ReadinessReport): Promise<ReadinessReport> {
     try {
       const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'shell-bypass-list');

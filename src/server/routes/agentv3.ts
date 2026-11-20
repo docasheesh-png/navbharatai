@@ -698,7 +698,7 @@ import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLane
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, engineTimeDominated, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
 import type { InitialLaneDecline } from '../AgentV3/initialLaneDecline';
-import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
+import { assessBuildInput, shouldAskWhatToBuild, divertsToChat, steerForUnbuildable } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -11643,8 +11643,7 @@ async function noteBuildOutcome(
      */
     const inputCheck = assessBuildInput(prompt);
     if (
-      !inputCheck.buildable
-      && (inputCheck.reason === 'link-only' || inputCheck.reason === 'empty')
+      divertsToChat(inputCheck) // empty, link-only, or an image it points at that is not attached (Q-3214)
       && intent !== 'chat'
       && intent !== 'edit_existing'
       // An IMPORT turn carries its content outside the prompt, so a bare URL there is not "nothing".
@@ -12179,6 +12178,7 @@ async function noteBuildOutcome(
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
                 + (answerPictureRequest ? deliverableSteer(prompt) : '')
+                + (inputCheck.buildable ? '' : steerForUnbuildable(inputCheck.reason, rawAttachments.length))
                 + (answerThenOffer ? BUILD_OFFER_STEER : '')
                 + (askFramework ? frameworkQuestionSteer(askFramework) : '')
                 + (ambiguousBuildAsk && !askFramework && !answerThenOffer && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest

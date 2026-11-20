@@ -199,6 +199,19 @@ const RULES: Rule[] = [
     // a credential AND where to add it is the honest "not available" state, not filler.
     ignore: (_m, line) => namesAKeyAndWhereToAddIt(line),
   },
+  {
+    // 🔴 A BUTTON THAT ADMITS IT IS PRETEND (failedbr #2030, 2026-11-08). An image-search app shipped a Download button
+    // whose handler was `// In a real app, you would download the actual file / For demo purposes, we'll just show an
+    // alert` → `alert("… will be downloaded in a real application")`. No rule here or in fakeFeatureScan named it, so a
+    // fake button shipped and the next turn had to find it. The admission itself is the signal: a STRING shown to the
+    // user saying the action happens "in a real app", or a comment saying "for demo purposes, we'll just …". A comment
+    // that only mentions a real app ("in a real app you'd also rate-limit this") is not flagged, and the honest red
+    // notice NO_FAKE_FEATURE_RULE asks for (a key's name and where to add it) is never flagged.
+    kind: 'demo-stand-in',
+    severity: 'high',
+    re: /["'`][^"'`\n]{0,160}\bin a real (?:app|application|implementation|version)\b[^"'`\n]{0,160}["'`]|["'`][^"'`\n]{0,160}\bfor demo(?:nstration)? purposes\b[^"'`\n]{0,160}["'`]|(?:\/\/|\/\*)\s*for demo(?:nstration)? purposes,?\s+(?:we(?:'ll| will)?\s+|i(?:'ll| will)?\s+)?(?:just|only|simply)\b/i,
+    ignore: (_m, line) => namesAKeyAndWhereToAddIt(line),
+  },
   // ── medium: standard TODO/FIXME/HACK comment markers ─────────────────────
   {
     kind: 'todo-marker',

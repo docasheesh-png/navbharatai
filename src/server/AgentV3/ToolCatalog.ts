@@ -2611,7 +2611,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
-              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable. Default = all; imports are pulled in automatically. '
+              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable, city. Default = all; imports are pulled in automatically. '
+              + 'city = createCity({ blocksX, blocksZ, style }): a whole grid of city blocks — streets, crossings, pavements, shops, apartments, offices, houses, parks; city.spawn, city.route(from, to) for left-lane AI routes, city.lotsOf(kind) for mission targets. '
               + 'breakable = makeBreakable(crate, { health }): the player\'s shots and swings break it into debris (breakableTargets() + hitBreakables(hits)); '
               + 'buildings = createEnterableHouse(): opt-in interiors, stairs and hinged doors; legacy createHouse() stays scenery. '
               + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '

@@ -102890,3 +102890,11 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2958 (#2415): an attached text file is written whole to `attachments/<name>` before the builder starts (the prompt copy is capped at 20,000 characters); the builder is told the path and not to search the disk. The write lives in `writeAttachmentFilesInStep`, because the chat handler is at its TS2563 branch budget (CI caught the first version at 538/537).
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
+
+## 2026-11-20 — Game audit 2 (#3): the 2D kit carries the touch controls (branch `claude/game-2d-touch`)
+- Evidence: failedbr #2435 (Mario) grepped the kit's Input for touch, found none, hand-rolled buttons and scored Phone 0. The
+  touch joystick and buttons lived only behind the 3D shell.
+- `src/game/2d/touch.ts`: mountTouchControls2D(stage, input, options) — the SAME TouchControls the 3D shell uses (joystick,
+  Jump + Attack by default, no camera drag), driving the same Input as the keyboard; the recipe layer adder brings
+  ui/touchControls.ts with it. The kit's instructions and compiled example show it; AppKnowledgeBase updated.
+- Locked by `tests/a2DGameIsPlayableOnAPhone.test.ts` (real modules on a fake page; reversion: no 2D defaults → fails).

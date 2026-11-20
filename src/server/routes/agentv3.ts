@@ -454,7 +454,7 @@ import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gameAssets/assetSeed';
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
-import { gameLibraryPlanningHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
+import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
@@ -19524,7 +19524,8 @@ async function noteBuildOutcome(
                     kitAssetsMs = Date.now() - assetsStartedAt;
                     kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
-                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt)].filter(Boolean).join('\n');
+                    // The menu only when the library is on for this account (status 'off' = gated): choosing by meaning needs it.
+                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt), assets.status !== 'off' ? gameLibraryMenuHandoff() : ''].filter(Boolean).join('\n');
                   } catch { /* The procedural kit remains the floor. */ }
                 }
                 // Recorded sounds (soundSeed.ts): only when the kit laid down the audio module they replace voices in.

@@ -1,6 +1,6 @@
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isZTestAccount } from '../../lib/zTestAccount';
-import type { AssetRequirement } from './assetPolicy';
+import { candidateMatches, type AssetRequirement } from './assetPolicy';
 import { CATALOGUE_MAX_ENTRIES, type ReviewedAsset } from './providers';
 
 /**
@@ -194,4 +194,22 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });
+}
+
+/**
+ * One add_library_models entry → a catalogue requirement. The name may be a subject or any word the plan knows ("gaon
+ * wala" → villager). An animation role is kept only when some model of that subject plays it: a role no model has would
+ * otherwise make the subject itself unavailable (the model is still wanted; it just stands). The dropped role is returned
+ * so the tool can say so instead of silently ignoring it.
+ */
+export function libraryRequirement(name: string, animation: unknown, catalogue: readonly ReviewedAsset[]): { requirement: AssetRequirement; droppedRole?: string } | null {
+  const served = new Set(catalogue.slice(0, CATALOGUE_MAX_ENTRIES).flatMap(c => c.subjects));
+  const wanted = name.trim().toLowerCase().slice(0, 64);
+  const subject = served.has(wanted) ? wanted : gameAssetRequirements(wanted, catalogue).map(r => r.subject).find(s => served.has(s));
+  if (!subject) return null;
+  const role = typeof animation === 'string' ? animation.trim().toLowerCase().slice(0, 32) : '';
+  if (!role) return { requirement: { subject } };
+  return catalogue.some(c => candidateMatches(c, { subject, animation: role }))
+    ? { requirement: { subject, animation: role } }
+    : { requirement: { subject }, droppedRole: role };
 }

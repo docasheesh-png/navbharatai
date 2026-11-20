@@ -1743,8 +1743,15 @@ export class BuildDiagnostics {
     return { split: false, text: `${s(lat)}s` };
   }
 
+  /**
+   * Q-2746 (autopsy 05eb30ba): a pre-build check (the scope classification, an admission call) is recorded after this
+   * timer starts but RAN before it, so its latency is longer than the whole window. It is not the build's first call:
+   * it gets a plain note, and the build's own first call — when it comes — replaces that note with the real split.
+   */
+  private firstCallTimed = false;
+  private preBuildCallNote?: { issue: BuildIssue; latencyMs: number };
   private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number, completedAt = this.now()): void {
-    if (this.llmCalls.length > 0) return; // only the first
+    if (this.firstCallTimed) return; // only the first call that ran inside this build's timer
     const elapsedMs = Math.max(0, completedAt - this.startedAt);
     // Only compatible timing windows can be subtracted: a longer measured call may have been
     // backfilled from before this timer. Neither a negative prep time nor a fabricated zero is valid.
@@ -1758,9 +1765,25 @@ export class BuildDiagnostics {
     // the misattribution autopsies dukaan and a38c6fef already paid for once.
     const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
     const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs, fallbackMs);
-    const message = windowMismatch
-      ? `The first recorded call reports ${Math.round(latencyMs! / 100) / 10}s latency, longer than the ${Math.round(elapsedMs / 100) / 10}s build timing window. Preparation and call timing cannot be separated from these timestamps; no zero-duration call or setup attribution is established.`
-      : lat === undefined
+    if (windowMismatch) {
+      if (this.preBuildCallNote) return; // one note; the build's own first call replaces it
+      const issue: BuildIssue = {
+        phase: 'plan', severity: 'info', code: 'TIME_TO_FIRST_CALL', ts: completedAt, autoResolved: true,
+        message: `A ${Math.round(latencyMs! / 100) / 10}s model call (a pre-build check such as the scope classification) started before this build's timer, so it is not counted as setup time. No call made by the build itself was recorded, so its preparation time was not measured.`,
+      };
+      this.issues.push(issue);
+      this.preBuildCallNote = { issue, latencyMs: latencyMs! };
+      return;
+    }
+    this.firstCallTimed = true;
+    if (this.preBuildCallNote) {
+      const at = this.issues.indexOf(this.preBuildCallNote.issue);
+      if (at >= 0) this.issues.splice(at, 1);
+    }
+    const preBuildClause = this.preBuildCallNote
+      ? ` (An earlier ${Math.round(this.preBuildCallNote.latencyMs / 100) / 10}s pre-build check started before this timer and is not counted.)`
+      : '';
+    const message = lat === undefined
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
       ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
@@ -1841,7 +1864,7 @@ export class BuildDiagnostics {
       severity: seconds >= 60 ? 'warning' : 'info',
       code: 'TIME_TO_FIRST_CALL',
       ts: completedAt,
-      message: covered,
+      message: covered + preBuildClause,
       autoResolved: seconds < 60,
     });
   }

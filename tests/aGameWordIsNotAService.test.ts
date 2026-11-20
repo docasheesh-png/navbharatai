@@ -48,3 +48,13 @@ describe('Indian tax and invoice terms are never unknown service names (failedbr
     expect(unknownNamesInRequest(`Build an invoice app that shows the ${w} amount on every bill.`)).toEqual([]);
   });
 });
+
+// …and from failedbr #1533 ("CORS" read as a typo) and #1441 ("15db SNR"), plus the family a sweep found beside them.
+describe('engineering vocabulary is never an unknown service name (failedbr #1533, #1441)', () => {
+  it('the real #1441 request names no unknown service', () => {
+    expect(unknownNamesInRequest('Create an app that can do speech separation  in background noise upto 15db SNR real time using audioflinger')).toEqual([]);
+  });
+  it.each(['CORS', 'SNR', 'CSRF', 'OAUTH', 'SSO', 'MFA', 'RBAC', 'ORM', 'SSR', 'WASM', 'DSP', 'FFT', 'NOSQL', 'BLE', 'RFID', 'LIDAR', 'SSH', 'UDP', 'WCAG', 'CTR', 'MRR', 'UUID'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Build an app with ${w} support for my shop.`)).toEqual([]);
+  });
+});

@@ -117,6 +117,22 @@ const TAX_TERMS = [
 ];
 for (const t of TAX_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Engineering vocabulary: what an app is built WITH, never a service to connect to (failedbr #1533, #1441, 2026-11-20).
+ * An NCERT study app's spec said "CORS" and the builder was told it was an unknown name ("I read CORS as a typo for
+ * COACT"); a speech-separation request said "15db SNR" and SNR was flagged too. A sweep of everyday engineering
+ * acronyms found 66 more in the same state — security, protocols, architecture, audio/DSP, hardware and growth
+ * metrics — fixed here as one family.
+ */
+const ENGINEERING_TERMS = [
+  'CORS', 'SNR', 'WEBSOCKET', 'WEBSOCKETS', 'SSE', 'CDN', 'TLS', 'CSP', 'XSS', 'CSRF', 'SQLI', 'OAUTH', 'SSO', 'SAML',
+  'MFA', 'TOTP', 'RBAC', 'ACL', 'CLI', 'ORM', 'MVC', 'MVVM', 'SSR', 'SSG', 'WASM', 'SCSS', 'DSP', 'FFT', 'PCM', 'RMS',
+  'DBMS', 'RDBMS', 'NOSQL', 'ETL', 'TSV', 'VAD', 'NER', 'YOLO', 'BLE', 'RFID', 'GNSS', 'LIDAR', 'IMU', 'HDD', 'HDMI',
+  'VPS', 'UDP', 'IMAP', 'SFTP', 'SSH', 'MMS', 'NFT', 'NFTS', 'AML', 'WCAG', 'ARIA', 'SEM', 'CTR', 'CPC', 'CPM', 'MRR',
+  'ARR', 'SLA', 'BOM', 'WMS', 'TMS', 'SNMP', 'UTF', 'UUID', 'UUIDS',
+];
+for (const t of ENGINEERING_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

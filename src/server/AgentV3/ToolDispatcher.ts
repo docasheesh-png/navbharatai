@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
 import { systemPackageInstallRefusal } from './systemPackageInstall';
+import { startsExpressServer, spaFallbackWriteNote } from './SpaFallbackAnalysis';
 import { PARTIAL_CONTENT_KEY, PendingWrites, resumeTruncatedEnabled, truncatedWriteNotice } from './reliability/resumeWrite';
 import { recordingActuator } from './recordedWrites';
 import { markPreviewGaveUp, previewGaveUp } from './previewGiveUp';
@@ -5063,7 +5064,7 @@ export class ToolDispatcher {
         }
       } catch { /* a note is best-effort */ }
     }
-    const style = await this.styleWriteNotes(files);
+    const style = (await this.styleWriteNotes(files)) + (await this.spaFallbackWriteNoteFor(files));
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
     // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
     // The platform wires those screens itself FIRST (autopsy ca99778e): the note alone lost three times, and a
@@ -5320,6 +5321,28 @@ export class ToolDispatcher {
    * that touches a stylesheet or a page pays for the read; anything unreadable is simply left out, so the worst case
    * is a note that says less, never one that says something false about a file it did not see.
    */
+  /** failedbr #1803 / #1801: a server written without the SPA catch-all is told so at the write (SpaFallbackAnalysis). */
+  private async spaFallbackWriteNoteFor(files: Record<string, string>): Promise<string> {
+    try {
+      if (!Object.entries(files).some(([p, c]) => startsExpressServer(p, c))) return '';
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'spa-note-listing'); }
+      catch { return ''; }
+      const wanted = listing
+        .map((p) => String(p).replace(/^\.?\/+/, ''))
+        .filter((p) => !(p in files) && /^src\/.*\.(tsx|jsx|ts|js)$/.test(p) && !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p))
+        .slice(0, ToolDispatcher.STYLE_NOTE_MAX_READS);
+      const project: Record<string, string> = {};
+      await Promise.all(wanted.map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'spa-note-read');
+          if (typeof raw === 'string') project[p] = raw;
+        } catch { /* unreadable — left out */ }
+      }));
+      return spaFallbackWriteNote(files, project);
+    } catch { return ''; }
+  }
+
   private async styleWriteNotes(files: Record<string, string>): Promise<string> {
     try {
       if (!writeQualityEnabled()) return '';

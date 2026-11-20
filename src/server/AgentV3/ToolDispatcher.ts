@@ -81,7 +81,7 @@ import { resolveObjectSpec, renderSpec, memoryCache } from '../lib/objectSpecPro
 import { aiRouter } from '../lib/aiRouter';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
-import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
+import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision, isDuplicateDeclarationError } from './SyntaxCheck';
 import { htmlEditVerdict, isHtmlPage } from './editIntegrity';
 import { checkPreviewCompiles, previewCompileApplicability, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
@@ -2737,6 +2737,32 @@ export class ToolDispatcher {
     refuse(verdict.message);
   }
 
+  /**
+   * 🔴 ESBUILD ACCEPTS IT, THE PREVIEW DOES NOT (failedbr #1926, 2026-11-08 — "health detector"). `import { AuditLog }
+   * from '../types'` (an interface, imported without `type`) beside `const AuditLog = () => …`: tsc and esbuild drop
+   * the type import and compile it, the in-browser preview's Babel cannot know the import is only a type and throws
+   * "Duplicate declaration", so the build ended RED on PREVIEW_COMPILE_DIVERGENCE after 25 minutes. The write-time guard
+   * parsed with esbuild only. For a file the in-browser preview compiles, the preview's own Babel check now runs too —
+   * refusing ONLY the duplicate-declaration class (Babel rejects other valid TypeScript, such as decorators, and those
+   * must not block a write), and only when the old content did not already have it.
+   */
+  private previewDuplicateRejection(path: string, oldContent: string, newContent: string): string | null {
+    if (!/\.(?:tsx?|jsx?)$/.test(path) || /\.d\.ts$/.test(path)) return null;
+    if (!previewCompileApplicability(this.framework).applicable) return null;
+    const first = (content: string) => checkPreviewCompiles({ [path]: content }).errors[0];
+    const now = first(newContent);
+    if (!now || !isDuplicateDeclarationError({ path, message: now.message })) return null;
+    const before = oldContent ? first(oldContent) : undefined;
+    if (before && isDuplicateDeclarationError({ path, message: before.message })) return null; // mid-removal: never trap it
+    const name = /Duplicate declaration "([^"]+)"/.exec(now.message)?.[1];
+    try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-PREVIEW-DUPLICATE] refused write to ${path}: ${now.message.slice(0, 120)}`); } catch { /* audit best-effort */ }
+    return `WRITE REJECTED — ${path} would not compile in the live preview: ${now.message.split('\n')[0]}. It was NOT saved. `
+      + (name
+        ? `"${name}" is declared in this file AND imported. If the import is only a type, write \`import type { ${name} }\` (or rename the import, e.g. \`import type { ${name} as ${name}Data }\`); otherwise rename the local declaration. `
+        : 'A name is both imported and declared in this file; rename one of them, or import a type with `import type`. ')
+      + 'TypeScript accepts this, but the in-browser preview\'s compiler does not, and the user would see a broken preview.';
+  }
+
   private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
     try {
       // Independent of the syntax parse guard (and of its kill switch): leftover apply-patch /
@@ -2752,7 +2778,7 @@ export class ToolDispatcher {
       }
       if (!writeParseGuardEnabled()) return null;
       const errNew = await firstSyntaxError(path, newContent);
-      if (!errNew) return null; // parses clean → nothing to block (skips the second parse in the common case)
+      if (!errNew) return this.previewDuplicateRejection(path, oldContent, newContent);
       const errOld = await firstSyntaxError(path, oldContent);
       const rejection = parseGuardDecision(path, errOld, errNew, true);
       if (rejection) {

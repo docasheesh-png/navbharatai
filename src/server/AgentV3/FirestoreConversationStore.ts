@@ -299,6 +299,17 @@ export class FirestoreConversationStore implements ConversationStore {
     });
   }
 
+  async listIdsByWorkspace(userId: string, workspaceId: string, limit = 5): Promise<string[]> {
+    if (!isEnumerableUserId(userId) || !workspaceId) return [];
+    // Equality on two fields only: Firestore serves this from its automatic single-field indexes (no
+    // composite index to deploy). The owner filter is part of the query, so another user's record is
+    // never even read. Ids only.
+    const snap = await this.db.collection(COLLECTION)
+      .where('userId', '==', userId).where('workspaceId', '==', workspaceId)
+      .select().limit(Math.max(1, Math.min(limit, 20))).get();
+    return snap.docs.map((d) => d.id);
+  }
+
   async listByUser(userId: string, limit = 50): Promise<ConversationRecord[]> {
     if (!isEnumerableUserId(userId)) return []; // never enumerate the shared-anon bucket (Phase 3.1)
     const cap = Math.max(0, limit);

@@ -56,7 +56,7 @@ import { groundScene } from './three/surfaces';
 import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
-import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
+import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
@@ -388,6 +388,10 @@ export class Game {
     this.input.axis = () => { const a = readAxis(); this.playerAxes.add(a); notePlayerAxis(a); return a; };
     // A drifting car pours tyre smoke where its rear wheels are (driveVehicle reports it).
     this.disposers.push(onVehicleDrift((at) => this.particles.burst('smoke', at.x, at.y, at.z, 0.35)));
+    // The PLAYER's crash is felt (sparks, crunch, jolt, buzz — the feedback table); a rival's crash is not the player's.
+    this.disposers.push(onVehicleCrash((at, vehicle, impact) => {
+      if (vehicle === this.playerVehicle) events.emit('VEHICLE_CRASHED', { position: at, impact });
+    }));
     // And which action buttons the GAME reads (see gameReadsButtons). Same answers as before.
     const buttonActions = new Set(DEFAULT_TOUCH_BUTTONS.map((b) => b.action));
     for (const m of ['isDown', 'wasPressed', 'wasReleased'] as const) {

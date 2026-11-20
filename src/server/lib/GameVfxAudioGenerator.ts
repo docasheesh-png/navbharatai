@@ -846,6 +846,8 @@ export const FEEDBACK: Partial<Record<GameEvent, FeedbackSpec>> = {
   WEAPON_RELOADED: { sound: 'reload' },
   MELEE_SWING:    { sound: 'swing' },
   MELEE_HIT:      { sound: 'hit',      trauma: 0.2,  hitStop: 0.05, haptic: 25 },
+  // The player's car hits a wall or another car: sparks at the bumper, the crunch, a jolt and a buzz (2026-11-20).
+  VEHICLE_CRASHED: { particle: 'sparks', sound: 'impact',  trauma: 0.4,  hitStop: 0.04, haptic: [40, 20, 40] },
   // The rewards that bring a player back are HEARD as well as shown (meta.ts) — on the UI bus.
   COMBO_MILESTONE: { sound: 'combo',   category: 'ui' },
   NEW_BEST:       { sound: 'newbest',  category: 'ui' },

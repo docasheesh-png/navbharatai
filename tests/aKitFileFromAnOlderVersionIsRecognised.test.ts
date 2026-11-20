@@ -137,7 +137,7 @@ describe('the dispatcher brings an untouched older kit file up to date, and neve
     const res = String((await d.dispatch({ id: 't1', name: 'generate_game_shell', input: {} }, 'architect')).content);
     expect(act.files.get(OBJECTS)).toBe(edited);
     expect(res).toContain('KIT VERSION MISMATCH');
-    expect(res).toContain(`src/game/Game.ts imports watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift from ${OBJECTS}`);
+    expect(res).toContain(`src/game/Game.ts imports watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash from ${OBJECTS}`);
     expect(res).toContain(`${CAMERA} imports vehicleAt, isVehicle from ${OBJECTS}`);
     expect(res).toContain('it is not a version the kit ever wrote (somebody changed it), so it was NOT replaced');
   });

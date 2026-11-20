@@ -654,7 +654,7 @@ import { isBudgetEndedError } from '../AgentV3/turnDeadline';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
-import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
+import { buildBuildInstallCommand, buildPreKillPortCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets, loadUserVaultForBuild, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
@@ -792,6 +792,7 @@ import { attachmentFilesForProject, attachmentFilesNote, writeAttachmentFilesInS
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
+import { missingExportClaims, staleExportClaims } from '../AgentV3/staleModuleExport';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
 import { failedAttemptCostVerdict } from '../AI/SurplusRegistry/failedAttemptCost';
@@ -23991,6 +23992,7 @@ async function noteBuildOutcome(
         // on its own so a server that refuses to stay up cannot loop.
         const MAX_SERVER_REVIVALS = 2;
         let serverRevivals = 0;
+        let staleModuleRestarted = false; // Q-2732: one cache-clearing restart when the console's missing export is on disk
         let consoleRecheckSpent = false; // one free second look per loop (recheckBeforeRepair)
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
           let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence };
@@ -24319,6 +24321,35 @@ async function noteBuildOutcome(
             });
             attempt -= 1; // a process restart is not a repair attempt
             continue;
+          }
+          // Q-2732 / Q-2242 (staleModuleExport.ts): the browser says a project file lacks an export the file on disk has —
+          // a stale dev-server transform, not a code bug. Restart once with Vite's cache cleared before paying for a repair.
+          if (!staleModuleRestarted) {
+            const claims = missingExportClaims(consoleErrs).slice(0, 6);
+            const onDisk: Record<string, string> = {};
+            for (const c of claims) {
+              try {
+                const text = await withTimeout(actuator.readFile(workspaceId, c.path), 5_000, 'stale-export-read');
+                if (typeof text === 'string') onDisk[c.path] = text;
+              } catch { /* unreadable — not proven stale, so the repair path keeps it */ }
+            }
+            const staleClaims = staleExportClaims(claims, (path) => onDisk[path] ?? null);
+            if (!staleModuleRestarted && staleClaims.length > 0) {
+              staleModuleRestarted = true;
+              events.emit({ type: 'narration', agent: 'architect', text: '🔄 The preview was serving an old copy of a file — restarting it with a fresh cache…', ts: Date.now() });
+              try {
+                const port = previewUrlPort(lastPreviewUrl) ?? 5173;
+                await withTimeout(actuator.runCommand(workspaceId, `${buildPreKillPortCommand(port)}; rm -rf node_modules/.vite`), 20_000, 'stale-module-stop');
+                await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'stale-module-restart');
+              } catch { /* the re-check below is the real verdict */ }
+              buildDiag.record({
+                phase: 'preview', severity: 'info', code: 'PREVIEW_STALE_MODULE_RESTARTED', autoResolved: true,
+                message: `The browser said ${staleClaims.length} file(s) lacked an export that the file on disk has, so the dev server was serving a stale copy; it was restarted with its cache cleared — no code was changed and no model call was made.`,
+                detail: staleClaims.map((c) => `${c.path} exports ${c.name}`).join('; '),
+              });
+              attempt -= 1; // a process restart is not a repair attempt
+              continue;
+            }
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
           // WE COULD NOT SEE THE APP — that is not the same as seeing it broken, and a repair pass here

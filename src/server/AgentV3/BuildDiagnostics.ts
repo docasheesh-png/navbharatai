@@ -2368,7 +2368,10 @@ export class BuildDiagnostics {
         const problemWord = PROBLEM_WORD_RE.test(tForMatch);
         // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
         // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.
-        const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch);
+        // A QUOTED SYMPTOM IS NAMED, NOT REPORTED (failedbr #1334, 2026-11-20): "I'll start by looking at … where this
+        // "Failed to fetch" error comes from." was filed as an ERROR twice — the only failure verb was inside the user's own
+        // quoted error message. Quoted spans are left out of the failure test; an unquoted "failed" is still a failure.
+        const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(withoutQuotedSpans(tForMatch));
         // REMEDIATION INTENT is progress, not a failure (PaisaTrack "fix all error" autopsy 2026-07-21:
         // "Now I'll fix both errors: … Fix the TypeScript type error" was recorded severity=error on a
         // SUCCESSFUL build, inflating the count to "1 error" under an "All Errors Fixed!" summary). When a
@@ -4155,6 +4158,11 @@ function judgeEtaPromise(
     ? 'the build landed INSIDE that band'
     : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;
   return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}${waitNote}.` };
+}
+
+/** The text with its double-quoted, curly-quoted and back-ticked spans removed — what the writer says, not what it quotes. PURE. */
+export function withoutQuotedSpans(text: string): string {
+  return String(text ?? '').replace(/"[^"\n]{1,200}"|“[^”\n]{1,200}”|`[^`\n]{1,200}`/g, ' ');
 }
 
 /**

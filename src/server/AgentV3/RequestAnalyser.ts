@@ -52,6 +52,17 @@ export function startBandLabel(tier: StartTier | string | null | undefined): str
   }
 }
 
+/** The band's key back from its report label (Q-2748): reports carry the label only; telemetry still groups by key. */
+export function startTierFromBandLabel(label: string | null | undefined): StartTier | null {
+  switch (String(label ?? '').trim()) {
+    case 'cheapest band': return 'gemini';
+    case 'light band': return 'haiku';
+    case 'standard band': return 'sonnet';
+    case 'heaviest band': return 'opus';
+    default: return null;
+  }
+}
+
 export type TaskType =
   | 'chat'
   /**

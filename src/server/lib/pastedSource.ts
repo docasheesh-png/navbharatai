@@ -158,6 +158,22 @@ function clean(s: string | undefined | null): string | null {
   return t.length >= 2 && /\p{L}/u.test(t) ? t : null;
 }
 
+/**
+ * A button whose label is a symbol or emoji — `<button onclick="move(-1)">⬅️</button>`. 🔴 failedbr #2379 (f0313035): a driving
+ * game's four controls were ⬅️ ⚡ 🛑 ➡️; `clean` needs a letter, so all four were dropped, the brief said "keep its 0
+ * button(s)" and never told the builder to keep them. Named by its aria-label or title when it has one, otherwise by the
+ * symbol plus its click handler, so "⬅️ (move(-1))" and "➡️ (move(1))" stay distinct. PURE.
+ */
+function symbolControl(attrs: string | undefined, inner: string | undefined): string | null {
+  const a = String(attrs ?? '');
+  const named = /\b(?:aria-label|title)=["']([^"']{2,60})["']/i.exec(a)?.[1];
+  if (named && /\p{L}/u.test(named)) return named.trim();
+  const sym = decodeEntities(String(inner ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  if (!sym || sym.length > 12 || !/[\p{Extended_Pictographic}\p{S}]/u.test(sym)) return null;
+  const handler = /\bonclick=["']\s*([^"']{1,40}?)\s*;?\s*["']/i.exec(a)?.[1];
+  return handler ? `${sym} (${handler})` : sym;
+}
+
 function uniq(list: Array<string | null>, max: number): string[] {
   const out: string[] = [];
   for (const v of list) if (v && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
@@ -180,7 +196,7 @@ export function pastedAppFacts(prompt: string | null | undefined): PastedAppFact
   const heading = clean(/<h1\b[^>]*>([\s\S]*?)<\/h1\s*>/i.exec(html)?.[1]);
   const description = clean(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i.exec(html)?.[1]);
   const controls = uniq(
-    [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button\s*>/gi)].map((m) => clean(m[1])),
+    [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button\s*>/gi)].map((m) => clean(m[2]) ?? symbolControl(m[1], m[2])),
     24,
   );
   const labels = [...html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label\s*>/gi)].map((m) => clean(m[1]));

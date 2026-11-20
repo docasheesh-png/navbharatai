@@ -1024,24 +1024,58 @@ export function conversationAccess(
 }
 
 /**
- * Candidate conversation-store ids for a history entry the client asked to open. A `v3_<sessionId>`
- * entry (from chat_sessions) has no server record under that literal id — but the SAME session's
- * server transcript exists under its workspace id (#837: conversationId = workspaceId), which is
- * `agentv3-{uid}-{sessionId}` — or `agentv3-anon-{sessionId}` when the build ran identity-degraded.
- * Trying these in order lets a v3_ entry open its FULL server transcript instead of falling back to
- * the (possibly corrupted/empty) chat_sessions copy. Pure + exported for testing.
+ * Candidate conversation-store ids for a chat the client asked to open (or rename, duplicate, purge).
+ *
+ * ONE session can have its transcript under FOUR ids, depending on how the record was made:
+ *   • `agentv3-{uid}-{sid}` — a normal build (#837: conversationId = workspaceId);
+ *   • `{sid}`              — a DUPLICATED app (its record is keyed by its own new session id);
+ *   • `v3_{sid}`           — the legacy history id;
+ *   • `agentv3-anon-{sid}` — a build that ran identity-degraded.
+ *
+ * 🔴 THE CLASS THIS CLOSES (2026-11-20, admin: an old game would not open — "server refused the transcript
+ * (HTTP 404: Conversation not found.) for id v3_95865209-…"). This list and
+ * `conversationIdCandidatesForWorkspace` were two copies of the same knowledge, and they had drifted: the
+ * build path knew a duplicated app's record sits under the bare session id, the reopen path did not, so
+ * opening such an app from its `v3_` history row tried three ids that do not exist and answered 404. Now the
+ * session part is derived by ONE helper whatever form the id arrives in (`v3_{sid}` or a workspace id), so
+ * the open, rename, duplicate and purge routes all try the same set. Ownership is still decided per record
+ * by `conversationAccess`, so a longer list never widens who may read what. A bare id (no recognisable
+ * session) resolves only to itself. Pure + exported for testing.
  */
 export function candidateConversationIds(id: string, verifiedUid: string | null): string[] {
+  const sid = sessionIdOfConversationId(id, verifiedUid);
+  if (!sid) return [id];
   const out = [id];
-  if (id.startsWith('v3_')) {
-    const sid = id.slice(3);
-    if (sid) {
-      const verifiedWs = workspaceIdFor(verifiedUid, sid);
-      if (verifiedWs) out.push(verifiedWs);
-      out.push(`${ANON_WORKSPACE_PREFIX}${sid}`);
-    }
+  const own = workspaceIdFor(verifiedUid, sid);
+  if (own) out.push(...conversationIdCandidatesForWorkspace(own, verifiedUid));
+  out.push(...conversationIdCandidatesForWorkspace(`${ANON_WORKSPACE_PREFIX}${sid}`, verifiedUid));
+  return [...new Set(out)];
+}
+
+/**
+ * `candidateConversationIds`, plus — as the last resort — the ids of this user's records for the session's
+ * workspace found by a query, so a record saved under a RANDOM id (a build from before conversationId =
+ * workspaceId) still opens, renames, pins, duplicates and unsends. The point-read ids come first; the query
+ * runs only when the id names a session of this verified user. Never throws: a failed query just adds nothing.
+ */
+export async function conversationLookupIds(
+  store: Pick<ConversationStore, 'listIdsByWorkspace'>, id: string, verifiedUid: string | null,
+): Promise<string[]> {
+  const ids = candidateConversationIds(id, verifiedUid);
+  const sid = sessionIdOfConversationId(id, verifiedUid);
+  const ws = sid ? workspaceIdFor(verifiedUid, sid) : null;
+  if (!ws || !verifiedUid || !store.listIdsByWorkspace) return ids;
+  const legacy = await store.listIdsByWorkspace(verifiedUid, ws).catch(() => [] as string[]);
+  return [...new Set([...ids, ...legacy])];
+}
+
+/** The session id inside a `v3_{sid}` id or one of THIS user's (or the anon bucket's) workspace ids; else null. */
+function sessionIdOfConversationId(id: string, verifiedUid: string | null): string | null {
+  if (id.startsWith('v3_')) return id.length > 3 ? id.slice(3) : null;
+  for (const prefix of [workspacePrefixFor(verifiedUid), ANON_WORKSPACE_PREFIX]) {
+    if (prefix && id.startsWith(prefix) && id.length > prefix.length) return id.slice(prefix.length);
   }
-  return out;
+  return null;
 }
 
 /**
@@ -4636,7 +4670,7 @@ export function registerAgentV3Routes(app: Express): void {
       // opening such an entry restores the REAL transcript instead of an empty local copy.
       const store = getConversationStore();
       let rec: Awaited<ReturnType<typeof store.get>> = null;
-      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
+      for (const cid of await conversationLookupIds(getConversationStore(), routeParam(req.params.id), userId)) {
         // This is THE reopen path — the one consumer that renders the evidence layer, so it alone
         // asks for the timeline (hot-path get() calls elsewhere skip those reads).
         rec = await store.get(cid, { includeTimeline: true }).catch(() => null);
@@ -4695,7 +4729,7 @@ export function registerAgentV3Routes(app: Express): void {
       // and reappear on the next list (the "ghost row" bug).
       let removed = false;
       let forbidden = false;
-      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
+      for (const cid of await conversationLookupIds(getConversationStore(), routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
@@ -4759,7 +4793,7 @@ export function registerAgentV3Routes(app: Express): void {
       const store = getConversationStore();
       let updated = false;
       let forbidden = false;
-      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
+      for (const cid of await conversationLookupIds(getConversationStore(), routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok' && rec) {
@@ -4828,7 +4862,7 @@ export function registerAgentV3Routes(app: Express): void {
     const store = getConversationStore();
     let source: Awaited<ReturnType<typeof store.get>> = null;
     let forbidden = false;
-    for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
+    for (const cid of await conversationLookupIds(getConversationStore(), routeParam(req.params.id), userId)) {
       const rec = await store.get(cid).catch(() => null);
       const access = conversationAccess(rec, userId);
       if (access === 'ok' && rec) { source = rec; break; }
@@ -4888,7 +4922,7 @@ export function registerAgentV3Routes(app: Express): void {
       // the loop below, so carrying the two fields is what keeps the rule readable at the call sites.
       let renamed: { id: string; repoName?: string; deployRepoName?: string } | null = null;
       let forbidden = false;
-      for (const cid of candidateConversationIds(routeParam(req.params.id), userId)) {
+      for (const cid of await conversationLookupIds(getConversationStore(), routeParam(req.params.id), userId)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access !== 'ok' || !rec) {
@@ -7234,7 +7268,7 @@ async function noteBuildOutcome(
       // The transcript + memory live under the workspace id (conversationId === workspaceId, #837); a
       // legacy v3_<sid> id resolves to its real agentv3-<uid>-<sid> / anon workspace. Purge every
       // accessible match so no copy of the unsent message survives.
-      for (const cid of candidateConversationIds(workspaceId, verifiedUid)) {
+      for (const cid of await conversationLookupIds(getConversationStore(), workspaceId, verifiedUid)) {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, verifiedUid);
         if (access === 'forbidden') { forbidden = true; continue; }

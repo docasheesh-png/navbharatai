@@ -122,6 +122,13 @@ export function localImportCandidates(fromFile: string, rawSpec: string, files: 
       base,
       ...CODE_EXTS.map((e) => base + e),
       ...CODE_EXTS.map((e) => path.posix.join(base, 'index' + e)),
+      // 🔴 A DECLARATION FILE RESOLVES TOO (failedbr #2399, b821cef6, 2026-11-16). `import type { PdfDoc } from
+      // '../types/pdf'` with `src/types/pdf.d.ts` on disk — tsc passed, the app rendered, and this resolver (which never
+      // tried `.d.ts`) reported "3 unresolved import(s) — the build will fail". That false blocker forced an
+      // unfinished-resume and the user pressed Stop during it. TypeScript resolves `.d.ts`; a real VALUE import from one
+      // still fails tsc and the production build, which judge it — so this can only remove a false blocker.
+      base + '.d.ts',
+      path.posix.join(base, 'index.d.ts'),
     ];
     // NodeNext/ESM TypeScript (SvelteKit, `"type":"module"`, `moduleResolution: NodeNext`): a relative
     // import carries the OUTPUT extension `.js`/`.jsx`/`.mjs`/`.cjs` but resolves to the `.ts`/`.tsx`/

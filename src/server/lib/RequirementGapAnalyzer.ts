@@ -16,6 +16,7 @@ import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
 import { withoutMachineText } from './machineText';
 import { namesWellKnownGame } from './wellKnownGameTitles';
+import { requestSubject } from './requestSubject';
 
 export interface RequirementGaps {
   domain: string;
@@ -833,7 +834,10 @@ export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|r
  *   financial product first, so it keeps the ordinary scoring too — the BR1985 precedent ("fantasy cricket game with a
  *   wallet and real-money prizes" stays fintech and gets KYC guidance). Pretend money ("fake money") is not that.
  */
-const MOVES_REAL_MONEY = /\breal[-\s]?money\b|\bcash\s+prizes?\b|\bwallets?\b|\bkyc\b|\bupi\b|\bdeposits?\b|\bwithdraw\w*|\bpayouts?\b|\basli\s+paise\b|असली\s*पैसे/i;
+// ONE list of real money in a game (two sessions had written two that disagreed: one knew "bet"/"wager", the other "cash prizes").
+const MOVES_REAL_MONEY = /\breal[-\s]?money\b|\bcash\s+prizes?\b|\bwallets?\b|\bkyc\b|\bupi\b|\bdeposits?\b|\bwithdraw\w*|\bpayouts?\b|\bbet(?:s|ting)?\b|\bwager\w*|\basli\s+paise\b|असली\s*पैसे/i;
+/** Money a game really handles — a wallet, real-money stakes, payouts — which makes it a regulated fintech product. */
+const REAL_MONEY_IN_A_GAME = MOVES_REAL_MONEY;
 const GAME_AS_MODIFIER = /\bgames?\s+(?:schedules?|slots?|bookings?|timings?|fixtures?|stores?|shops?|tickets?|stats|statistics|score\s*cards?|scorecards?)\b/gi;
 const NAMES_AN_APP = /\b(?:apps?|application|website|web\s*site|platform|portal|dashboard|software|crm|erp)\b/i;
 const GAME_IS_THE_APP = /\bgames?\s+(?:apps?|application)\b|\bplatform\s+games?\b|\bgame\s+(?:website|web\s*site)\b/gi;
@@ -853,11 +857,14 @@ export function asksForAGame(text: string): boolean {
   return !NAMES_AN_APP.test(named.replace(GAME_IS_THE_APP, ' game '));
 }
 
+const GAME_IS_THE_SUBJECT =
+  /(?:\bgames?|\bkhel|खेल|गेम|গেম|ગેમ|ਗੇਮ|ಗೇಮ್|கேம்|గేమ్|ഗെയിം)(?:\s+(?:app|banao|bana\s*do|banakar\s*do|bana\s*ke\s*do|banaun\s*de|chahiye|chahie|please|pls|for\s+me|बनाओ|बना\s*दो|चाहिए))*\s*[.!]*$/i;
+
 function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
   if (asksForAGame(text)) return DOMAINS.find((d) => d.key === 'game');
   const gameRead = withoutGameModifiers(text);
-  return DOMAINS
+  const picked = DOMAINS
     // A request that NAMES a well-known game ("make a bgmi for me") is a game request even without the word (failedbr #2478).
     // Read on the FULL text: its "about a game" guard (tournament, top-up, website) needs the words the modifier strip removes.
     .filter((d) => (d.key === 'game' ? d.re.test(gameRead) || indicDomainMatches(d.key, gameRead) || namesWellKnownGame(text) : d.re.test(text) || indicDomainMatches(d.key, text)))
@@ -875,6 +882,19 @@ function selectDomain(text: string): DomainDef | undefined {
       // is byte-identical.
       return domainHeadlineHits(d, text) > domainHeadlineHits(best, text) ? d : best;
     }, undefined);
+  // 🔴 WHAT IS BEING MADE OUTRANKS WHAT IT CONTAINS (failedbr #2090, 2026-11-08). "Make a realistic cricket game with
+  // … dressing room and hospital gym bus flight" tied game and healthcare on features (0–0) and headline words (1–1),
+  // and array order handed it to healthcare: the game was given EMR, pharmacy and staff roles, and no game kit. A game
+  // names real places all the time (a hospital, a school, a gym). So when the request's own subject is a game ("…
+  // cricket game", "…game banao"), the game wins unless the other domain has MORE feature signals than the game, or the
+  // game handles real money: a fantasy cricket game with a wallet and real-money prizes is a regulated product and
+  // stays fintech with its KYC guidance (BR1985), while a bank-robbery game is a game. A "game store app" never
+  // reaches here: its subject's head noun is "app".
+  const game = DOMAINS.find((d) => d.key === 'game');
+  const realMoney = picked?.key === 'fintech' && REAL_MONEY_IN_A_GAME.test(text);
+  if (picked && game && picked !== game && !realMoney && GAME_IS_THE_SUBJECT.test(requestSubject(text))
+    && domainFeatureScore(picked, text) <= domainFeatureScore(game, text)) return game;
+  return picked;
 }
 
 /** How many DISTINCT words of a domain's headline the prompt names (+1 when it names it in an Indic

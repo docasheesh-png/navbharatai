@@ -30,3 +30,11 @@ describe('music-genre and AI terms are never unknown service names (failedbr #22
     expect(unknownNamesInRequest(`Build an AI music app with ${w} support and a player.`)).toEqual([]);
   });
 });
+
+// …and from failedbr #2094 (a Class 9 test-bank app: "100 MCQ questions" was flagged).
+describe('exam and classroom terms are never unknown service names (failedbr #2094)', () => {
+  it.each(['MCQ', 'MCQS', 'PYQ', 'OMR', 'SGPA', 'HSC', 'SSLC', 'CUET', 'CTET', 'BPSC', 'RRB', 'LKG'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Build a Class 9 test app with 100 ${w} questions per subject and results.`)).toEqual([]);
+  });
+});
+

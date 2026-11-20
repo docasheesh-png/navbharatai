@@ -644,6 +644,7 @@ const EN = {
   share: 'Share', copied: 'Copied!', shareText: 'I scored {score} in {game}! Can you beat it?', bestOnDevice: 'Best on this device',
   autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
+  controls: 'Controls', pressKey: 'Press a key (Esc to cancel)', resetControls: 'Reset controls', up: 'Up', down: 'Down', reload: 'Reload',
 };
 
 export type StringKey = keyof typeof EN;
@@ -672,6 +673,7 @@ const HI: Record<StringKey, string> = {
   share: 'शेयर करें', copied: 'कॉपी हो गया!', shareText: 'मैंने {game} में {score} स्कोर किया! क्या आप इसे हरा सकते हैं?', bestOnDevice: 'इस फ़ोन पर सबसे अच्छे',
   autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
+  controls: 'कंट्रोल्स', pressKey: 'कोई कुंजी दबाएँ (रद्द करने के लिए Esc)', resetControls: 'कंट्रोल्स रीसेट करें', up: 'ऊपर', down: 'नीचे', reload: 'रीलोड',
 };
 
 export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
@@ -2541,6 +2543,138 @@ export class LaneRunner {
 }
 `;
 
+const KEYBINDS = `/**
+ * KEY REBINDING (admin 2026-11-20 game-gap audit: the keys were fixed — a left-handed player, an AZERTY keyboard or a
+ * player who wanted Jump on J had no way to change them). The player picks a key for each action in Settings → Controls,
+ * and it is saved on this device.
+ *
+ *   const keys = loadKeyBindings();          // the saved keys over the defaults (the shell does this for you)
+ *   const input = new Input(canvas, keys);   // Input reads the SAME object, so a change applies at once
+ *   rebindKey(keys, 'jump', 'KeyJ');         // also takes J away from any other action, and saves
+ *
+ * Only keyboard keys are rebound; the mouse buttons, the gamepad and the touch buttons keep theirs. Escape is never
+ * given away — it is how a player gets out of a menu (and how a key capture is cancelled).
+ */
+import { DEFAULT_ACTIONS, type ActionMap } from './input';
+
+/** The actions a player can rebind, in the order Settings lists them. */
+export const REBINDABLE_ACTIONS: readonly string[] = ['up', 'down', 'left', 'right', 'jump', 'sprint', 'attack', 'interact', 'reload', 'drift'];
+
+const STORAGE_KEY = 'nb-game-keys-v1';
+const KEY_CODE = /^(?:Key[A-Z]|Digit[0-9]|Numpad[0-9]|Arrow(?:Up|Down|Left|Right)|F(?:[1-9]|1[0-2])|Space|Enter|Tab|Backspace|Shift(?:Left|Right)|Control(?:Left|Right)|Alt(?:Left|Right)|Comma|Period|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash|Minus|Equal|Backquote)$/;
+
+/** Can this KeyboardEvent.code be given to an action? Escape, media keys and odd codes cannot. */
+export function isBindableKey(code: string): boolean { return typeof code === 'string' && KEY_CODE.test(code); }
+
+const isKeyboard = (code: string): boolean => !code.startsWith('Mouse') && !code.startsWith('Pad:') && !code.startsWith('Virtual:');
+
+/** The key shown for an action: its first keyboard key, or '' when it has none. */
+export function primaryKey(map: ActionMap, action: string): string {
+  return (map[action] ?? []).find(isKeyboard) ?? '';
+}
+
+/** A short label for a key: KeyW → W, Digit1 → 1, ArrowUp → ↑, ShiftLeft → Shift. */
+export function keyLabel(code: string): string {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
+  const arrows: Record<string, string> = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
+  if (arrows[code]) return arrows[code];
+  return code.replace(/(Left|Right)$/, '');
+}
+
+function copyMap(base: ActionMap): ActionMap {
+  const out: ActionMap = {};
+  for (const [a, codes] of Object.entries(base)) out[a] = codes.filter((c) => !c.startsWith('Virtual:'));
+  return out;
+}
+
+/** The defaults with the saved keyboard keys laid over them. Anything unreadable or invalid in storage is ignored. */
+export function loadKeyBindings(base: ActionMap = DEFAULT_ACTIONS): ActionMap {
+  const map = copyMap(base);
+  let saved: unknown = null;
+  try { if (typeof localStorage !== 'undefined') saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { saved = null; }
+  if (!saved || typeof saved !== 'object') return map;
+  for (const action of REBINDABLE_ACTIONS) {
+    const keys = (saved as Record<string, unknown>)[action];
+    if (!Array.isArray(keys)) continue;
+    const valid = keys.filter((k): k is string => typeof k === 'string' && isBindableKey(k));
+    if (!valid.length) continue;
+    map[action] = [...valid, ...(map[action] ?? []).filter((c) => !isKeyboard(c))];
+  }
+  return map;
+}
+
+/** Save the keyboard keys of every rebindable action. */
+export function saveKeyBindings(map: ActionMap): void {
+  const out: Record<string, string[]> = {};
+  for (const a of REBINDABLE_ACTIONS) out[a] = (map[a] ?? []).filter(isKeyboard);
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, JSON.stringify(out)); } catch { /* not saved, still applied */ }
+}
+
+export interface RebindResult {
+  ok: boolean;
+  /** The actions the key was taken from. */
+  takenFrom: string[];
+  /** Actions left with no key, which were given this action's old key. */
+  gaveOldKeyTo: string[];
+  reason?: string;
+}
+
+/**
+ * Give 'code' to 'action' as its main key, in place (Input sees it at once), and save. The key is taken from every other
+ * action; one left with no keyboard key at all gets this action's old key, so no action is ever unreachable.
+ */
+export function rebindKey(map: ActionMap, action: string, code: string): RebindResult {
+  if (!REBINDABLE_ACTIONS.includes(action)) return { ok: false, takenFrom: [], gaveOldKeyTo: [], reason: 'not a rebindable action' };
+  if (!isBindableKey(code)) return { ok: false, takenFrom: [], gaveOldKeyTo: [], reason: 'that key cannot be used' };
+  const old = primaryKey(map, action);
+  const own = map[action] ?? [];
+  map[action] = [code, ...own.filter((c) => c !== code && c !== old)];
+  const takenFrom: string[] = [];
+  const gaveOldKeyTo: string[] = [];
+  for (const other of Object.keys(map)) {
+    if (other === action || !(map[other] ?? []).includes(code)) continue;
+    map[other] = map[other].filter((c) => c !== code);
+    takenFrom.push(other);
+    if (old && old !== code && !map[other].some(isKeyboard)) { map[other] = [old, ...map[other]]; gaveOldKeyTo.push(other); }
+  }
+  saveKeyBindings(map);
+  return { ok: true, takenFrom, gaveOldKeyTo };
+}
+
+/** Put every action back on its default keys, in place, and forget the saved ones. */
+export function resetKeyBindings(map: ActionMap, base: ActionMap = DEFAULT_ACTIONS): void {
+  const fresh = copyMap(base);
+  for (const a of Object.keys(map)) if (!(a in fresh)) delete map[a];
+  for (const [a, codes] of Object.entries(fresh)) map[a] = codes;
+  try { if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY); } catch { /* nothing saved */ }
+}
+
+/**
+ * Wait for the next key on target and hand its code to done; Escape (or cancel()) hands null. The key is consumed, so
+ * pressing the new Jump key does not also make the player jump. Returns cancel().
+ */
+export function captureKey(target: Window | HTMLElement, done: (code: string | null) => void): () => void {
+  let live = true;
+  const finish = (code: string | null): void => {
+    if (!live) return;
+    live = false;
+    target.removeEventListener('keydown', onKey as EventListener, true);
+    done(code);
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.code === 'Escape') return finish(null);
+    if (isBindableKey(e.code)) finish(e.code);
+  };
+  target.addEventListener('keydown', onKey as EventListener, true);
+  return () => finish(null);
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/core/loop.ts': LOOP,
   'src/game/core/input.ts': INPUT,
@@ -2565,10 +2699,12 @@ const FILES: Record<string, string> = {
   // Swipe input and the lane-runner rules — 2026-11-20 game-gap audit.
   'src/game/core/swipe.ts': SWIPE,
   'src/game/core/runner.ts': RUNNER,
+  // Saved key bindings and the change-a-key capture — 2026-11-20 game-gap audit.
+  'src/game/core/keybinds.ts': KEYBINDS,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner', 'keybinds'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -2606,6 +2742,8 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     // swipe.ts presses actions on the Input class.
     if (files['src/game/core/swipe.ts']) files['src/game/core/input.ts'] = FILES['src/game/core/input.ts'];
+    // keybinds.ts reads the default actions from input.ts.
+    if (files['src/game/core/keybinds.ts']) files['src/game/core/input.ts'] = FILES['src/game/core/input.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 

@@ -32,6 +32,12 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'hooded rogue': ['hooded rogue', 'hooded rogues'], hatchback: ['hatchback'], 'station wagon': ['station wagon'],
   'straight road tile': ['straight road tile'], 'road corner tile': ['road corner tile'], 'fire hydrant': ['fire hydrant'], dumpster: ['dumpster'], crate: ['crate', 'crates'],
   car: ['car', 'cars', 'कार', 'कारें', 'coche', 'coches', 'auto'],
+  // Library batch 6 (2026-11-20): the library's first firearms and more cars — the words a BGMI-style prompt uses.
+  gun: ['gun', 'guns', 'बंदूक', 'बंदूकें', 'bandook', 'bandooq'], pistol: ['pistol', 'pistols', 'पिस्तौल', 'पिस्टल'],
+  rifle: ['rifle', 'rifles', 'राइफल'], 'assault rifle': ['assault rifle', 'assault rifles', 'ak47', 'ak-47', 'm4', 'm416'],
+  'sniper rifle': ['sniper rifle', 'sniper rifles', 'sniper', 'snipers', 'स्नाइपर', 'awm', 'kar98'], shotgun: ['shotgun', 'shotguns', 'शॉटगन'],
+  smg: ['smg', 'smgs', 'submachine gun', 'submachine guns', 'uzi', 'ump'], revolver: ['revolver', 'revolvers', 'रिवॉल्वर'],
+  suv: ['suv', 'suvs', 'jeep', 'jeeps', 'जीप'], 'sports car': ['sports car', 'sports cars', 'स्पोर्ट्स कार'],
   train: ['train', 'trains', 'locomotive', 'ट्रेन', 'रेलगाड़ी', 'tren', 'trenes'],
   'railway station': ['railway station', 'train station', 'रेलवे स्टेशन', 'ट्रेन स्टेशन', 'estación de tren'],
   bird: ['bird', 'birds', 'पक्षी', 'चिड़िया', 'चिड़ियाँ', 'pájaro', 'pájaros'],
@@ -161,7 +167,12 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       worker: ['service worker', 'web worker', 'office worker'], bus: ['bus stop', 'bus stops', 'school bus stop'], school: ['school bus'], bank: ['river bank', 'blood bank'],
       ant: ['ant man'], log: ['log in', 'login', 'log file', 'log out'],
       bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
-      car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
+      car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car',
+        // A named kind of car is that model, not "a car" too (police car → car + police car was the old double).
+        'police car', 'police cars', 'sports car', 'sports cars', 'पुलिस कार', 'स्पोर्ट्स कार'],
+      building: ['building a', 'building the'],
+      rifle: ['assault rifle', 'assault rifles', 'sniper rifle', 'sniper rifles'],
+      gun: ['laser gun', 'laser guns', 'ray gun', 'submachine gun', 'submachine guns', 'water gun', 'nail gun', 'glue gun'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
 

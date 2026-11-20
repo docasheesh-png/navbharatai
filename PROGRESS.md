@@ -103095,6 +103095,17 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — Game kit: swimming (game-gap audit item)
+
+- **Gap:** nothing in the kit knew what water was — a player who walked into a lake sank and walked along the bottom.
+- **Fix:** motor `stepSwim` (pure: float at head-out depth by buoyancy spring, water drag, slower swim speed, Jump held
+  up / dive held down, Jump at the surface climbs out); controller `setWater(level | (x,z)=>level|null)` with a 0.25 m
+  exit margin so the edge does not flicker, breath (runs down under water, refills 4× faster, `onOutOfBreath` once a
+  second), `swimming` / `underwater` / `breath` getters, reset clears it. New `crouch` action (C / Left Ctrl / Pad:11),
+  rebindable in Settings → Controls (EN + HI label); the shell passes `diveHeld`. Instructions + AppKnowledgeBase.
+  Not built (stated): swim animation, a phone dive button.
+- **Lock:** `tests/aPlayerSwims.test.ts` (9, real motor/controller/terrain, incl. the sink-to-the-bottom baseline).
+  8 reversion proofs fail. Generated kit tsc before/after: identical 33 pre-existing errors.
 ## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
 
 - **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after
@@ -103168,3 +103179,9 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
 - #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.
+
+## 2026-11-20 — #4389 merged (Q-2750/2753/2766/2769 closed; Surplus retries reported); game library batch 6
+- #4389 merged: every failed Surplus attempt (benched or retried by the stay-alive loop) now reaches the build report as one `SURPLUS` provider notice with codes only (`aRetriedAttemptIsReported`). Q-3019 stays IN PROGRESS for its speed half (retry the same model before benching, decided from the new notices).
+- **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
+- Drive review (2026-11-20): accepted N1, N2, N3, N4, N8, N9, N16, Downtown City, Medieval Village, KayKit Adventurers 2.0, SBS textures (CC0 per the archive's licence file). Rejected: N5 (licence forbids redistribution), N6 (paid, attribution), N10 (Cenji licence), Bestiary (not CC0), and every archive with no licence file (sounds, PSX cars, retro weapons, furniture, rooms, etc.) until a source page shows its licence.
+- Next: animated clothed characters (Universal Base Characters + Modular Outfits + Universal Animation Library, same 65-joint rig; four built under 5 MB with 16 animations each).

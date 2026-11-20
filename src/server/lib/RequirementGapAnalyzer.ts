@@ -1028,7 +1028,22 @@ const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|sta
  */
 export function namesASingleLearnerTool(prompt: string): boolean {
   const t = String(prompt || '');
-  return PRACTICE_TOOL_RE.test(t) && !INSTITUTION_SCOPE_RE.test(t);
+  return (PRACTICE_TOOL_RE.test(t) && !INSTITUTION_SCOPE_RE.test(t)) || namesAPersonalToolForStudents(t);
+}
+
+/**
+ * A PERSONAL TOOL WHOSE AUDIENCE IS STUDENTS IS STILL A PERSONAL TOOL (failedbr #1161, 2026-11-20). "Create a attendance
+ * tracker app for engineering students" read as an education platform: roles (student / teacher / admin), courses,
+ * grading and fees became "likely missing", and the build wrote Login.tsx and Courses.tsx. An engineering student's
+ * attendance tracker is the one that counts their own classes against 75%. A tool noun (tracker, planner, calculator,
+ * timer, notes, budget …) for students, with no word that brings in a teacher, an institution or money, is one person's
+ * tool. `attendance` here is the tool's subject, so it is not read as the institution word it is elsewhere. PURE.
+ */
+const PERSONAL_TOOL_FOR_STUDENTS = /\b(?:tracker|planner|calculator|timer|counter|diary|journal|to-?do|budget|expenses?|habits?|reminders?|notes|organi[sz]er|scheduler|timetable)\b[^.\n]{0,48}\bfor\s+(?:\w+\s+){0,2}students?\b/i;
+const SECOND_PARTY_RE = /\b(?:teachers?|tutors?|admins?|administrators?|staff|roles?|log\s?-?ins?|sign\s?-?(?:in|up)s?|multi[\s-]?users?|institutes?|institutions?|coaching|management|platform|portal|erp|lms|classrooms?|batch(?:es)?|enrol\w*|fees?|payments?|subscriptions?|courses?|lessons?|parents?)\b/i;
+export function namesAPersonalToolForStudents(prompt: string): boolean {
+  const t = String(prompt || '');
+  return PERSONAL_TOOL_FOR_STUDENTS.test(t) && !SECOND_PARTY_RE.test(t);
 }
 
 /**

@@ -506,7 +506,7 @@ import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { isNotFoundError } from './fsErrors';
 import { SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
-import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
+import { withoutPreviewBridge, bridgeShellNote, bridgeLineRanges, withoutBridgeGrepMatches } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
@@ -6972,7 +6972,9 @@ export class ToolDispatcher {
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
         const reading = readGrepOutput(stdout, pattern);
         if (reading.failed) throw new Error(redactSecrets(reading.text));
-        return redactSecrets(reading.text);
+        // Our preview bridge lives in the sandbox's index.html; its lines are not the app's (failedbr #672, Q-3219).
+        const shown = await withoutBridgeGrepMatches(reading.text, async (p) => bridgeLineRanges(await this.actuator.readFile(this.workspaceId, p)));
+        return redactSecrets(shown);
       }
 
       case 'glob': {

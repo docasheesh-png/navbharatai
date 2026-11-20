@@ -24,7 +24,7 @@ import {
   SURPLUS_STOP_COST_ESTIMATED,
 } from '../AgentV3/surplusStopTokenFloor';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
-import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
+import { type SurplusBuildSession, surplusBuilderEnabled, describeSurplusAttemptFailure } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
 import { withEngineSafeDiag, stripEngineSafeDiag } from '../lib/engineSafeDiag';
@@ -3680,6 +3680,7 @@ function proChainV2TurnRunner(opts: Parameters<typeof buildTurnRunner>[0], v2: P
   const surplus = opts.surplusSession?.runner({
     onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
     onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+    onAttemptFailed: (failure) => opts.onProviderError?.('SURPLUS', new Error(describeSurplusAttemptFailure(failure))),
   });
   const r1Key = routerOneApiKey();
   return v2.agentRunner({
@@ -3816,6 +3817,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     const surplusRunner = opts.surplusSession.runner({
       onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
       onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+      // Q-3019 (failedbr #2478): a retried Surplus attempt reaches the report and the AI Engines page, not only the log.
+      onAttemptFailed: (failure) => opts.onProviderError?.('SURPLUS', new Error(describeSurplusAttemptFailure(failure))),
     });
     if (!opts.surplusPreWriteFailOpen) return surplusRunner;
     // Drop Surplus from the recursive Weak factory so we never wrap Surplus again after fail-open.

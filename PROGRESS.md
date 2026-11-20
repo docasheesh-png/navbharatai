@@ -103022,3 +103022,14 @@ Ledger, older reports (2026-11-20, #4377):
 - #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
+
+## 2026-11-20 — #4377 merged (failedbr #2169 / #2163 / #2155 / #2141); autopsies #2158, #2133, #2122, #2116 (next PR)
+
+Closed Q-2994, Q-2995, Q-2996, Q-2997 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): our browser's media limits are not an app defect; "game" in the Indian scripts is a game; a missing plain stylesheet import is created; Hinglish fillers are not subjects in the "add to this app or a new one?" check.
+- #2139 — no defect: a "hack" request with photo, map and location was planned as a harmless map where users drop their own markers (no tracking, no cheat); the user stopped it at 22 s.
+
+Ledger for the next PR (rows Q-3021…Q-3024):
+- #2158 — Q-3021 a rule about how to build ("do not publish …", "after building, run …") and the staples of a small game (score, lives, restart) are not parts: a compact space shooter counted 22 and went to 14 project modules; it now counts 6 and builds as one app. Q-3022 opened: a list opener's colon still spans its whole line; scoping it per sentence needs the project gates re-measured. Also in #2158, already fixed and not given rows: "WASD" as an unknown service (#4369), and a stopped Surplus call filed under `claude-sonnet-4-6` on a Weak build (BR1992, 2026-11-16).
+- #2133 — Q-3023 the orphan-stylesheet check reads Astro/Vue/Svelte component files (imports, `<link>`, `<style>` `@import`, Vue `<style src>`), and our `nbai-native.css` is written only together with the `<link>` that uses it. Q-3024 opened: the project graph never reads component-file imports, so three broken `.astro` imports were found only by full builds (the app had rendered at 135 s; the user stopped it at 743 s).
+- #2122 — no defect: a battle-royale game rendered at 182 s; the user stopped it at 200 s.
+- #2116 — no defect: a Marathi auto-rickshaw simulator was still rendering when the user stopped it at 219 s. Its "13 distinct colours" warning (identical in #2122) is the kit/scene-renderer class already excluded from the colour count by BR1954/Q-2311 and #2437.

@@ -103122,3 +103122,5 @@ Ledger, older reports (2026-11-20, next PR):
 - #1900 — no defect: the gate's one blocker was BUILD_TIMEOUT on a build that had reported success. Counting it is deliberate (Q-381 batch six, "NO BILL MOVES"): it is what keeps a build that ran out of time unfinished and uncharged. A change to exclude it was tried and reverted when that guard failed.
 - #1922 — no new row: HEAL_NOT_DURABLE (`App.tsx` ×6, "our write held") again without a name. Q-3027's first half is now done: every heal write carries its name and the line prints it. Its binary `.mp3` is BR1952.
 - #1876 — no new rows: 53 ENGINE_R1 fallbacks (Q-2692) and a free build that cost about $1 before the ceiling stopped it (Q-2240, blocked on the admin's money decision).
+- #1913 — Q-3041 the Play Store / App Store are where an app is published, not a shop: a game that mentioned uploading to the play store was read as ecommerce and got no kit.
+- #1930, #1914 — no defect: a user stop at 18 s before any write; the write guard refused a duplicate declaration, then the user stopped.

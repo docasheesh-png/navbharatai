@@ -474,6 +474,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   // ecommerce — "store X locally / in IndexedDB / on the device" is PERSISTENCE, never a shop. Same
   // report: "Store translation history locally" was the ecommerce signal.
   /\bstor(?:e|es|ed|ing)\s+(?:[\w-]+\s+){1,4}?(?:locally|offline|on\s+(?:the\s+)?(?:device|phone|disk)|in\s+(?:local\s*storage|indexeddb|the\s+browser|an?\s+database|the\s+database|firestore|supabase|sqlite|memory))\b/gi,
+  // ecommerce — the PLAY STORE / APP STORE is where an app is published, not a shop it sells from (failedbr #1913,
+  // 2026-11-08: "Khatarnak Sa game banaa do Jise main play store mein upload kar Sakun" read as ECOMMERCE, so a game got
+  // cart and checkout as "likely missing" features, no game kit and the fast lane). A shop app that also mentions a store
+  // keeps its own signals; only the platform names are removed.
+  /\b(?:google\s+)?play\s*-?\s*store\b|\b(?:apple\s+)?app\s*-?\s*store\b|\bgoogle\s+play\b|प्ले\s*स्टोर|ऐप\s*स्टोर/gi,
   // social — text on a screen is not a social network. "Use clear messages such as …", "clear status
   // messages", "display messages as chat bubbles" (SignBridge again) describe copy and a visual style;
   // posting, following and friends are what make a social app, and those keep their meaning.

@@ -102989,4 +102989,6 @@ Ledger, older reports (2026-11-20, #4377):
 - #2196 — no new row: a 32-file app rendered at 7 min and the build kept writing until the 25-min cap — the free-tier convergence ceiling, Q-2240.
 - #2163 — Q-2995 "गेम" (and "game" in the other Indian scripts) is a game: an all-Devanagari racing request now gets the kit.
 - #2188 — not opened in full: stopped by the user at 51 s on "a game fully like Free Fire Max"; its class (a famous-game clone on the weak tier) is covered by the roadmap/kit path.
+- #2155 — Q-2996 a missing plain stylesheet import (`./index.css`) is created deterministically.
+- #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
 

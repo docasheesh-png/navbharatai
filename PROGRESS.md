@@ -103093,3 +103093,4 @@ Still open, our own work: Q-3022, Q-3024, Q-3026, Q-3027, Q-3030. Blocked on the
 
 Also renumbered the queue-retry-drills row from a duplicate Q-3020 to Q-3035: two sessions had both taken Q-3020 on 2026-11-20 (3eea5cae1 and 6942a03ec), so `theQueueIdsAreUnique` was red on `main`.
 - #2030 — Q-3036 a handler that admits it is pretend ("for demo purposes, we'll just show an alert", "…in a real application") is a HIGH authenticity finding; a fake Download button had shipped unnamed. Its "Play Store button" order enabled the deploy tool (PUBLISH_REQUESTED), which is the designed reading.
+- #2005 — no new row: the E2B concurrency cap (Q-2929) refused setup and the fast lane still ran, with all 22 writes refused; since BR1952 a text-only lane is skipped against an unavailable workspace (`FAST_LANE_SKIPPED_SANDBOX`).

@@ -16,6 +16,7 @@ import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
 import { withoutMachineText } from './machineText';
 import { namesWellKnownGame } from './wellKnownGameTitles';
+import { requestSubject } from './requestSubject';
 
 export interface RequirementGaps {
   domain: string;
@@ -816,9 +817,15 @@ export function indiaFirstGuidance(domain: string): string {
  */
 export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|radio|fm)\s*[-\s]?\s*players?\b|(?:म्यूजिक|म्यूज़िक|संगीत|ऑडियो|वीडियो|गाने|गानों)\s*(?:का\s*)?प्लेयर/i;
 
+/** Money a game really handles — a wallet, real-money stakes, payouts — which makes it a regulated fintech product. */
+const REAL_MONEY_IN_A_GAME = /\bwallet\b|real[- ]?money|\bupi\b|\bkyc\b|payout|withdraw|\bbet(?:s|ting)?\b|\bwager|\bdeposit/i;
+
+const GAME_IS_THE_SUBJECT =
+  /(?:\bgames?|\bkhel|खेल|गेम|গেম|ગેમ|ਗੇਮ|ಗೇಮ್|கேம்|గేమ్|ഗെയിം)(?:\s+(?:app|banao|bana\s*do|banakar\s*do|bana\s*ke\s*do|banaun\s*de|chahiye|chahie|please|pls|for\s+me|बनाओ|बना\s*दो|चाहिए))*\s*[.!]*$/i;
+
 function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
-  return DOMAINS
+  const picked = DOMAINS
     // A request that NAMES a well-known game ("make a bgmi for me") is a game request even without the word (failedbr #2478).
     .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text) || (d.key === 'game' && namesWellKnownGame(text)))
     .reduce<DomainDef | undefined>((best, d) => {
@@ -835,6 +842,19 @@ function selectDomain(text: string): DomainDef | undefined {
       // is byte-identical.
       return domainHeadlineHits(d, text) > domainHeadlineHits(best, text) ? d : best;
     }, undefined);
+  // 🔴 WHAT IS BEING MADE OUTRANKS WHAT IT CONTAINS (failedbr #2090, 2026-11-08). "Make a realistic cricket game with
+  // … dressing room and hospital gym bus flight" tied game and healthcare on features (0–0) and headline words (1–1),
+  // and array order handed it to healthcare: the game was given EMR, pharmacy and staff roles, and no game kit. A game
+  // names real places all the time (a hospital, a school, a gym). So when the request's own subject is a game ("…
+  // cricket game", "…game banao"), the game wins unless the other domain has MORE feature signals than the game, or the
+  // game handles real money: a fantasy cricket game with a wallet and real-money prizes is a regulated product and
+  // stays fintech with its KYC guidance (BR1985), while a bank-robbery game is a game. A "game store app" never
+  // reaches here: its subject's head noun is "app".
+  const game = DOMAINS.find((d) => d.key === 'game');
+  const realMoney = picked?.key === 'fintech' && REAL_MONEY_IN_A_GAME.test(text);
+  if (picked && game && picked !== game && !realMoney && GAME_IS_THE_SUBJECT.test(requestSubject(text))
+    && domainFeatureScore(picked, text) <= domainFeatureScore(game, text)) return game;
+  return picked;
 }
 
 /** How many DISTINCT words of a domain's headline the prompt names (+1 when it names it in an Indic

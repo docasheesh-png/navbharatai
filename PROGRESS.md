@@ -102891,6 +102891,16 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
 
+## 2026-11-20 — Game audit 2 (#4): a browser intervention is not a crash (branch `claude/playtest-honest`)
+- Evidence: failedbr #2477 — a game scoring 86 (answered up/W, left/A, right/D, Space, drag) was gated "the game was played
+  and is not playable (runtime error)" because Chrome logged "Unable to preventDefault inside passive event listener".
+- The playtest's console watcher now records browser interventions apart (`run.interventions`, BROWSER_INTERVENTION);
+  they no longer count as errors (Stable unaffected) and become the SOFT defect GAME_DEFECT_TOUCH_SCROLLS with the fix
+  ({ passive: false } / touch-action: none) — honest (the page can scroll under the thumb), never "not playable".
+- Not duplicated: the 0-fps / "Controls 0" half of item #4 was already fixed by d54d489d (software WebGL; a checker without
+  WebGL no longer blames the game). The "no on-screen controls" (#2435) and start-button (#2475) items stay UNVERIFIED —
+  the reports do not show why the detector missed; no detector change without that evidence.
+- Locked by `tests/aBrowserInterventionIsNotACrash.test.ts` (real browser; reversion: interventions as errors → fails).
 ## 2026-11-20 — Game audit 2 (#7): one word for loudness across the kit (branch `claude/game-playoptions-trap`)
 - Evidence: failedbr #2435 spent three turns on `TS2353 'volume' does not exist in type 'PlayOptions'` — audio.play and
   playMusic take `volume`, the melody player's PlayOptions said `gain`.
@@ -102906,6 +102916,13 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it n
   way back, and a readiness WARNING (not a blocker: the game may still run on a desktop). 2D canvas games, board games and
   projects without the shell are never flagged (Q-2715 preserved).
 - Locked by `tests/aGameIsBuiltOnTheShell.test.ts` (reversion: renderer detection off → 3 fail).
+## 2026-11-20 — Game audit 2 (#3): the 2D kit carries the touch controls (branch `claude/game-2d-touch`)
+- Evidence: failedbr #2435 (Mario) grepped the kit's Input for touch, found none, hand-rolled buttons and scored Phone 0. The
+  touch joystick and buttons lived only behind the 3D shell.
+- `src/game/2d/touch.ts`: mountTouchControls2D(stage, input, options) — the SAME TouchControls the 3D shell uses (joystick,
+  Jump + Attack by default, no camera drag), driving the same Input as the keyboard; the recipe layer adder brings
+  ui/touchControls.ts with it. The kit's instructions and compiled example show it; AppKnowledgeBase updated.
+- Locked by `tests/a2DGameIsPlayableOnAPhone.test.ts` (real modules on a fake page; reversion: no 2D defaults → fails).
 ## 2026-11-20 — failedbr #2408 / #2342 / #2339 resolved (#4360 merged)
 
 Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
@@ -102999,3 +103016,19 @@ Ledger for the next PR (rows Q-2987…Q-2989):
 - #2257 — no defect: the user stopped 2.8 min in after the app rendered; the two warnings are accurate notes on an unfinished tree.
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).
+
+## 2026-11-20 — #4375 merged (failedbr #2263 / #2255 / #2246 / #2224 / #2216 / #2208)
+
+Closed Q-2987, Q-2988, Q-2989, Q-2990, Q-2991, Q-2992, Q-2993 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handled missing camera/microphone in our checking browser is not an app defect; "make the internet faster" is the fifth impossible power; a declined turn records OUTCOME_DECLINED; the node_modules stamp never creates a file (and a static file server keeps its own host); a model write that removes an untouched kit file's exports or class members is refused; music-genre and AI terms are one unknown-name family; "<framework> Vite plugin not found in Vite config" is a configuration error. CI caught one defect of the PR's own (an install-stamp test leaving temp dirs behind — moved to makeTempDir) before merge.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984, Q-2240 (blocked, each with what it needs).
+
+Ledger, older reports (2026-11-20, #4377):
+- #2169 — Q-2994 our browser's media limits (no H.264, a play()/pause() race) are not an app defect.
+- #2205 — no new row: an edit turn on an existing app got no platform kit seed by design (the kit is never written over somebody's work); the model's own run_recipe laid it down safely; the four edit_file misses are the weak model's.
+- #2196 — no new row: a 32-file app rendered at 7 min and the build kept writing until the 25-min cap — the free-tier convergence ceiling, Q-2240.
+- #2163 — Q-2995 "गेम" (and "game" in the other Indian scripts) is a game: an all-Devanagari racing request now gets the kit.
+- #2188 — not opened in full: stopped by the user at 51 s on "a game fully like Free Fire Max"; its class (a famous-game clone on the weak tier) is covered by the roadmap/kit path.
+- #2155 — Q-2996 a missing plain stylesheet import (`./index.css`) is created deterministically.
+- #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
+- #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
+

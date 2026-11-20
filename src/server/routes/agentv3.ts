@@ -25589,7 +25589,7 @@ async function noteBuildOutcome(
           const session = sandboxSessionOf(actuator, workspaceId);
           buildDiag.record({
             phase: 'readiness', severity: 'info', code: 'SANDBOX_SESSION', autoResolved: true,
-            message: describeSession(session, Date.now()),
+            message: describeSession(session, Date.now(), billingCtx.buildStartedAt), // Q-3222: scoped to this session
           });
           // A measurement never starts a machine: with no live session there is nothing to ask. A failed probe keeps
           // its KIND (timed out vs failed) — a cause the report states must be one that happened.

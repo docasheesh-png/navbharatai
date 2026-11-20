@@ -26,6 +26,8 @@ describe('a recipe brings the layers it imports', () => {
     const ran = filesOf('generate_game_runtime', 'generate_game_controller', 'generate_game_systems', 'generate_game_vfx', 'generate_melody', 'generate_game_shell');
     const missing = missingLayerFiles(ran, new Set(Object.keys(ran)));
     expect([...missing.keys()].sort()).toEqual([
+      // breakable.ts: the shell steps the debris of broken crates every frame (2026-11-20).
+      'src/game/three/breakable.ts',
       'src/game/three/buildings.ts',
       'src/game/three/camera.ts',
       'src/game/three/collision.ts',

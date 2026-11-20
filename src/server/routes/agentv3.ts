@@ -514,7 +514,7 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd, SurplusAccountingUnavailableError } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
-import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, PHASE_SCOPE, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { runInBillingPhase, currentBillingPhase, PHASE_PLANNER, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, PHASE_SCOPE, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
 import { bugHuntCostReading, bugHuntCostLine } from '../AgentV3/bugHuntCost';
 import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
@@ -15595,13 +15595,13 @@ async function noteBuildOutcome(
           if (roadmap.runPlanner) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
-            const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
+            const rmCall = runInBillingPhase(PHASE_PLANNER, () => makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
               system: `${megaRoadmapSystemPrompt()}\nSelected workspace architecture: ${framework}. Keep every step compatible with it. Do not invent a single-HTML constraint unless the user explicitly asked for it.\n${gamePlannerCapability(prompt, framework)}`,
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
               tools: [],
               maxTokens: 4000,
-            });
+            }));
             // 🔴 THE SIBLING #3020 NEVER HUNTED (autopsy e706e068, 2026-09-17). The project planner's
             // hard-coded 60 s clock killed the School ERP decomposition and recorded nothing; THIS call
             // had the identical shape one screen up — a flat 45 s race, `recordLlmCall` after the race so
@@ -15644,7 +15644,7 @@ async function noteBuildOutcome(
             // bill for a call we knew the vendor of. `recordLlmCall` two lines up already names it. The
             // heal runners were fixed for this exact shape in 2026-08-10 (see healRunnerOpts); the three
             // planner calls were the siblings never hunted. Same ledger the fast lane feeds.
-            captureTurnUsage(rmProvider, { ...rmT.usage }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);
+            void runInBillingPhase(PHASE_PLANNER, async () => captureTurnUsage(rmProvider, { ...rmT.usage }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0)); // a planner slice (failedbr #1200)
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
             const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt });
@@ -17850,7 +17850,7 @@ async function noteBuildOutcome(
             // own `Promise.race` bound — so the 30 s timeout, and every error, left the report with NO row
             // at all. `recordedTextCall` is the one door now: it owns the bound AND records both outcomes,
             // so an abandoned blueprint step is a line an autopsy can read instead of a silence.
-            const t = await recordedTextCall(
+            const t = await runInBillingPhase(PHASE_PLANNER, () => recordedTextCall(
               {
                 // This site keeps its OWN capture — `bpProvider` feeds `captureTurnUsage` below, and the
                 // sign-bridge census pins this exact form for all three planners. The door's `onUsed` is
@@ -17875,13 +17875,13 @@ async function noteBuildOutcome(
               { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000 },
               // Hard bound so an up-front step can NEVER hang the build — now a bound whose expiry is on the record.
               { promptPreview: `${system}\n---\n${user}`, timeoutMs: 30_000, timeoutMessage: 'blueprint step timed out' },
-            );
+            ));
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(bpProvider, { ...t.usage }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
+            void runInBillingPhase(PHASE_PLANNER, async () => captureTurnUsage(bpProvider, { ...t.usage }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0)); // a planner slice (failedbr #1200)
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -19093,9 +19093,9 @@ async function noteBuildOutcome(
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
-            const call = makePlanTextRunner((used) => { ppProvider = used; }).runTurn({
+            const call = runInBillingPhase(PHASE_PLANNER, () => makePlanTextRunner((used) => { ppProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: PROJECT_PLANNER_MAX_TOKENS,
-            });
+            }));
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
             const timeout = new Promise<never>((_, rej) => { ppTimer = setTimeout(() => rej(new Error(PROJECT_PLANNER_TIMED_OUT)), ppTimeoutMs); });
             let t: Awaited<typeof call>;
@@ -19121,7 +19121,7 @@ async function noteBuildOutcome(
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(ppProvider, { ...t.usage }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
+            void runInBillingPhase(PHASE_PLANNER, async () => captureTurnUsage(ppProvider, { ...t.usage }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0)); // a planner slice (failedbr #1200)
             ppLast.stopReason = t.stopReason ?? null;
             ppLast.chars = t.text.length;
             ppLast.latencyMs = Date.now() - startedAt;

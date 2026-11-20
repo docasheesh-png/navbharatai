@@ -156,3 +156,15 @@ export function budgetSteer(
       + '"this part is not done" is worth far more than a claim that cannot be checked.',
   };
 }
+
+/**
+ * May a POLISH hand-back (the style / accessibility resume) still start? Not once the build has told the user it is
+ * wrapping up. 🔴 failedbr #2318 (19ae5fbb, 2026-11-12): an electrician app rendered at 1011 s and the readiness check
+ * judged it finished (100/100); at 1340 s — 89% of the window, after "Time is short — wrapping up so you get a working
+ * app" — the style hand-back sent it back for design and accessibility polish, the 25-minute cap cut it off, and a
+ * ready app ended "STOPPED — not converging". Polish never outranks delivering what already works. PURE.
+ */
+export function polishHandBackAllowed(stagesSaid: ReadonlySet<string> | null | undefined): boolean {
+  if (!stagesSaid) return true;
+  return !stagesSaid.has('wrapping') && !stagesSaid.has('final');
+}

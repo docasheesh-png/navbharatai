@@ -102,7 +102,7 @@ export async function imageForApp(ask: AppImageAsk): Promise<AppImageAnswer> {
   try {
     const triage = triagePrompt(ask.prompt);
     if (triage.verdict === 'block') {
-      const m = blockMessage(triage.contentClass, ask.prompt);
+      const m = blockMessage(triage.contentClass, ask.prompt, triage.ruleId);
       return { ok: false, code: 'blocked', owner: m, visitor: m };
     }
   } catch { /* the word ban below still runs */ }

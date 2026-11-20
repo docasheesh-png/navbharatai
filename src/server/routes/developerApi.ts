@@ -111,7 +111,7 @@ async function spendGate(
         uid: auth.userId, triage, surface: 'chat', excerpt: safetyExcerpt(words), at: now,
       })).catch(() => { /* the decision stands either way */ });
       if (triage.verdict === 'block') {
-        res.status(422).json(apiError('content_policy', blockMessage(triage.contentClass, words)));
+        res.status(422).json(apiError('content_policy', blockMessage(triage.contentClass, words, triage.ruleId)));
         return null;
       }
     }

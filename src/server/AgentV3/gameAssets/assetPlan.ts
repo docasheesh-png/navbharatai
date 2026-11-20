@@ -4,11 +4,16 @@ import { candidateMatches, type AssetRequirement } from './assetPolicy';
 import { CATALOGUE_MAX_ENTRIES, type ReviewedAsset } from './providers';
 
 /**
- * Default OFF; enabling does not approve any unreviewed catalogue entry or paid service.
- *   AGENTV3_EXTERNAL_GAME_ASSETS=on     ⇒ every user
- *   AGENTV3_EXTERNAL_GAME_ASSETS=admin  ⇒ limited rollout: only the owner test uid (z@gmail.com) plus
- *                                         verified uids listed in AGENTV3_EXTERNAL_GAME_ASSETS_UIDS (comma list)
- *   unset / off / anything else         ⇒ nobody
+ * 🟢 DEFAULT ON (admin 2026-11-20, verbatim: "mujhe cloud run me kuch nahi dalna aap default on kar dena"). failedbr #2478
+ * showed "3D assets 0.0 s (off)": the reviewed model library (characters, vehicles, buildings, props) never reached a
+ * user's game because the switch was default OFF and nobody set it. ON does not approve any unreviewed catalogue entry
+ * or paid service — only the reviewed, hash-pinned library is used, and a model that does not arrive leaves the
+ * procedural kit in place (assetSeed: "the procedural kit remains the floor").
+ *   unset / empty / on / true / 1 / yes  ⇒ every user
+ *   AGENTV3_EXTERNAL_GAME_ASSETS=off      ⇒ nobody (kill switch; also false / 0 / no)
+ *   any OTHER value (a typo)              ⇒ nobody — someone tried to configure it, so fail safe
+ *   AGENTV3_EXTERNAL_GAME_ASSETS=admin   ⇒ limited rollout: only the owner test uid plus verified uids listed in
+ *                                          AGENTV3_EXTERNAL_GAME_ASSETS_UIDS (comma list)
  * Uid must be the server-verified owner uid; no uid ⇒ not admitted in `admin` mode.
  */
 export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env, verifiedUid?: string | null): boolean {
@@ -19,7 +24,8 @@ export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env, 
     const list = String(env.AGENTV3_EXTERNAL_GAME_ASSETS_UIDS ?? '').split(',').map(v => v.trim()).filter(Boolean);
     return list.includes(verifiedUid);
   }
-  return parseEnvFlag(env.AGENTV3_EXTERNAL_GAME_ASSETS) ?? false;
+  if (raw === '') return true;
+  return parseEnvFlag(raw) ?? false;
 }
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
   mage: ['mage', 'mages', 'जादूगर'], wizard: ['wizard', 'wizards'], barbarian: ['barbarian', 'barbarians'], rogue: ['rogue', 'rogues'],

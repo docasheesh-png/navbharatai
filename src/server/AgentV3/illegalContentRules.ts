@@ -300,6 +300,47 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
     ),
   },
   {
+    id: 'REAL_MONEY_GAMBLING',
+    contentClass: 'illegal',
+    description:
+      'offers betting or gambling for real money (deposits, bets, withdrawals or cash prizes), which India\'s Promotion and '
+      + 'Regulation of Online Gaming Act, 2025 bans. The same game with pretend chips or coins is fine.',
+    /**
+     * ADMIN 2026-11-20: "other app builder jo karte hai, same karo". What they publish: Bolt (StackBlitz) and Builder.io
+     * forbid UNLAWFUL gambling (Builder.io allows it only with the licences), Replit lists gambling among illegal uses.
+     * The shared standard is "no unlawful gambling" — and in India the 2025 Act makes every real-money online game
+     * unlawful, skill or chance, and facilitating one a cognizable, non-bailable offence. So for an Indian platform the
+     * same standard means: never the real-money part. A Teen Patti, poker, Ludo or casino-style game with pretend chips
+     * is a game, and is built.
+     */
+    subject: withDevanagari(
+      /\b(bet|bets|betting|wager\w*|gambl\w*|casinos?|satta|matka|sportsbooks?|bookies?|lotter(?:y|ies)|jackpots?|roulette|slot[-\s]?machines?|poker|teen[-\s]?patti|rummy|andar[-\s]?bahar|aviator[-\s]?game|fantasy[-\s]+(?:cricket|football|kabaddi|sports?|leagues?|teams?))\b/i,
+      ['सट्ट', 'मटका', 'जुआ' + END, 'जुए' + END, 'कैसीनो', 'बेटिंग', 'तीन\\s*पत्ती', 'रम्मी', 'लॉटरी', 'पोकर', 'फ' + NUKTA + 'ैंटेसी\\s*(?:क्रिकेट|टीम|लीग)'], W.REAL_MONEY_GAMBLING.subject,
+    ),
+    /**
+     * REAL MONEY MOVING IN OR OUT — what a pretend-chips game never has. Negated mentions are skipped inside the pattern
+     * itself ("no real money", "never a deposit", "without cash prizes", and after it: "real-money play is not supported"), because the PUBLISH scanner reads this context
+     * with no exempt step — and the board-games kit's own generated files say "never real money, never a deposit, a
+     * wallet top-up or a cash prize" beside "Teen Patti". A kit-built fun game must not be blocked by its own disclaimer.
+     * A sentence that says real money is BANNED is the same kind of disclaimer (the Business kit: "India bans real-money
+     * online games"), so a ban word — bans, banned, prohibited, forbidden, illegal, outlawed — counts as a negation too.
+     */
+    context: withDevanagari(
+      /(?<!\b(?:no|not|never|nor|without|zero|fake|pretend|non|instead\s+of|bans?|banned|banning|prohibit\w*|forbid\w*|illegal|outlaw\w*)\b[^.!?\n]{0,48})\b(deposit\w*|withdraw\w*|cash[-\s]?outs?|payouts?|real[-\s]?(?:money|cash|rupees?)|cash[-\s]?prizes?|prize[-\s]?money|win(?:ning)?[-\s]+(?:real\s+)?(?:money|cash|rupees?|₹)|add[-\s]+money|upi\s+(?:deposit|top[-\s]?ups?)|wallet[-\s]+top[-\s]?ups?|asli\s+paise|paise?\s+(?:jeet\w*|lagao|lagaa?ye|lagaa?na|jama|nikaal\w*|kamao))\b(?![-\s\w]{0,30}\b(?:is|are|was|were)\s+(?:not|never|banned|prohibited|forbidden|illegal|outlawed)\b)/i,
+      ['असली\\s+पैसे', 'पैसे\\s+(?:जमा|निकाल|लगा|जीत)', 'कैश\\s+प्राइज' + NUKTA + '?', 'डिपॉजिट', 'विड्रॉ', 'इनाम\\s+की\\s+राशि'], W.REAL_MONEY_GAMBLING.context,
+    ),
+    // Recorded, not refused: a betting word and money mentioned in a request to build — a human looks later.
+    intent: withDevanagari(
+      /\b(money|cash|rupees?|inr|₹|paisa|paise|earn|earning|payments?|wallet)\b/i,
+      ['पैसे', 'पैसा', 'रुपये', 'कमाई', 'वॉलेट'], W.REAL_MONEY_GAMBLING.intent,
+    ),
+    // An app that HELPS people away from gambling, or reports illegal betting, is not the offence it fights.
+    exempt: withDevanagari(
+      /\b(addict\w*|de-?addiction|recover\w*|helplines?|awareness|counsel\w*|therap\w*|report(?:s|ing)?\s+illegal|illegal\s+betting\s+(?:report|complaint)s?|ban\s+on\s+(?:betting|gambling))\b/i,
+      ['लत' + END, 'नशा\\s*मुक्ति', 'छुटकारा', 'हेल्पलाइन', 'जागरूक', 'काउंसलिंग', 'परामर्श'], W.REAL_MONEY_GAMBLING.exempt,
+    ),
+  },
+  {
     id: 'ADULT_CONTENT',
     contentClass: 'adult',
     /**

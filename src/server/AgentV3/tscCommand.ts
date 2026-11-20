@@ -189,6 +189,22 @@ export function recipeInstallCommand(deps: ReadonlyArray<{ name: string; version
     + `touch ${NPM_INSTALL_LOCK}; ${installs} && touch node_modules; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
 }
 
+/**
+ * The stamp a SUCCESSFUL shell install needs so `MANIFEST_CURRENT` reads the tree as current (failedbr #2278 sibling hunt,
+ * 2026-11-20). The recipe install (`recipeInstallCommand`) and `TSC_ENSURE` both end in `touch node_modules`, because an
+ * install that adds only a scoped entry (`@types/three` lands under `node_modules/@types`) or finds the package already
+ * present rewrites package.json and leaves the directory's own mtime older. The model's OWN `npm install -D @types/three`
+ * did not, so the write-time typecheck read "package.json had changed since the last install" and stood down for every
+ * later write of the build — #2278 shipped a file importing two kit exports that do not exist, which write-time tsc
+ * exists to quote back. `manifestPath` is `manifestRewrittenBy`'s answer; null when it is not a safe plain path. PURE.
+ */
+export function nodeModulesStampAfterInstall(manifestPath: string | null | undefined): string | null {
+  const m = /^((?:[\w@.-]+\/)*)package\.json$/.exec(String(manifestPath ?? ''));
+  if (!m || /(?:^|\/)\.\.(?:\/|$)/.test(m[1])) return null;
+  const nm = `${m[1]}node_modules`;
+  return `[ -d '${nm}' ] && touch '${nm}'; true`;
+}
+
 /** BR1955: bare manual probes must not throw away the write-time compiler's incremental data.
  * The real compiler still runs and validates every input; this is NOT a cached-success bypass.
  * Explicit CLI configs, output/watch modes, shell composition and CLI cache choices are unchanged.

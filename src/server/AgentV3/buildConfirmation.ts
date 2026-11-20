@@ -102,6 +102,22 @@ export function declinesTheBuild(message: string): boolean {
 
 
 /**
+ * A PROMPT TEMPLATE WITH ITS BLANK STILL IN IT NAMES NO APP (failedbr #1020, 2026-11-20). A Hindi template —
+ * "तुम एक एक्सपर्ट मोबाइल ऐप डेवलपर हो … मेरी ऐप का टॉपिक यह है: [यहाँ लिखिए आपको कौन सी ऐप बनानी है, जैसे: …]" — was pasted
+ * with the topic never filled in. The role line became the app's name, the placeholder's EXAMPLES set the domain, and the
+ * model was nudged into a To-Do app. A bracketed fill-in instruction ("[यहाँ लिखिए …]", "[write your app idea here]",
+ * "<insert topic>") is the one part that names the app, still blank — so the turn is answered and asks for it. PURE.
+ */
+const UNFILLED_PLACEHOLDER = new RegExp([
+  String.raw`[\[<{(]\s*(?:यहाँ|यहां|यहा)\s*(?:लिखि?ए|लिखें|लिखो|डालें)[^\]>})]{0,200}[\]>})]`,
+  String.raw`[\[<{]\s*(?:write|type|enter|insert|add|put|fill(?:\s+in)?|describe|your)\b[^\]>}]{0,80}\b(?:here|topic|idea|app(?:\s+name)?|name|details?|description)\b[^\]>}]{0,80}[\]>}]`,
+  String.raw`[\[<{]\s*(?:yaha|yahan)\s+(?:likhe|likhiye|likho)[^\]>}]{0,200}[\]>}]`,
+].join('|'), 'i');
+export function hasUnfilledPlaceholder(message: string): boolean {
+  return UNFILLED_PLACEHOLDER.test(String(message ?? ''));
+}
+
+/**
  * Does this turn ask whether the message itself confirms a build? A new build always; an edit only when no earlier request
  * left an app — or when the message is code with no words, which is no instruction on any app (failedbr #1278). PURE.
  */
@@ -123,6 +139,7 @@ export type BuildConfirmationReason =
   | 'asks-for-a-document'
   | 'declines-the-build'
   | 'code-without-instruction'
+  | 'unfilled-template'
   | 'question'
   | 'names-nothing-to-build';
 
@@ -145,6 +162,7 @@ export function buildConfirmation(message: string): BuildConfirmation {
   // failedbr #1270: "nhi banao" / "mat banao" refuses the build; it never confirms one.
   if (text && declinesTheBuild(text)) return { confirmed: false, reason: 'declines-the-build' };
   if (text && isCodeWithoutInstruction(text)) return { confirmed: false, reason: 'code-without-instruction' };
+  if (text && hasUnfilledPlaceholder(text)) return { confirmed: false, reason: 'unfilled-template' };
   // failedbr #1420 / #1430: a document is written in chat (its reply offers the build), even after "create" / "design".
   if (text && requestsADocument(text)) return { confirmed: false, reason: 'asks-for-a-document' };
   if (text && isExplicitCompleteBuild(text)) return { confirmed: true, reason: 'complete-build' };

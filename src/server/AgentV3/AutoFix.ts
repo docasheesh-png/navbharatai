@@ -317,6 +317,16 @@ export interface RuntimeVerifyRecord {
   autoResolved: boolean;
 }
 
+/**
+ * May an empty console capture be called "runtime verified"? Only when there was a page to run: a preview was
+ * published, or a render was proved. 🔴 failedbr #1563 (2026-11-20): the sandbox was at its concurrency limit, no
+ * preview ever came up (PREVIEW_NEVER_CAME_UP), the capture returned no errors without saying it could not look, and
+ * the same report said "Runtime verified — the app ran in the browser". PURE.
+ */
+export function runtimeCanBeVerified(previewUrl: string | null | undefined, renderProven: boolean): boolean {
+  return renderProven === true || (typeof previewUrl === 'string' && previewUrl.trim() !== '');
+}
+
 /** The app ran in a real browser session and no actionable console errors remained — an honest positive. */
 export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
   return {

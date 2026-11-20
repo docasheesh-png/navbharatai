@@ -102901,6 +102901,16 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it n
   WebGL no longer blames the game). The "no on-screen controls" (#2435) and start-button (#2475) items stay UNVERIFIED —
   the reports do not show why the detector missed; no detector change without that evidence.
 - Locked by `tests/aBrowserInterventionIsNotACrash.test.ts` (real browser; reversion: interventions as errors → fails).
+## 2026-11-20 — Game audit 2 (#1): a 3D game that skips the kit's shell is told what it loses (branch `claude/game-shell-mounted`)
+- Evidence: failedbr #2475 / #2476 / #2477 (three "pubg / bgmi jaisa" games, all asking for a joystick). The shell
+  (GameCanvas.tsx) was seeded each time; the builder wrote its own `new THREE.WebGLRenderer()` + rAF loop, so the shell's
+  touch joystick, menus, HUD and music never existed (#2476: d-pad handlers "empty functions", off-screen; #2477: arrows
+  "changed nothing"). The prompt already said "mount <GameCanvas>"; the only signal was an end-of-build "kit component not used".
+- `src/server/AgentV3/shellBypass.ts`: shell present + a game's own file builds its own renderer (WebGLRenderer or r3f) +
+  nothing of its own mounts GameCanvas / new Game / RacingRoadGame → a write-time repair note naming what is lost and the exact
+  way back, and a readiness WARNING (not a blocker: the game may still run on a desktop). 2D canvas games, board games and
+  projects without the shell are never flagged (Q-2715 preserved).
+- Locked by `tests/aGameIsBuiltOnTheShell.test.ts` (reversion: renderer detection off → 3 fail).
 ## 2026-11-20 — failedbr #2408 / #2342 / #2339 resolved (#4360 merged)
 
 Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
@@ -102908,3 +102918,12 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2963 (#2342): on an edit, the aggregate project-score blocker no longer forces an unfinished-resume (`isProjectScoreBlocker`); the verdict half is Q-2964 (admin decision).
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
+
+## 2026-11-20 — failedbr #2318 / #2306 / #2399 resolved (#4361 merged)
+
+Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2966 (#2318): no style/accessibility hand-back once the build has said "wrapping" (75%) or "final" (90%) — a ready app is delivered, not polished into the cap (`polishHandBackAllowed`, both sites).
+- Q-2968 (#2306): the `coming-soon` fake marker ignores the honest disclosure NO_FAKE_FEATURE_RULE demands (a line naming a credential and where to add it).
+- Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
+- Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).

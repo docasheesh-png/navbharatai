@@ -565,7 +565,7 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
-import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable } from '../AgentV3/freeBuildTimeCap';
+import { freeBuildWindow, freeWindowLine, noteFreeBuildStartDurable, decideFreePauseDurable } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -14760,7 +14760,7 @@ async function noteBuildOutcome(
       // at 25 minutes must not read, in the report, as one that hit the 30-minute paid cap.
       if (freeWindow.capped) {
         try {
-          buildDiag.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_TIME_CAP', message: `Free build window: ${Math.round(freeWindow.seconds / 60)} min (a paid build would get ${Math.round(freeWindow.paidSeconds / 60)} min).`, autoResolved: true });
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_TIME_CAP', message: freeWindowLine(freeWindow, maxBuildSeconds(), buildDepth), autoResolved: true });
         } catch { /* observation only */ }
       }
       // OBSERVABILITY ONLY (2026-09-16) — record what the request analyser concluded above, so a

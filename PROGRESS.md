@@ -102898,3 +102898,14 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2963 (#2342): on an edit, the aggregate project-score blocker no longer forces an unfinished-resume (`isProjectScoreBlocker`); the verdict half is Q-2964 (admin decision).
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
+
+## 2026-11-20 — Build report 05eb30ba: five report-honesty rows (Q-2746, Q-2747, Q-2748, Q-2751, Q-2752)
+| ID | Problem → root cause → class | Fix · lock (each proven by reversion) |
+|---|---|---|
+| Q-2747 | "$0.0000 instead of $0.0000" → `toFixed(4)` rounds < $0.00005 to zero → 15 report amounts in 8 files | `usdAmount` (sub-cent keeps 2 significant digits) · `aSmallAmountIsNotPrintedAsZero` + census |
+| Q-2746 | "longer than the 0s build timing window" → a pre-build check that ran before the timer was taken as the build's first call → the class five earlier autopsies (BR1958/84/85/86/95) only reworded | plain note, replaced by the build's own first call · `aPreBuildCallIsNotTheBuildsFirstCall` |
+| Q-2748 | `startTier: "sonnet"` on Weak builds → the report printed the band key (historical model names); 2b0a3ed5 added a label but kept the key | report carries only `complexityBand`; telemetry keeps the key; legacy reports map back · `aBandIsNotAModelInTheReport` |
+| Q-2751 | LADDER_DEPTH counted the scope call on an empty build → scope tokens share the build's ledger | `PHASE_SCOPE` at both scope writers; ladder skips it; bill unchanged (tested) · `aScopeCheckIsNotALadderSlice` |
+| Q-2752 | domain stems inside unrelated words → census vs 275k words found 9 (parental→booking, impatient→healthcare, blending→fintech, …) | each guarded against that word only · `aWordInsideAWordIsNotADomain` (old code: 8 fail) |
+
+**Discovered, not folded in:** Q-2972 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.

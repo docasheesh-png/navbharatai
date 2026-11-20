@@ -520,7 +520,12 @@ export function liveUserMessageTurn(message: string, etaShown?: string | null): 
       + '(by its exports and contents) and keep their version unless it breaks the build; if it matches no file, say so in one '
       + 'line and carry on with the app. Never invent a feature from it. '
     : '';
-  return '[USER MESSAGE — sent live during the build.] Act on it now without discarding progress. ' + code
+  // failedbr #686 (Q-3215): "Game bnao" became a Snake game; "Game bnao bike race" arrived mid-build and the old
+  // "without discarding progress" kept the model on Snake. A message that names a DIFFERENT app is the user's choice.
+  return '[USER MESSAGE — sent live during the build.] Act on it now. ' + code
+    + 'If it changes WHAT is being built (it names a different app or game than the one underway), the user\'s new choice '
+    + 'wins: switch to it, reusing only the files that still fit, and never keep building the old one. Otherwise keep the '
+    + 'progress made so far. '
     + 'If it answers a question you asked, build to that answer. If it is unclear what it asks for, '
     + 'say in one line how you read it before you continue. Your final reply must say what you did '
     + `about it. ${eta}\n${message}`;

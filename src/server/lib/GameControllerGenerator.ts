@@ -198,6 +198,106 @@ export function stepMotor(
 }
 
 /**
+ * SWIMMING (admin 2026-11-20 game-gap audit: a player who walked into a lake sank to the bottom and walked along it,
+ * because nothing in the kit knew what water was). Pure, like the rest of the motor: it is handed how deep the FEET are
+ * under the surface and returns the new velocity.
+ *
+ * - The body FLOATS with head and shoulders out (a spring toward floatDepth), slowed by water drag.
+ * - Jump held swims UP, dive held swims DOWN; Jump pressed at the surface climbs out (enough for a low bank).
+ * - Slower than walking, sprint helps a little — water is heavy.
+ */
+export interface SwimConfig {
+  /** Feet deeper than this and the character swims instead of wading. */
+  swimDepth: number;
+  /** The depth the feet float at: head and shoulders out of the water. */
+  floatDepth: number;
+  /** The head is under water when the feet are deeper than this. */
+  headDepth: number;
+  swimSpeed: number;
+  sprintMultiplier: number;
+  acceleration: number;
+  /** Water drag: how fast speed dies away when no key is held. */
+  drag: number;
+  /** Speed of swimming up or down. */
+  verticalSpeed: number;
+  /** How strongly the body is pulled to floatDepth. */
+  buoyancy: number;
+  /** The jump out of the water at the surface. */
+  exitJumpSpeed: number;
+  /** Seconds of breath under water. */
+  breathSeconds: number;
+}
+
+export const DEFAULT_SWIM: SwimConfig = {
+  swimDepth: 1.0,
+  floatDepth: 1.3,
+  headDepth: 1.6,
+  swimSpeed: 2.6,
+  sprintMultiplier: 1.5,
+  acceleration: 9,
+  drag: 2.5,
+  verticalSpeed: 2.2,
+  buoyancy: 5,
+  exitJumpSpeed: 7,
+  breathSeconds: 15,
+};
+
+export interface SwimInput extends MotorInput {
+  /** Dive is held — swim down. */
+  diveHeld?: boolean;
+}
+
+export interface SwimStep {
+  state: MotorState;
+  /** True on the step the character jumped out at the surface. */
+  jumpedOut: boolean;
+  /** The head is under water. */
+  underwater: boolean;
+}
+
+/** Advance one FIXED step in water. depth = water surface height − feet height (metres). Never mutates its input. */
+export function stepSwim(prev: MotorState, input: SwimInput, depth: number, delta: number, config: SwimConfig = DEFAULT_SWIM): SwimStep {
+  const s: MotorState = { ...prev, grounded: false, timeSinceGrounded: 999 };
+  s.timeSinceJumpPressed = input.jumpPressed ? 0 : prev.timeSinceJumpPressed + delta;
+
+  // Horizontal: like walking, slower, with water drag instead of ground friction.
+  const target = config.swimSpeed * (input.sprint ? config.sprintMultiplier : 1);
+  if (Math.hypot(input.moveX, input.moveZ) > 0.001) {
+    s.vx += input.moveX * config.acceleration * delta;
+    s.vz += input.moveZ * config.acceleration * delta;
+  }
+  const speed = Math.hypot(s.vx, s.vz);
+  if (speed > target) {
+    // Faster than a swimmer can go (a dive in at running speed): the water slows it, it does not snap.
+    const slowed = Math.max(target, speed * Math.exp(-config.drag * 2 * delta));
+    s.vx = (s.vx / speed) * slowed; s.vz = (s.vz / speed) * slowed;
+  } else if (Math.hypot(input.moveX, input.moveZ) <= 0.001) {
+    const decay = Math.exp(-config.drag * delta);
+    s.vx *= decay; s.vz *= decay;
+    if (Math.abs(s.vx) < 0.01) s.vx = 0;
+    if (Math.abs(s.vz) < 0.01) s.vz = 0;
+  }
+
+  // Vertical: climb out, swim up or down, or float.
+  const atSurface = depth <= config.floatDepth + 0.2;
+  let jumpedOut = false;
+  if (input.jumpPressed && atSurface) {
+    s.vy = config.exitJumpSpeed;
+    s.jumping = true;
+    s.timeSinceJumpPressed = 999;
+    jumpedOut = true;
+  } else {
+    let want: number;
+    if (input.diveHeld) want = -config.verticalSpeed;
+    else if (input.jumpHeld && depth > config.floatDepth + 0.15) want = config.verticalSpeed;
+    else want = Math.max(-config.verticalSpeed, Math.min(config.verticalSpeed, (depth - config.floatDepth) * config.buoyancy));
+    s.vy += (want - s.vy) * Math.min(1, config.drag * 2 * delta);
+    s.jumping = false;
+  }
+  return { state: s, jumpedOut, underwater: depth > config.headDepth };
+}
+
+/**
  * Rotate an input vector into CAMERA space, so "forward" means "away from the camera" and "right" means
  * the right of the SCREEN.
  *
@@ -219,7 +319,7 @@ export function cameraRelative(moveX: number, moveZ: number, cameraYaw: number):
 `;
 
 const CONTROLLER = `import * as THREE from 'three';
-import { stepMotor, initialMotorState, cameraRelative, DEFAULT_MOTOR, type MotorConfig, type MotorState } from './motor';
+import { stepMotor, stepSwim, initialMotorState, cameraRelative, DEFAULT_MOTOR, DEFAULT_SWIM, type MotorConfig, type MotorState, type SwimConfig } from './motor';
 import { events } from '../core/events';
 import { collisionRoot, hasWorldGround, sweepWorldCapsules, uprightCapsule, worldColliders, worldFloorAt } from '../three/collision';
 
@@ -229,7 +329,18 @@ export interface CharacterOptions {
   config?: Partial<MotorConfig>;
   /** Small ledges up to this height can be stepped onto. */
   stepOffset?: number;
+  /** Water the character can swim in — see setWater(). */
+  water?: WaterSurface;
+  swim?: Partial<SwimConfig>;
+  /** Called about once a second while the character has no breath left (take health here, if the game wants). */
+  onOutOfBreath?: () => void;
 }
+
+/**
+ * Where the water is: one height for a lake or a sea, or a function of position for a river (null = no water here).
+ * A height in world units — the surface the player floats at.
+ */
+export type WaterSurface = number | ((x: number, z: number) => number | null);
 
 interface GroundContact { y: number; normal: THREE.Vector3; mesh?: THREE.Object3D }
 
@@ -247,6 +358,14 @@ export class CharacterController {
   /** Leading edge support while the feet move onto the centre of a stair tread. */
   private readonly stepSupport = new THREE.Vector3();
   private readonly lastSafe = new THREE.Vector3();
+  private water: WaterSurface | null;
+  private readonly swimConfig: SwimConfig;
+  private readonly onOutOfBreath?: () => void;
+  private swimmingNow = false;
+  private underwaterNow = false;
+  /** Seconds of breath left. */
+  private breathLeft: number;
+  private outOfBreathFor = 0;
 
   constructor(options: CharacterOptions = {}) {
     this.radius = options.radius ?? 0.4;
@@ -254,6 +373,28 @@ export class CharacterController {
     this.stepOffset = options.stepOffset ?? 0.35;
     this.config = { ...DEFAULT_MOTOR, ...(options.config || {}) };
     this.slopeLimit = Math.cos(this.config.maxSlopeDegrees * Math.PI / 180);
+    this.water = options.water ?? null;
+    this.swimConfig = { ...DEFAULT_SWIM, ...(options.swim || {}) };
+    this.onOutOfBreath = options.onOutOfBreath;
+    this.breathLeft = this.swimConfig.breathSeconds;
+  }
+
+  /** Give the character water to swim in (a lake height, or a function for a river), or null for none. */
+  setWater(water: WaterSurface | null): void { this.water = water; }
+
+  /** Is the character swimming (rather than walking or wading)? */
+  get swimming(): boolean { return this.swimmingNow; }
+  /** Is the head under water? */
+  get underwater(): boolean { return this.underwaterNow; }
+  /** Breath left, 0..1 (1 = full). Runs down under water and refills at the surface. */
+  get breath(): number { return this.breathLeft / this.swimConfig.breathSeconds; }
+
+  /** The water surface above the feet, or null where there is no water. */
+  private waterSurfaceAt(x: number, z: number): number | null {
+    const w = this.water;
+    if (w === null || w === undefined) return null;
+    const y = typeof w === 'function' ? w(x, z) : w;
+    return typeof y === 'number' && Number.isFinite(y) ? y : null;
   }
 
   /** Add explicit colliders when using the controller outside the game shell. */
@@ -267,6 +408,10 @@ export class CharacterController {
     this.object.position.set(x, y, z);
     this.lastSafe.set(x, y, z);
     this.stepSupport.set(0, 0, 0);
+    this.swimmingNow = false;
+    this.underwaterNow = false;
+    this.breathLeft = this.swimConfig.breathSeconds;
+    this.outOfBreathFor = 0;
   }
 
   get velocity(): { x: number; y: number; z: number } { return { x: this.state.vx, y: this.state.vy, z: this.state.vz }; }
@@ -276,11 +421,28 @@ export class CharacterController {
   /** Call at a fixed timestep. Camera yaw makes the controls view-relative. */
   update(
     delta: number,
-    input: { moveX: number; moveZ: number; sprint: boolean; jumpPressed: boolean; jumpHeld: boolean },
+    input: { moveX: number; moveZ: number; sprint: boolean; jumpPressed: boolean; jumpHeld: boolean; diveHeld?: boolean },
     cameraYaw = 0,
   ): void {
     const dir = cameraRelative(input.moveX, input.moveZ, cameraYaw);
     const root = collisionRoot(this.object);
+    // In water deep enough to swim (with a small margin on the way out, so the edge does not flicker between the two).
+    const surface = this.waterSurfaceAt(this.object.position.x, this.object.position.z);
+    const depth = surface === null ? -Infinity : surface - this.object.position.y;
+    const swimFrom = this.swimConfig.swimDepth - (this.swimmingNow ? 0.25 : 0);
+    if (depth > swimFrom) {
+      this.world = worldColliders(root, this.colliders, this.object);
+      this.implicitGround = false;
+      const step = stepSwim(this.state, { ...input, moveX: dir.x, moveZ: dir.z }, depth, delta, this.swimConfig);
+      this.state = step.state;
+      this.swimmingNow = !step.jumpedOut;
+      this.breathe(step.underwater, delta);
+      if (step.jumpedOut) events.emit('PLAYER_JUMPED');
+      this.move(delta, false);
+      return;
+    }
+    if (this.swimmingNow) { this.swimmingNow = false; }
+    this.breathe(false, delta);
     this.world = worldColliders(root, this.colliders, this.object);
     this.implicitGround = this.colliders.length === 0 && !hasWorldGround(this.world, root);
     const ground = this.probeGround(delta);
@@ -306,6 +468,19 @@ export class CharacterController {
       this.state = initialMotorState();
       this.stepSupport.set(0, 0, 0);
       events.emit('PLAYER_FELL', { at: this.lastSafe.clone() });
+    }
+  }
+
+  /** Breath runs down under water and refills (four times faster) in the air. */
+  private breathe(underwater: boolean, delta: number): void {
+    this.underwaterNow = underwater;
+    const full = this.swimConfig.breathSeconds;
+    this.breathLeft = underwater ? Math.max(0, this.breathLeft - delta) : Math.min(full, this.breathLeft + delta * 4);
+    if (this.breathLeft > 0) { this.outOfBreathFor = 0; return; }
+    this.outOfBreathFor += delta;
+    if (this.outOfBreathFor >= 1) {
+      this.outOfBreathFor -= 1;
+      try { this.onOutOfBreath?.(); } catch (e) { console.error('[swim]', e); }
     }
   }
 
@@ -479,6 +654,12 @@ export function generateGameController(include?: string[]): GameControllerResult
       '- AIR CONTROL is its own number — full control feels floaty, none feels like a punishment.\n' +
       '- STEP OFFSET stops the character snagging on every kerb; the SLOPE LIMIT makes steep ground slide.\n' +
       '- Emit-driven: PLAYER_JUMPED / PLAYER_LANDED fire from here, so VFX and audio hook on without this\n' +
-      '  class importing them. Trigger landing dust on the EVENT, never inside the controller.',
+      '  class importing them. Trigger landing dust on the EVENT, never inside the controller.\n' +
+      'SWIMMING (never hand-write it — a player who walks into a lake must not walk along the bottom):\n' +
+      '- player.setWater(0) for a lake or sea at height 0, or player.setWater((x, z) => riverSurfaceAt(x, z) ?? null).\n' +
+      "- In deep water the player floats (head out), swims slower, Jump held swims up, dive held swims down (pass diveHeld:\n" +
+      "  input.isDown('crouch')), and Jump at the surface climbs out. Shallow water is still walking.\n" +
+      '- player.swimming, player.underwater and player.breath (0..1) are there for the HUD; onOutOfBreath fires once a\n' +
+      '  second with no breath left — take health there if the game wants drowning.',
   };
 }

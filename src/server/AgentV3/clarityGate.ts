@@ -272,6 +272,10 @@ export function bestGuessPrompt(firstRequest: string, reply: string, replyNamesT
   const asked = replyNamesTheApp ? '' : `${String(firstRequest ?? '').trim()}\n`;
   return `${asked}${String(reply ?? '').trim()}\n\n`
     + '[PLATFORM NOTE] The user was already asked once what to build. Do not ask again: choose the single most likely concrete app '
-    + 'from what they said, build it with sensible defaults, and begin your first message with ONE short line, in the user\'s language, '
-    + 'saying what you assumed (e.g. "Maine ise ek <app type> maan kar banaya hai" — name the app type you chose from THEIR words; never default to a billing/shop app unless they asked for one).';
+    // failedbr #1188, #1182, #1180 (2026-11-20): the example was past tense ("…maan kar banaya hai" — "I have built it as")
+    // and Roman Hindi, so the opening line claimed a finished app at second 15, before one file existed, and a Bengali user
+    // got Latin-script Hinglish back. It now says what is being built, in the user's own language AND script.
+    + 'from what they said, build it with sensible defaults, and begin your first message with ONE short line, in the user\'s own language '
+    + 'and in the same script they typed, saying what you are about to build and why (e.g. in English: "I\'m building this as a <app type> — tell me if you meant something else"). '
+    + 'Never say it is already built: nothing exists yet. Name the app type you chose from THEIR words; never default to a billing/shop app unless they asked for one.';
 }

@@ -91,7 +91,7 @@ describe('never twice in a row', () => {
     expect(p).toContain('ek game banao');
     expect(p).toContain('koi bhi');
     expect(p).toMatch(/Do not ask again/);
-    expect(p).toMatch(/saying what you assumed/);
+    expect(p).toMatch(/saying what you are about to build and why/); // failedbr #1188: present tense, never "already built"
   });
   it('wired: the route records a clarify turn, skips both gates after it, and emits the chips', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');

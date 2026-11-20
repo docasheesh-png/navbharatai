@@ -28,3 +28,13 @@ describe('the answer to our question is the request when it names an app (failed
     expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toContain('bestGuessPrompt(lastRequestTurn.text, typedPrompt, mentionsBuildNoun(typedPrompt.toLowerCase()))');
   });
 });
+
+describe('the best-guess note never claims a finished app (failedbr #1188, #1182, #1180)', () => {
+  it('asks for a present-tense line in the user\'s own language and script, with no Roman Hindi past-tense example', () => {
+    const p = bestGuessPrompt('App banao', 'WhatsApp like app');
+    expect(p).not.toMatch(/banaya hai/);
+    expect(p).not.toMatch(/billing app maan/);
+    expect(p).toMatch(/same script they typed/);
+    expect(p).toMatch(/Never say it is already built/);
+  });
+});

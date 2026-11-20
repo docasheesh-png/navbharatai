@@ -319,7 +319,7 @@ import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreDetail, s
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
-import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
+import { buildLanguageInstruction } from '../AgentV3/LanguageDetect';
 import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
 // MOVED OUT (Q-867, 2026-10-12) — the conversation-store singleton and the running-build registry each
@@ -16811,7 +16811,7 @@ async function noteBuildOutcome(
         expectsArtifacts: () => expectsArtifacts,
         // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
         // writes the labels and never sees the user's words.
-        languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),
+        languageRule: () => buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing' }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
         // The SAME request notes the architect's prompt opens with (Q-868 gave a writing specialist the classic-phone
@@ -18928,7 +18928,7 @@ async function noteBuildOutcome(
         // Phase 6.1: the instruction states its own CONFIDENCE (a script is proof, a romanized guess
         // says it is a guess). Autopsy 466c260a: a request in Latin letters now says so explicitly and
         // forbids an unrequested switch of script. ONE function — the sub-agents read the same line.
-        buildPrompt = `${appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' })}\n\n${buildPrompt}`;
+        buildPrompt = `${buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing' })}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
 
       // Attachments: prepend the extracted file content/description so the build

@@ -6898,6 +6898,197 @@ export function createAircraft(o: { kind?: 'jet' | 'prop'; colour?: number } = {
 }
 `;
 
+const BREAKABLE = `/**
+ * BREAKABLE OBJECTS (admin 2026-11-20 game-gap audit: crates, barrels, windows and walls took hits and nothing happened,
+ * or a builder hid the object and the player walked through the hole it left blocking nothing — or worse, it kept
+ * blocking while invisible). A breakable object has health; the player's own shots and swings reach it through the same
+ * target list the enemies use; at zero it LEAVES the scene (so it stops blocking) and shatters into debris that flies,
+ * falls, bounces, settles and then shrinks away and is disposed (so a long fight does not leak memory).
+ *
+ *   makeBreakable(crate, { health: 40, onBreak: () => loot.roll('crate', crate.position) });
+ *   // the player's weapon: include the breakables in its targets, then hand the hits back
+ *   const hits = gun.update(dt, [...enemyTargets, ...breakableTargets()]);
+ *   hitBreakables(hits);   // damages only the breakables among them; enemies are yours as before
+ * The game shell steps the debris every frame by itself (updateBreakables).
+ */
+import * as THREE from 'three';
+
+export interface BreakableOptions {
+  /** Damage it takes to break. Default 30. */
+  health?: number;
+  /** Debris pieces. Default 10 (2–40). */
+  pieces?: number;
+  /** Debris colour; default the object's own first material colour. */
+  color?: number;
+  /** Seconds the debris lies before it shrinks away. Default 2.5. */
+  debrisSeconds?: number;
+  /** Called once, when it breaks (drop loot, score, play a sound). */
+  onBreak?: (object: THREE.Object3D) => void;
+}
+
+export interface BreakableTarget { id: string; position: { x: number; y: number; z: number }; radius: number; object: THREE.Object3D }
+
+interface Entry { health: number; max: number; options: BreakableOptions; broken: boolean }
+interface Piece { mesh: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; floor: number; age: number; life: number; size: number }
+
+const entries = new Map<THREE.Object3D, Entry>();
+/** Broken objects are forgotten from the map (no leak) and remembered here, weakly, for isBreakable / damageBreakable. */
+const brokenSet = new WeakSet<THREE.Object3D>();
+const pieces: Piece[] = [];
+const liveMaterials = new Set<THREE.Material>();
+const GRAVITY = -18;
+const SHRINK = 0.5;
+let seed = 1;
+const rand = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
+/** Give an object health so the player's attacks can break it. */
+export function makeBreakable(object: THREE.Object3D, options: BreakableOptions = {}): void {
+  const max = Math.max(1, Number.isFinite(options.health) ? (options.health as number) : 30);
+  entries.set(object, { health: max, max, options, broken: false });
+}
+
+export function isBreakable(object: THREE.Object3D): boolean { return entries.has(object); }
+/** Health left, 0..1 (0 when broken or not breakable). */
+export function breakableHealth(object: THREE.Object3D): number { const e = entries.get(object); return e ? e.health / e.max : 0; }
+/** Has it been broken? */
+export function isBroken(object: THREE.Object3D): boolean { return brokenSet.has(object); }
+
+/** The unbroken breakables as weapon targets (position = the middle of the object, radius = half its size). */
+export function breakableTargets(): BreakableTarget[] {
+  const out: BreakableTarget[] = [];
+  const box = new THREE.Box3();
+  for (const object of entries.keys()) {
+    if (!object.parent) continue;
+    box.setFromObject(object);
+    if (box.isEmpty()) continue;
+    const c = box.getCenter(new THREE.Vector3());
+    const s = box.getSize(new THREE.Vector3());
+    out.push({ id: 'breakable:' + object.uuid, position: { x: c.x, y: c.y, z: c.z }, radius: Math.max(s.x, s.y, s.z) / 2, object });
+  }
+  return out;
+}
+
+/** Damage a breakable; it breaks at zero. from = where the hit came from (debris flies away from it). */
+export function damageBreakable(object: THREE.Object3D, amount: number, from?: { x: number; y: number; z: number }): { broken: boolean; health: number } {
+  const e = entries.get(object);
+  if (!e || !Number.isFinite(amount) || amount <= 0) return { broken: brokenSet.has(object), health: e ? e.health / e.max : 0 };
+  e.health = Math.max(0, e.health - amount);
+  if (e.health === 0) breakNow(object, from);
+  return { broken: brokenSet.has(object), health: e.health / e.max };
+}
+
+/**
+ * Hand a weapon's hits back: each hit whose target is a breakable damages it. Returns how many breakables were hit.
+ * Hits on anything else (enemies) are left alone.
+ */
+export function hitBreakables(hits: ReadonlyArray<{ target: unknown; damage: number; point?: { x: number; y: number; z: number } }>, from?: { x: number; y: number; z: number }): number {
+  let n = 0;
+  for (const h of hits ?? []) {
+    const t = h?.target as Partial<BreakableTarget> | undefined;
+    const object = t?.object;
+    if (!object || !entries.has(object)) continue;   // an enemy, or already broken
+    damageBreakable(object, h.damage, from);
+    n += 1;
+  }
+  return n;
+}
+
+function colorOf(object: THREE.Object3D, fallback: number): THREE.Color {
+  let found: THREE.Color | null = null;
+  object.traverse((o: THREE.Object3D) => {
+    if (found) return;
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[] | undefined;
+    const first = Array.isArray(m) ? m[0] : m;
+    if (first && (first as THREE.MeshStandardMaterial).color) found = (first as THREE.MeshStandardMaterial).color.clone();
+  });
+  return found ?? new THREE.Color(fallback);
+}
+
+/** Break it now: out of the scene, debris in its place. */
+export function breakNow(object: THREE.Object3D, from?: { x: number; y: number; z: number }): void {
+  const e = entries.get(object);
+  if (!e || e.broken) return;
+  e.broken = true;
+  e.health = 0;
+  entries.delete(object);
+  brokenSet.add(object);
+  const parent = object.parent;
+  const box = new THREE.Box3().setFromObject(object);
+  if (parent && !box.isEmpty()) {
+    const centre = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const count = Math.max(2, Math.min(40, Math.round(e.options.pieces ?? 10)));
+    const edge = Math.max(0.05, Math.cbrt((size.x * size.y * size.z) / count) * 0.8);
+    const color = typeof e.options.color === 'number' ? new THREE.Color(e.options.color) : colorOf(object, 0x8b5a2b);
+    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
+    liveMaterials.add(material);
+    const push = from ? centre.clone().sub(new THREE.Vector3(from.x, from.y, from.z)).setY(0) : new THREE.Vector3();
+    if (push.lengthSq() > 0) push.normalize().multiplyScalar(3);
+    seed = (seed + parent.children.length * 7919 + count) >>> 0;
+    for (let i = 0; i < count; i++) {
+      const s = edge * (0.6 + rand() * 0.8);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), material);
+      mesh.position.set(
+        box.min.x + rand() * size.x,
+        box.min.y + rand() * size.y,
+        box.min.z + rand() * size.z,
+      );
+      mesh.castShadow = true;
+      const out = mesh.position.clone().sub(centre);
+      out.y = 0;
+      if (out.lengthSq() > 0) out.normalize();
+      const v = out.multiplyScalar(2 + rand() * 3).add(push).setY(2 + rand() * 4);
+      parent.add(mesh);
+      pieces.push({ mesh, v, spin: new THREE.Vector3(rand() * 8 - 4, rand() * 8 - 4, rand() * 8 - 4), floor: box.min.y + s / 2, age: 0, life: e.options.debrisSeconds ?? 2.5, size: s });
+    }
+  }
+  if (parent) parent.remove(object);
+  try { e.options.onBreak?.(object); } catch (err) { console.error('[breakable]', err); }
+}
+
+/** Step the debris: fly, fall, bounce, settle, then shrink away and dispose. The game shell calls this every step. */
+export function updateBreakables(dt: number): void {
+  if (!Number.isFinite(dt) || dt <= 0 || pieces.length === 0) return;
+  for (let i = pieces.length - 1; i >= 0; i--) {
+    const p = pieces[i];
+    p.age += dt;
+    p.v.y += GRAVITY * dt;
+    p.mesh.position.addScaledVector(p.v, dt);
+    p.mesh.rotation.x += p.spin.x * dt; p.mesh.rotation.y += p.spin.y * dt; p.mesh.rotation.z += p.spin.z * dt;
+    if (p.mesh.position.y < p.floor) {
+      p.mesh.position.y = p.floor;
+      p.v.y = Math.abs(p.v.y) > 1 ? -p.v.y * 0.3 : 0;
+      p.v.x *= 0.6; p.v.z *= 0.6;
+      p.spin.multiplyScalar(0.6);
+    }
+    if (p.age > p.life) {
+      const k = Math.max(0, 1 - (p.age - p.life) / SHRINK);
+      p.mesh.scale.setScalar(k);
+      if (k === 0) {
+        p.mesh.parent?.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        pieces.splice(i, 1);
+      }
+    }
+  }
+  // The shared material goes when its last piece does.
+  if (pieces.length === 0) disposeOrphanMaterials();
+}
+
+function disposeOrphanMaterials(): void { for (const m of liveMaterials) m.dispose(); liveMaterials.clear(); }
+
+/** How many debris pieces are alive (for tests and a perf HUD). */
+export function debrisCount(): number { return pieces.length; }
+
+/** Forget every breakable and remove all debris (a new round, a level change, dispose). */
+export function clearBreakables(): void {
+  for (const p of pieces) { p.mesh.parent?.remove(p.mesh); p.mesh.geometry.dispose(); }
+  pieces.length = 0;
+  entries.clear();
+  disposeOrphanMaterials();
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/buildings.ts': GAME_BUILDINGS,
   'src/game/three/renderer.ts': RENDERER,
@@ -6921,10 +7112,12 @@ const FILES: Record<string, string> = {
   'src/game/three/objects.ts': OBJECTS,
   // A sky that lives: the clock, the day-night cycle and the weather, driving the lights above.
   'src/game/three/atmosphere.ts': ATMOSPHERE,
+  // Crates, barrels and walls that break into debris under the player's shots and swings (2026-11-20).
+  'src/game/three/breakable.ts': BREAKABLE,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable',
 ];
 
 /**
@@ -7134,6 +7327,11 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "  behind). Never walk a character under a 'chase' rig — it turns with every step the walker takes\n" +
       '  relative to it, so a joystick held a little off-centre walks in circles.\n' +
       '- Call followShadow(key, playerPos) on a large map, or shadows blur out as the player walks away.\n' +
-      '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.',
+      '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.\n' +
+      'BREAKABLE CRATES, BARRELS, WINDOWS, WALLS (three/breakable.ts — never hide a mesh and call it broken):\n' +
+      '- makeBreakable(crate, { health: 40, onBreak: () => loot.roll(\'crate\', crate.position) }) once.\n' +
+      '- The player\'s weapon: gun.update(dt, [...enemyTargets, ...breakableTargets()]) then hitBreakables(hits, playerPos)\n' +
+      '  (a sword: the same with melee.update). At zero health it leaves the scene — it stops blocking — and shatters into\n' +
+      '  debris that the shell steps and disposes by itself.',
   };
 }

@@ -149,7 +149,7 @@ export interface PastedAppFacts {
   controls: string[];
   /** Input fields, named by their label or placeholder. */
   fields: string[];
-  /** Colours it declares as CSS custom properties, `--name: #hex`. */
+  /** Colours it declares as CSS custom properties, `--name: #hex`; else its plain colours, named by the property using each. */
   colours: Array<{ name: string; value: string }>;
 }
 
@@ -170,8 +170,59 @@ function symbolControl(attrs: string | undefined, inner: string | undefined): st
   if (named && /\p{L}/u.test(named)) return named.trim();
   const sym = decodeEntities(String(inner ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
   if (!sym || sym.length > 12 || !/[\p{Extended_Pictographic}\p{S}]/u.test(sym)) return null;
-  const handler = /\bonclick=["']\s*([^"']{1,40}?)\s*;?\s*["']/i.exec(a)?.[1];
+  const handler = clickHandler(a);
   return handler ? `${sym} (${handler})` : sym;
+}
+
+/**
+ * The button's click handler, read to its own closing quote — `onclick="calcPress('+')"` is `calcPress('+')`, not the
+ * `calcPress(` a "stop at any quote" read gave (failedbr #1341). Trimmed to 40 characters. PURE.
+ */
+function clickHandler(attrs: string): string | null {
+  const m = /\bonclick=(["'])([\s\S]*?)\1/i.exec(attrs);
+  const h = m?.[2].replace(/\s+/g, ' ').replace(/;\s*$/, '').trim();
+  return h ? h.slice(0, 40) : null;
+}
+
+/**
+ * A KEY: a button whose whole label is one to three digits or punctuation marks — a calculator's `7`, `/`, `.`, `=`
+ * (failedbr #1341, 2026-11-20). `clean` needs a letter and `symbolControl` a symbol, so a pasted calculator's 16 keys
+ * came out as "+ (calcPress()" and "= (calcEqual())" and the rest vanished: "keep its 2 button(s)". PURE.
+ */
+function keyLabel(inner: string | undefined): string | null {
+  const t = decodeEntities(String(inner ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return t.length >= 1 && t.length <= 3 && /^[\p{N}\p{P}\p{S}]+$/u.test(t) ? t : null;
+}
+
+/** Keys become ONE control when there are several ("keys 7 8 9 / 4 … (16 keys)"), so a keypad cannot crowd out the named buttons. */
+function controlsOf(html: string): Array<string | null> {
+  const named: Array<string | null> = [];
+  const keys: string[] = [];
+  for (const m of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button\s*>/gi)) {
+    const label = clean(m[2]);
+    if (label) { named.push(label); continue; }
+    const key = keyLabel(m[2]);
+    if (key && !/[\p{Extended_Pictographic}]/u.test(key)) { keys.push(key); continue; }
+    named.push(symbolControl(m[1], m[2]));
+  }
+  if (keys.length >= 4) return [`keys ${[...new Set(keys)].join(' ')} (${keys.length} keys)`, ...named];
+  return [...keys, ...named];
+}
+
+/**
+ * The page's own colours when it declares no custom properties (failedbr #1341: `#e81123`, `#f0f0f0`… read as "0 colour(s)").
+ * From the stylesheet and inline `style=""`, named by the property that uses each one, most-used first. PURE.
+ */
+function plainColours(css: string, html: string): Array<{ name: string; value: string }> {
+  const inline = [...html.matchAll(/\bstyle=(["'])([\s\S]*?)\1/gi)].map((m) => m[2]).join(';');
+  const counts = new Map<string, { name: string; value: string; n: number }>();
+  for (const m of `${css};${inline}`.matchAll(/(background(?:-color)?|color|border(?:-[a-z]+)?|fill|stroke)\s*:\s*[^;{}]*?(#[0-9a-f]{3,8})\b/gi)) {
+    const value = m[2].toLowerCase();
+    const seen = counts.get(value);
+    if (seen) seen.n++;
+    else counts.set(value, { name: m[1].toLowerCase(), value, n: 1 });
+  }
+  return [...counts.values()].sort((a, b) => b.n - a.n).slice(0, 8).map(({ name, value }) => ({ name, value }));
 }
 
 function uniq(list: Array<string | null>, max: number): string[] {
@@ -195,10 +246,7 @@ export function pastedAppFacts(prompt: string | null | undefined): PastedAppFact
   const title = clean(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(html)?.[1]);
   const heading = clean(/<h1\b[^>]*>([\s\S]*?)<\/h1\s*>/i.exec(html)?.[1]);
   const description = clean(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i.exec(html)?.[1]);
-  const controls = uniq(
-    [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button\s*>/gi)].map((m) => clean(m[2]) ?? symbolControl(m[1], m[2])),
-    24,
-  );
+  const controls = uniq(controlsOf(html), 24);
   const labels = [...html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label\s*>/gi)].map((m) => clean(m[1]));
   const placeholders = [...html.matchAll(/<(?:input|textarea|select)\b[^>]*placeholder=["']([^"']+)["']/gi)].map((m) => clean(m[1]));
   const fields = uniq([...labels, ...placeholders], 24);
@@ -207,5 +255,6 @@ export function pastedAppFacts(prompt: string | null | undefined): PastedAppFact
     if (!colours.some((c) => c.name === m[1])) colours.push({ name: m[1], value: m[2] });
     if (colours.length >= 8) break;
   }
+  if (colours.length === 0) colours.push(...plainColours(css, html));
   return { title, heading, description, controls, fields, colours };
 }

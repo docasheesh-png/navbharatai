@@ -64,10 +64,20 @@ const LOOP_KINDS = new Set(['ForStatement', 'ForInStatement', 'ForOfStatement', 
 function calleeName(call: any): string {
   const expr = call.getExpression?.();
   if (!expr) return '';
-  const text: string = expr.getText?.() ?? '';
-  // For `React.useState` / `a.b.useMemo`, take the last segment.
-  const seg = text.split('.').pop() ?? text;
-  return seg.trim();
+  const kind = expr.getKindName?.();
+  if (kind === 'Identifier') return (expr.getText?.() ?? '').trim();
+  // 🔴 A METHOD NAMED `use` IS NOT A HOOK (failedbr #2478, 2026-11-20): `inventory.use(it.id)` in the seeded kit's Hud.tsx
+  // was read as React's `use` — "1 Rules-of-Hooks violation (crash at runtime)" on code that cannot crash — and the
+  // builder spent 15 minutes renaming translation keys and methods to escape it, then hit the 25-minute cap. A member
+  // call is a hook only the way eslint-plugin-react-hooks counts one: a hook name on a PascalCase NAMESPACE
+  // (`React.useState`, `React.use`, `Lib.useThing`) — never a method on a lower-case object (`inventory.use`,
+  // `this.useCache`, `store.useX`). The undefined-hook analyzer already skips every member call.
+  if (kind === 'PropertyAccessExpression') {
+    const object = expr.getExpression?.();
+    if (object?.getKindName?.() !== 'Identifier' || !/^[A-Z]/.test(object.getText?.() ?? '')) return '';
+    return (expr.getName?.() ?? '').trim();
+  }
+  return '';
 }
 
 /** Is this function-like node a React component (Uppercase) or a custom hook (useX)? */

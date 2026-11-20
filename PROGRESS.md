@@ -102914,6 +102914,28 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
 
+## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
+
+Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
+diagnostic `server refused the transcript (HTTP 404: Conversation not found.) for id v3_95865209-…`.
+
+- **Root cause.** The history list loads only the 50 most recent apps from the server; an older app shows up
+  only through its `chat_sessions` row, whose id is `v3_<sid>`. To open it, `candidateConversationIds` tried
+  `v3_<sid>`, `agentv3-<uid>-<sid>` and `agentv3-anon-<sid>`. It did NOT try the bare `<sid>`, where a
+  **duplicated app's** record lives, and nothing could find a record saved under a **random id** (builds from
+  before conversationId = workspaceId). Answer: 404.
+- **Class.** Two copies of "which ids can a session's record have" had drifted: `conversationIdCandidatesForWorkspace`
+  (build path) knew the bare-session-id case, `candidateConversationIds` (open, delete, pin, duplicate, rename,
+  unsend) did not.
+- **Fix.** `candidateConversationIds` now derives the session from either form of the id and reuses
+  `conversationIdCandidatesForWorkspace`, so both lists are one. `conversationLookupIds` adds, as the last
+  resort, the ids of this user's records for that workspace (`listIdsByWorkspace`, an owner-filtered
+  two-field equality query that needs no composite index). All six routes use it.
+- **Locked by** `tests/aDuplicatedAppOpensFromHistory.test.ts`, using the report's session id. Reverting
+  either half fails it (2 tests fail for the candidate list, 1 for the old-record lookup). A census guard
+  fails if a route builds its own candidate list again.
+- **Not verified.** Which of the two shapes this specific game had: production data was not readable from
+  this session. **Watch for:** the same game now opens with its messages.
 ## 2026-11-20 — failedbr #2318 / #2306 / #2399 resolved (#4361 merged)
 
 Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
@@ -102922,3 +102944,19 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
+
+## 2026-11-20 — failedbr #2379 / #2337 resolved (#4362 merged); autopsies #2320, #2311, #2295, #2279, #2278, #2271 (#4369)
+
+Closed Q-2972, Q-2973, Q-2976 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2972 (#2379): a dev server backgrounded in a subshell is unwrapped before the probes are dropped (`unwrapSubshellBackgroundedServer`).
+- Q-2973 (#2379): emoji/symbol-labelled buttons are controls in the pasted-page facts (`symbolControl`).
+- Q-2976 (#2337): the missing-privacy-policy note is ADVISORY — tell the user, build nothing unless asked.
+
+Ledger for the reports worked in #4369 (rows Q-2977…Q-2984 in the queue):
+- #2320 — same class as Q-2963 (edit held to the project score), already merged in #4360. No new row.
+- #2311 (stopped fast-lane build) — CSS_CLASSES_UNDEFINED on a stopped tree: already RESOLVED by #4259 (BR1988), merged after this build ran. The unlabelled NotesManager field: Q-2977 🟡 (the report lacks the file's text).
+- #2295 (a bare `src/game/fx/synth.ts` read as a game build, game kit seeded, "Add credits" upsell) — every item already RESOLVED on main: a source path alone is chat (`source-path-only`, 2026-11-16), chat intent seeds no kit, an answer-only turn gets no upsell (`answerOnlyNow`), and the Surplus failed-attempt usage hole was closed by #4320 (Q-2920). No new row.
+- #2279 (GO CAR) — Q-2978 game words are one family; Q-2979 a game the kit owns is never split into project modules; Q-2980 a play screen is not held to a page title. Not new rows: the TOOL_ERROR write without a path (the instructive-error layer converged next turn, and a write with no path cannot be repaired without guessing); CSS_CLASSES_UNDEFINED on a stopped MODULE turn (BR1988 keeps module turns on main's warning by design, and Q-2979 removes the game instance); USAGE_NOT_REPORTED (#4320).
+- #2278 (racing game) — Q-2981 a model's successful install re-stamps node_modules (sibling of the #4253 recipe-install fix); Q-2982 a seeded library is never rewritten for an importer's invented export; Q-2984 🟡 dead controls (game auto-repair is suspended by a security decision).
+- #2271 (INDIAN MUSIC) — Q-2983 a music app's roadmap step got the game kit; Q-2985 an unguarded Supabase client is noted at write time; Q-2986 a blocked `.env` read lists the saved key names. Not a defect: the closing "previous work is still stopping" line is RC-4's deliberate wording, pinned by BR1964. Already resolved elsewhere: the 10-minute key wait counted against the build (#2431, `workClock.ts`, 2026-11-19); 41 "ENGINE_R1 failed" fallbacks are Q-2692 (another session's branch owns it).
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).

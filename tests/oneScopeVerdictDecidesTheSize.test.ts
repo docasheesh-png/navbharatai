@@ -88,7 +88,7 @@ describe('🔒 the route sizes once', () => {
 
   it('one verdict, from planning.sizing, read by the report, the roadmap and project mode', () => {
     expect(route.match(/scopeVerdict\(/g) ?? []).toHaveLength(1);
-    expect(route).toContain('const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex });');
+    expect(route).toContain('const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex, gameOnKit: gameKitOwnsTheBuild(planning.sizing, framework) });');
     expect(route).toContain('const scope = appScope.scope;');
     expect(route).toContain('const { scope, dispute } = appScope;');
     expect(route).toContain('megaProject: appScope.projectMode,');
@@ -100,7 +100,7 @@ describe('🔒 the route sizes once', () => {
     const planGate = route.slice(route.indexOf('if (!pPlan &&'), route.indexOf(') {', route.indexOf('if (!pPlan &&')) + 3);
     expect(planGate).toContain('appScope.projectMode'); // ← project mode reads THE one verdict, not a second derivation
     expect(planGate).not.toMatch(/megaProjectSignals\(|analyzeAppScope\(/);
-    expect(route).toContain('scope: { large: appScope.large, signals: appScope.scope.signals },');
+    expect(route).toContain('scope: { large: appScope.large, signals: appScope.scope.signals, gameOnKit: appScope.gameOnKit },');
   });
 
   it('🔒 no second sizer is called in the route', () => {

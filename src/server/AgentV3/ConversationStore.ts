@@ -191,6 +191,12 @@ export interface ConversationStore {
    * returns full records; the Firestore store omits the transcript here.
    */
   listByUser(userId: string, limit?: number): Promise<ConversationRecord[]>;
+  /**
+   * The ids of THIS user's records for one workspace, whatever id they were saved under — the last resort
+   * for a record no point read can find (a build from before conversationId = workspaceId minted a random
+   * id per build). Optional so a test double need not implement it; never enumerates the anon bucket.
+   */
+  listIdsByWorkspace?(userId: string, workspaceId: string, limit?: number): Promise<string[]>;
   /** Delete a build. No-op if it does not exist. */
   remove(id: string): Promise<void>;
   /**
@@ -316,6 +322,15 @@ export class InMemoryConversationStore implements ConversationStore {
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt)
       .slice(0, Math.max(0, limit))
       .map(cloneRecord);
+  }
+
+  async listIdsByWorkspace(userId: string, workspaceId: string, limit = 5): Promise<string[]> {
+    if (!isEnumerableUserId(userId)) return [];
+    return [...this.records.values()]
+      .filter((r) => r.userId === userId && r.workspaceId === workspaceId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, Math.max(0, limit))
+      .map((r) => r.id);
   }
 
   async remove(id: string): Promise<void> {

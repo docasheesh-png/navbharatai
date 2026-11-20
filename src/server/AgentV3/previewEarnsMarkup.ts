@@ -31,6 +31,7 @@
 // exceeds its decided bill is left alone, and every zeroing rule downstream still takes precedence.
 //
 // PURE — numbers in, a number out. No I/O, no clock, never throws.
+import { usdAmount } from '../lib/usdAmount';
 
 export interface MarkupDecision {
   /** What to bill. Never greater than what was decided before this ran. */
@@ -95,7 +96,7 @@ export function decideMarkupOnProof(input: {
     billedUsd: real,
     markupApplied: false,
     reason: `The app was never confirmed running here, so the service margin was waived: billed at real cost only `
-      + `($${real.toFixed(4)} instead of $${decided.toFixed(4)}).`,
+      + `($${usdAmount(real)} instead of $${usdAmount(decided)}).`,
     userMessage: input.awaitingShell
       ? `This turn built one part of your app, and there is nothing to open until "${input.awaitingShell}" `
         + 'puts it together, so you have been charged only what this turn actually cost to run — no service '

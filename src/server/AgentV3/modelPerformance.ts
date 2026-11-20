@@ -48,6 +48,7 @@
  */
 
 import type { BuildDiagnosticsReport, LlmCallRecord, BuildIssue } from './BuildDiagnostics';
+import { startTierFromBandLabel } from './RequestAnalyser';
 
 /** The provider families that can appear on a build ladder. `unknown` when an id matches none. */
 export type ModelProvider = 'GLM' | 'KIMI' | 'CLAUDE' | 'OPENAI' | 'GEMINI' | 'GROK' | 'unknown';
@@ -305,11 +306,13 @@ export function buildOutcomeDims(r: BuildDiagnosticsReport): BuildOutcomeDims {
     if (code) issueCodeCounts[code] = (issueCodeCounts[code] ?? 0) + 1;
   }
   const budget = issues.find((i) => i?.code === 'CORRECTION_BUDGET');
-  const req = (r as { requestAnalysis?: { taskType?: string; complexityScore?: number; startTier?: string } }).requestAnalysis;
+  // Legacy reports carry `startTier`; reports since Q-2748 carry only `complexityBand` (its meaning). One grouping key either way.
+  const req = (r as { requestAnalysis?: { taskType?: string; complexityScore?: number; startTier?: string; complexityBand?: string } }).requestAnalysis;
+  const bandKey = typeof req?.startTier === 'string' && req.startTier ? req.startTier : startTierFromBandLabel(req?.complexityBand);
   return {
     taskType: typeof req?.taskType === 'string' && req.taskType ? req.taskType : null,
     complexityScore: isNum(req?.complexityScore) ? req.complexityScore : null,
-    startTier: typeof req?.startTier === 'string' && req.startTier ? req.startTier : null,
+    startTier: bandKey,
     gateState: gateStateFromIssues(issues),
     previewRepairAttempts: issueCodeCounts['PREVIEW_NOT_RENDERED'] ?? 0,
     durationMs: isNum(r.startedAt) && isNum(r.endedAt) && r.endedAt >= r.startedAt ? r.endedAt - r.startedAt : null,

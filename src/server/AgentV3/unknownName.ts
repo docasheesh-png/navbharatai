@@ -71,6 +71,19 @@ const VEHICLE_AND_UNIT_TERMS = [
 ];
 for (const t of VEHICLE_AND_UNIT_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Game-design and game-engine terms — a part of the game, never a service (failedbr #2279, 2026-11-20: a 3D racing
+ * game's spec said "HUD", and the builder was told HUD was an unknown name it must not build a client for; HUD was
+ * then added to the vehicle list, one word, while NPC, PVP, SFX, VFX, MMO and the rest were all still flagged).
+ * One family, so the next game word is not added one name at a time.
+ */
+const GAME_TERMS = [
+  'HUD', 'NPC', 'NPCS', 'RPG', 'RPGS', 'MMO', 'MMOS', 'MMORPG', 'PVP', 'PVE', 'COOP', 'MOBA', 'RTS', 'TPS', 'FPS',
+  'DLC', 'AFK', 'AOE', 'DPS', 'RNG', 'LOD', 'IAP', 'PBR', 'SFX', 'VFX', 'BGM', 'OST', 'AABB', 'GLSL', 'HLSL',
+  'WASD', 'LAN', 'GG', 'XP', 'HP', 'MP', 'KO', 'CTF', 'TDM', 'BR', 'POV', 'FOV', 'LOS', 'UGC', 'ELO',
+];
+for (const t of GAME_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

@@ -102891,6 +102891,16 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
 
+## 2026-11-20 — Game audit 2 (#4): a browser intervention is not a crash (branch `claude/playtest-honest`)
+- Evidence: failedbr #2477 — a game scoring 86 (answered up/W, left/A, right/D, Space, drag) was gated "the game was played
+  and is not playable (runtime error)" because Chrome logged "Unable to preventDefault inside passive event listener".
+- The playtest's console watcher now records browser interventions apart (`run.interventions`, BROWSER_INTERVENTION);
+  they no longer count as errors (Stable unaffected) and become the SOFT defect GAME_DEFECT_TOUCH_SCROLLS with the fix
+  ({ passive: false } / touch-action: none) — honest (the page can scroll under the thumb), never "not playable".
+- Not duplicated: the 0-fps / "Controls 0" half of item #4 was already fixed by d54d489d (software WebGL; a checker without
+  WebGL no longer blames the game). The "no on-screen controls" (#2435) and start-button (#2475) items stay UNVERIFIED —
+  the reports do not show why the detector missed; no detector change without that evidence.
+- Locked by `tests/aBrowserInterventionIsNotACrash.test.ts` (real browser; reversion: interventions as errors → fails).
 ## 2026-11-20 — Game audit 2 (#7): one word for loudness across the kit (branch `claude/game-playoptions-trap`)
 - Evidence: failedbr #2435 spent three turns on `TS2353 'volume' does not exist in type 'PlayOptions'` — audio.play and
   playMusic take `volume`, the melody player's PlayOptions said `gain`.

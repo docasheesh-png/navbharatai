@@ -274,6 +274,9 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     flowMinFrames: FLOW_MIN_FRAMES,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
+    // The browser's own interventions (a passive-listener preventDefault it ignored): recorded apart from errors.
+    intervention: BROWSER_INTERVENTION.source,
+    interventionFlags: BROWSER_INTERVENTION.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
     start: { any: START_LABEL.source, lead: START_LABEL_LEADING.source, flags: START_LABEL.flags,
       never: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags, notStart: NOT_A_START.source, notStartFlags: NOT_A_START.flags,
@@ -296,6 +299,7 @@ export function gamePlaytestModule(cfg: Record<string, unknown>, importLine: str
 const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const noise = new RegExp(cfg.noise, cfg.noiseFlags);
+const intervention = new RegExp(cfg.intervention, cfg.interventionFlags);
 
 // Deterministic randomness (Game Engine Ultra Phase 2): Math.random becomes a seeded mulberry32, so the
 // same game is played against the same spawns every run. crypto.getRandomValues is left alone.
@@ -677,9 +681,15 @@ const errors = [];
 // The stack beside each error (Q-2301): the server reads the app's own frame out of it, so the repair is told
 // WHERE the throw is. '' when there is none (a console line carries no stack).
 const errorStacks = [];
+const interventions = [];
 function watch(page) {
   page.on('pageerror', (e) => { errors.push(String(e && e.message || e).slice(0, 160)); errorStacks.push(String(e && e.stack || '').slice(0, 1200)); });
-  page.on('console', (m) => { if (m.type() === 'error' && !noise.test(m.text())) { errors.push(m.text().slice(0, 160)); errorStacks.push(''); } });
+  page.on('console', (m) => {
+    if (m.type() !== 'error' || noise.test(m.text())) return;
+    // A browser intervention is the BROWSER declining one call (it ignored a preventDefault) — the game did not crash.
+    if (intervention.test(m.text())) { if (interventions.length < 5) interventions.push(m.text().slice(0, 160)); return; }
+    errors.push(m.text().slice(0, 160)); errorStacks.push('');
+  });
 }
 
 async function hold(page, keys, ms) {
@@ -1031,6 +1041,7 @@ try {
   out.errors = errors.slice(0, 5);
   out.errorStacks = errorStacks.slice(0, 5);
   out.errorCount = errors.length;
+  if (interventions.length) out.interventions = interventions;
   say(out);
 } catch (e) {
   if (e !== null) say({ ok: false, webgl: out.webgl, error: String(e && e.message || e).slice(0, 200) });
@@ -1220,6 +1231,8 @@ export interface PlaytestRun {
   /** The stack captured with each of `errors`, same order ('' when none). Absent from an older script's output. */
   errorStacks?: string[];
   errorCount?: number;
+  /** Browser interventions seen while played (e.g. a passive-listener preventDefault it ignored) — not errors. */
+  interventions?: string[];
   /** The checking browser's own WebGL: the renderer name, false when it could not create a context, null when not probed. */
   webgl?: string | false | null;
 }
@@ -1247,6 +1260,15 @@ export function parsePlaytest(stdout: string | null | undefined): PlaytestRun {
   }
   return { ok: false, diagnostic: parseScriptDiagnostic(text) };
 }
+
+/**
+ * A BROWSER INTERVENTION IS NOT A CRASH (failedbr #2477, 2026-11-20). A game that scored 86, answering up / W, left / A,
+ * right / D, Space and a drag, was called "the game was played and is not playable (runtime error)" because Chrome
+ * logged "Unable to preventDefault inside passive event listener invocation" — the browser declining one call, after
+ * which the game ran on. It is recorded apart (run.interventions) and becomes a SOFT finding with its exact fix, never
+ * a runtime error. Hiding it entirely would be dishonest: on a phone it means the page can scroll under the thumb.
+ */
+export const BROWSER_INTERVENTION = /\[Intervention\]|unable to preventdefault inside passive event listener/i;
 
 export type Dimension = 'runs' | 'responds' | 'mobile' | 'stable' | 'smooth' | 'alive' | 'replay';
 
@@ -1752,7 +1774,8 @@ export type GameDefectCode =
   | 'GAME_DEFECT_VEHICLE_STALLED' // build 46e2d74b: the car never moves
   | 'GAME_DEFECT_MISSING_LAYER'   // autopsy 6a55d939: imports a kit layer that is not on disk
   | 'GAME_DEFECT_RESTART_BROKEN'  // 2026-11-19: after the round ended, no play-again control, or pressing it did not restart
-  | 'GAME_DEFECT_SILENT';         // 2026-11-19: the game's code plays sound, and a whole playthrough played none
+  | 'GAME_DEFECT_SILENT'          // 2026-11-19: the game's code plays sound, and a whole playthrough played none
+  | 'GAME_DEFECT_TOUCH_SCROLLS';  // 2026-11-20 (failedbr #2477): a touch handler's preventDefault was ignored (passive listener)
 export interface GameDefect { code: GameDefectCode; evidence: string }
 
 export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = [], replay?: GameCodeFacts | null): GameDefect[] {
@@ -1776,6 +1799,7 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
   }
   // Only a real zero from a run that counted (null = an older script or no Web Audio at all) and only for a game whose code plays sound.
   if (run && replay?.sound === true && run.sounds === 0) out.push({ code: 'GAME_DEFECT_SILENT', evidence: 'the game\'s code plays sound, and the whole desktop playthrough played none' });
+  if (run?.interventions?.some((t) => /passive event listener/i.test(t))) out.push({ code: 'GAME_DEFECT_TOUCH_SCROLLS', evidence: 'a touch handler called preventDefault on a passive listener, so the browser ignored it — the page can scroll or zoom under the player\'s thumb; add the listener with { passive: false } or give the game area touch-action: none' });
   if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
   return out;
 }

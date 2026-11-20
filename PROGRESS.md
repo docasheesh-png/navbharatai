@@ -103155,3 +103155,9 @@ Ledger, older reports (2026-11-20, next PR):
 
 Closed (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): Q-3037 a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it; Q-3039 a React-writing game recipe is refused in a project that cannot mount React; Q-3040 a dropped-connection message no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a gate blocker. The rows above (Q-3041, Q-3103–Q-3107) go in the next PR.
 
+Ledger, older reports (2026-11-20, next PR):
+- #1831 — no new rows: a user stop at 94 s while the builder read the camera files; its `claude-sonnet-4-6` label on an unanswered Weak call is Q-970, and the Surplus debug note's path is disabled on main.
+- #1823, #1822, #1821 — Q-2316: the style floor's import survives a rewrite of the mount, and an orphaned floor sheet is re-imported once per turn. #1822 also showed invented polish after the app rendered (`generate_tests` with no functions) before a user stop.
+- #1820 — Q-3108: a conflict, diff or wrapper marker in a whole-file write is named in the refusal instead of the duplicate-declaration hint.
+- #1817, #1814, #1813 — already autopsied by build ID (rows exist).
+

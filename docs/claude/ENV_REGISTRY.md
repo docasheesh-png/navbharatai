@@ -5278,3 +5278,11 @@ Admin, verbatim: *"mujhe cloud run me kuch nahi dalna aap default on kar dena"* 
 - No Cloud Run variable is needed or was changed. The earlier note that live-download and mobile/publication
   acceptance were incomplete still stands; the admin chose to turn it on with the procedural floor as the fallback.
   **Watch the next game builds' reports:** `3D assets … s (prepared, N ready)` instead of `(off)`.
+
+### 2026-11-20 — Admin set `AGENTV3_EXTERNAL_GAME_ASSETS=on` in Cloud Run
+
+The admin confirmed setting `AGENTV3_EXTERNAL_GAME_ASSETS` to `on` on `navbharat-ai-prod`. The variable was already
+present (2026-11-13 screenshot inventory), and an env value beats the code default, so the default-ON change (#4391)
+could not take effect while the old value stood (failedbr #2478 showed `3D assets 0.0 s (off)`). Every user's new 3D
+game now gets the reviewed library. Kill switch: set it to `off`. **Watch:** the next 3D game build's report should
+read `3D assets … (prepared, N ready)`; if it still reads `(off)`, the new revision is not serving.

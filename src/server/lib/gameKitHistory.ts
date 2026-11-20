@@ -95,6 +95,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8e8f1449321102000889e051d97fb4acb1a2d1ee993ce63e24b788773f2c608c",
     "3c18a7c3d0d16e60fea19ce885c6d34dc5c013e12e6b2ca6cbfcfd76fe480111"
   ],
+  "src/game/LaneRunnerGame.tsx": [
+    "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40"
+  ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
     "b670d1ca7850c12b055c278dd20def90c1ea7a68fb832283009c4fe6b6b3529f",

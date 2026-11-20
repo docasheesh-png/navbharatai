@@ -103276,3 +103276,21 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
   - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
 - **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.
+
+## 2026-11-20 — City traffic: the grid comes alive (engine plan, item 4)
+
+- **Gap:** city.ts gave streets and buildings, and nothing moved on them — `createTraffic()` drives one straight road.
+- **Fix:** `src/server/lib/GameCityTrafficGenerator.ts` → kit file `src/game/three/citytraffic.ts`: the kit's cars, autos
+  and buses drive the city grid in the LEFT lane, turn at crossings (never a U-turn unless the street ends), obey traffic
+  lights (one street green at a time, amber between, neighbouring crossings offset; two instanced meshes for every lamp
+  in the city), keep a gap to the vehicle ahead, stop for the player, and are deterministic per seed.
+- **Found by the test, fixed at the class:** the first version checked the gap only within a street — measured, a vehicle
+  turned onto a street on top of one that had just entered it 52 times in two minutes. Now a vehicle passes its stop line
+  only when its light is green, the crossing is EMPTY (one vehicle in a crossing at a time) and the street it turns into
+  has room (so a queue never blocks the crossing). Each vehicle chooses its next street in advance.
+- `dispose()` never frees the vehicles' geometry: the kit shares parts between all vehicles, the player's car included.
+- **Proof:** `tests/cityTrafficObeysTheRoad.test.ts` (8): two minutes of 20 vehicles checked every frame (on the street,
+  left lane, never through red, never inside the gap, never two in a crossing, everyone moves, most turn); rush hour of
+  45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
+  player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
+- 🟡 **Not built yet:** pedestrians.

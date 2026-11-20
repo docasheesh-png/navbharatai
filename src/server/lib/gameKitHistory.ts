@@ -479,6 +479,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/city.ts": [
     "f81e49558a350f1975c90e33da0f956e83d8bc57bb1291ae85d44b214f32f8df"
   ],
+  "src/game/three/citytraffic.ts": [
+    "a1c64e0c58cd2a3975747dfd84bc554249b3b54f4b00568e1216f58b35946a76"
+  ],
   "src/game/three/collision.ts": [
     "17d7db8f5f5aee65d637043365d0b94e67e4f7bdcd9f92da616b77928fdd3866",
     "9b1aad461db630b41e9e676fb5515f6626e9b10b282dc06e946eb46a735ee90a",

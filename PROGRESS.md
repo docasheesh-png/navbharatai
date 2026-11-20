@@ -103182,4 +103182,5 @@ Ledger, older reports (2026-11-20, next PR):
 - #1808 — Q-3109: a durable forget of files that were never stored is complete, so the rollback is no longer called incomplete. Its 38 build-loop files after the 85 s render, then a broken app and a restore, are Q-2305 (post-green writes kept unverified; blocked on the admin's decision).
 - #1803 — Q-3110: a system package install (apt, yum, apk, brew…) is answered at the bash door with the npm route; the 300 s foreground `node server.ts` is backgrounded on main, and the ffmpeg core and EADDRINUSE items are existing rows/rules.
 - #1801 — Q-3111 (with #1803): a server written without the SPA catch-all is told so at the write; its OUTCOME_AUTHORITY_UNAVAILABLE at 547 s is Q-2957 (blocked), which now names this report.
+- #1798 — Q-3112: a scaffold file the fast-lane plan describes only as it already is (package.json, vite.config, index.html, src/main) is not regenerated; the counter app lost its budget to two byte-copies of the starter before `App.tsx`. The 503 that ended it is a Surplus engine condition.
 

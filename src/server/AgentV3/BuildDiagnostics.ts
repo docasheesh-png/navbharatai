@@ -2798,6 +2798,16 @@ export class BuildDiagnostics {
    * the wait was timed at all (autopsy 303e8a6f: 62% of an 11.4 s wait was in no line). Every SETUP_TIMING goes
    * through here or `closeSetupWindow` — a census forbids a hand-written one in the route.
    */
+  /**
+   * A setup step that is usually instant, recorded only when it was not (failedbr #1319/#1263/#1277: 2–6 s before the first
+   * call sat "outside every timed step"). Below `minMs` it is not a step worth a report line, so none is written.
+   */
+  recordSetupTimingIfSlow(t: { message: (ms: number) => string; detail?: string; startMs: number }, minMs = 250): void {
+    const ms = this.now() - t.startMs;
+    if (!(ms >= minMs)) return;
+    this.recordSetupTiming({ startMs: t.startMs, message: t.message(ms), ...(t.detail ? { detail: t.detail } : {}) });
+  }
+
   recordSetupTiming(t: { message: string; detail?: string; startMs: number; endMs?: number }): void {
     const endMs = Number.isFinite(t.endMs) ? (t.endMs as number) : this.now();
     const startMs = Number.isFinite(t.startMs) ? Math.min(t.startMs, endMs) : endMs;

@@ -17795,7 +17795,9 @@ async function noteBuildOutcome(
       // kind the blueprint lane runs on) above.
       // BOTH ad facts from ONE load (Q-1018): the other service's players, and the app's OWN ad slots — the
       // ones that ARE ours to remove, and that the builder note is told to take out.
+      const adFactsT0 = Date.now();
       const thirdPartyAdFactsAtStart = await editTurnAdFacts(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
+      buildDiag.recordSetupTimingIfSlow({ startMs: adFactsT0, message: (ms) => `Existing app read for ad facts in ${ms}ms` });
       // 🔴 Q-1019 — the facts a zero-file turn's answer is judged against, read from the project as it was
       // when the turn BEGAN, which is what the model was answering about. "Remove the ads" on an app that
       // plays videos in YouTube's own player has one correct outcome — say so and change nothing — and the
@@ -17993,12 +17995,15 @@ async function noteBuildOutcome(
             // Level 9: restore persisted memory snapshot before warming from files —
             // episodes and file-list hints survive server restarts this way.
             const wsMem = getWorkspaceMemory(workspaceId);
+            // failedbr #1319/#1263/#1277: 2–6 s before the first call sat "outside every timed step" — this is one of them.
+            const memoryT0 = Date.now();
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
             // 🔴 THE CAP WAS THE HOLLOW GRAPH'S LAST CAUSE (queue Q-116). The default 80 files left every file
             // past the 80th as a STUB on a bigger app — exactly the projects that most need the graph (the
             // contract card, the invariants and grounding all read it). 400 files, bounded by time so a big
             // project never holds up the build's start; anything left is still counted by the line below.
             await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p), { maxFiles: 400, deadlineMs: WARM_INDEX_BUILD_START_MS });
+            buildDiag.recordSetupTimingIfSlow({ startMs: memoryT0, message: (ms) => `Project memory restored and indexed in ${ms}ms`, detail: `${fileTree.length} file(s) listed; indexing is capped at ${WARM_INDEX_BUILD_START_MS}ms` });
             // 🔎 MEASURE THE HOLLOW GRAPH (open root cause #2, 2026-09-17). A cold resume indexes every
             // previously-known file with `RESTORED_STUB`, which puts it in `graph.files` — and
             // `warmIndexFiles` skips files it already knows, so those keep EMPTY facts (no imports, no

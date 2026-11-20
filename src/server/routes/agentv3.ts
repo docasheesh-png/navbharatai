@@ -23516,7 +23516,10 @@ async function noteBuildOutcome(
           // The decision was arguably right and the REASON was false, which is worse: it tells the user
           // something untrue about their own app, and it hides the real reason from the next reader.
           const projectFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-          const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
+          // …AND THE SANDBOX'S ENTRY FILES (failedbr #669, Q-3221): the durable store does not hold the scaffold a
+          // build never touched, so a zero-write build had no index.html or .tsx in view and was told "this project
+          // has no user interface". The integrity pass already read those entry files from the sandbox.
+          const e2eFiles = { ...projectFiles, ...wholeProjectFiles, ...Object.fromEntries(writtenFiles) };
           const decision = shouldAutoScaffoldE2e({
             files: e2eFiles,
             // Runs before the render proof (#3313): a rescue-eligible build is not a failed one (6461025c).

@@ -103206,6 +103206,24 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
 - #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.
 
+## 2026-11-20 — Ready-to-play endless runner starter; one list of genre starters (engine plan, item 3)
+
+- **Checked first:** item 2 of the plan (a playtest that plays) already exists — `gamePlaytest.ts` plays every canvas game
+  (start, keys, drag, touch, errors, FPS) and `gameRepair.ts` gates completion; AUTOMATIC repair is deliberately suspended
+  (docs/security/game-auto-repair-suspension.md: rollback from an incomplete snapshot could lose user files). Left
+  suspended — re-enabling needs the reviewed byte-preserving snapshot protocol that note describes, and the admin's call.
+- **Starters before this:** racing (`RacingRoadGame`) and the royale practice. A runner was wired from parts every time.
+- **Fix:** `src/game/LaneRunnerGame.tsx` in the shell — `createLaneRunnerScene()` draws the kit's LaneRunner (track,
+  lane lines, recycled posts for speed, block / low / high obstacles, spinning coins, the humanoid running, jumping,
+  sliding, dying) and wires the kit (GameCanvas start screen, pause, game over + Play again via GAME_STARTED, settings,
+  language, swipes + keys, score into core/state, jump/coin/crash feedback events). Lane 0 is the LEFT on screen: drawn at
+  `x = -run.x` because the chase camera looks down +Z (screen-right is world -X).
+- **Class fix:** `src/server/lib/gameStarters.ts` is the ONE list of starters; `actionVisibility`, `endlessRaceCourse`
+  and `shellBypass` each hard-coded RacingRoadGame and now read it; the seed gives each starter only to its genre
+  (a racing request no longer receives the whole shell; a runner no longer receives the race).
+- **Proof:** `tests/theRunnerStarterPlays.test.ts` (8): Right moves right on screen through the real chase camera; a bot
+  playing through the player's own input survives 90 s / 1200+ m; standing still → game over; Play again is clean; the
+  right starter per genre. Seven reversions each failed. Kit strict compile + shell/seed/reader suites green.
 ## 2026-11-20 — Game menus in nine more Indian languages + Settings → Language (game-gap audit)
 
 - **Problem:** the game kit's own screens (start, pause, settings, game over, shop, controls, captions) were English or

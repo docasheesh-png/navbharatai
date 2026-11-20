@@ -103052,3 +103052,15 @@ Ledger, older reports (2026-11-20, #4377):
 - #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
+
+## 2026-11-20 — #4365 merged (Q-2746/2747/2748/2751/2752 closed); four more 05eb30ba-era rows fixed
+Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2746, Q-2747, Q-2748, Q-2751, Q-2752 — ledger in the entry above.
+
+| ID | Problem → root cause → class | Fix · lock (each proven by reversion) |
+|---|---|---|
+| Q-2750 | "a paid build would get 58 min" vs "29 min" in the same hour → both true: a deep build's window is doubled, the line never said so | `freeWindowLine` names the size when scaled · `aPaidWindowSaysWhyItDiffers` |
+| Q-2753 | four file counts in one report (28/21/30/30) → four different sets, CHANGE_RECORDED the only one naming none | its scope is in the line · `everyFileCountNamesItsScope` |
+| Q-2769 | JOURNEY_NOT_DERIVED told a list-driven form (`name={field.name}`) it had no names while accessibility scored 100 → the check reads names from source | the limit is said as the check's; real unnamed forms keep the remedy · `aFormBuiltFromAListIsNotUnnamed` |
+| Q-2766 | `{ ReactComponent }` + `?react` (two SVG plugins' styles) → preview errors until rewired | named on write with the exact default-import fix · `anSvgImportUsesOnePluginsStyle` |
+
+**Opened:** Q-3021 — a list-driven form gets no journey at all; the real fix reads field names from the running page.

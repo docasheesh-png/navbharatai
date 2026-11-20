@@ -77,8 +77,8 @@ describe('🏙️ city blocks', () => {
     expect(Math.max(...tall.map((l: any) => l.floors))).toBeLessThanOrEqual(30);
     expect(Math.max(...C.planCity({ maxFloors: 2, blocksX: 6, blocksZ: 6 }).lots.map((l: any) => l.floors))).toBeLessThanOrEqual(2);
     expect(C.planCity({ parks: 0, blocksX: 6, blocksZ: 6 }).parks).toEqual([]);
-    const allParks = C.planCity({ parks: 0.5, blocksX: 2, blocksZ: 1, seed: 1 });
-    expect(allParks.lots.length).toBeGreaterThan(0);
+    // Never a city of only parks: a one-block city at the highest park share still has buildings, for every seed.
+    for (let seed = 1; seed <= 20; seed++) expect(C.planCity({ parks: 0.5, blocksX: 1, blocksZ: 1, seed }).lots.length).toBeGreaterThan(0);
     // Silly sizes are bounded, not obeyed.
     const big = C.planCity({ blocksX: 1000, blocksZ: Number.NaN, block: 1, road: -5 });
     expect(big.blocksX).toBe(12); expect(big.blocksZ).toBe(4); expect(big.block).toBe(24); expect(big.road).toBe(6);

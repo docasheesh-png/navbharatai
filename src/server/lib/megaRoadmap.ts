@@ -324,12 +324,14 @@ const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, 
  * Pure; never throws.
  */
 /** A native mobile stack named in a step: React Native, Expo, Flutter, SwiftUI, Jetpack Compose, Kotlin, Ionic. */
+/** A second 3D engine beside the game kit's own three.js — the planner's choice unless the user named it (failedbr #2481). */
+export const SECOND_3D_STACK = /@react-three\/(?:fiber|drei)|\breact[-\s]three[-\s]fiber\b|\bbabylon(?:\.js|js)?\b|\bplaycanvas\b/i;
 const NATIVE_STACK = /\breact[- ]?native\b|\bexpo\b|\bflutter\b|\bswift\s?ui\b|\bjetpack\s+compose\b|\bkotlin\b|\bionic\b/i;
 
 export function roadmapGuardrail(
   parsed: { userMessage?: string; achievableSummary: string; note: string | null; steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }> } | null,
   famousApp: string | null,
-  architecture?: { framework: string; originalRequest: string },
+  architecture?: { framework: string; originalRequest: string; gameKit?: boolean },
 ): { roadmap: MegaRoadmap | null; rejected: string[] } {
   const rejected: string[] = [];
   if (!parsed) return { roadmap: null, rejected: ['no parseable roadmap'] };
@@ -352,6 +354,15 @@ export function roadmapGuardrail(
     && !NATIVE_STACK.test(architecture.originalRequest)
     && parsed.steps.some((step) => NATIVE_STACK.test(step.buildPrompt))) {
     return { roadmap: null, rejected: [`roadmap architecture conflicts with selected ${architecture.framework}: a native mobile stack is a planner choice, not a user constraint`] };
+  }
+
+  // failedbr #2481 ("ek real gta jaise game banao, bahut bade map par"): step 1 told the builder to use @react-three/fiber —
+  // a second 3D engine beside the game kit's three.js, which the platform lays down for this game — so the builder ignored
+  // the kit and its big map and drew a cube on a plane. The same class as the native stack above: a stack the user never
+  // named, chosen by the planner, contradicting the platform's. `gameKit` is the caller's `gameKitOwnsTheBuild`.
+  if (architecture?.gameKit && !SECOND_3D_STACK.test(architecture.originalRequest)
+    && parsed.steps.some((step) => SECOND_3D_STACK.test(step.buildPrompt))) {
+    return { roadmap: null, rejected: ['roadmap architecture conflicts with the game kit: a second 3D engine is a planner choice, not a user constraint'] };
   }
 
   if (architecture && parsed.steps.some(step => gameDimensionConflict(architecture.originalRequest, step.buildPrompt))) {

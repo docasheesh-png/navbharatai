@@ -103,9 +103,7 @@ export function gameKitFrameworkSupported(framework: string | null | undefined):
 export function gameKitPlan(prompt: string | null | undefined, framework?: string | null): GameKitRecipe[] {
   const text = String(prompt ?? '');
   if (!text.trim() || !gameKitFrameworkSupported(framework)) return [];
-  let domain = '';
-  try { domain = analyzeRequirementGaps(text).domain; } catch { return []; }
-  if (domain !== 'game') return [];
+  if (!turnIsGame(text)) return [];
   if (gameKitWants3D(text)) {
     // 🗺️ THE BIG MAP IS LAID DOWN BY THE PLATFORM TOO (failedbr #2478, 2026-11-20 — admin: "pubg/free fire/bgmi game … ek
     // bahut bada map bane … library me already maps hai, par use nahi kiye gaye"). The Athree map was only a line in the
@@ -196,9 +194,7 @@ export function gameKitWants3D(prompt: string | null | undefined): boolean {
  */
 export function wantsSceneDetail(prompt: string | null | undefined): boolean {
   const text = String(prompt ?? '');
-  let domain = '';
-  try { domain = analyzeRequirementGaps(text).domain; } catch { domain = ''; }
-  return domain === 'game' ? gameKitWants3D(text) : wantsSceneObjects(text);
+  return turnIsGame(text) ? gameKitWants3D(text) : wantsSceneObjects(text);
 }
 
 /**
@@ -451,7 +447,7 @@ export function gameTurnHandoff(
   env: NodeJS.ProcessEnv = process.env,
 ): { contract: GameScopeContract | null; block: string } {
   if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped
-    || analyzeRequirementGaps(prompt).domain !== 'game') return { contract: null, block: '' };
+    || !turnIsGame(prompt)) return { contract: null, block: '' };
   const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
@@ -487,6 +483,28 @@ export function gameIdentityLines(original: string): string[] {
   return out;
 }
 
+/**
+ * The line `gameTurnRequest` writes into a game's milestone turn. It is written ONLY when the user's own request is a game
+ * (`requestIsGame(original)`), so it carries that decision to every reader of the turn text.
+ */
+export const GAME_MILESTONE_LINE = 'This milestone belongs to a game.';
+
+/**
+ * 🎮 IS THIS TURN A GAME? — the ONE answer for every reader of a turn's text (failedbr #2481, 2026-11-21 — "ek real gta jaise
+ * game banao, bahut bade map par"). The roadmap's step 1 was "Create a basic Three.js 3D environment … a flat terrain (like a
+ * square plane) … a simple player character". `gameTurnRequest` rightly marked it as a game's milestone, but the kit plan,
+ * the scene-detail tier and the game contract each RE-READ the domain from the whole turn text, and the step's own words
+ * ("terrain", "plane") outvoted the game: the domain came back "real-estate", so no kit, no big map, no contract — the
+ * builder drew a cube on a plane. 🧬 THE CLASS: a turn's domain decided from the planner's step words instead of the user's
+ * request. The user's request already decided (`requestIsGame`, written as `GAME_MILESTONE_LINE`); a turn with no milestone
+ * is read exactly as before. PURE.
+ */
+export function turnIsGame(text: string | null | undefined): boolean {
+  const t = String(text ?? '');
+  if (t.split(/\r?\n/).some((line) => line.trim() === GAME_MILESTONE_LINE)) return true;
+  return requestIsGame(t);
+}
+
 export function gameTurnRequest(original: string, milestone?: string | null): string {
   if (!milestone) return original;
   // 🔴 ONLY A GAME'S MILESTONE BELONGS TO A GAME (failedbr #2271, 2026-11-20 — "INDIAN MUSIC"). The line below was
@@ -498,7 +516,7 @@ export function gameTurnRequest(original: string, milestone?: string | null): st
   const explicit3D = SAYS_3D.test(original) && gameKitWants3D(original);
   const explicit2D = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional)\b/i.test(original);
   const phone = namedNonSmartphone(original);
-  return [milestone, 'This milestone belongs to a game.', ...gameIdentityLines(original), ...hardConstraintLines(original),
+  return [milestone, GAME_MILESTONE_LINE, ...gameIdentityLines(original), ...hardConstraintLines(original),
     explicit2D ? 'User constraint: 2D game.' : explicit3D ? 'User constraint: 3D game.' : '',
     phone ? `User device constraint: ${phone.device}.` : ''].filter(Boolean).join('\n');
 }
@@ -509,6 +527,28 @@ function requestIsGame(text: string): boolean {
 }
 
 /** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */
+/**
+ * 🎮 WHAT THE PLATFORM GIVES THIS GAME, told to the big-app planner (failedbr #2481, 2026-11-21 — "ek real gta jaise game
+ * banao, bahut bade map par"). The old line ("plan a limited original playable slice") let the planner tell the user that
+ * "a large-scale map needs dedicated backend infrastructure that cannot run in a browser" — false: the platform lays a big
+ * library map, a city with traffic and people, physics and a joystick down itself — and plan step 1 as "a flat terrain, a
+ * cube or capsule, OrbitControls, @react-three/fiber", so the builder never used the kit. Built from the SAME plan the seed
+ * runs, so the planner is told exactly what will be laid down, and nothing for an app that is not a game. PURE.
+ */
 export function gamePlannerCapability(prompt: string, framework: string): string {
-  return gameKitPlan(prompt, framework).length ? 'Game capability: this React workspace supports the existing fixed-timestep input/audio runtime and optional Three.js 3D shell, camera and vehicle recipes. Plan a limited original playable slice in the selected React architecture; do not claim that 3D itself is unavailable, or promise a full commercial-game copy.' : '';
+  const plan = gameKitPlan(prompt, framework);
+  if (!plan.length) return '';
+  const in3D = plan.includes('generate_game_3d');
+  const bigWorld = plan.includes('generate_athree_map') || plan.includes('generate_world_2d');
+  return [
+    'GAME KIT: this request is a game, and the platform lays its game kit down itself before step 1\'s builder starts. Plan ON it:',
+    in3D
+      ? '- It brings the game loop, keyboard + touch joystick input, a three.js renderer and camera, humanoid characters, a whole city of blocks with traffic that obeys lights and people who cross on the zebras, real physics (falling, rolling, ragdoll), vehicles, sound, music, menus and a HUD.'
+      : '- It brings the game loop, keyboard + touch input, sprites and animation, a tilemap, 2D physics and a camera, particles, sound, music, menus and a HUD.',
+    bigWorld ? `- It lays a BIG ${in3D ? 'map from the platform\'s map library' : '2D world'} under this game. Step 1 puts the player on it.` : '',
+    '- A big map, an open world, a city, traffic and pedestrians run fully in the browser with this kit: they are NEVER an infrastructure ceiling. Never set "needsInfra" for them and never say they cannot be built. Only real online multiplayer (a game server) is infrastructure.',
+    `- Step 1 is a PLAYABLE game: the player's character moving${bigWorld ? ' on the big map' : ''} with the keys and the touch controls, from the first preview — never a "basic environment setup" step, never a cube or capsule for the player, never a flat plane for the world.`,
+    in3D ? '- Every step builds on the kit\'s own three.js modules. Never @react-three/fiber, @react-three/drei, OrbitControls or a second 3D engine.' : '',
+    'Do not promise a full copy of a commercial game: build an original game in its style.',
+  ].filter(Boolean).join('\n');
 }

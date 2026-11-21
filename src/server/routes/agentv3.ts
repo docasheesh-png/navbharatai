@@ -15667,7 +15667,7 @@ async function noteBuildOutcome(
             void runInBillingPhase(PHASE_PLANNER, async () => captureTurnUsage(rmProvider, { ...rmT.usage }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0)); // a planner slice (failedbr #1200)
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
-            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt });
+            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt, gameKit: gameKitOwnsTheBuild(originalPrompt, framework) });
             // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
             // sentence alone). A cut-off reply and a malformed one need different fixes.
             if (!rmParsed) {

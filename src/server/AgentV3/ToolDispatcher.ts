@@ -6,6 +6,7 @@ import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
 import { addLibraryModels } from './gameAssets/assetSeed';
 import { externalGameAssetsEnabled, libraryRequirement } from './gameAssets/assetPlan';
+import { ownModelGuide } from './gameAssets/modelSourcesGuide';
 import { REVIEWED_GAME_ASSETS } from './gameAssets/providers';
 import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
@@ -10530,7 +10531,7 @@ export class ToolDispatcher {
           if (asked1.droppedRole) unplayable.push(`${asked1.requirement.subject} (${asked1.droppedRole})`);
           if (!requirements.some((r) => r.subject === asked1.requirement.subject)) requirements.push(asked1.requirement);
         }
-        if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.`;
+        if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.\n${ownModelGuide(unknown)}`;
         const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
         const existing = {
           assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
@@ -10547,7 +10548,7 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('library models');
         return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
           + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
-          + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.` : '')
+          + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.\n${ownModelGuide(unknown)}\n` : '')
           + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
           + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
       }

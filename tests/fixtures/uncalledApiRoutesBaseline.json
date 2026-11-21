@@ -78,5 +78,7 @@
   "POST /api/failedbr/oauth/register": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
   "GET /api/failedbr/oauth/authorize": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
   "POST /api/failedbr/oauth/token": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
-  "POST /api/failedbr/oauth/revoke": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)"
+  "POST /api/failedbr/oauth/revoke": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
+  "GET /api/email/unsubscribe": "external: the unsubscribe link in a notification email (emailUnsubscribe.ts)",
+  "POST /api/email/unsubscribe": "external: the unsubscribe page's button and a mail client's one-click unsubscribe (emailUnsubscribe.ts)"
 }

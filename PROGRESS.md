@@ -103486,3 +103486,11 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — PR #4390 merged (3c91ff3); its 122 queue rows closed
+
+#4390 (failedbr #1913 → #669 autopsies; Q-3041…Q-3223 and the bulk rows Q-1553…Q-1573 it resolved) merged after CI went green on
+its final head and the merge with `main` (#4397) was checked clean. The 122 rows it owned were removed from the open table and their
+IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`; their ledgers stay in the entries above. Rows still open after it:
+the admin-decision rows (Q-3137, Q-3139, Q-3142, Q-3148, Q-3157, Q-3161, Q-3164, Q-3180, Q-3198 and the older ones) and the
+untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only new reports are autopsied).

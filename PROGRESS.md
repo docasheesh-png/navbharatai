@@ -103829,3 +103829,13 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - **No guess, every lane:** `NO_GUESS_RULE` (noEvalRule.ts) in the architect, fast-lane and one-shot prompts: an unclear change is not made — what is clear is done and ONE short question names the choices; a new app asks first only when it could mean two really different apps; an obvious default is not "unclear"; an exact request is never questioned back. Sub-agents do not carry it (they answer the architect). It is an instruction to the model, not an enforced lock. Locked in `tests/aLibraryCharacterIsSetByThePlatform.test.ts`.
 - **Q-3234 option A:** `refusedOutright` — a 4xx refusal (not 408/429) benches the Surplus model on its first failure. Test in `aRetriedAttemptIsReported.test.ts` (reverted ⇒ fails).
 - **Q-3237 option A, phase 1:** route smoke check moved to `buildPhases/routeSmoke.ts`; `tests/theBuildRouteIsSplitByPhase.test.ts`; CLAUDE.md core rule "the build route's handler only shrinks". Next: one phase per PR.
+
+## 2026-11-21 — admin's screenshot items + autopsy of failedbr #2487/#2488/#2484 (admin: "find and fix bugs sach me … wake up … autopsy")
+
+- **Q-3238 "Find and fix bugs" is a real hunt:** `optionalBugHunt.ts` — `BUG_HUNT_TURN_BRIEF` (read every source file, typecheck, preview errors, fix only real bugs, honest list), `bugHuntReviewScope` (whole app, not this turn's edits), the review runs with no edits and in the fast lane, full strength (`greenReviewPlan({ userAskedToFix })`). `tests/findAndFixBugsReallyHunts.test.ts`.
+- **Q-3241 the game was never played (both builds, 1–3 fps):** reproduced locally on the real kit; the shell starts at the low tier and the open-world map at its phone tier on a software renderer. Measured 5 → 12.75 fps (start screen), 1.25 → 5.75 (playing), Play 5.2 s → 2.1 s. `tests/aBrowserWithNoGpuStartsAtTheBottom.test.ts`.
+- **Q-3242:** "open world" no longer makes "levels" a required feature (`gameIntent.ts`).
+- **Q-3243 (honesty half):** the map rule says regions are only city/town/village and the builder must say so instead of renaming towns. Real land regions: open.
+- **Q-3239 (proof card in the timeline + Dismiss) and Q-3240 (Wake up really wakes):** separate PRs.
+- **Open, queued:** Q-3244 (summary claimed "fully functional" for an unplayed game), Q-3245 (#2484: 5.4 min of preparation before any model call), Q-3246 (8 read-only turns; 32 steps after "ready").
+- Evidence that #4420's Q-3232 fix landed: #2487's seed recipes took 25.0 s (61.5 s on #2485); SEED_PREVIEW_UP 27 s after the kit, first render at 87 s.

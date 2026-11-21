@@ -22,6 +22,23 @@ export const NO_EVAL_RULE =
  * what the user described. The requirement notes (RequirementGapAnalyzer) remain the ONE sanctioned
  * source of additions a prompt left implicit; anything else is offered, not built.
  */
+/**
+ * 🛑 NOTHING IS CHANGED OR BUILT ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi
+ * baat clear na ho, to user se puch li jaye" — then, asked whether it holds for every app build and not only games: "han.
+ * user se puch lo clear na ho to"). Said in every lane that writes an app (architect, fast lane, one-shot). Sub-agents do
+ * not carry it: they answer the architect, who asks the user. The game form (GAME_NO_GUESS_RULE) adds the game's examples.
+ *
+ * Bounded on purpose, so it never turns into a builder that questions everything: a detail with an obvious default is not
+ * "unclear", and an exact request is never questioned back. The question is ONE, short, and names the choices.
+ */
+export const NO_GUESS_RULE =
+  '- 🛑 NEVER CHANGE OR BUILD ON A GUESS. Changing an app that already exists: if the request can mean more than one thing in THIS app '
+  + '(which screen, button, item or part it is about; "isko accha / better karo" without saying what; a word that fits two parts or none), '
+  + 'do NOT pick one and do NOT change that part — do everything that IS clear, then ask ONE short question in the user\'s language that names '
+  + 'the choices. Never change a number, text, colour, name or behaviour nobody asked about. A new app: build the clear core; ask first only '
+  + 'when the request could mean two really different apps. A detail with an obvious default (a colour, a layout, sample wording) is not '
+  + 'unclear — pick the sensible default and say so in one line. Never question a request that is already exact.';
+
 export const BUILD_WHAT_WAS_ASKED_RULE =
   '- Build what the user asked for. Do not add features, screens or buttons they did not ask for (unless the ' +
   'build\'s own requirement notes list them); mention at most one or two optional extras in your final message instead.';

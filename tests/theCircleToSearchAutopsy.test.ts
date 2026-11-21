@@ -86,7 +86,7 @@ describe('a repair must never invent the result', () => {
   it('the upstream half: both build prompts and writing specialists carry the no-faked-result rule', () => {
     expect(NO_FAKED_RESULT_RULE).toMatch(/song recogniser, a QR\/barcode scanner/);
     expect(architectSystemPrompt('vite-react')).toContain(NO_FAKED_RESULT_RULE);
-    expect(readFileSync('src/server/AgentV3/SimpleBuilder.ts', 'utf8')).toMatch(/BUILD_WHAT_WAS_ASKED_RULE,\n\s*NO_FAKED_RESULT_RULE,/);
+    expect(readFileSync('src/server/AgentV3/SimpleBuilder.ts', 'utf8')).toMatch(/BUILD_WHAT_WAS_ASKED_RULE,\n(?:\s*NO_GUESS_RULE,\n)?\s*NO_FAKED_RESULT_RULE,/);   // NO_GUESS_RULE sits between since 2026-11-21
     expect(readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8')).toContain('contextBlocks.push(`${NO_EVAL_RULE}\\n${NO_FAKED_RESULT_RULE}\\n${NO_FAKE_FEATURE_RULE}');
   });
 });

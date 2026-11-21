@@ -103823,3 +103823,9 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - **Not proven from here:** production logs (the `AGENTV3_ANON_FALLBACK` audit line carries the exact reason) are not reachable from this session; the fix covers the client-side cause the evidence points to. If the admin still sees the new message after this deploys, the cause is server-side verification and that audit line says which.
 - **Empty panel:** "Private attached files · all my chats (0)" is hidden while nothing is saved and nothing failed; it appears with the first saved original (the feature stays). AppKnowledgeBase updated.
 - **Tests:** `tests/aSignedInUserIsNotToldToSignIn.test.ts` (7); reversion proven (fallback removed → 1 failed). Three mounted-client fixtures updated for the shared helper. 47 related test files pass.
+
+## 2026-11-21 — admin decisions applied: "no guess" in every app lane; a refused engine request benches at once; the build route split begins (admin: "1. han … 2. a 3. a")
+
+- **No guess, every lane:** `NO_GUESS_RULE` (noEvalRule.ts) in the architect, fast-lane and one-shot prompts: an unclear change is not made — what is clear is done and ONE short question names the choices; a new app asks first only when it could mean two really different apps; an obvious default is not "unclear"; an exact request is never questioned back. Sub-agents do not carry it (they answer the architect). It is an instruction to the model, not an enforced lock. Locked in `tests/aLibraryCharacterIsSetByThePlatform.test.ts`.
+- **Q-3234 option A:** `refusedOutright` — a 4xx refusal (not 408/429) benches the Surplus model on its first failure. Test in `aRetriedAttemptIsReported.test.ts` (reverted ⇒ fails).
+- **Q-3237 option A, phase 1:** route smoke check moved to `buildPhases/routeSmoke.ts`; `tests/theBuildRouteIsSplitByPhase.test.ts`; CLAUDE.md core rule "the build route's handler only shrinks". Next: one phase per PR.

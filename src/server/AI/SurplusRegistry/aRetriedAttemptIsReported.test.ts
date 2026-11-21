@@ -105,3 +105,34 @@ describe('Q-3019: a model is benched only at its second failure in the build (wa
     } finally { delete process.env.SURPLUS_TURN_RETRIES; }
   });
 });
+
+describe('Q-3234 (failedbr #2485, admin option A): a REFUSED request benches the model at once', () => {
+  it('the #2485 shape — HTTP 404 — benches on the FIRST failure, said with its status; the next model answers', async () => {
+    process.env.SURPLUS_TURN_RETRIES = '2';
+    try {
+      const { s, adapter, make } = setup();
+      // A second reviewed model, so there is somewhere to go.
+      s.snapshot!.models.push('model-b');
+      s.snapshot!.offers.push({ ...s.snapshot!.offers[0], model: 'model-b', offerId: 'offer-b' });
+      s.reviews.quality.push({ ...s.reviews.quality[0], model: 'model-b' });
+      s.capabilities.push({ ...s.capabilities[0], model: 'model-b' });
+      const ok = (adapter.dispatch as any).getMockImplementation();
+      const asked: string[] = [];
+      (adapter.dispatch as any).mockImplementation(async (req: any, ...a: unknown[]) => { asked.push(String(req.model)); return asked.length === 1 ? { status: 404 } : ok(req, ...a); });
+      adapter.identify = (raw: any) => { if (raw?.status === 404) throw new Error('Surplus response route or capabilities did not match (http_404)'); return { model: String(raw.model ?? 'model-a') === 'model-a' ? 'model-b' : 'model-b', providerId: 'provider-a', completion: { ...raw, model: 'model-b' } }; };
+      const session = await make();
+      const seen: SurplusAttemptFailure[] = [];
+      await session.runner({ onAttemptFailed: f => seen.push(f) }).runTurn(params as any).catch(() => undefined);
+      expect(seen[0]).toMatchObject({ model: 'model-a', httpStatus: 404, benched: true });
+      expect(seen[0].sameModelRetry).toBeUndefined();
+      expect(describeSurplusAttemptFailure(seen[0])).toMatch(/the engine refused the request, HTTP 404\) — model-a is benched for this build/);
+      expect(asked.slice(1)).not.toContain('model-a');                     // never asked again in this build
+    } finally { delete process.env.SURPLUS_TURN_RETRIES; }
+  }, 20000);
+
+  it('only a refusal benches at once: 429, 408, 5xx and no status keep the warm-cache retry', async () => {
+    const { refusedOutright } = await import('./buildSession');
+    for (const status of [400, 401, 403, 404, 410, 422]) expect(refusedOutright(status), String(status)).toBe(true);
+    for (const status of [undefined, 200, 408, 429, 500, 502, 503]) expect(refusedOutright(status), String(status)).toBe(false);
+  });
+});

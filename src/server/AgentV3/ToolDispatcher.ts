@@ -389,7 +389,7 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
-import { generateOpenWorld, openWorldAppSource } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -10401,11 +10401,20 @@ export class ToolDispatcher {
           try { app = await this.actuator.readFile(this.workspaceId, 'src/App.tsx'); }
           catch (error) { if (!isNotFoundError(error)) throw error; }
           if (app === null || !/GameCanvas|OpenWorldGame|RacingRoadGame|LaneRunnerGame|new\s+Game\s*\(|<canvas/i.test(app)) {
+            // The game's own list of features: created once, never replaced (it is the user's game from then on).
+            let listed = false;
+            try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
+            catch (error) { if (!isNotFoundError(error)) throw error; }
+            if (!listed) {
+              const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX, { agent, source: 'generate_open_world' });
+              this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
+              getWorkspaceMemory(this.workspaceId).indexFile(GAME_FEATURES_INDEX_PATH, index.content);
+            }
             const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined });
             const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
             this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
             getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
-            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame' + (owRec.city === true ? ' world={{ city: true }}' : '') + ' /> — the game is playable now. Edit that file to add your setup and update; do not replace it.';
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame' + (owRec.city === true ? ' world={{ city: true }}' : '') + ' features={FEATURES} /> — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
           }
         }
         this.scheduleCheckpoint('open world starter');

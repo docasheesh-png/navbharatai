@@ -2829,6 +2829,117 @@ export function LaneRunnerGame(props: LaneRunnerGameProps = {}) {
 }
 `;
 
+export const GAME_FEATURES = String.raw`// FEATURES — how a game grows from one thing to a hundred without breaking (admin 2026-11-21: "user jo chahe game me
+// judwaye, usi game me judta chala jaye, kuch bhi tute na … 10-100 kitne bhi").
+//
+// A game is a LIST of features. Each feature is one small file that adds one thing (coins, police, a mission, rain) through
+// the same two calls: setup() once, update() every step. Adding the 50th thing is the same work as adding the 1st: one new
+// file and one line in the list. Nothing else is edited, so nothing else can break.
+//
+// And one feature cannot take the game down: each runs inside its own guard. If one throws, THAT feature is switched off
+// and named in the console ("[feature police] …"); the world, the player and every other feature keep running.
+import type { GameContext } from '../Game';
+import { events } from '../core/events';
+
+export interface FeatureApi {
+  /** A value another feature shared (its coins counter, its list of enemies), or undefined when that feature is off. */
+  get<T>(id: string): T | undefined;
+  /** Is this feature set up and running? */
+  has(id: string): boolean;
+}
+
+export interface GameFeature<W = unknown> {
+  /** A short unique name: 'coins', 'police', 'day-night', 'mission-delivery'. */
+  id: string;
+  /** Features this one builds on. They are set up first; if one of them is off, this one stays off too (and says why). */
+  needs?: string[];
+  /** Runs once. Add your objects here. Return a value to SHARE with other features (they read it with api.get(id)). */
+  setup?(ctx: GameContext, world: W, api: FeatureApi): unknown;
+  /** Runs every step (fixed 60 Hz), after the features it needs. */
+  update?(ctx: GameContext, world: W, delta: number, api: FeatureApi): void;
+  /** Remove what setup() added. */
+  dispose?(): void;
+}
+
+/** Type helper: export default defineFeature({ id: 'coins', setup(ctx, world) { … }, update(ctx, world, dt) { … } }). */
+export function defineFeature<W = unknown>(feature: GameFeature<W>): GameFeature<W> { return feature; }
+
+export interface FeatureStatus { id: string; state: 'on' | 'off'; reason?: string }
+
+export interface FeatureHost<W> {
+  setup(ctx: GameContext, world: W): void;
+  update(ctx: GameContext, world: W, delta: number): void;
+  /** What is running and what was switched off, with the reason. */
+  status(): FeatureStatus[];
+  dispose(): void;
+}
+
+export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W> | null | undefined>): FeatureHost<W> {
+  const off = new Map<string, string>();
+  const shared = new Map<string, unknown>();
+  const running: GameFeature<W>[] = [];
+  const seen = new Set<string>();
+  const all: GameFeature<W>[] = [];
+  for (const f of list) {
+    if (!f || typeof f.id !== 'string' || !f.id) continue;
+    if (seen.has(f.id)) { console.error('[feature ' + f.id + '] is listed twice; the second one is ignored.'); continue; }
+    seen.add(f.id); all.push(f);
+  }
+  const api: FeatureApi = { get: <T,>(id: string) => shared.get(id) as T | undefined, has: (id) => running.some((f) => f.id === id) };
+  const fail = (f: GameFeature<W>, where: string, error: unknown): void => {
+    const reason = where + ': ' + (error instanceof Error ? error.message : String(error));
+    off.set(f.id, reason);
+    const at = running.indexOf(f); if (at >= 0) running.splice(at, 1);
+    shared.delete(f.id);
+    console.error('[feature ' + f.id + '] switched off — ' + reason);
+    try { events.emit('FEATURE_FAILED', { id: f.id, reason }); } catch { /* a listener must not undo the isolation */ }
+  };
+  return {
+    setup(ctx, world) {
+      // In the order of the list, but a feature waits for the ones it needs.
+      const pending = [...all];
+      let progressed = true;
+      while (pending.length && progressed) {
+        progressed = false;
+        for (let i = 0; i < pending.length; i++) {
+          const f = pending[i];
+          const needs = f.needs || [];
+          const missing = needs.find((id) => !seen.has(id) || off.has(id));
+          if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
+          if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
+          pending.splice(i--, 1); progressed = true;
+          try { const value = f.setup ? f.setup(ctx, world, api) : undefined; running.push(f); if (value !== undefined) shared.set(f.id, value); }
+          catch (error) { fail(f, 'setup', error); }
+        }
+      }
+      for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+    },
+    update(ctx, world, delta) {
+      for (const f of [...running]) {
+        if (!f.update) continue;
+        if ((f.needs || []).some((id) => off.has(id))) { fail(f, 'update', new Error('a feature it needs was switched off')); continue; }
+        try { f.update(ctx, world, delta, api); } catch (error) { fail(f, 'update', error); }
+      }
+    },
+    status: () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const })),
+    dispose() {
+      for (const f of running.splice(0).reverse()) { try { f.dispose?.(); } catch (error) { console.error('[feature ' + f.id + '] dispose: ' + String(error)); } }
+      shared.clear();
+    },
+  };
+}
+
+/** For a game on <GameCanvas>: its options with the features run after its own setup() and update(). */
+export function withFeatures<O extends { setup?: (ctx: GameContext) => unknown; update?: (ctx: GameContext, delta: number) => void }>(options: O, features: ReadonlyArray<GameFeature<undefined>>): O {
+  const host = createFeatureHost<undefined>(features);
+  return {
+    ...options,
+    setup(ctx: GameContext) { const out = options.setup?.(ctx); host.setup(ctx, undefined); return out; },
+    update(ctx: GameContext, delta: number) { options.update?.(ctx, delta); host.update(ctx, undefined, delta); },
+  } as O;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/Game.ts': GAME,
   'src/game/RacingRoadGame.tsx': RACING_ROAD_GAME,
@@ -2836,9 +2947,11 @@ const FILES: Record<string, string> = {
   'src/game/GameCanvas.tsx': GAME_CANVAS,
   'src/game/ui/Hud.tsx': HUD,
   'src/game/ui/touchControls.ts': TOUCH_CONTROLS,
+  // How a game grows: a list of small features, each guarded, added one file at a time (2026-11-21).
+  'src/game/play/features.ts': GAME_FEATURES,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'racingroadgame', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'features', 'racingroadgame', 'lanerunnergame'];
 
 
 /**
@@ -2927,6 +3040,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     }
     // Game draws the touch controls, so it never ships without them (and they are useless alone).
     if (files['src/game/Game.ts']) files['src/game/ui/touchControls.ts'] = FILES['src/game/ui/touchControls.ts'];
+    // The feature host types against Game's context, and every game on the shell may grow by features.
+    if (files['src/game/Game.ts']) files['src/game/play/features.ts'] = FILES['src/game/play/features.ts'];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

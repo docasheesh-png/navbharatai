@@ -317,6 +317,22 @@ export function athreeMapHandoff(recipeResult: string): string {
 }
 
 /**
+ * 🧩 HOW A GAME GROWS (admin 2026-11-21: "user jo chahe game me judwaye, usi game me judta chala jaye, kuch bhi tute na …
+ * 10-100 kitne bhi"). A game that is one big setup() is rewritten on every request, and each rewrite can break what worked.
+ * A game that is a LIST of features grows by one file and one line per request; nothing else is edited, and the kit runs
+ * each feature inside its own guard (play/features.ts). Said on the first build AND on every later turn of a game that has
+ * the list (gameTurnHandoff), because the turn that adds the 30th thing is the one that must not touch the other 29.
+ */
+export const GAME_FEATURES_RULE = '🧩 THIS GAME GROWS BY FEATURES. Everything the game has is one small file under src/game/features/'
+  + ' (export default defineFeature({ id, needs?, setup, update }) from src/game/play/features.ts) listed in src/game/features/index.ts.'
+  + ' To ADD what the user asks for: create ONE new feature file and add ONE line to that list. To CHANGE a thing: edit only that'
+  + ' feature\'s file. To REMOVE it: take it out of the list. NEVER rewrite, merge or move the other features, src/App.tsx or the kit for a'
+  + ' request that does not name them — a feature another one builds on is named in needs and read with api.get(id), never copied.'
+  + ' Each feature is guarded: one that throws is switched off and named in the console ("[feature <id>] …") while the rest of the game'
+  + ' keeps running, so read the console after adding one.';
+export const GAME_FEATURES_INDEX_FILE = 'src/game/features/index.ts';
+
+/**
  * The builder's instruction when the platform mounted the open-world starter: the game ALREADY plays, so the builder adds
  * to it. failedbr #2485: told only "build the game IN the map", a weak builder wrote CustomGame.tsx, its own
  * characterController.ts and WorldSetup.ts beside the kit, and never joined them to the map.
@@ -325,9 +341,9 @@ export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP
   + ' animated player is standing on NavBharatAI\'s Athree map — on a street of its city when the game has one — with the follow camera,'
   + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). DO NOT rewrite src/App.tsx\'s world,'
   + ' and NEVER write your own world, ground, player, character controller, camera or game component beside it (no CustomGame, no'
-  + ' WorldSetup, no characterController of your own). Build THIS turn\'s features by passing setup and update to <OpenWorldGame> from your'
-  + ' own file under src/game/<your-game>/: setup(ctx, world) adds things with world.place(object, x, z) (WORLD metres, on the ground),'
-  + ' update(ctx, world, dt) runs your rules with world.playerWorld(); world.city gives the city, its traffic, people, parked cars and'
+  + ' WorldSetup, no characterController of your own). ' + GAME_FEATURES_RULE + ' In a feature, setup(ctx, world) adds things with'
+  + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
+  + ' world.city gives the city, its traffic, people, parked cars and'
   + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. Change the city or the map through the world prop'
   + ' ({ city: { blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }, seed, quality }).';
 
@@ -504,13 +520,18 @@ export function gameTurnHandoff(
   options: { writingRun: boolean; moduleTurn: boolean; importTurn: boolean; stopped: boolean },
   env: NodeJS.ProcessEnv = process.env,
 ): { contract: GameScopeContract | null; block: string } {
-  if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped
-    || !turnIsGame(prompt)) return { contract: null, block: '' };
+  if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped) return { contract: null, block: '' };
+  // A game that grows by features is one on EVERY turn, whatever the turn's words are ("add coins", "police bhi daalo"
+  // name no game): the project's own list says so, and the rule that protects the other features is said regardless.
+  if (!turnIsGame(prompt)) return { contract: null, block: typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '' };
   const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
   const api = kitTypeContract(producers, 12_000);
+  // Read from the project itself, so it holds on the 30th turn exactly as on the first — whoever built the game.
+  const grows = typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '';
   return { contract, block: [
+    grows,
     contract ? gameContractBlock(contract) : '',
     api ? '[GAME KIT API SNAPSHOT — saved start-of-turn source plus acknowledged seed/refresh writes; '
       + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '

@@ -207,12 +207,18 @@ import React, { useMemo, useRef } from 'react';
 import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions } from './Game';
 import { createOpenWorld, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
+import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
 
 export interface OpenWorldGameProps {
   title?: string;
   subtitle?: string;
   /** The map: seed, profile, size, quality, style — see play/openWorld.ts and athree/. */
   world?: OpenWorldOptions;
+  /**
+   * THE GAME, as a list of features (play/features.ts): each adds one thing, each is guarded, and adding one more never
+   * touches the others. Keep the list in src/game/features/index.ts.
+   */
+  features?: ReadonlyArray<GameFeature<OpenWorld>>;
   /** Add your game to the world. Runs once, after the player is standing on the map. */
   setup?: (ctx: GameContext, world: OpenWorld) => void;
   /** Your rules, at a fixed 60 Hz, after the world has streamed for this step. */
@@ -221,8 +227,10 @@ export interface OpenWorldGameProps {
   options?: Omit<GameOptions, 'container' | 'setup' | 'update'>;
 }
 
-export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, setup, update, options }: OpenWorldGameProps) {
+export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, setup, update, options }: OpenWorldGameProps) {
   const world = useRef<OpenWorld | null>(null);
+  const host = useRef<FeatureHost<OpenWorld> | null>(null);
+  const listed = useRef(features); listed.current = features;
   const hooks = useRef({ setup, update }); hooks.current = { setup, update };
   const gameOptions = useMemo<Omit<GameOptions, 'container'>>(() => ({
     camera: 'third-person', gameId: 'open-world', minimap: true,
@@ -231,11 +239,14 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     setup(ctx) {
       world.current = createOpenWorld(ctx, worldOptions);
       hooks.current.setup?.(ctx, world.current);
+      host.current = createFeatureHost<OpenWorld>(listed.current || []);
+      host.current.setup(ctx, world.current);
     },
     update(ctx, delta) {
       if (!world.current) return;
       world.current.frame(ctx, delta);
       hooks.current.update?.(ctx, world.current, delta);
+      host.current?.update(ctx, world.current, delta);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
@@ -253,15 +264,31 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
   const title = String(options.title ?? 'Open World').replace(/[^\p{L}\p{N} .,!?'-]/gu, '').trim().slice(0, 60) || 'Open World';
   return [
     "import { OpenWorldGame } from './game/OpenWorldGame';",
+    "import { FEATURES } from './game/features';",
     '',
     '// The player is already standing on NavBharatAI\'s big map' + (options.city ? ', on a street of its city' : '') + '. Make it your game through the',
-    '// setup and update props (cars, enemies, pickups, missions, rules) — the world, the player and the camera are the kit\'s.',
+    '// FEATURES list in src/game/features/index.ts: one small file per thing the game has (coins, enemies, missions, rules).',
+    '// The world, the player and the camera are the kit\'s.',
     'export default function App() {',
-    `  return <OpenWorldGame title=${JSON.stringify(title)}${options.city ? ' world={{ city: true }}' : ''} />;`,
+    `  return <OpenWorldGame title=${JSON.stringify(title)}${options.city ? ' world={{ city: true }}' : ''} features={FEATURES} />;`,
     '}',
     '',
   ].join('\n');
 }
+
+export const GAME_FEATURES_INDEX_PATH = 'src/game/features/index.ts';
+/** The game's own list of features — the user's file (never a kit file): created once, then only ever added to. */
+export const GAME_FEATURES_INDEX = [
+  '// THIS GAME, AS A LIST. Each feature is one file in this folder that adds one thing to the game.',
+  '// To ADD something: create src/game/features/<name>.ts with defineFeature({ id, setup, update }) and add it to the list below.',
+  '// To CHANGE one thing: edit only that feature\'s file. To REMOVE it: take it out of the list. Nothing else needs to change.',
+  "import type { GameFeature } from '../play/features';",
+  "import type { OpenWorld } from '../play/openWorld';",
+  '',
+  'export const FEATURES: GameFeature<OpenWorld>[] = [',
+  '];',
+  '',
+].join('\n');
 
 export function generateOpenWorld(): RecipeOutput {
   return {
@@ -279,6 +306,11 @@ export function generateOpenWorld(): RecipeOutput {
       '    update={(ctx, world, dt) => { /* YOUR rules, 60 Hz. world.playerWorld() is where the player is, in WORLD metres */ }} />;',
       '}',
       '```',
+      'GROW THE GAME BY FEATURES (src/game/play/features.ts): every thing the game has is ONE file, src/game/features/<name>.ts —',
+      "  export default defineFeature<OpenWorld>({ id: 'coins', setup(ctx, world, api) { /* add objects; return a value to share */ }, update(ctx, world, dt, api) { /* rules */ } });",
+      'and one line in the FEATURES list in src/game/features/index.ts, passed as <OpenWorldGame features={FEATURES} />. A feature that needs',
+      'another names it in needs: [\'coins\'] and reads what it shared with api.get(\'coins\'). Each feature is guarded: one that throws is switched',
+      'off and named in the console, and the rest of the game keeps running. To add the next thing, add the next file — never rewrite the others.',
       'world={{ city: true }} levels ground near the start and stands a city on it (streets, crossings, pavements, shops, apartments, offices,',
       'parks), with traffic that obeys the lights, people who cross on the zebras, and parked cars the player gets into with Use (E). world.city',
       'gives the city, its traffic, its people, the parked cars and toWorld(x, z) for its lots and routes. Pass city options',

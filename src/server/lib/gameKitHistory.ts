@@ -105,7 +105,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb"
   ],
   "src/game/OpenWorldGame.tsx": [
-    "48c550cff4d14f2bc7edac196803f67b6c94106a981b5aad7a4d19d7ebe6f440"
+    "48c550cff4d14f2bc7edac196803f67b6c94106a981b5aad7a4d19d7ebe6f440",
+    "b5bef9555780abb83f2fdad52e3a4e52c1507aa28ea4192d1ce35be9c05ceab7"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
@@ -427,6 +428,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0ff9ef98f777142f8c6e8fa88f6b1c3174faf4df324ebcfbd180b21c5e5380fa",
     "6015bd1aaea3129a95c5198fcc3147f1bc53d247ee94c74c50f1b01634358642",
     "ec13ef9b8ed4bff26006f30d0e9743f13cff2f6bbbcc3d1ee07ddbf21922f8d4"
+  ],
+  "src/game/play/features.ts": [
+    "e09a02029b1467748dedfd26bcf67f94980bbb61362f0059c5dcf03dc3c7512c"
   ],
   "src/game/play/motor.ts": [
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",

@@ -98,3 +98,35 @@ describe('an FBX with its picture attached keeps its look (admin 2026-11-21)', (
     expect(warnings.get('sword.glb')!.join(' ')).toMatch(/picture\(s\) knight_texture\.png were not attached/);
   });
 });
+
+describe('FBX exports from Sketchfab / Mixamo / avatar creators (2026-11-21: 3 of 3 real Indian-clothing models failed)', () => {
+  it('an FBX with EMBEDDED pictures parses: a window is lent only for the parse, its pictures are captured, and it is removed', async () => {
+    const { withLentWindow } = await import('../src/server/AgentV3/gameAssets/userModels');
+    const embedded = new Map<string, Blob>();
+    const key = withLentWindow(embedded, () => (globalThis as unknown as { window: { URL: { createObjectURL(b: Blob): string } } }).window.URL.createObjectURL(new Blob([new Uint8Array([0x89, 0x50])], { type: 'image/png' })));
+    expect(key).toBe('nbblob:0');
+    expect(embedded.get('nbblob:0')!.type).toBe('image/png');
+    expect('window' in globalThis).toBe(false);
+    // A parse that throws still removes it; a window that already existed is left exactly as it was.
+    expect(() => withLentWindow(new Map(), () => { throw new Error('bad fbx'); })).toThrow('bad fbx');
+    expect('window' in globalThis).toBe(false);
+    const mine = { mine: true }; (globalThis as unknown as { window: unknown }).window = mine;
+    try { withLentWindow(new Map(), () => 0); expect((globalThis as unknown as { window: unknown }).window).toBe(mine); }
+    finally { delete (globalThis as unknown as { window?: unknown }).window; }
+  });
+
+  it('face shape keys (morph targets) are left out — 126 of them were 42 MB of a 55 MB avatar — and the count is returned to tell the user', async () => {
+    const THREE = await import('three');
+    const { dropMorphTargets } = await import('../src/server/AgentV3/gameAssets/userModels');
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+    geo.morphAttributes.position = Array.from({ length: 5 }, () => new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+    const mesh = new THREE.Mesh(geo); mesh.updateMorphTargets();
+    const root = new THREE.Group(); root.add(mesh, new THREE.Mesh(new THREE.BoxGeometry()));
+    expect(dropMorphTargets(root)).toBe(5);
+    expect(Object.keys(geo.morphAttributes)).toEqual([]);
+    expect(mesh.morphTargetInfluences).toBeUndefined();
+    expect(dropMorphTargets(root)).toBe(0);
+    expect(readFileSync('src/server/AgentV3/gameAssets/userModels.ts', 'utf8')).toMatch(/face shape keys \(expressions\) were left out/);
+  });
+});

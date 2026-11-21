@@ -103516,6 +103516,24 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
 - **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
   new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.
+## 2026-11-21 — Real physics for 3D games: things fall, roll, topple, and ragdoll
+
+- **Why:** the admin's plan item "real physics: objects that fall over, roll and ragdoll". The kit had none: a crate
+  a car hit never moved, a stack could not topple, and a character's death could only be a canned pose.
+- **What:** a new kit module `three/physics.ts` (`src/server/lib/GamePhysicsGenerator.ts`) built on cannon-es 0.20.0
+  (MIT, no dependencies, pinned). Hand-writing a rigid-body solver was rejected: stacks jitter and objects tunnel.
+  - `createPhysics(scene)` has gravity and a ground, and turns the scene's solid kit colliders into fixed walls.
+  - `add(mesh, { mass })` sizes a box or sphere from the mesh. Also: `remove`, `explode(point, strength, radius)`,
+    `ragdoll(humanoid)` (11 bones pinned at the joints, driving the kit humanoid's joints), and `step(dt)`
+    (fixed 60 Hz from the game's own dt), `dispose`.
+  - cannon-es is installed **only** when physics.ts ships; the repo pins the same version as a devDependency so
+    our tests run against exactly what users get.
+- **Root cause caught while building:** cannon's `fixedStep` reads the wall clock, so a game stepped by its own `dt`
+  (and every test) barely moved. The module uses `world.step(1/60, dt, 6)`.
+- **Proof:** `tests/thingsFallRollAndRagdoll.test.ts` (7). A crate comes to rest at y = 0.5. A five-box stack stands
+  still for 5 s. A blast topples it away from the blast. A ball rolls and stops at a kit wall. Mass 0 never moves. A
+  ragdoll lands with its head near the ground, no body below the ground, every joint's pivots still meeting, at rest.
+  Four reversions each failed: no joint constraints, no scene walls, no conditional dependency, and wall-clock stepping.
 ## 2026-11-21 — Tune a game with sliders in the preview (admin plan: "a tuning panel … without prompting again")
 
 - **Kit `core/tuning.ts`:** `tunable(key, default, { label, min, max, step })` returns a live handle; saved values come from
@@ -103606,3 +103624,18 @@ untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only
   - Test: `theBuilderPicksByMeaningNotWords`.
 - **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
 - **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.
+
+## 2026-11-21 — #4406 merged; FBX from Sketchfab / Mixamo / avatar creators now converts
+- #4406 merged: the character customizer on request, and the intent map.
+- The admin added 3 Indian-clothing models to Drive: a man in a dhoti, a man in a kurta, a woman in a saree. Their FBX exports exposed two class bugs in the server FBX import:
+  - **Embedded pictures:** FBXLoader calls `window.URL.createObjectURL`, so all 3 failed to parse in Node. `withLentWindow` now lends a window for the synchronous parse only, captures the pictures (they now go into the GLB), then removes it.
+  - **Face shape keys:** 126 morph targets were 42 MB of a 55 MB GLB. `dropMorphTargets` removes them and the user is told.
+  - Test: `anFbxBecomesAModelInTheGame` (+2).
+- **NOT in the library — licences unverified.** None of the 3 zips carries a licence file, and sketchfab.com is unreachable from this session.
+  - The dhoti model looks like Sketchfab's "Indian Man In Dhoti" (earlier search: CC-BY).
+  - The kurta and saree went through Mixamo (a "mixamo.com" clip, an avatar-creator body), and their licence is unknown.
+  - Also too heavy for the 8 MB user path (13 MB / 23 MB after the fix; 65k / 118k triangles).
+  - Waiting on the admin for each model's licence (a page screenshot).
+- **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
+  - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
+  - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.

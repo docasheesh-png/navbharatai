@@ -91,7 +91,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c722c45d3168e3214bd12b6b390bf8fb3d7e6c7796fd7b647289c0fd30757bf5",
     "d3e57935ab98e96ef4df3c855b18d25ed43e30293aed1ad3312088566a5f7247",
     "1f9ca34c43157609fd164fb1b76d96c452509361c713b9bb626ec096dd4f6185",
-    "7850bb8b2e57c9aabba497084e464a9a147e6e1386d60855e07e52fb9e5e72a2"
+    "7850bb8b2e57c9aabba497084e464a9a147e6e1386d60855e07e52fb9e5e72a2",
+    "208b5632ac19f6ebc448dc232716c0a906052e86859288775ea8fa64b870346d",
+    "b2140860692d7ab032fd23b05223143d255ac4ae073119a686ba884f184b48b2"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -103,6 +105,11 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/LaneRunnerGame.tsx": [
     "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40",
     "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb"
+  ],
+  "src/game/OpenWorldGame.tsx": [
+    "48c550cff4d14f2bc7edac196803f67b6c94106a981b5aad7a4d19d7ebe6f440",
+    "b5bef9555780abb83f2fdad52e3a4e52c1507aa28ea4192d1ce35be9c05ceab7",
+    "68713acdd702d65e8c814e651a61792c0206d98ba809e4838dc0c55dc7684ef8"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
@@ -185,7 +192,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0b421f21f864a642a7f3f62e54714e039baca33d39a10e8a00ed6c794eb0ccd8",
     "b558e1127300beb2e42e0012e804e393b820e0a5fc0b0eece9c3780be97a3abf",
     "370fe0b003e88bb5d6bd162ebb4012eac59a7a6091b8e47488350e0fecd79c5c",
-    "632c091bfa90c063cf41676e67b6ee415a72c47a7843b30b58b0e6cccd23ae6a"
+    "632c091bfa90c063cf41676e67b6ee415a72c47a7843b30b58b0e6cccd23ae6a",
+    "24777239f198dd0ee5389eec77cb329939ba98e77d639bcd8d3d3c475c55abe7"
   ],
   "src/game/athree/vehicles.ts": [
     "cacc3ff86106db83b4c1c4058b4d7401a39cdfdd748b31fbb24873dccafbaa91",
@@ -205,7 +213,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "28a01d4fcebcc2b0bc75eb0fb6c63f1144a73cbc0dad0630d4a84f3c69c1abbb",
     "2befad6c1f46c5927f77edbfade3f58173505bc89245cc030412766636dfcd0b",
     "d35a8cd244f22d8cd904c02e4433d23ff6ba11548a7468585ce9e6ca97cbd8ff",
-    "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e"
+    "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e",
+    "ec1601a16cb1709c8549e792c0728cb55449d8c0d213865c9cadb3c76faac8f6"
   ],
   "src/game/board/business.ts": [
     "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",
@@ -423,10 +432,21 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6015bd1aaea3129a95c5198fcc3147f1bc53d247ee94c74c50f1b01634358642",
     "ec13ef9b8ed4bff26006f30d0e9743f13cff2f6bbbcc3d1ee07ddbf21922f8d4"
   ],
+  "src/game/play/features.ts": [
+    "e09a02029b1467748dedfd26bcf67f94980bbb61362f0059c5dcf03dc3c7512c",
+    "fd40eb887e5f50e9d7a3d626fcde471826f29930a1966edfe7e876baf21a5b2f"
+  ],
   "src/game/play/motor.ts": [
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",
     "f1ff14f4eab4da545f34a66b0f8b53dae34bb8e7425fd62235074c50b0eddf4c",
     "38bfbcf96a01d86508968ed33d25362b07b8073821157d7425464477efabcd86"
+  ],
+  "src/game/play/openWorld.ts": [
+    "abee4ff7116d932b34d78e34183af99bd6ef690c776561a30e97be009a8617ed",
+    "4f2ad3c20e3fc86fdeb19f0d9f0a9342b6f1974c432e66cf11e9a3ec90a82cd5"
+  ],
+  "src/game/play/playerBody.ts": [
+    "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f"
   ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"

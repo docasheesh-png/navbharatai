@@ -109,6 +109,9 @@ import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSumm
 import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
+
+/** A recipe's files in flight at once: enough to end the one-by-one wait, few enough for any sandbox. */
+const RECIPE_WRITE_CONCURRENCY = 6;
 import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
@@ -389,6 +392,8 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
+import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -758,6 +763,9 @@ export function batchRefusalText(written: readonly string[], notWritten: Readonl
 
 /** The end-of-build race-course check reads at most this many source files (a game is a few dozen). */
 const RACE_SCAN_MAX_FILES = 400;
+
+/** The tools through which the BUILDER writes a whole file (growth guard, lock 1). */
+const BUILDER_WRITE_SOURCES: ReadonlySet<string> = new Set(['write_file', 'write_files_batch', 'replace_symbol', 'codemod_move_file']);
 
 export class ToolDispatcher {
   /**
@@ -1256,6 +1264,36 @@ export class ToolDispatcher {
     this.userRequest = typeof request === 'string' ? request : null;
   }
 
+  /**
+   * 🧱 THE GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when this turn began, and the user's own words.
+   * A write to a feature, a place, the mount or a kit file that the request does not name is refused at the write.
+   */
+  private readonly platformWrites = new Map<string, string>();
+  /** The last content the platform itself wrote to each path this turn (growth guard, lock 2). */
+  platformWritesThisTurn(): ReadonlyMap<string, string> { return this.platformWrites; }
+  private readonly growthRefused = new Set<string>();
+  /** The protected files the builder tried to change this turn and was refused (the user is told which, and how to allow it). */
+  growthRefusedThisTurn(): string[] { return [...this.growthRefused]; }
+  private growthBaseline: Readonly<Record<string, string>> | null = null;
+  private growthRequest = '';
+  private growthKnown: PartsKnown = new Map();
+  setGrowthBaseline(filesAtTurnStart: Readonly<Record<string, string>> | null, request: string | null): void {
+    this.growthBaseline = filesAtTurnStart && growsByLists(filesAtTurnStart) ? filesAtTurnStart : null;
+    this.growthKnown = partsKnown(this.growthBaseline);
+    this.growthRequest = typeof request === 'string' ? request : '';
+  }
+  /** Refuse a builder's write that changes what this turn was not asked to change. `after === null` = delete. */
+  private assertGrows(path: string, after: string | null): void {
+    if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
+    let rel = path;
+    try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown });
+    if (verdict.allow) return;
+    this.growthRefused.add(rel);
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }
+    refuse(growthRefusal(rel, verdict.reason || 'the request did not ask for this change'));
+  }
+
   setIgnoreRules(rules: IgnoreRule[]): void {
     this.ignoreRules = Array.isArray(rules) ? rules : [];
   }
@@ -1447,6 +1485,8 @@ export class ToolDispatcher {
     const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
     this.assertWritable(rel);
     this.assertTextWritable(rel);
+    // The builder's own writes only: a recipe, a kit refresh and a heal are the platform's (growthGuard.ts).
+    if (BUILDER_WRITE_SOURCES.has(opts.source)) this.assertGrows(rel, content);
     content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content), { framework: this.framework });
     content = withoutPreviewBridge(rel, content);
     let kind: 'create' | 'modify' = 'create';
@@ -1515,6 +1555,9 @@ export class ToolDispatcher {
       if (!this.actuator.createFileExclusive) refuse('Atomic file creation is unavailable; preserve existing source.');
       await this.actuator.createFileExclusive!(this.workspaceId, rel, content);
     } else await this.actuator.writeFile(this.workspaceId, rel, content);
+    // What the PLATFORM itself wrote this turn (a recipe, a kit refresh, a heal) is never the builder's change: the
+    // growth guard's end-of-turn lock reads this so it never undoes our own write.
+    if (!BUILDER_WRITE_SOURCES.has(opts.source)) this.platformWrites.set(rel, content); else this.platformWrites.delete(rel);
     this.onFileWrite?.(rel, content);
     if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
     return { kind, content, existingContent, kitNote };
@@ -4039,13 +4082,26 @@ export class ToolDispatcher {
     }
   }
 
+  /** How many of a recipe's files are in flight at once. Read by tests. */
+  static readonly RECIPE_WRITE_CONCURRENCY = RECIPE_WRITE_CONCURRENCY;
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
     if (runner) lines.push(runner);
     const refreshed: string[] = [];
     const refreshFailed: string[] = [];
-    for (const [path, content] of Object.entries(files)) {
+    // ⏱️ SEVERAL FILES AT ONCE (failedbr #2485, Q-3232: the kit seed took 61 s before the first model call). Each file is
+    // three sandbox round trips (this read, the write guard's own read, the write) and a game's kit is ~120 files, written
+    // strictly one after another — ~360 round trips in a row. The files of one recipe do not depend on each other, so a
+    // few go at once; the receipt keeps the recipe's own order. An additive composition stays one-at-a-time: its refusal
+    // promises that only EARLIER files may exist. After a failure no new file is started.
+    let stopped = false;
+    const one = async ([path, content]: [string, string]): Promise<string> => {
+      if (stopped) return `not written ${path} (an earlier file of this recipe failed)`;
+      try { return await writeOne(path, content); } catch (error) { stopped = true; throw error; }
+    };
+    const writeOne = async (path: string, content: string): Promise<string> => {
       let existing: string | null = null;
       let missing = false;
       try { existing = await this.actuator.readFile(this.workspaceId, path); }
@@ -4060,8 +4116,7 @@ export class ToolDispatcher {
       }
       if (!missing && existing === content) {
         this.noteKitCurrent(path, content);
-        lines.push(`Unchanged ${path} (already exactly what this recipe writes)`);
-        continue;
+        return `Unchanged ${path} (already exactly what this recipe writes)`;
       }
       if (additiveOnly && !missing) refuse('Additive composition found changed existing source at ' + path + '; no replacement attempted. Earlier new files may exist; inspect before retry.');
       // 🧬 An older kit version nobody edited is brought up to date (Q-863, gameRecipeLayers.ts): the recipe's
@@ -4073,25 +4128,27 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
           this.noteKitCurrent(path, wrote.content);
           refreshed.push(path);
-          lines.push(`Updated ${path}`);
+          return `Updated ${path}`;
         } catch {
           refreshFailed.push(path);
-          lines.push(`skipped existing ${path}`);
+          return `skipped existing ${path}`;
         }
-        continue;
       }
       // New files only. No recipe in this tree intentionally patches an existing router or App.tsx.
       if (!missing) {
         const stale = existing !== null && recipeFilePool().has(path) ? staleKitReason(path, existing, content) : null;
-        lines.push(`skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`);
-        continue;
+        return `skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`;
       }
       const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false, exclusiveCreate });
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
-      lines.push(`${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-    }
+      return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`;
+    };
+    lines.push(...await mapWithConcurrency(Object.entries(files), additiveOnly ? 1 : RECIPE_WRITE_CONCURRENCY, one));
+    const inOrder = Object.keys(files);
+    refreshed.sort((x, y) => inOrder.indexOf(x) - inOrder.indexOf(y));
+    refreshFailed.sort((x, y) => inOrder.indexOf(x) - inOrder.indexOf(y));
     const kitNote = kitVersionNote(refreshed, [], refreshFailed).trim();
     if (kitNote) lines.push(kitNote);
     return lines;
@@ -6294,6 +6351,7 @@ export class ToolDispatcher {
           throw withEditMissProvenance(missErr, path, oldStr, existing, this.fileViews);
         }
         const { updated: edited, matchedOld, note } = applied;
+        this.assertGrows(path, edited); // growth guard, lock 1: an edit is a write
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
         const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited), { framework: this.framework }), agent);
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
@@ -10379,6 +10437,63 @@ export class ToolDispatcher {
         const w2dLayers = await this.addMissingRecipeLayers(w2d.files, agent);
         this.scheduleCheckpoint('2d world');
         return `Added the 2D world (${w2dDecision.reason}):\n${w2dWritten.join('\n')}\n\n${w2d.instructions}${w2dLayers}`;
+      }
+
+      case 'generate_open_world': {
+        // THE JOIN BETWEEN THE BIG MAP AND THE GAME (failedbr #2485). The map decision stays where it is made: this recipe
+        // only builds on a map that is already in the project, so it can never put a world under an app that has none.
+        let owHasMap = false;
+        try { await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts'); owHasMap = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        if (!owHasMap) refuse('The open-world starter stands on the Athree map, and this project has none. Run generate_athree_map first; if that is refused, this game has no big map and the starter is not for it.');
+        const ow = generateOpenWorld();
+        const owWritten = await this.writeRecipeFiles(ow.files, agent);
+        const owLayers = await this.addMissingRecipeLayers(ow.files, agent);
+        // MOUNTED BY THE PLATFORM where no game is mounted yet (the kit seed asks for it): the first render is already a
+        // player on the big map. An App that renders a game of its own is never replaced.
+        const owRec = (input as Record<string, unknown>) || {};
+        let owMounted = '';
+        if (owRec.mount === true) {
+          let app: string | null = null;
+          try { app = await this.actuator.readFile(this.workspaceId, 'src/App.tsx'); }
+          catch (error) { if (!isNotFoundError(error)) throw error; }
+          if (app === null || !/GameCanvas|OpenWorldGame|RacingRoadGame|LaneRunnerGame|new\s+Game\s*\(|<canvas/i.test(app)) {
+            // The game's own map (its places): created once, never replaced.
+            let mapped = false;
+            try { await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH); mapped = true; }
+            catch (error) { if (!isNotFoundError(error)) throw error; }
+            if (!mapped) {
+              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true }), { agent, source: 'generate_open_world' });
+              this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
+              getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
+            }
+            // The game's own player (look, or a library character): created once, never replaced.
+            let cast = false;
+            try { await this.actuator.readFile(this.workspaceId, GAME_PLAYER_FILE_PATH); cast = true; }
+            catch (error) { if (!isNotFoundError(error)) throw error; }
+            if (!cast) {
+              const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE, { agent, source: 'generate_open_world' });
+              this.state?.recordFileChange({ path: GAME_PLAYER_FILE_PATH, kind: playerFile.kind }, agent);
+              getWorkspaceMemory(this.workspaceId).indexFile(GAME_PLAYER_FILE_PATH, playerFile.content);
+            }
+            // The game's own list of features: created once, never replaced (it is the user's game from then on).
+            let listed = false;
+            try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
+            catch (error) { if (!isNotFoundError(error)) throw error; }
+            if (!listed) {
+              const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX, { agent, source: 'generate_open_world' });
+              this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
+              getWorkspaceMemory(this.workspaceId).indexFile(GAME_FEATURES_INDEX_PATH, index.content);
+            }
+            const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined });
+            const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
+            this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
+            getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
+          }
+        }
+        this.scheduleCheckpoint('open world starter');
+        return `Added the open-world starter:\n${owWritten.join('\n')}\n\n${ow.instructions}${owMounted}${owLayers}`;
       }
 
       case 'generate_game_royale': {

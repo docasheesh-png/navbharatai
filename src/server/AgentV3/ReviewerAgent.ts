@@ -643,8 +643,10 @@ export interface ReviewBuildOpts {
  */
 export interface LeanReviewInline {
   files: { path: string; content: string }[];
-  /** Changed source files that did not fit the bound — named, so the reviewer can read one it needs. */
+  /** Changed source files that did not fit the bound at all — named, so the reviewer knows what it was not shown. */
   omitted: string[];
+  /** Files shown only from their beginning (LEAN_REVIEW_CUT_MARK ends each): too long to show whole (Q-3236). */
+  cut?: string[];
 }
 
 const LEAN_SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|css|scss|html)$/i;
@@ -652,6 +654,9 @@ const LEAN_SKIP = /(^|\/)(node_modules|dist|build|e2e|tests?|__tests__)\/|\.(tes
 /** Total characters of code a lean review is handed, and the most any one file may take of it. */
 export const LEAN_REVIEW_INLINE_CHARS = 60_000;
 export const LEAN_REVIEW_FILE_CHARS = 16_000;
+/** The least of a long file worth showing; with less room than this left, the file is named as not shown instead. */
+export const LEAN_REVIEW_MIN_EXCERPT = 2_000;
+export const LEAN_REVIEW_CUT_MARK = '\n/* …CUT HERE — the rest of this file is not shown in this review. Do not judge what you cannot see. */\n';
 
 /** The app's own entry and screens first, then the rest — what a reviewer reads first by hand. */
 function leanPriority(path: string): number {
@@ -693,12 +698,24 @@ export function leanReviewInline(
   const files: { path: string; content: string }[] = [];
   const omitted: string[] = [];
   let used = 0;
+  const cut: string[] = [];
   for (const { path, content } of readable) {
-    if ((!everythingFits && content.length > LEAN_REVIEW_FILE_CHARS) || used + content.length > maxChars) { omitted.push(path); continue; }
+    if ((!everythingFits && content.length > LEAN_REVIEW_FILE_CHARS) || used + content.length > maxChars) {
+      // 🔴 A LONG FILE IS SHOWN FROM ITS BEGINNING, NOT LEFT FOR A TOOL (failedbr #2485, Q-3236). An omitted source file
+      // sent the lean review to its read tools, and a tool-reading review cannot finish in the lean budget: 45 s, a
+      // glob of 137 files, no verdict. The start of a file (imports, state, the component's shape) is where most of
+      // what a reviewer needs is; the cut is marked, so nothing is judged that was not shown.
+      const room = Math.min(LEAN_REVIEW_FILE_CHARS, maxChars - used) - LEAN_REVIEW_CUT_MARK.length;
+      if (room >= LEAN_REVIEW_MIN_EXCERPT && !/\.css$/i.test(path)) {
+        const excerpt = content.slice(0, room) + LEAN_REVIEW_CUT_MARK;
+        files.push({ path, content: excerpt }); cut.push(path); used += excerpt.length;
+      } else omitted.push(path);
+      continue;
+    }
     files.push({ path, content });
     used += content.length;
   }
-  return { files, omitted };
+  return { files, omitted, ...(cut.length ? { cut } : {}) };
 }
 
 /**
@@ -741,7 +758,10 @@ export function reviewFileList(fileTree: readonly string[], changed: readonly st
  * keeps its read tools, because then reading is the only way to see the code. PURE.
  */
 export function leanReviewAnswersInOneCall(inline: LeanReviewInline | undefined): boolean {
-  return !!inline && inline.files.length > 0 && inline.omitted.every(isStylesheetPath);
+  // Q-3236 (failedbr #2485): with ANYTHING inline, the lean review answers in one call. A file that did not fit is named
+  // as not shown; it is no longer a reason to hand the review tools it has no time to use (the comment above stands for
+  // the one case left: nothing could be inlined at all).
+  return !!inline && inline.files.length > 0;
 }
 
 /**
@@ -865,14 +885,17 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     'If everything looks good, just write: [PASS] App looks complete. Score: 90',
     ...(opts.mode === 'suggest' && opts.inlineFiles && opts.inlineFiles.files.length > 0 ? [
       '',
-      `THE FILES THAT CHANGED, IN FULL (${opts.inlineFiles.files.length}). They are complete and current — review them`,
+      `THE FILES THAT CHANGED, IN FULL (${opts.inlineFiles.files.length - (opts.inlineFiles.cut ?? []).length}). They are complete and current — review them`,
       'from here and answer directly. Do NOT read any of these again with a tool.',
       ...opts.inlineFiles.files.map(({ path, content }) => `\n=== ${path} ===\n${content}`),
       ...(opts.inlineFiles.omitted.length > 0 ? [
         '',
         leanReviewAnswersInOneCall(opts.inlineFiles)
-          ? `Changed but not included (a stylesheet too large for this review): ${opts.inlineFiles.omitted.join(', ')}. You have no tools in this review — judge the code above.`
+          ? `Changed but not shown (${opts.inlineFiles.omitted.every(isStylesheetPath) ? 'a stylesheet too large for this review' : 'they did not fit this review'}): ${opts.inlineFiles.omitted.join(', ')}. You have no tools in this review — judge the code above, and say nothing about a file you were not shown.`
           : `Changed but not included (too large for this review): ${opts.inlineFiles.omitted.join(', ')} — read one only if a finding depends on it.`,
+      ] : []),
+      ...((opts.inlineFiles.cut ?? []).length > 0 ? [
+        `Shown only from their beginning (each ends at a CUT HERE mark): ${(opts.inlineFiles.cut ?? []).join(', ')}. Review what is shown; never report as missing something that may be below the cut.`,
       ] : []),
     ] : []),
     ...(opts.mode === 'suggest' ? [

@@ -52,6 +52,7 @@ describe('BR1966: a glued gta5 title is GTA, like spaced "gta 5"', () => {
       'generate_game_vfx',
       'generate_melody',
       'generate_game_shell',
+      'generate_open_world', // …and the player is put ON it, playable before the first model call (failedbr #2485)
     ]);
     expect(v.realismTier).toBe('real');
   });

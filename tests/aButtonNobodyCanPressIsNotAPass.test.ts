@@ -187,16 +187,20 @@ describe('the one changed file is handed over even when it is over the per-file 
       'src/huge.ts': 'c'.repeat(40_000),
     };
     const inline = leanReviewInline(Object.keys(files), (p) => files[p]);
-    expect(inline.omitted).toContain('src/huge.ts');          // over the per-file cap, and the set overflows
+    expect([...(inline.cut ?? []), ...inline.omitted]).toContain('src/huge.ts');   // over the per-file cap: shown in part, or named as not shown
     expect(inline.files.reduce((n, f) => n + f.content.length, 0)).toBeLessThanOrEqual(LEAN_REVIEW_INLINE_CHARS);
   });
 
   it('the total bound is never exceeded, whichever branch runs', () => {
     const one = { 'src/App.tsx': 'x'.repeat(LEAN_REVIEW_INLINE_CHARS + 1) };
     const inline = leanReviewInline(Object.keys(one), (p) => one[p as keyof typeof one]);
-    expect(inline.files).toEqual([]);
-    expect(inline.omitted).toEqual(['src/App.tsx']);
-    expect(leanReviewAnswersInOneCall(inline)).toBe(false);    // nothing inline ⇒ reading is the only way
+    // Q-3236 (failedbr #2485): a file too long to show whole is shown from its beginning, marked — never left for a
+    // tool the lean review has no time to use. The total bound still holds.
+    expect(inline.omitted).toEqual([]);
+    expect(inline.cut).toEqual(['src/App.tsx']);
+    expect(inline.files[0].content.length).toBeLessThanOrEqual(LEAN_REVIEW_INLINE_CHARS);
+    expect(inline.files[0].content).toMatch(/CUT HERE/);
+    expect(leanReviewAnswersInOneCall(inline)).toBe(true);
   });
 });
 

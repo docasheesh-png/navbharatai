@@ -57,6 +57,18 @@ function headerAdaptedParams(value: unknown): string[] {
 export function adaptedParamsPreserveContract(params: unknown[]): boolean {
   return params.every(p => typeof p === 'string' && CONTRACT_PRESERVING_ADAPTATIONS.has(p.trim().toLowerCase().split(/[:=>\s.-]/)[0]));
 }
+/**
+ * The engine's own machine error CODE for a refused request, for the server log only (failedbr #2485, Q-3234: six attempts
+ * answered HTTP 404 and nothing recorded which 404). Only a short code-shaped token is kept (letters, digits, _ . -); a
+ * sentence, a URL or anything longer is dropped, so no upstream prose is ever logged. '' when there is none.
+ */
+export function surplusErrorCodeToken(body: Record<string, unknown>): string {
+  try {
+    const error = body?.error && typeof body.error === 'object' ? body.error as Record<string, unknown> : null;
+    const token = [error?.code, error?.type].find((v) => (typeof v === 'string' && /^[A-Za-z0-9_.-]{1,48}$/.test(v)) || (typeof v === 'number' && Number.isSafeInteger(v)));
+    return token === undefined ? '' : ` (code ${String(token)})`;
+  } catch { return ''; }
+}
 /** Which identity check failed ('' = accepted). Same contract as before, just named. */
 export function surplusIdentityMismatch(wire: WireResponse, body: Record<string, unknown>, telemetry: Record<string, unknown>): string {
   if (!wire) return 'no_wire';
@@ -204,7 +216,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       const why = surplusIdentityMismatch(wire, body, telemetry);
       if (why) {
         // Enumerated check name only (never upstream text) so the next live fail names its DNA.
-        console.warn(`[SURPLUS] response identity rejected: ${why}`);
+        console.warn(`[SURPLUS] response identity rejected: ${why}${surplusErrorCodeToken(body)}`);
         throw new Error(`Surplus response route or capabilities did not match (${why})`);
       }
       const completion = normalizeSurplusCompletion(structuredClone(body) as unknown as OpenAiCompletionLike, expectedModel);

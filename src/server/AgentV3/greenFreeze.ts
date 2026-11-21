@@ -70,6 +70,10 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   'runtime-error-autofix', // the app renders but throws — the user wants a working app
   'feature-presence-heal', // a feature the user explicitly asked for is missing
   'green-guard-restore',   // puts the last-known-good files back — the safety mechanism itself
+  // The growth guard's end-of-turn lock (growthGuard.ts, 2026-11-21): puts back a feature, a place, the mount or a kit
+  // file the turn changed without being asked. Safe for the reason the line above is: it writes the bytes the file had
+  // when the turn began (or that list with the turn's own additions kept), never an opinion of the engine's.
+  'growth-guard-restore',
   // Re-seeding an EMPTY sandbox from the durable store before a build (sandboxSeed.ts). Added
   // 2026-08-20 after it broke a real publish: the seed writes through `actuator.writeFile`, the freeze
   // refused every write on a green app, and the user was told "your files could not be restored".

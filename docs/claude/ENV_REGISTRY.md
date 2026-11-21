@@ -5291,3 +5291,11 @@ present (2026-11-13 screenshot inventory), and an env value beats the code defau
 could not take effect while the old value stood (failedbr #2478 showed `3D assets 0.0 s (off)`). Every user's new 3D
 game now gets the reviewed library. Kill switch: set it to `off`. **Watch:** the next 3D game build's report should
 read `3D assets … (prepared, N ready)`; if it still reads `(off)`, the new revision is not serving.
+
+### AGENTV3_SEED_PREVIEW (code default: ON; not set in Cloud Run) — 2026-11-21
+
+Seed preview (`src/server/AgentV3/seedPreview.ts`, failedbr #2485 Q-3233): when the game kit's seed has mounted a playable app (`src/App.tsx` renders a kit starter), the platform starts the preview BEFORE the builder's first call, so the user is looking at a running game while the builder adds to it instead of a spinner for the whole build. It starts nothing when the seed did not mount an app, and a preview that fails to start is not an error — the builder starts it as before. `AGENTV3_SEED_PREVIEW=off` turns it off (the builder starts the preview itself, as before 2026-11-21). No cost: no model call.
+
+### AGENTV3_GROWTH_GUARD (code default: ON; not set in Cloud Run) — 2026-11-21
+
+The growth guard (`src/server/AgentV3/growthGuard.ts`): in a game that grows by lists (`src/game/features/index.ts`, `src/game/world.ts`), a turn may not rewrite or delete a feature, drop a feature or a place from its list, replace the mount, or edit a kit file unless the user's own words ask for it. Lock 1 refuses the builder's write; lock 2 puts back at the end of the turn whatever changed without being asked. `off` disables both locks (the prompt rules remain). Admin-mandated ("isko rocksolid karo"); do not turn it off without the admin.

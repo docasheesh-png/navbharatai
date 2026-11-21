@@ -87,8 +87,8 @@ describe('§4 a stylesheet too large to inline does not give the lean review its
     expect(leanReviewAnswersInOneCall({ files: [{ path: 'src/App.tsx', content: 'x' }], omitted: ['src/index.css'] })).toBe(true);
   });
 
-  it('any other omitted file, or nothing inlined, keeps the tools', () => {
-    expect(leanReviewAnswersInOneCall({ files: [{ path: 'src/App.tsx', content: 'x' }], omitted: ['src/Big.tsx'] })).toBe(false);
+  it('anything inlined ⇒ one call (Q-3236: an omitted file is named as not shown, never a reason for tools); nothing inlined keeps the tools', () => {
+    expect(leanReviewAnswersInOneCall({ files: [{ path: 'src/App.tsx', content: 'x' }], omitted: ['src/Big.tsx'] })).toBe(true);
     expect(leanReviewAnswersInOneCall({ files: [], omitted: ['src/index.css'] })).toBe(false);
   });
 

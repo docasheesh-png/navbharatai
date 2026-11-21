@@ -221,9 +221,12 @@ describe('a lean review is handed the code it judges', () => {
 
   it('picks the app\'s own source, entry first, in full — never the config files', () => {
     const inline = leanReviewInline(Object.keys(content), (p) => content[p]);
-    expect(inline.files.map((f) => f.path)).toEqual(['src/App.tsx', 'src/pages/CartPage.tsx', 'src/hooks/useCart.ts']);
+    expect(inline.files.filter((f) => !(inline.cut ?? []).includes(f.path)).map((f) => f.path)).toEqual(['src/App.tsx', 'src/pages/CartPage.tsx', 'src/hooks/useCart.ts']);
     expect(inline.files[0].content).toBe(content['src/App.tsx']);
-    expect(inline.omitted).toEqual(['src/huge.ts']);
+    // Q-3236 (failedbr #2485): the file too long to show whole is shown from its beginning, marked — not left for a tool.
+    expect(inline.omitted).toEqual([]);
+    expect(inline.cut).toEqual(['src/huge.ts']);
+    expect(inline.files.find((f) => f.path === 'src/huge.ts')!.content).toMatch(/CUT HERE/);
   });
 
   /**

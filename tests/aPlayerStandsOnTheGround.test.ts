@@ -116,7 +116,7 @@ describe('the camera collides with the world as it is drawn', () => {
 describe('the player has a body', () => {
   const game = generateGameShell().files['src/game/Game.ts'];
   it('third-person gets a humanoid that faces where it walks; first-person gets none; a game can bring its own', () => {
-    expect(game).toContain("import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';");
+    expect(game).toContain("import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';");
     expect(game).toMatch(/options\.playerBody !== false && !firstPerson/);
     expect(game).toContain('this.player.object.add(options.playerBody)');
     expect(game).toContain('Math.atan2(v.x, v.z)');

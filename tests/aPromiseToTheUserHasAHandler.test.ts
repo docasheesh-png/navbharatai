@@ -175,6 +175,12 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  // The growth guard's ask (growthAskNote, 2026-11-21): the user lets the builder change what is needed, this once.
+  'jo zaroori ho badal do': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/growthGuard.ts (PERMIT)`,
+    why: 'an explicit change order ("badal do" — edit_existing), and the growth guard\'s PERMIT opens the parts it had kept shut for this one turn',
+    proof: () => reachesConfirmedWork('jo zaroori ho badal do') && read('src/server/AgentV3/growthGuard.ts').includes('jo\\s+(?:bhi\\s+)?zar+oo?ri'),
+  },
   undo: {
     handler: 'src/lib/versionUndoIntent.ts; src/components/agentv3/AgentV3Panel.tsx (VersionUndoCard)',
     why: 'typing undo in Pro chat opens the in-chat version picker (wantsVersionUndo), where one tap restores any saved version',

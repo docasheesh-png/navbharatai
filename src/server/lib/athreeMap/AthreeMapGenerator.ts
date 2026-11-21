@@ -281,6 +281,13 @@ export interface AthreeWorld {
   readonly seaLevel: number;
   /** The ground height, with the rivers, lakes and roads carved in (what is drawn, driven and floated on). */
   heightAt(x: number, z: number): number;
+  /**
+   * Level a rectangle of ground for something flat (a city, a base): one height inside, easing back into the land over the
+   * margin. Call it BEFORE the first map.update(), so the terrain is drawn level. Returns the pad's height.
+   */
+  levelGround(x: number, z: number, halfX: number, halfZ: number, margin?: number): number;
+  /** True on levelled ground: nothing grows there. */
+  clearAt(x: number, z: number): boolean;
   /** Every road, plaza, the race circuit and the runways (regions are built on demand). */
   roadNetwork(): RoadNetwork;
   /** The road under a place (on the paved width), or null. */
@@ -473,9 +480,34 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return roadNet;
   };
 
-  function heightAt(x: number, z: number): number {
+  // LEVELLED GROUND: a game that puts something flat on the map (a city, a base, an arena) asks for a level pad BEFORE the
+  // first frame. Inside the pad the ground is one height; over the margin it eases back into the land, so there is no
+  // cliff and no floating slab. Everything that reads heightAt (the drawn terrain, the colliders, plants, vehicles) agrees.
+  const pads: Array<{ x: number; z: number; hx: number; hz: number; y: number; margin: number }> = [];
+  function naturalHeightAt(x: number, z: number): number {
     const t = terrainNoRoads(x, z);
     return withRoads ? roadsOf().carve(x, z, t) : t;
+  }
+  function heightAt(x: number, z: number): number {
+    let t = naturalHeightAt(x, z);
+    for (const p of pads) {
+      const d = Math.max(Math.abs(x - p.x) - p.hx, Math.abs(z - p.z) - p.hz);
+      if (d >= p.margin) continue;
+      const w = d <= 0 ? 1 : 1 - smoothstep(0, p.margin, d);
+      t += (p.y - t) * w;
+    }
+    return t;
+  }
+  function levelGround(x: number, z: number, halfX: number, halfZ: number, margin = 40): number {
+    let sum = 0, n = 0;
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) { sum += naturalHeightAt(x + (i / 2) * halfX, z + (j / 2) * halfZ); n++; }
+    const y = Math.max(1.5, sum / n);
+    pads.push({ x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) });
+    return y;
+  }
+  function clearAt(x: number, z: number): boolean {
+    for (const p of pads) if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true;
+    return false;
   }
 
   function surfaceAt(x: number, z: number): 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water' {
@@ -633,7 +665,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 

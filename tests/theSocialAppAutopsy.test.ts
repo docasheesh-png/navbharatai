@@ -76,7 +76,8 @@ describe('a lean review handed all the changed code answers in ONE call', () => 
   it('every changed file inline ⇒ one call; anything left out or nothing inlined ⇒ it may read', () => {
     const all = leanReviewInline(Object.keys(content), (p) => content[p]);
     expect(leanReviewAnswersInOneCall(all)).toBe(true);
-    expect(leanReviewAnswersInOneCall({ files: all.files, omitted: ['src/huge.ts'] })).toBe(false);
+    // Q-3236 (failedbr #2485): a file that did not fit is named as not shown — the review still answers in one call.
+    expect(leanReviewAnswersInOneCall({ files: all.files, omitted: ['src/huge.ts'] })).toBe(true);
     expect(leanReviewAnswersInOneCall({ files: [], omitted: [] })).toBe(false);
     expect(leanReviewAnswersInOneCall(undefined)).toBe(false);
   });
@@ -86,8 +87,11 @@ describe('a lean review handed all the changed code answers in ONE call', () => 
     expect(reviewerInstruction({ ...base, mode: 'suggest', inlineFiles: all })).toMatch(/You have NO tools in this review/);
     const partial = { files: all.files, omitted: ['src/huge.ts'] };
     const text = reviewerInstruction({ ...base, mode: 'suggest', inlineFiles: partial });
-    expect(text).not.toMatch(/NO tools/);
-    expect(text).toMatch(/Read each file you need ONCE/);
+    // Q-3236: with code inline the review has no tools even when a file did not fit; it is told what it was not shown.
+    expect(text).toMatch(/You have no tools in this review — judge the code above, and say nothing about a file you were not shown/);
+    const none = reviewerInstruction({ ...base, mode: 'suggest', inlineFiles: { files: [], omitted: ['src/huge.ts'] } });
+    expect(none).not.toMatch(/NO tools/);
+    expect(none).toMatch(/Read each file you need ONCE/);
   });
 
   it('an empty override is a real "no tools", and both the spawn and the route use it', () => {

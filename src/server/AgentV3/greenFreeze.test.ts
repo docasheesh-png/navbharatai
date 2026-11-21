@@ -168,7 +168,7 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     // is strictly better (else undone); no .env file. Same restraints as the explorer repair.
     expect([...ALLOWED_PASSES].sort()).toEqual([
       'design-consistency-heal', 'design-heal-revert', 'explorer-repair', 'feature-presence-heal', 'game-repair',
-      'green-guard-restore', 'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
+      'green-guard-restore', 'growth-guard-restore', 'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
       'vaccine-repair',
     ]);
   });

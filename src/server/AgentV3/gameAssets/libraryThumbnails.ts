@@ -46,6 +46,22 @@ export function libraryThumbPath(sha256: string, cwd = process.cwd()): string | 
   return existsSync(path) ? path : null;
 }
 
+/**
+ * 🗺️ MAP PLACES IN THE LIBRARY (admin 2026-11-21: "game library se user chun ke khud map, object add karwa sake"). The
+ * library held only models, so a user could pick a cow but never a town. These are the places the open-world map grows by
+ * (play/openWorld.ts regions): choosing one sends a request that adds ONE region to the game's map. They are NavBharatAI's
+ * own generated places — no file, so no picture: a plain tile, like any model whose picture is not rendered.
+ */
+export const MAP_PLACE_PREFIX = 'map-place:';
+export const LIBRARY_MAP_PLACES: ReadonlyArray<{ kind: 'city' | 'town' | 'village'; name: string; subjects: readonly string[] }> = [
+  { kind: 'city', name: 'New city (streets, towers, traffic)', subjects: ['city', 'shehar', 'downtown', 'map', 'place'] },
+  { kind: 'town', name: 'New town (shops, low buildings)', subjects: ['town', 'kasba', 'market', 'map', 'place'] },
+  { kind: 'village', name: 'New village (a few houses, parks)', subjects: ['village', 'gaon', 'gaanv', 'map', 'place'] },
+];
+export function mapPlaceRows(): LibraryBrowseRow[] {
+  return LIBRARY_MAP_PLACES.map((p) => ({ id: `${MAP_PLACE_PREFIX}${p.kind}`, name: p.name, category: 'map-places', subjects: p.subjects, animations: [], thumb: null }));
+}
+
 export function libraryBrowseRows(catalogue: readonly ReviewedAsset[] = REVIEWED_GAME_ASSETS, hasThumb: (sha: string) => boolean = (sha) => libraryThumbPath(sha) !== null): LibraryBrowseRow[] {
   const seen = new Set<string>();
   const rows: LibraryBrowseRow[] = [];
@@ -64,7 +80,7 @@ export function libraryBrowseRows(catalogue: readonly ReviewedAsset[] = REVIEWED
   return rows;
 }
 
-export function browseLibrary(query: { q?: string; category?: string; limit?: number; offset?: number }, rows: readonly LibraryBrowseRow[] = libraryBrowseRows()): LibraryBrowseResult {
+export function browseLibrary(query: { q?: string; category?: string; limit?: number; offset?: number }, rows: readonly LibraryBrowseRow[] = [...mapPlaceRows(), ...libraryBrowseRows()]): LibraryBrowseResult {
   const q = normalize(String(query.q ?? '')).slice(0, 60);
   const cat = normalize(String(query.category ?? ''));
   const counts = new Map<string, number>();
@@ -81,7 +97,21 @@ export function browseLibrary(query: { q?: string; category?: string; limit?: nu
   };
 }
 
+/**
+ * 🧍 A LIBRARY MODEL AS THE PLAYER (failedbr #2485, admin 2026-11-21: "yeh jo character banta hai, isko user jab chahe
+ * replace karwa de, text se ya game library se chun ke"). The same tile, a second meaning: not "put this in the scene" but
+ * "this is who I play as". A map place is not a body, so it has no such instruction.
+ */
+export function useAsCharacterPrompt(row: Pick<LibraryBrowseRow, 'id' | 'name'>): string | null {
+  if (row.id.startsWith(MAP_PLACE_PREFIX)) return null;
+  return `Make the ${row.name} from the NavBharatAI library my game's player character (library id: "${row.id}"). Replace only the character I play as; keep the map, the controls and everything else as it is.`;
+}
+
 /** The instruction the composer receives: names the exact subject add_library_models resolves, and nothing runs until sent. */
 export function addToGamePrompt(row: Pick<LibraryBrowseRow, 'id' | 'name'>): string {
+  if (row.id.startsWith(MAP_PLACE_PREFIX)) {
+    const kind = row.id.slice(MAP_PLACE_PREFIX.length);
+    return `Add one more ${kind} to my game's map as a new place (library map place: "${kind}"). Keep every place already on the map and everything else as it is.`;
+  }
   return `Add the ${row.name} model from the NavBharatAI library to my game (library id: "${row.id}"). Place it where it fits the scene and keep everything else as it is.`;
 }

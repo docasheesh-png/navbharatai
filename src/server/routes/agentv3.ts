@@ -75,6 +75,8 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
+import { enforceGrowthAtTurnEnd, libraryActionsAtTurnStart } from '../AgentV3/growthTurn';
+import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
@@ -460,7 +462,7 @@ import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gam
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
 import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff, withLibraryMenuForExistingGame } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
-import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
+import { browseLibrary, libraryThumbPath, addToGamePrompt, useAsCharacterPrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, turnIsGame, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
@@ -5308,7 +5310,8 @@ async function noteBuildOutcome(
       limit: num(req.query.limit), offset: num(req.query.offset),
     });
     res.setHeader('Cache-Control', 'private, max-age=60');
-    res.json({ enabled: externalGameAssetsEnabled(process.env, uid), ...result, prompts: Object.fromEntries(result.rows.map((r) => [r.id, addToGamePrompt(r)])) });
+    res.json({ enabled: externalGameAssetsEnabled(process.env, uid), ...result, prompts: Object.fromEntries(result.rows.map((r) => [r.id, addToGamePrompt(r)])),
+      characterPrompts: Object.fromEntries(result.rows.flatMap((r) => { const text = useAsCharacterPrompt(r); return text ? [[r.id, text]] : []; })) });
   });
   // Pictures are renders of public, reviewed models — no user data — so an <img> can load them without a token. Only a
   // file named by a catalogue hash is ever read.
@@ -17686,6 +17689,8 @@ async function noteBuildOutcome(
         // …AND THE FILES THE USER PUT HERE ARE NOT THE BUILD'S TO DELETE (autopsy 4d538ca3 — see
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
+        // 🧱 GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when the turn began, and the user's own words.
+        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, prompt); } catch { /* the end-of-turn lock still holds */ }
         try {
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
@@ -19498,6 +19503,14 @@ async function noteBuildOutcome(
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
+      // 🗺️🧍 WHAT IS PICKED IN THE LIBRARY IS DONE BY THE PLATFORM ITSELF (growthTurn.ts): a map place (worldGrow.ts) or the
+      // player's character (characterSwap.ts). Where it cannot be done, nothing is changed on a guess and the user is asked.
+      if (!isImportTurn && !projectModuleRef) {
+        const libraryHandoff = await libraryActionsAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+          write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
+          addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
+        if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
+      }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
         if (kitPlan.length === 0) {
@@ -19547,8 +19560,9 @@ async function noteBuildOutcome(
                   if (abort.signal.aborted) break;
                   // A 2D plan takes the effects layer's SOUND half only — its particles would install three.js.
                   const recipeInput = gameKitRecipeInput(recipe, kitPlan, gameTurnRequest(prompt, milestoneRequest));
+                  const recipeStartedAt = Date.now();
                   const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
-                  kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
+                  kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? ''), ms: Date.now() - recipeStartedAt });
                 }
                 kitRecipesMs = Date.now() - kitStartedAt;
                 // BR1977: recipes report ok (`!r.is_error`) even when they wrote nothing —
@@ -19601,8 +19615,12 @@ async function noteBuildOutcome(
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
-                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') + kitSoundsNote });
+                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s (${seedRecipeTimes(kitResults)})` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') + kitSoundsNote });
                 if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
+                // 🖥️ The mounted game goes on screen NOW, before the builder's first call (seedPreview.ts, Q-3233).
+                const seedPreview = await startPreviewAfterSeed({ seeded: gameKitSeeded, alreadyUp: !!lastPreviewUrl, port: oneShotDevPort(framework),
+                  run: (command) => actuator.runCommand(workspaceId, command), portUrl: (port) => actuator.getPortUrl(workspaceId, port), record: (issue) => buildDiag.record(issue) });
+                if (seedPreview) { lastPreviewUrl = applyPreviewDomain(seedPreview.url); events.emit({ type: 'preview', url: lastPreviewUrl, ts: Date.now() }); buildPrompt = `${SEED_PREVIEW_HANDOFF}\n\n${buildPrompt}`; }
                 // A race whose course the request does not describe runs on the kit's endless 12-piece track
                 // (endlessRaceCourse.ts, owner 2026-11-18): said in the handoff, and the builder's code is checked for it.
                 const endlessRace = gameKitSeeded.includes('generate_game_3d') && wantsEndlessRaceCourse(gameTurnRequest(prompt, milestoneRequest));
@@ -21673,6 +21691,17 @@ async function noteBuildOutcome(
           return { players: projectAdServingPlayers(files), ownAds: projectOwnAdSdks(files) };
         } catch { return { players: [], ownAds: [] }; }
       };
+      // 🧱 GROWTH GUARD, lock 2 (growthGuard.ts — admin 2026-11-21: "isko rocksolid karo"). Whatever door a change came
+      // through (a tool, a shell command, a script), every feature, every place on the map, the mount and the kit are
+      // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
+      // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
+      if (!abort.signal.aborted && !initialTerminalDecline) {
+        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
+          write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
+          platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
+          refused: dispatcher.growthRefusedThisTurn(), written: [...writtenFiles.keys()], record: (issue) => buildDiag.record(issue),
+          say: (text) => { events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }); } });
+      }
       // An initial decline must not manufacture artifacts through deterministic maintenance.
       // Keep the normal answer capture, release diagnostics and billing/finalization below.
       if (!initialTerminalDecline) try {

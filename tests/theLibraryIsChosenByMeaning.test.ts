@@ -21,8 +21,9 @@ describe('the builder chooses library models by meaning', () => {
     expect(menu).toMatch(/villager \(walk\/run\/jog\/jump\/crouch\/aim\/shoot\/reload\/die\/hit\/drive\)/);
     expect(menu).toMatch(/bird \(fly\)/);
     expect(menu).toMatch(/MEANING/);
-    // Paid on every build that has the library: keep it a menu, not a dump of the catalogue.
-    expect(menu.length).toBeLessThan(8000);
+    // Paid on every 3D game turn: keep it a menu, not a dump of the catalogue. 2026-11-21: 8000 → 11000 for the intent map
+    // (gameCapabilities.ts, ~2.7 KB) that lets the builder pick by meaning in any language — ~2.5k tokens a turn in all.
+    expect(menu.length).toBeLessThan(11000);
   });
 
   it('a subject appears once even when several models serve it', () => {
@@ -62,7 +63,8 @@ describe('an EXISTING 3D game sees the library on every later turn (admin 2026-1
 
   it('a later turn on a project with the 3D kit gets the menu first; the prompt itself is kept whole', async () => {
     const out = await withLibraryMenuForExistingGame('add a cow to my game', { intent: 'edit_existing', read: read({ [THREE_KIT_MARKER]: 'export const x = 1;' }), env: on });
-    expect(out.startsWith('[GAME_LIBRARY_MENU]')).toBe(true);
+    expect(out.startsWith('[WHAT THE USER MEANS → WHAT TO DO]')).toBe(true);
+    expect(out).toContain('[GAME_LIBRARY_MENU]');
     expect(out.endsWith('\n\nadd a cow to my game')).toBe(true);
   });
 

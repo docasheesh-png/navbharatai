@@ -2671,8 +2671,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_character_customizer',
       description:
-        'Add a CHARACTER CUSTOMIZATION panel to the user\'s game — ONLY when the user asks for one ("character customize karne ki screen", '
-        + '"character creator", "let players change their outfit/colour"). Writes src/game/three/characterCustomizer.ts: it works on ANY loaded model '
+        'In-game control for players to change how characters look (colours, parts, size, pose), in any words. '
+        + 'Run it when that is what the user MEANS, whatever the language. '
+        + 'Only on request; a change the user wants NOW is assetCustomizations.ts, not this. Writes src/game/three/characterCustomizer.ts: it works on ANY loaded model '
         + '(library, the user\'s own .glb, or code-built) by discovering the model\'s named materials (colour pickers with presets) and mesh parts '
         + '(show/hide), plus size, a pose picker when roles exist, reset, and the look saved per character and re-applied. Labels take the user\'s '
         + 'language. Anything the panel lacks that the user asks for is added to the same module.',

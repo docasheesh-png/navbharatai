@@ -60,7 +60,8 @@ describe('a character customization panel, written into the user\'s game when th
     expect(isRecipeName('generate_character_customizer')).toBe(true);
     expect(RECIPE_TOOLS).toContain('generate_character_customizer');
     const def = defaultToolCatalog().find(t => t.name === 'generate_character_customizer')!;
-    expect(def.description).toMatch(/ONLY when the user asks/);
+    expect(def.description).toMatch(/Only on request/);
+    expect(def.description).toMatch(/when that is what the user MEANS, whatever the language/);
     expect(recipeListing('generate_character_customizer')).toMatch(/ANY loaded model/);
     const out = generateCharacterCustomizer();
     expect(Object.keys(out.files)).toEqual(['src/game/three/characterCustomizer.ts']);

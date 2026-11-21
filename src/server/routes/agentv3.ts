@@ -76,6 +76,7 @@ import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { enforceGrowthAtTurnEnd, addLibraryPlaceAtTurnStart } from '../AgentV3/growthTurn';
+import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
@@ -19559,8 +19560,9 @@ async function noteBuildOutcome(
                   if (abort.signal.aborted) break;
                   // A 2D plan takes the effects layer's SOUND half only — its particles would install three.js.
                   const recipeInput = gameKitRecipeInput(recipe, kitPlan, gameTurnRequest(prompt, milestoneRequest));
+                  const recipeStartedAt = Date.now();
                   const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
-                  kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
+                  kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? ''), ms: Date.now() - recipeStartedAt });
                 }
                 kitRecipesMs = Date.now() - kitStartedAt;
                 // BR1977: recipes report ok (`!r.is_error`) even when they wrote nothing —
@@ -19613,8 +19615,12 @@ async function noteBuildOutcome(
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
-                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') + kitSoundsNote });
+                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s (${seedRecipeTimes(kitResults)})` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') + kitSoundsNote });
                 if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
+                // 🖥️ The mounted game goes on screen NOW, before the builder's first call (seedPreview.ts, Q-3233).
+                const seedPreview = await startPreviewAfterSeed({ seeded: gameKitSeeded, alreadyUp: !!lastPreviewUrl, port: oneShotDevPort(framework),
+                  run: (command) => actuator.runCommand(workspaceId, command), portUrl: (port) => actuator.getPortUrl(workspaceId, port), record: (issue) => buildDiag.record(issue) });
+                if (seedPreview) { lastPreviewUrl = applyPreviewDomain(seedPreview.url); events.emit({ type: 'preview', url: lastPreviewUrl, ts: Date.now() }); buildPrompt = `${SEED_PREVIEW_HANDOFF}\n\n${buildPrompt}`; }
                 // A race whose course the request does not describe runs on the kit's endless 12-piece track
                 // (endlessRaceCourse.ts, owner 2026-11-18): said in the handoff, and the builder's code is checked for it.
                 const endlessRace = gameKitSeeded.includes('generate_game_3d') && wantsEndlessRaceCourse(gameTurnRequest(prompt, milestoneRequest));

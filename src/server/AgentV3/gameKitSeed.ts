@@ -268,6 +268,8 @@ export interface GameKitSeedResult {
   ok: boolean;
   /** The tool result the model would have received had it called the recipe itself. */
   content: string;
+  /** How long this recipe took in the seed, in ms (Q-3232). */
+  ms?: number;
 }
 
 /** How much of one recipe's own instructions the handoff carries. Bounded so a future recipe cannot flood the prompt. */

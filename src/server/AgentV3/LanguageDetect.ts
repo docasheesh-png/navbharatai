@@ -266,6 +266,10 @@ export function usersOwnWordsLine(prompt: string, replyLanguage?: string): strin
   return [
     `The task text below was written by the planner in English — it is NOT the user's message, and its language is not theirs. The user's own message was: "${quoted}"`,
     'Their language is the language of THAT message: narrate every step, ask, and write your final summary in it.',
+    // failedbr #2485 (Q-3235): told to narrate in the user's language above an English brief, a weak builder spent its
+    // whole first turn TRANSLATING the brief back ("…agle milestones ka stub na banayein…") and built nothing; a nudge
+    // had to restart it. Narration is one short line about what is being done — never the task said again.
+    'Never repeat, summarise or translate the task text back to the user: your first reply STARTS THE WORK with a tool call, and any words beside it are one short line.',
     replyLanguage ?? '',
   ].filter(Boolean).join(' ');
 }

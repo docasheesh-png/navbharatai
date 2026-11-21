@@ -12,7 +12,7 @@
 // 🔑 ROOT CAUSE 2. The planner did not know the kit exists. It told the user "large-scale map ke liye dedicated backend
 // infrastructure chahiye … browser mein nahi ho sakti" (false) and planned @react-three/fiber + a cube. 🧬 CLASS: the planner
 // choosing a world and a stack that contradict what the platform lays down. It is now told the kit (from the same plan the
-// seed runs), and a roadmap that brings a second 3D engine to a kit game is refused, like a native stack the user never named.
+// seed runs), and a step that brings a placeholder player or a second 3D engine to a kit game is overruled in the step itself.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -74,21 +74,28 @@ describe('🗺️ the planner plans ON the kit, never around it', () => {
     expect(gamePlannerCapability('Build a todo app', 'vite-react')).toBe('');
   });
 
-  it('a roadmap that brings a second 3D engine to a kit game is refused; the user naming it keeps it', () => {
+  it('a second 3D engine in a kit game\'s step is overruled in the step itself; the roadmap is kept; the user naming it keeps it', () => {
     const steps = [
       { title: 'Basic 3D Environment Setup', goal: 'a 3D world', buildPrompt: STEP1, needsInfra: null },
       { title: 'Character Movement Controls', goal: 'move with the joystick', buildPrompt: 'Add joystick and WASD movement for the player character.', needsInfra: null },
       { title: 'Mini Map Display', goal: 'see the map', buildPrompt: 'Add a minimap in the corner showing the player position.', needsInfra: null },
     ];
     const parsed = { userMessage: 'x', achievableSummary: 'x', note: null, steps };
-    expect(roadmapGuardrail(parsed, 'GTA', { framework: 'vite-react', originalRequest: REQUEST, gameKit: true }).roadmap).toBeNull();
-    expect(roadmapGuardrail(parsed, 'GTA', { framework: 'vite-react', originalRequest: REQUEST, gameKit: false }).roadmap).not.toBeNull();
-    expect(roadmapGuardrail(parsed, 'GTA', { framework: 'vite-react', originalRequest: `${REQUEST}, use @react-three/fiber`, gameKit: true }).roadmap).not.toBeNull();
+    const kit = roadmapGuardrail(parsed, 'GTA', { framework: 'vite-react', originalRequest: REQUEST, gameKit: true, game3D: true });
+    expect(kit.roadmap).not.toBeNull();
+    for (const s of kit.roadmap!.steps) expect(s.buildPrompt).toMatch(/never @react-three\/fiber, @react-three\/drei or another 3D engine, even where this step says so above/);
+    expect(kit.rejected.join(' ')).toMatch(/planned a second 3D engine beside the game kit/);
+    // A 2D kit game (a board game) is never told about a big map, a follow camera or three.js.
+    const flat = roadmapGuardrail(parsed, null, { framework: 'vite-react', originalRequest: 'ludo game banao', gameKit: true, game3D: false });
+    for (const s of flat.roadmap!.steps) expect(s.buildPrompt).not.toMatch(/game kit/);
+    // The user named the engine: it is their constraint, not the planner's choice.
+    const named = roadmapGuardrail(parsed, 'GTA', { framework: 'vite-react', originalRequest: `${REQUEST}, use @react-three/fiber`, gameKit: true, game3D: true });
+    for (const s of named.roadmap!.steps) expect(s.buildPrompt).not.toMatch(/game kit/);
   });
 
   it('the route hands the guardrail the kit decision and the planner the kit capability', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain('roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt, gameKit: gameKitOwnsTheBuild(originalPrompt, framework) });');
+    expect(route).toContain('roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt, gameKit: gameKitOwnsTheBuild(originalPrompt, framework), game3D: gameKitPlan(originalPrompt, framework).includes(\'generate_game_3d\') });');
     expect(route).toContain('${gamePlannerCapability(prompt, framework)}');
   });
 });

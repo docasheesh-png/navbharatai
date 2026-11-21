@@ -463,7 +463,7 @@ import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, turnIsGame, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { forgeAssignment, forgeMissingHandoff } from '../AgentV3/forgeForMissing';
 import { objectForgeEnabled } from '../lib/objectForge/ObjectForgeGenerator';
 import { REVIEWED_GAME_ASSETS } from '../AgentV3/gameAssets/providers';
@@ -15668,7 +15668,7 @@ async function noteBuildOutcome(
             void runInBillingPhase(PHASE_PLANNER, async () => captureTurnUsage(rmProvider, { ...rmT.usage }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0)); // a planner slice (failedbr #1200)
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
-            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt, gameKit: gameKitOwnsTheBuild(originalPrompt, framework) });
+            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt, gameKit: gameKitOwnsTheBuild(originalPrompt, framework), game3D: gameKitPlan(originalPrompt, framework).includes('generate_game_3d') });
             // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
             // sentence alone). A cut-off reply and a malformed one need different fixes.
             if (!rmParsed) {
@@ -24797,7 +24797,7 @@ async function noteBuildOutcome(
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
           && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
-          && isCanvasGameProject(playtestFiles)
+          && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
           && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
@@ -24859,7 +24859,7 @@ async function noteBuildOutcome(
             const why = playtestSkipReason({
               enabled: gamePlaytestEnabled(),
               buildOk: result?.ok === true,
-              isCanvasGame: isCanvasGameProject(playtestFiles),
+              isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }),
               isImportTurn,
               aborted: abort.signal.aborted,
               hasRunCommand: !!actuator.runCommand,

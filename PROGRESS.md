@@ -103697,3 +103697,24 @@ The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans �
 - **Wired into all four scope-deciding planner calls** in `routes/agentv3.ts`: the mega-app roadmap, plan mode, the Software Project Mode planner and its replan. The roadmap call's recorded prompt size counts it.
 - **Tests:** `tests/thePlannerKnowsWhatThePlatformHas.test.ts` (7): catalog census (a new recipe reaches the planner by itself), apps + games coverage, White-Label guard, size cap, and a route census (no planner system prompt used without the digest). Reversions proven: digest removed from the project planner → 2 failed; vendor scrub removed → 1 failed.
 - **Honest cost:** about 5–6 thousand extra input tokens on each planner call (one call per big build, plus plan mode when the user asks for a plan). Watch the next big build's roadmap for slower or lower-quality planning on the weak tier; if seen, the digest can be narrowed to the request's domain.
+## 2026-11-21 — Autopsy failedbr #2481: a GTA request delivered as a purple box (Q-3224)
+
+Admin: *"gta jaisa bada game bnane ko bola, to yeh ghumne wala dabba bana diya!"* Report #2481 ("succeeded", 4.1 min, Weak/Surplus):
+- The mega-roadmap split the request; step 1's brief was "a flat terrain (like a square plane) … a simple player character (can be a
+  cube or capsule). Use OrbitControls". `gameKitPlan` and `gameTurnHandoff` re-read the DOMAIN of the milestone text — REAL ESTATE —
+  though `gameTurnRequest` had marked it as a game's. FAST_LANE_SKIPPED_GAME: "not a game the kit serves". Fix: `isAGameTurn`.
+- The planner called a big map, traffic and pedestrians "backend infrastructure … browser mein nahi ho sakti". Fix: planner rule 9,
+  `GAME_KIT_CLAUSE` on every game step, a game's own needsInfra is not a ceiling (only multiplayer), the false note dropped.
+- "Succeeded" with no playtest: the R3F scene (`@react-three/fiber`, `<Canvas>`, `useFrame`) matched neither half of
+  `isCanvasGameProject`. Fix: R3F counts when the user asked for a game; the skip reason reads the same condition.
+- Seen, not fixed here: the console check probed ports 3000/5000/8080 the app does not use and reported 502s (~30 s of struggle);
+  the summary came in English for a Hinglish prompt.
+Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 2026-11-21: open the PR, do not merge.
+
+## 2026-11-21 — #4414 and #4415 combined into one (admin: "dono ko milakar ek kar do")
+
+- Two sessions fixed failedbr #2481 in parallel (8 minutes apart). #4415's branch is merged into #4414's; one implementation of each thing is kept.
+- **One game-turn reader:** `turnIsGame` / `GAME_MILESTONE_LINE` (#4415's `isAGameTurn` / `GAME_MILESTONE_MARKER` renamed onto it; its three readers plus `wantsSceneDetail`, the sibling #4415 had not reached).
+- **Kept from #4415:** the R3F game is playtested when the user asked for a game (the "succeeded with nothing played" root cause, which #4414 had missed); a game's own `needsInfra` is not a ceiling; the false "needs backend" note is dropped; planner rule 9; queue rows Q-3224/3225/3226.
+- **Reconciled:** #4414 refused a whole roadmap that named a second 3D engine; #4415 kept the roadmap and appended a kit clause that did not mention the engine (two opposite instructions in one step). Now the roadmap is kept and the clause itself overrules the engine. The clause is said only for a 3D kit game (`game3D`, from the caller's kit plan) — #4415 said "big map, follow camera" to every game, a Ludo board included — and never when the user named the engine. `megaRoadmap.ts` no longer reads the domain itself; the caller's kit decision is the one answer.
+- Q-3225 and Q-3226 stay OPEN in the queue.

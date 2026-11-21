@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import * as THREE from 'three';
 import { generateGame3D, GAME_3D_MODULES } from '../src/server/lib/Game3DGenerator';
 import { GAME_PHYSICS_VERSION } from '../src/server/lib/GamePhysicsGenerator';
+import { recipeDependenciesNeeded } from '../src/server/lib/gameRecipeLayers';
 
 const DIR = join(__dirname, `.tmp-physics-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,6 +34,10 @@ describe('🧱 physics ships only where it is used', () => {
     expect(g.dependencies).toContainEqual({ name: 'cannon-es', version: GAME_PHYSICS_VERSION });
     expect(generateGame3D(['city']).dependencies.map((d) => d.name)).not.toContain('cannon-es');
     expect(g.instructions).toMatch(/createPhysics\(scene\)/);
+    // The builder installs it when a written file imports it, and not otherwise.
+    const pkg0 = JSON.stringify({ dependencies: { three: '^0.180.0' }, devDependencies: { '@types/three': '^0.180.0' } });
+    expect(recipeDependenciesNeeded(g.files, pkg0)).toContainEqual({ name: 'cannon-es', version: GAME_PHYSICS_VERSION, dev: false });
+    expect(recipeDependenciesNeeded(generateGame3D(['city']).files, pkg0).map((d) => d.name)).not.toContain('cannon-es');
     // The version the kit installs is the version our own tests run against.
     const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
     expect(pkg.devDependencies['cannon-es']).toBe(GAME_PHYSICS_VERSION);

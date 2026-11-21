@@ -161,6 +161,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['my own model', 'upload model', 'glb', 'gltf', 'obj', 'fbx', '3d model upload', 'apna model', 'mera model', 'custom character', 'import model', 'zip of models', 'add my car', 'model daalo', 'fbx upload', 'where to download models', 'free 3d models', 'model kaha se milega', 'download model'],
   },
   {
+    id: 'game_big_worlds',
+    name: 'Big 3D worlds that still run on a phone',
+    path: 'NavBharatAI Pro → describe a large world in your 3D game (a whole city, forest, map, hundreds of houses, trees, vehicles or people)',
+    description: 'Since 2026-11-21 a 3D game can hold a world far bigger than one screen. The world is split into squares and only the squares near the player are loaded; squares left behind are freed from memory. Each model is downloaded once however many copies stand in the world, all copies of a still object (houses, trees, rocks) in one square are drawn together, distant squares use lighter versions, and moving characters and animals near the player are capped to what the device can handle (fewer on a phone, more on a desktop). Walls, houses and tree trunks stay solid to walk into. The best big worlds use a few models many times — 10–15 kinds of house in different sizes, turns and colours rather than hundreds of different files — which is what keeps them smooth on a phone. Your own uploaded models stream the same way as library models.',
+    howToUse: 'Ask in your own words for the world you want ("make a whole city with 100 houses and traffic", "ek bada jungle banao") — the builder places every copy and streams it. To change a kind of house or tree everywhere at once, ask for the change ("make all the houses red").',
+    relatedFeatures: ['agentv3_builder', 'pro_own_3d_models'],
+    keywords: ['big world', 'open world', 'huge map', 'whole city', 'many houses', 'forest', 'streaming', 'world streaming', 'bada world', 'poora sheher', 'bahut saare ghar', 'jungle', '100 trees', 'phone par chale'],
+  },
+  {
     id: 'shared_free_daily_answers',
     name: 'Shared daily chat allowance',
     path: 'AI chat or eligible Professionals → daily usage counter',

@@ -103640,6 +103640,33 @@ untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only
 - **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
 - **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.
 
+## 2026-11-21 — Big worlds stream; library batch 12 (variety); the longest name wins
+
+The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans … kya navbharatai pura alag world bana dega?" They then approved: "ok models streaming banao, phir library variety badhao".
+
+- **Model streaming.** `GameWorldStreamingGenerator.ts` writes `src/game/three/worldStreaming.ts` into every game that gets library models. It is written once; a later turn keeps the game's copy.
+  - **What was there:** every model loaded at game start and stayed until the end. Each copy had its own draw calls. `dressWorld` capped a world at 120 copies over 120 m. Only the terrain streamed.
+  - **What it does now:**
+    - The world is split into cells, and only the cells near the camera exist, with one ring of slack.
+    - Each model loads once.
+    - All copies of a static model in a cell are drawn as one InstancedMesh per part.
+    - Far cells swap to the reduced mesh (the existing LOD level 1) without a rebuild.
+    - Animated copies get their own handle each, capped per device: phone 12, mid 24, desktop 48.
+    - Unused models are freed past the device budget.
+    - Collision marks are copied onto the instanced parts. The kit's collision already tests every instance (`shapesFor`).
+  - **How the builder is told:** in the asset handoff, in `add_library_models`, and through a new `big-world` outcome in the intent map.
+  - **Checks:** the generated module typechecks under strict mode with @types/three 0.180. Test: `aBigWorldStreamsModels` runs the emitted code with real three.js. Reversion proven three times: the cache, freeing far cells, and the actor cap.
+  - **Not proven yet:** a frame-rate measurement in a real game on a phone. Watch the first big-world build for that.
+- **Library batch 12:** 40 CC0 models from kayquer kits, live-admitted 40/40, with thumbnails.
+  - 9 kinds of home, plus 6 town buildings and a beach umbrella.
+  - 4 trees.
+  - 8 vehicle bodies.
+  - 12 people with walk and run.
+  - Subjects that are everyday game words were refused: boss, pickup, manager, navigator, coach.
+- **Root cause, matcher class:** a word inside a longer known name was also matched on its own ("pickup truck" → truck + pickup truck). Each earlier batch patched one hand-written exclusion at a time. Now the longest known name in a clause wins; the old exclusion table stays for non-subject senses (rock music, log in).
+- **Root cause, moving subjects:** walk and run were asked for only for a hand-typed list of subjects, which the new people were not on. Now the list also includes every subject a library model animates. The role stays the game's need: "walking dog" still asks for walk, so the code-built dog walks.
+- **Root cause, duplicate models:** batch 12 first listed three people that batch 4 already had. `buildLibraryBatch.mts` now refuses a model already in the library (reversion proven), and a test asserts that no model is in the catalogue twice.
+- **Library menu:** subjects with the same roles now share one line. It went from 11558 to about 10700 chars, under the 11000 cap.
 ## 2026-11-21 — #4406 merged; FBX from Sketchfab / Mixamo / avatar creators now converts
 - #4406 merged: the character customizer on request, and the intent map.
 - The admin added 3 Indian-clothing models to Drive: a man in a dhoti, a man in a kurta, a woman in a saree. Their FBX exports exposed two class bugs in the server FBX import:

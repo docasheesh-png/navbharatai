@@ -42,6 +42,12 @@ export const GAME_CAPABILITIES: readonly GameCapability[] = Object.freeze([
     saidAs: ['add a cow', 'gaon mein ghar aur kuan', 'a city with cars', 'शिकारी और धनुष'],
   },
   {
+    id: 'big-world',
+    outcome: 'a large world or many copies — a whole city, forest, map or kingdom, hundreds of houses, trees, vehicles or people — that must still run on a phone',
+    use: 'a few library models (add_library_models) placed many times with createWorldStreamer from src/game/three/worldStreaming.ts (place every copy, update(camera.position, dt) each frame)',
+    saidAs: ['poora sheher banao', 'make a huge open world', '100 ghar aur 100 ped', 'ek bada jungle'],
+  },
+  {
     id: 'surface-textures',
     outcome: 'ground, walls, roofs or floors that look like grass, brick, tile or wood instead of a flat colour',
     use: 'add_library_models { textures: [{ surface, variant }] }',

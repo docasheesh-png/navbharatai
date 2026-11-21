@@ -70,13 +70,21 @@ export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REV
     const roles = Object.keys(c.animationRoles ?? {}).filter(r => r !== 'idle');
     for (const s of c.subjects.slice(0, 16)) { const set = subjects.get(s) ?? new Set<string>(); subjects.set(s, set); roles.forEach(r => set.add(r)); }
   }
-  const lines = [...byCategory].sort(([a], [b]) => a.localeCompare(b)).map(([category, subjects]) =>
-    `${category}: ${[...subjects].sort(([a], [b]) => a.localeCompare(b)).map(([s, roles]) => roles.size ? `${s} (${[...roles].join('/')})` : s).join(', ')}`);
+  // Subjects that play the same roles share ONE line: "character (walk/run): bald man, coach, …". Listing the roles after
+  // every subject spent most of the menu repeating "(walk/run)" — 1.5 KB of a line once the library had 48 people.
+  const lines = [...byCategory].sort(([a], [b]) => a.localeCompare(b)).flatMap(([category, subjects]) => {
+    const groups = new Map<string, string[]>();
+    for (const [s, roles] of [...subjects].sort(([a], [b]) => a.localeCompare(b))) {
+      const key = [...roles].join('/'); groups.set(key, [...(groups.get(key) ?? []), s]);
+    }
+    return [...groups].sort(([a], [b]) => a.length - b.length || a.localeCompare(b))
+      .map(([roles, names]) => `${category}${roles ? ` (${roles})` : ''}: ${names.join(', ')}`);
+  });
   return gameCapabilityMenu() + '\n[GAME_LIBRARY_MENU]\n'
     + `Every ready 3D model in the NavBharatAI library, by subject. The models already prepared above were matched from the WORDS of the request; `
     + `choose from this menu by its MEANING. When the game needs something listed here that was not prepared — a village story needs villagers, `
     + `houses and a well even if nobody typed "villager"; a hunting game needs a hunter and animals — call add_library_models with those subjects `
-    + `(and the animation role the game uses, in brackets). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes; `
+    + `(and the animation role the game uses — a line's roles in brackets apply to every subject on it). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes; `
     + `and when the user asked for a SPECIFIC thing that is not listed and a code-built version would not be what they meant (a particular creature, `
     + `vehicle or character look), also tell them where to get it free and how to attach it — the guide below.\n`
     + lines.join('\n')

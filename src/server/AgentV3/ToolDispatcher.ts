@@ -5,6 +5,7 @@ import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
 import { addLibraryModels, workspaceGameAssetPersistence } from './gameAssets/assetSeed';
+import { GAME_WORLD_STREAMING_PATH } from '../lib/GameWorldStreamingGenerator';
 import { externalGameAssetsEnabled, libraryRequirement } from './gameAssets/assetPlan';
 import { ownModelGuide } from './gameAssets/modelSourcesGuide';
 import { addLibraryTextures, textureResultNote } from './gameAssets/textureLibrary';
@@ -4151,7 +4152,7 @@ export class ToolDispatcher {
     const existing = {
       assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
       attribution: await read('public/game-assets/ATTRIBUTION.txt'), customizations: await read('src/game/three/assetCustomizations.ts'),
-      runtime: await read('src/game/three/externalAssets.ts'),
+      runtime: await read('src/game/three/externalAssets.ts'), streaming: await read(GAME_WORLD_STREAMING_PATH),
     };
     const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
     const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
@@ -4165,7 +4166,7 @@ export class ToolDispatcher {
       + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
       + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.\n${ownModelGuide(unknown)}\n` : '')
       + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
-      + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
+      + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts. For many copies or a big world: createWorldStreamer from ${GAME_WORLD_STREAMING_PATH} (world.place([...]); world.update(camera.position, dt) every frame).${layers}`;
   }
 
   /** add_library_models' texture half: packaged CC0 textures into the game, durably first (textureLibrary.ts). */

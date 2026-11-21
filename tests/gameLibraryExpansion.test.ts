@@ -10,12 +10,13 @@ import { REVIEWED_LIBRARY_BATCH_8 } from '../src/server/AgentV3/gameAssets/revie
 import { REVIEWED_LIBRARY_BATCH_9 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch9';
 import { REVIEWED_LIBRARY_BATCH_10 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch10';
 import { REVIEWED_LIBRARY_BATCH_11 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch11';
+import { REVIEWED_LIBRARY_BATCH_12 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch12';
 import { REVIEWED_GAME_ASSETS,validateCatalogue } from '../src/server/AgentV3/gameAssets/providers';
 import { gameAssetRequirements,externalGameAssetsEnabled } from '../src/server/AgentV3/gameAssets/assetPlan';
 import { searchGameLibrary } from '../src/server/AgentV3/gameAssets/gameLibrary';
 describe('licensed library expansion admission',()=>{
  it('adds eleven pinned models; the library is on by default (admin 2026-11-20)',()=>{
-  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length + REVIEWED_LIBRARY_BATCH_9.length + REVIEWED_LIBRARY_BATCH_10.length + REVIEWED_LIBRARY_BATCH_11.length);
+  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length + REVIEWED_LIBRARY_BATCH_9.length + REVIEWED_LIBRARY_BATCH_10.length + REVIEWED_LIBRARY_BATCH_11.length + REVIEWED_LIBRARY_BATCH_12.length);
   expect(()=>validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();expect(externalGameAssetsEnabled({})).toBe(true);expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:'off'})).toBe(false);
  });
  it('selects exact characters and locomotion, not a neighbouring substitute',()=>{

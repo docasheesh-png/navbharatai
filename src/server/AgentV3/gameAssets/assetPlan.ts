@@ -161,6 +161,10 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'four lane road curve': ['four lane road curve'], sidewalk: ['sidewalk', 'footpath', 'pavement', 'फुटपाथ'], 'sidewalk corner': ['sidewalk corner', 'footpath corner'],
   'ac unit': ['ac unit', 'air conditioner', 'aircon'], bollard: ['bollard', 'bollards'], manhole: ['manhole', 'manhole cover', 'gutter cover'],
   planter: ['planter', 'flower pot', 'gamla', 'गमला'], 'street drain': ['street drain', 'drain grate', 'naali'],
+  // 2026-11-21 library batch 11 (Medieval Village MegaKit): two whole village houses assembled from its pieces, and props.
+  'village house': ['village house', 'village houses', 'gaon ka ghar', 'गाँव का घर', 'गांव का घर'], cottage: ['cottage', 'cottages', 'kutiya', 'कुटिया'],
+  wagon: ['wagon', 'wagons', 'cart', 'carts', 'wooden cart'], 'wooden fence': ['wooden fence', 'wood fence', 'lakdi ki baad', 'लकड़ी की बाड़'],
+  'stone stairs': ['stone stairs', 'stone steps', 'outdoor stairs'], chimney: ['chimney', 'chimneys', 'चिमनी'], vine: ['vine', 'vines', 'creeper', 'बेल'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -197,6 +201,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
         // A named kind of car is that model, not "a car" too (police car → car + police car was the old double).
         'police car', 'police cars', 'sports car', 'sports cars', 'पुलिस कार', 'स्पोर्ट्स कार'],
       building: ['building a', 'building the', 'city building', 'city buildings', 'office building', 'office buildings', 'heritage building', 'old building', 'brick building', 'shop building'],
+      wagon: ['food cart', 'food carts', 'shopping cart', 'go cart', 'golf cart', 'cart page', 'add to cart', 'shopping carts'], house: ['village house', 'village houses', 'gaon ka ghar', 'गाँव का घर', 'गांव का घर'], fence: ['wooden fence', 'wood fence'], stairs: ['stone stairs'],
       sidewalk: ['sidewalk corner', 'footpath corner'], 'city street': ['city street curve'], 'four lane road': ['four lane road curve'],
       rifle: ['assault rifle', 'assault rifles', 'sniper rifle', 'sniper rifles'],
       // A named kind of character is that model, not the generic one too.

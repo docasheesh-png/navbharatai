@@ -4847,6 +4847,11 @@ is retired (2026-11-02): no profile is pinned on any band.
 - **`AGENTV3_EXTERNAL_GAME_ASSETS`** (default off) — L3 assets. `on` ⇒ every user; `admin` ⇒ limited
   rollout to the owner test uid (z@gmail.com) plus verified uids in `AGENTV3_EXTERNAL_GAME_ASSETS_UIDS`
   (comma list); anything else ⇒ off.
+  🔴 **CORRECTION 2026-11-21 — the default is now ON** (`7aac6be51`, admin 2026-11-20): an EMPTY or absent value means every
+  user gets the library (`externalGameAssetsEnabled`: `raw === '' ⇒ true`). So the admin may simply DELETE this key from
+  Cloud Run (the 100+ entries were slowing the console). Only set it to switch the library off (`off`) or to restrict it
+  (`admin` ⇒ owner test uid + `AGENTV3_EXTERNAL_GAME_ASSETS_UIDS` only). ⚠️ If the live value is `admin`, the library is
+  STILL owner-only until the key is deleted or set to `on`. The "default off" lines below are history.
 No environment values or credentials were changed by this code revision.
 Router One's prospective expense multiplier is 2.5; automatic positive settlement
 remains unavailable without trusted final request/account-bound supplier receipts.

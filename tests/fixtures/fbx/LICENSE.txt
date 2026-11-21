@@ -3,3 +3,4 @@ Test fixtures for the server-side FBX import (src/server/AgentV3/gameAssets/user
               Animated (Idle, Jump); its materials load as fully transparent through FBXLoader — the defect the import fixes.
 - sword.fbx — Kay Lousberg, KayKit Adventurers Character Pack 2.0, Assets/fbx(unity)/sword_1handed.fbx (License.txt: CC0).
               References a texture file, which made FBXLoader call browser APIs in Node and fail to parse.
+- knight_texture.png — the picture sword.fbx names (same pack, Textures/knight_texture.png): attached beside the FBX, it is put back in.

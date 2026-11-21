@@ -24814,6 +24814,9 @@ async function noteBuildOutcome(
               gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
+              // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
+              const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');
+              if (heavy) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: ${heavy.evidence}.`, autoResolved: false });
               // 🎮 DID THIS TURN MAKE THE GAME WORSE? Compared with the measure from before the turn; if so, the user is told
               // in plain words and offered a one-tap "Go back" to the saved version from just before it (the ❗️ list row (gameUndo.ts) reads
               // the version id from this finding's detail). Nothing is changed automatically.

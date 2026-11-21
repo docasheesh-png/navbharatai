@@ -182,7 +182,20 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
   const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
     .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
-  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, CATALOGUE_MAX_ENTRIES).flatMap(c => c.subjects.slice(0, 16))])];
+  const served = catalogue.slice(0, CATALOGUE_MAX_ENTRIES);
+  const subjects = [...new Set([...Object.keys(ALIASES), ...served.flatMap(c => c.subjects.slice(0, 16))])];
+  const wordsOf = (subject: string) => (ALIASES[subject] ?? [subject]).map(normalized);
+  // THE LONGEST NAME WINS (2026-11-21, library batch 12). "a pickup truck" also matched "truck", "a small house" also
+  // "house", "a young woman" also "woman": every new compound subject needed a hand-written exclusion on its generic
+  // subject (the table below), and batch 12 added 40 subjects the table did not know. Now a word that sits inside a
+  // LONGER known name in the same clause is not matched on its own — "pickup truck" is the pickup truck, not a truck too.
+  const phrases = [...new Set(subjects.flatMap(wordsOf))];
+  const longer = new Map<string, string[]>();
+  const longerThan = (word: string) => {
+    let hit = longer.get(word);
+    if (!hit) { hit = phrases.filter(p => p !== word && p.length > word.length && ` ${p} `.includes(` ${word} `)); longer.set(word, hit); }
+    return hit;
+  };
   const matching = (subject: string, clause: string) => {
     let scoped = ` ${clause} `;
     const excludedPhrases: Record<string, readonly string[]> = {
@@ -219,15 +232,20 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
 
     if (subject === 'train') for (const station of ALIASES['railway station']) scoped = scoped.replaceAll(` ${normalized(station)} `, ' ');
     if (subject === 'bird' && ['eagle', 'parrot'].some(s => ALIASES[s].some(w => mentioned(clause, w)))) return false;
-    return (ALIASES[subject] ?? [subject]).some(word => mentioned(scoped.trim(), word));
+    const own = new Set(wordsOf(subject));
+    return [...own].some(word => {
+      let text = scoped;
+      for (const p of longerThan(word)) if (!own.has(p)) text = text.replaceAll(` ${p} `, ' ');
+      return mentioned(text.trim(), word);
+    });
   };
+  // A role is asked for only when a model of that subject PLAYS it (was a hand-typed list of subjects, which the 12 new
+  // people of batch 12 were not in — and which asked "dog" to run whether or not any dog could).
+  const plays = (subject: string, role: string) => served.some(c => c.subjects.includes(subject) && c.animations.includes(c.animationRoles?.[role] ?? role));
   return subjects.filter(subject => clauses.some(c => matching(subject, c))).slice(0, 6).map(subject => {
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
-    const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
-        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer', 'farm cow', 'farm horse', 'zebra'].includes(subject)
-        ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
+    const animation = ['fly', 'run', 'walk'].find(role => plays(subject, role) && motion(role));
     return { subject, ...(animation ? { animation } : {}) };
   });
 }

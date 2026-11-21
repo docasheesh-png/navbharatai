@@ -1,0 +1,402 @@
+[
+  {
+    "id": "lib12-terraced-houses",
+    "file": "sobrados_geminados.glb",
+    "sourceBytes": 81252,
+    "bytes": 78368,
+    "triangles": 1184,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-shop-house",
+    "file": "sobrado_comercio.glb",
+    "sourceBytes": 81784,
+    "bytes": 77160,
+    "triangles": 1252,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-house-with-yard",
+    "file": "casa_quintal.glb",
+    "sourceBytes": 76444,
+    "bytes": 74708,
+    "triangles": 1052,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-porch-house",
+    "file": "casa_alpendre.glb",
+    "sourceBytes": 65988,
+    "bytes": 63972,
+    "triangles": 984,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-townhouse",
+    "file": "casa_sobrado.glb",
+    "sourceBytes": 81900,
+    "bytes": 80020,
+    "triangles": 1284,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-small-house",
+    "file": "casa_popular.glb",
+    "sourceBytes": 51532,
+    "bytes": 50376,
+    "triangles": 704,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-bungalow",
+    "file": "casa_terrea.glb",
+    "sourceBytes": 69104,
+    "bytes": 67228,
+    "triangles": 1048,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-two-storey-house",
+    "file": "casa_dois_andares.glb",
+    "sourceBytes": 63196,
+    "bytes": 61752,
+    "triangles": 932,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-flat-roof-house",
+    "file": "casa_laje.glb",
+    "sourceBytes": 76548,
+    "bytes": 73360,
+    "triangles": 1100,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-office-tower",
+    "file": "torre_escritorios.glb",
+    "sourceBytes": 66740,
+    "bytes": 65156,
+    "triangles": 984,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-workshop",
+    "file": "oficina.glb",
+    "sourceBytes": 78660,
+    "bytes": 76644,
+    "triangles": 1344,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-water-tower",
+    "file": "caixa_dagua_taca.glb",
+    "sourceBytes": 73312,
+    "bytes": 73312,
+    "triangles": 1300,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-silo",
+    "file": "silo_industria.glb",
+    "sourceBytes": 71284,
+    "bytes": 69268,
+    "triangles": 1236,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-shed",
+    "file": "galpao_pequeno.glb",
+    "sourceBytes": 50428,
+    "bytes": 47836,
+    "triangles": 804,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-research-centre",
+    "file": "centro_pesquisa.glb",
+    "sourceBytes": 87456,
+    "bytes": 85152,
+    "triangles": 1344,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-beach-umbrella",
+    "file": "guarda_sol_a.glb",
+    "sourceBytes": 12008,
+    "bytes": 12008,
+    "triangles": 174,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-small-tree",
+    "file": "arvore_pequena.glb",
+    "sourceBytes": 11376,
+    "bytes": 11376,
+    "triangles": 116,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-flowering-tree",
+    "file": "ipe_amarelo.glb",
+    "sourceBytes": 28400,
+    "bytes": 28400,
+    "triangles": 388,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-araucaria",
+    "file": "araucaria.glb",
+    "sourceBytes": 31832,
+    "bytes": 31832,
+    "triangles": 548,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-fan-palm",
+    "file": "buriti.glb",
+    "sourceBytes": 38764,
+    "bytes": 38764,
+    "triangles": 636,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-pickup-truck",
+    "file": "cuscuz.glb",
+    "sourceBytes": 164052,
+    "bytes": 160880,
+    "triangles": 3140,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-delivery-van",
+    "file": "cafune.glb",
+    "sourceBytes": 163888,
+    "bytes": 161536,
+    "triangles": 3056,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-minivan",
+    "file": "pacoca.glb",
+    "sourceBytes": 158288,
+    "bytes": 155952,
+    "triangles": 3006,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-convertible",
+    "file": "canjica.glb",
+    "sourceBytes": 151740,
+    "bytes": 149272,
+    "triangles": 2788,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-jeep",
+    "file": "borrasca.glb",
+    "sourceBytes": 201760,
+    "bytes": 196892,
+    "triangles": 3542,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-rally-car",
+    "file": "chispa.glb",
+    "sourceBytes": 159144,
+    "bytes": 152352,
+    "triangles": 3072,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-muscle-car",
+    "file": "brasa.glb",
+    "sourceBytes": 168124,
+    "bytes": 161708,
+    "triangles": 3138,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-compact-sedan",
+    "file": "quindim.glb",
+    "sourceBytes": 173560,
+    "bytes": 169708,
+    "triangles": 3182,
+    "animations": 0,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-young-man",
+    "file": "multidao_07.glb",
+    "sourceBytes": 289648,
+    "bytes": 263148,
+    "triangles": 1306,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-young-woman",
+    "file": "multidao_19.glb",
+    "sourceBytes": 278560,
+    "bytes": 252056,
+    "triangles": 1202,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-bearded-man",
+    "file": "multidao_05.glb",
+    "sourceBytes": 260188,
+    "bytes": 233684,
+    "triangles": 1166,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-bald-man",
+    "file": "multidao_16.glb",
+    "sourceBytes": 270108,
+    "bytes": 243604,
+    "triangles": 1190,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-road-worker",
+    "file": "multidao_06.glb",
+    "sourceBytes": 260516,
+    "bytes": 234012,
+    "triangles": 1178,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-woman-in-jacket",
+    "file": "multidao_09.glb",
+    "sourceBytes": 264064,
+    "bytes": 237564,
+    "triangles": 1226,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-coach",
+    "file": "rafa.glb",
+    "sourceBytes": 338560,
+    "bytes": 311912,
+    "triangles": 1614,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-radio-host",
+    "file": "lu.glb",
+    "sourceBytes": 352056,
+    "bytes": 325408,
+    "triangles": 1726,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-boss-woman",
+    "file": "marta.glb",
+    "sourceBytes": 340420,
+    "bytes": 313768,
+    "triangles": 1606,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-rich-man",
+    "file": "cardim.glb",
+    "sourceBytes": 340820,
+    "bytes": 314168,
+    "triangles": 1570,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-female-racing-driver",
+    "file": "piloto_m01.glb",
+    "sourceBytes": 334764,
+    "bytes": 308112,
+    "triangles": 1606,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib12-co-driver",
+    "file": "caetano.glb",
+    "sourceBytes": 348612,
+    "bytes": 321964,
+    "triangles": 1690,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  }
+]

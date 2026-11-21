@@ -18,8 +18,13 @@ describe('the builder chooses library models by meaning', () => {
 
   it('the menu names EVERY catalogue subject, and the roles each can play', () => {
     for (const c of REVIEWED_GAME_ASSETS) for (const s of c.subjects) expect(menu, s).toMatch(new RegExp(`(: |, )${s}( \\(|,|\\n|$)`));
-    expect(menu).toMatch(/villager \(walk\/run\/jog\/jump\/crouch\/aim\/shoot\/reload\/die\/hit\/drive\)/);
-    expect(menu).toMatch(/bird \(fly\)/);
+    // Subjects that play the same roles share one line, the roles written once (2026-11-21: the per-subject form spent
+    // 1.5 KB repeating "(walk/run)" once the library had 48 people).
+    const rolesOf = (subject: string) => menu.split('\n').find(l => new RegExp(`: (.*, )?${subject}(,|$)`).test(l))?.match(/^[a-z-]+ \(([^)]*)\):/)?.[1];
+    expect(rolesOf('villager')).toBe('walk/run/jog/jump/crouch/aim/shoot/reload/die/hit/drive');
+    expect(rolesOf('bird')).toBe('fly');
+    expect(rolesOf('young woman')).toBe('walk/run');
+    expect(rolesOf('cactus')).toBeUndefined();
     expect(menu).toMatch(/MEANING/);
     // Paid on every 3D game turn: keep it a menu, not a dump of the catalogue. 2026-11-21: 8000 → 11000 for the intent map
     // (gameCapabilities.ts, ~2.7 KB) that lets the builder pick by meaning in any language — ~2.5k tokens a turn in all.
@@ -27,8 +32,8 @@ describe('the builder chooses library models by meaning', () => {
   });
 
   it('a subject appears once even when several models serve it', () => {
-    const characterLine = menu.split('\n').find(l => l.startsWith('character: '))!;
-    expect(characterLine.match(/(^|, |: )woman( \(|,|$)/g)).toHaveLength(1);
+    const characterLines = menu.split('\n').filter(l => /^character( \([^)]*\))?: /.test(l)).join('\n');
+    expect(characterLines.match(/(, |: )woman(,|$)/gm)).toHaveLength(1);
   });
 
   it('the menu reaches a new game only when the library is on for the account', () => {

@@ -317,6 +317,16 @@ export interface RuntimeVerifyRecord {
   autoResolved: boolean;
 }
 
+/**
+ * May an empty console capture be called "runtime verified"? Only when there was a page to run: a preview was
+ * published, or a render was proved. 🔴 failedbr #1563 (2026-11-20): the sandbox was at its concurrency limit, no
+ * preview ever came up (PREVIEW_NEVER_CAME_UP), the capture returned no errors without saying it could not look, and
+ * the same report said "Runtime verified — the app ran in the browser". PURE.
+ */
+export function runtimeCanBeVerified(previewUrl: string | null | undefined, renderProven: boolean): boolean {
+  return renderProven === true || (typeof previewUrl === 'string' && previewUrl.trim() !== '');
+}
+
 /** The app ran in a real browser session and no actionable console errors remained — an honest positive. */
 export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
   return {
@@ -489,9 +499,27 @@ export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerify
  *
  * WHITE-LABEL: never a provider or model name. PURE.
  */
-export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null): string {
+/**
+ * The admin line for a verdict the RED gate corrected (failedbr #1052, #1043, 2026-11-20). "The build reported success" was
+ * printed on a build that had hit its 25-minute cap: the runner returns ok when files were written before the time ran out,
+ * so the sentence was literally true and misleading. A timed-out run says that it ran out of time. PURE.
+ */
+export function releaseGateRedOutcomeMessage(blockers: number, timedOut: boolean): string {
+  const opening = timedOut
+    ? 'The build ran out of time with files written, and the release gate was RED'
+    : 'The build reported success while the release gate was RED';
+  return `${opening} with ${blockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`;
+}
+
+export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null, builderWroteFiles = true): string {
   const n = Math.max(1, blockerCount);
   const one = n === 1;
+  // failedbr #677 (Q-3220): "Your app is built and saved, but 2 things are still broken" — on a build that wrote ZERO
+  // files. Nothing was built; saying it was, then listing what is broken in it, describes an app that does not exist.
+  if (!builderWroteFiles) {
+    return `Nothing was built this time — the build ended before your app was written, so it is NOT ready to use. `
+      + `You have NOT been charged for this build. Reply "continue" and I'll build it.`;
+  }
   // The root cause is an internal diagnostic sentence; take only its first line and cap it, so the
   // user gets the fact without a stack of file paths they cannot act on.
   const because = String(rootCause ?? '').split('\n')[0].trim();

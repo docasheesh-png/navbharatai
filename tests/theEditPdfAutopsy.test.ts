@@ -90,7 +90,7 @@ describe('a running dev server is relaunched when a package changed after it pre
   it('the reuse fast path asks it and clears the cache before relaunching', () => {
     const src = read('src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts');
     expect(src).toContain('buildPrebundleStaleCheckCommand()');
-    expect(src).toContain('if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale)) {');
+    expect(src).toContain('if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale, devCommandForcesRestart(command))) {');
     expect(src).toMatch(/if \(prebundleStale\) \{\s*await sandbox\.commands\.run\(`rm -rf \$\{VITE_PREBUNDLE_DIR\}`/);
   });
 });

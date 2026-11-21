@@ -142,8 +142,8 @@ describe('a text-only call the build route makes is on the record too', () => {
     expect(code).toMatch(/surplusSession: undefined,[^]*?onTurnComplete: opts.onTurnComplete,/);
     expect(code).toContain('...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {})');
     // Two planners that have always recorded both outcomes (asserted individually further down).
-    expect(joined).toContain('const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({');
-    expect(joined).toContain('const call = makePlanTextRunner((used) => { ppProvider = used; }).runTurn({');
+    expect(joined).toContain('const rmCall = runInBillingPhase(PHASE_PLANNER, () => makePlanTextRunner((used) => { rmProvider = used; }).runTurn({');
+    expect(joined).toContain('const call = runInBillingPhase(PHASE_PLANNER, () => makePlanTextRunner((used) => { ppProvider = used; }).runTurn({');
     // The fast lane's own recording wrapper — `fastGenerateOnce` records success AND failure.
     expect(joined).toContain('t = await runner.runTurn({');
     // The judge chain's Claude backstop: a runner DEFINITION, not a build call — the judge's own

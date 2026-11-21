@@ -117,6 +117,12 @@ describe('the #2260 shape, generalised', () => {
     expect(dominantGroundingBlock(r)).toBeNull();
   });
 
+  it('a tiny preamble is never "dominant" — failedbr #1343: ~45 tokens of a 4000 budget was a WARNING', () => {
+    const r = applyGroundingBudget([block('package.json', 40), block('index.html', 5)], 4_000);
+    expect(r.keptTokens).toBeLessThan(100);
+    expect(dominantGroundingBlock(r)).toBeNull();
+  });
+
   it('a single-file preamble is never "dominant" — there is nothing to dominate', () => {
     expect(dominantGroundingBlock(applyGroundingBudget([block('a', 1_000)], 0))).toBeNull();
     expect(DOMINANT_BLOCK_RATIO).toBeGreaterThan(0.5); // must mean "most of it", not "a lot of it"

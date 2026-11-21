@@ -1,0 +1,268 @@
+{
+  "checkedAt": "2026-11-20",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "q9-cow",
+      "sha256": "aa686039538e0efab42d7df0b5a417d89f52c08b5e2bb499e13a298950ecfbda",
+      "bytes": 275780,
+      "liveDownload": true,
+      "cacheRestores": 7,
+      "proofs": [
+        {
+          "animation": "Walk",
+          "triangles": 796,
+          "changedPixels": 1347,
+          "animated": true
+        },
+        {
+          "animation": "Walk",
+          "triangles": 796,
+          "changedPixels": 1347,
+          "animated": true
+        },
+        {
+          "animation": "Run",
+          "triangles": 796,
+          "changedPixels": 1276,
+          "animated": true
+        },
+        {
+          "animation": "Run",
+          "triangles": 796,
+          "changedPixels": 1276,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 796,
+          "changedPixels": 1386,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 796,
+          "changedPixels": 1386,
+          "animated": true
+        },
+        {
+          "animation": "Death",
+          "triangles": 796,
+          "changedPixels": 1486,
+          "animated": true
+        },
+        {
+          "animation": "Death",
+          "triangles": 796,
+          "changedPixels": 1486,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q9-horse",
+      "sha256": "3fa84ddfe2aff8a44c99f7b7f7356431766f06c14bfd81407917246eb4bed102",
+      "bytes": 254340,
+      "liveDownload": true,
+      "cacheRestores": 7,
+      "proofs": [
+        {
+          "animation": "Walk",
+          "triangles": 690,
+          "changedPixels": 1106,
+          "animated": true
+        },
+        {
+          "animation": "Walk",
+          "triangles": 690,
+          "changedPixels": 1106,
+          "animated": true
+        },
+        {
+          "animation": "Run",
+          "triangles": 690,
+          "changedPixels": 998,
+          "animated": true
+        },
+        {
+          "animation": "Run",
+          "triangles": 690,
+          "changedPixels": 998,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 690,
+          "changedPixels": 1137,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 690,
+          "changedPixels": 1137,
+          "animated": true
+        },
+        {
+          "animation": "Death",
+          "triangles": 690,
+          "changedPixels": 1248,
+          "animated": true
+        },
+        {
+          "animation": "Death",
+          "triangles": 690,
+          "changedPixels": 1248,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q9-zebra",
+      "sha256": "c9268b10277d2b45b98125fb7d3dffde4a666ca6b7bbd3a4276f648470bb6af6",
+      "bytes": 339304,
+      "liveDownload": true,
+      "cacheRestores": 7,
+      "proofs": [
+        {
+          "animation": "Walk",
+          "triangles": 1354,
+          "changedPixels": 1084,
+          "animated": true
+        },
+        {
+          "animation": "Walk",
+          "triangles": 1354,
+          "changedPixels": 1084,
+          "animated": true
+        },
+        {
+          "animation": "Run",
+          "triangles": 1354,
+          "changedPixels": 993,
+          "animated": true
+        },
+        {
+          "animation": "Run",
+          "triangles": 1354,
+          "changedPixels": 993,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 1354,
+          "changedPixels": 1128,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 1354,
+          "changedPixels": 1128,
+          "animated": true
+        },
+        {
+          "animation": "Death",
+          "triangles": 1354,
+          "changedPixels": 1256,
+          "animated": true
+        },
+        {
+          "animation": "Death",
+          "triangles": 1354,
+          "changedPixels": 1256,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q9-llama",
+      "sha256": "b82d28c971718a7f29402672653d83c5334829bf702b4a6ecf4d21b93dc6f1ca",
+      "bytes": 149356,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": "Jump",
+          "triangles": 662,
+          "changedPixels": 1119,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 662,
+          "changedPixels": 1119,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q9-pig",
+      "sha256": "3bd4ac86370e9b953358a5f867be9eb5a77e6d90d3877d3a36db32d7cdad8b0f",
+      "bytes": 135768,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": "Jump",
+          "triangles": 562,
+          "changedPixels": 1524,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 562,
+          "changedPixels": 1524,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q9-sheep",
+      "sha256": "c51e9b183b3a5525116a0295972805ad834c53fcc754c0f4a45c46a063f88489",
+      "bytes": 141668,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": "Jump",
+          "triangles": 612,
+          "changedPixels": 1616,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 612,
+          "changedPixels": 1616,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q9-pug",
+      "sha256": "e2ef349cce616084d0ee21c455346aaca28eabcc352e0ca16aad3fbf3d4121d0",
+      "bytes": 128680,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": "Jump",
+          "triangles": 644,
+          "changedPixels": 1706,
+          "animated": true
+        },
+        {
+          "animation": "Jump",
+          "triangles": 644,
+          "changedPixels": 1706,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

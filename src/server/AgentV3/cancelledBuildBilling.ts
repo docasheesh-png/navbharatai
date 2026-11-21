@@ -104,6 +104,7 @@
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 import { seedKeptSentence, type AbortCause } from './buildAbortCause';
+import { sameAsSeeded } from './appSignature';
 
 /** What the user is holding at the moment they stopped. */
 /**
@@ -482,7 +483,7 @@ export function stopBillingSwitches(env: Record<string, string | undefined>): St
 export function preseededUnchangedCount(preseeded: Iterable<[string, string]> | null | undefined, written: { get(p: string): string | undefined }): number {
   if (!preseeded) return 0;
   let n = 0;
-  for (const [p, c] of preseeded) if (written.get(p) === c) n++;
+  for (const [p, c] of preseeded) if (sameAsSeeded(c, written.get(p))) n++; // our badge alone is not the user's work
   return n;
 }
 

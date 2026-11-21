@@ -576,3 +576,51 @@ export function withPreviewAiRelay(dist: Map<string, Buffer>): Map<string, Buffe
 }
 
 export const PREVIEW_AI_RELAY_MARKER = 'data-nbai-preview-ai';
+
+/**
+ * The 1-based line ranges our bridge script occupies in an HTML document (failedbr #672/#673, queue Q-3219). `read_file`
+ * strips the bridge, but the agent's `grep` read the sandbox file directly: a search for "network error" returned our
+ * own `reportHttp(…, 'request failed (network error)')`, and a user's "fix this network error" — the bridge's words —
+ * was chased through our script as if it were theirs. PURE.
+ */
+export function bridgeLineRanges(html: string): Array<[number, number]> {
+  if (typeof html !== 'string' || !html.includes(PREVIEW_BRIDGE_MARKER)) return [];
+  const out: Array<[number, number]> = [];
+  const re = new RegExp(BRIDGE_SCRIPT_RE_SOURCE, 'gi');
+  const lineAt = (i: number) => html.slice(0, i).split('\n').length;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const start = m.index + (m[1]?.length ?? 0);
+    const end = m.index + m[0].length - (m[2]?.length ?? 0);
+    out.push([lineAt(start), lineAt(Math.max(start, end - 1))]);
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  return out;
+}
+
+/**
+ * Drop grep result lines (`path:line:text`) that fall inside our bridge script, and say how many were hidden.
+ * `rangesFor` gives the bridge's line ranges for an HTML path (empty when none). PURE apart from that callback.
+ */
+export async function withoutBridgeGrepMatches(
+  text: string,
+  rangesFor: (path: string) => Promise<Array<[number, number]>>,
+): Promise<string> {
+  const lines = String(text ?? '').split('\n');
+  const cache = new Map<string, Array<[number, number]>>();
+  let hidden = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    const m = /^(.+?\.html?):(\d+)[:-]/i.exec(line);
+    if (m) {
+      const path = m[1].replace(/^\.\//, '');
+      if (!cache.has(path)) cache.set(path, await rangesFor(path).catch(() => []));
+      const n = Number(m[2]);
+      if ((cache.get(path) ?? []).some(([a, b]) => n >= a && n <= b)) { hidden++; continue; }
+    }
+    kept.push(line);
+  }
+  if (hidden === 0) return text;
+  const body = kept.join('\n').trim();
+  const note = `(${hidden} match(es) inside NavBharatAI's own preview script were hidden — that script is injected by the platform, it is not the app's code and never ships.)`;
+  return body ? `${body}\n${note}` : `(no matches in the app's own code)\n${note}`;
+}

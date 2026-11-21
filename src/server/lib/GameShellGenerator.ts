@@ -69,6 +69,9 @@ import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 // NavBharatAI's recorded sounds when this game was seeded with them; otherwise a stand-in that keeps built-in voices.
 import { loadSoundLibrary } from './fx/soundLibrary';
 import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
+// Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
+// (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
+export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, GameLanguage, StringKey };
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -122,7 +125,7 @@ export interface GameOptions {
    * from its real speed. Pass your own Object3D (a character, an animal, a ball), or false for none —
    * first-person games get none by default, since the camera is inside it.
    */
-  playerBody?: THREE.Object3D | false;
+  playerBody?: THREE.Object3D | boolean;
   /** Shirt colour of the default body, so the hero stands out from the world. */
   playerColor?: number;
   /**
@@ -354,7 +357,8 @@ export class Game {
     // third-person game the hero was invisible unless the model happened to add a mesh, and the player
     // saw a camera drifting over the ground. (Found by PLAYING the shell: gamePlaytest.ts.)
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
-    if (options.playerBody) {
+    // true means "the default body", the same as leaving it out (failedbr #1334: a boolean was passed and failed to compile).
+    if (options.playerBody && typeof options.playerBody === 'object') {
       this.player.object.add(options.playerBody);
     } else if (options.playerBody !== false && !firstPerson) {
       this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87 });

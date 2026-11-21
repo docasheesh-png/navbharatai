@@ -152,7 +152,8 @@ describe('wiring — every deterministic heal reports, and the route turns it in
     // …and every call site hands the helper what it READ as its third argument.
     const calls = dispatcher.match(/await this\.landHealWrite\([^)]*\)/g) || [];
     expect(calls).toHaveLength(8); // 8 since build 9c612cdb (Q-985) — see the test above
-    for (const call of calls) expect(call.split(',').length).toBe(3);
+    // 4 since failedbr #1922: the heal's NAME rides as the fourth argument (aRepeatedHealNamesItsWriter), after what it READ.
+    for (const call of calls) expect(call.split(',').length).toBe(4);
   });
 
   it('it needed NO new dispatcher parameter — the reviewer runs on a CHILD dispatcher', () => {

@@ -389,6 +389,7 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
+import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal } from './growthGuard';
 import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
@@ -759,6 +760,9 @@ export function batchRefusalText(written: readonly string[], notWritten: Readonl
 
 /** The end-of-build race-course check reads at most this many source files (a game is a few dozen). */
 const RACE_SCAN_MAX_FILES = 400;
+
+/** The tools through which the BUILDER writes a whole file (growth guard, lock 1). */
+const BUILDER_WRITE_SOURCES: ReadonlySet<string> = new Set(['write_file', 'write_files_batch', 'replace_symbol', 'codemod_move_file']);
 
 export class ToolDispatcher {
   /**
@@ -1257,6 +1261,34 @@ export class ToolDispatcher {
     this.userRequest = typeof request === 'string' ? request : null;
   }
 
+  /**
+   * 🧱 THE GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when this turn began, and the user's own words.
+   * A write to a feature, a place, the mount or a kit file that the request does not name is refused at the write.
+   */
+  private readonly platformWrites = new Map<string, string>();
+  /** The last content the platform itself wrote to each path this turn (growth guard, lock 2). */
+  platformWritesThisTurn(): ReadonlyMap<string, string> { return this.platformWrites; }
+  private readonly growthRefused = new Set<string>();
+  /** The protected files the builder tried to change this turn and was refused (the user is told which, and how to allow it). */
+  growthRefusedThisTurn(): string[] { return [...this.growthRefused]; }
+  private growthBaseline: Readonly<Record<string, string>> | null = null;
+  private growthRequest = '';
+  setGrowthBaseline(filesAtTurnStart: Readonly<Record<string, string>> | null, request: string | null): void {
+    this.growthBaseline = filesAtTurnStart && growsByLists(filesAtTurnStart) ? filesAtTurnStart : null;
+    this.growthRequest = typeof request === 'string' ? request : '';
+  }
+  /** Refuse a builder's write that changes what this turn was not asked to change. `after === null` = delete. */
+  private assertGrows(path: string, after: string | null): void {
+    if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
+    let rel = path;
+    try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest });
+    if (verdict.allow) return;
+    this.growthRefused.add(rel);
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }
+    refuse(growthRefusal(rel, verdict.reason || 'the request did not ask for this change'));
+  }
+
   setIgnoreRules(rules: IgnoreRule[]): void {
     this.ignoreRules = Array.isArray(rules) ? rules : [];
   }
@@ -1448,6 +1480,8 @@ export class ToolDispatcher {
     const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
     this.assertWritable(rel);
     this.assertTextWritable(rel);
+    // The builder's own writes only: a recipe, a kit refresh and a heal are the platform's (growthGuard.ts).
+    if (BUILDER_WRITE_SOURCES.has(opts.source)) this.assertGrows(rel, content);
     content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content), { framework: this.framework });
     content = withoutPreviewBridge(rel, content);
     let kind: 'create' | 'modify' = 'create';
@@ -1516,6 +1550,9 @@ export class ToolDispatcher {
       if (!this.actuator.createFileExclusive) refuse('Atomic file creation is unavailable; preserve existing source.');
       await this.actuator.createFileExclusive!(this.workspaceId, rel, content);
     } else await this.actuator.writeFile(this.workspaceId, rel, content);
+    // What the PLATFORM itself wrote this turn (a recipe, a kit refresh, a heal) is never the builder's change: the
+    // growth guard's end-of-turn lock reads this so it never undoes our own write.
+    if (!BUILDER_WRITE_SOURCES.has(opts.source)) this.platformWrites.set(rel, content); else this.platformWrites.delete(rel);
     this.onFileWrite?.(rel, content);
     if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
     return { kind, content, existingContent, kitNote };
@@ -6295,6 +6332,7 @@ export class ToolDispatcher {
           throw withEditMissProvenance(missErr, path, oldStr, existing, this.fileViews);
         }
         const { updated: edited, matchedOld, note } = applied;
+        this.assertGrows(path, edited); // growth guard, lock 1: an edit is a write
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
         const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited), { framework: this.framework }), agent);
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them

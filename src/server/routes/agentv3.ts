@@ -75,6 +75,7 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
+import { enforceGrowthAtTurnEnd, addLibraryPlaceAtTurnStart } from '../AgentV3/growthTurn';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
@@ -17686,6 +17687,8 @@ async function noteBuildOutcome(
         // …AND THE FILES THE USER PUT HERE ARE NOT THE BUILD'S TO DELETE (autopsy 4d538ca3 — see
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
+        // 🧱 GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when the turn began, and the user's own words.
+        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, prompt); } catch { /* the end-of-turn lock still holds */ }
         try {
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
@@ -19497,6 +19500,15 @@ async function noteBuildOutcome(
             }
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
+      }
+      // 🗺️ A PLACE PICKED FROM THE LIBRARY IS ADDED BY THE PLATFORM ITSELF (worldGrow.ts, admin 2026-11-21). The library's
+      // own request for New city / New town / New village is a one-line change of the game's map: the platform makes it
+      // here, from the file as it is NOW in the sandbox, and tells the builder it is done. A typed wish ("ek aur shehar
+      // jodo") still goes to the builder with GAME_WORLD_RULE; this is only the exact library action.
+      if (!isImportTurn && !projectModuleRef) {
+        const placeHandoff = await addLibraryPlaceAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+          write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) });
+        if (placeHandoff) buildPrompt = `${placeHandoff}\n\n---\n\n${buildPrompt}`;
       }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
@@ -21695,6 +21707,17 @@ async function noteBuildOutcome(
         // backgrounding it risks the report finalising before these findings land — the exact blind spot
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
+        // 🧱 GROWTH GUARD, lock 2 (growthGuard.ts — admin 2026-11-21: "isko rocksolid karo"). Whatever door a change came
+        // through (a tool, a shell command, a script), every feature, every place on the map, the mount and the kit are
+        // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
+        // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
+        if (!abort.signal.aborted) {
+          await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
+            write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
+            platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
+            refused: dispatcher.growthRefusedThisTurn(), record: (issue) => buildDiag.record(issue),
+            say: (text) => { events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }); } });
+        }
         const integrityStartedAt = Date.now();
         etaFinalChecksAt = Date.now(); // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));

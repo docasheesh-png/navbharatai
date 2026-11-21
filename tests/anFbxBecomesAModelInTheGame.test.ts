@@ -39,7 +39,7 @@ describe('an attached FBX becomes a checked model in the game', () => {
     expect(refused).toEqual([]);
     expect([...files.keys()]).toEqual(['weapons/sword.glb']);
     validateGlb(files.get('weapons/sword.glb')!, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS);
-    expect(warnings.get('weapons/sword.glb')!.join(' ')).toMatch(/textures could not be carried over from FBX[\s\S]*export it as \.glb/);
+    expect(warnings.get('weapons/sword.glb')!.join(' ')).toMatch(/picture\(s\) knight_texture\.png were not attached[\s\S]*attach the picture files with the FBX/);
   });
 
   it('a broken FBX is refused with the export step, never dropped', async () => {
@@ -63,5 +63,38 @@ describe('when the library has no such model, the user is told where to get it a
   it('it reaches the builder in the library menu, and in add_library_models when a name is not in the library', () => {
     expect(gameLibraryMenuHandoff()).toContain('NavBharatAI Pro → paperclip → Choose file');
     expect(readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8').match(/ownModelGuide\(unknown\)/g)?.length).toBe(2);
+  });
+});
+
+describe('an FBX with its picture attached keeps its look (admin 2026-11-21)', () => {
+  const uvs = (glb: Uint8Array) => {
+    const b = Buffer.from(glb); const n = b.readUInt32LE(12);
+    const doc = JSON.parse(b.subarray(20, 20 + n).toString('utf8'));
+    const bin = b.subarray(28 + n);
+    const acc = doc.accessors[doc.meshes[0].primitives[0].attributes.TEXCOORD_0];
+    const view = doc.bufferViews[acc.bufferView];
+    const start = (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+    return Array.from({ length: 4 }, (_, i) => [bin.readFloatLE(start + i * 8), bin.readFloatLE(start + i * 8 + 4)]);
+  };
+  it('the picture the FBX names, attached beside it, goes into the GLB as its base colour, and nothing is reported missing', async () => {
+    const { files, warnings, refused } = await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')], ['knight_texture.png', fixture('knight_texture.png')]]));
+    expect(refused).toEqual([]);
+    const glb = files.get('sword.glb')!;
+    validateGlb(glb, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS);
+    const b = Buffer.from(glb); const doc = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString('utf8'));
+    expect(doc.images).toHaveLength(1);
+    expect(doc.images[0].mimeType).toBe('image/png');
+    expect(doc.materials.some((m: { pbrMetallicRoughness?: { baseColorTexture?: unknown } }) => m.pbrMetallicRoughness?.baseColorTexture)).toBe(true);
+    expect(warnings.get('sword.glb')!.join(' ')).not.toMatch(/not attached|could not be carried over/);
+  });
+  it('its UVs are flipped for glTF (they showed the silver blade in the grip\'s brown), and only when a picture goes in', async () => {
+    const plain = (await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')]]))).files.get('sword.glb')!;
+    const textured = (await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')], ['knight_texture.png', fixture('knight_texture.png')]]))).files.get('sword.glb')!;
+    const a = uvs(plain), b = uvs(textured);
+    for (let i = 0; i < a.length; i++) { expect(b[i][0]).toBeCloseTo(a[i][0], 5); expect(b[i][1]).toBeCloseTo(1 - a[i][1], 5); }
+  });
+  it('without the picture, the user is told exactly which file to attach', async () => {
+    const { warnings } = await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')]]));
+    expect(warnings.get('sword.glb')!.join(' ')).toMatch(/picture\(s\) knight_texture\.png were not attached/);
   });
 });

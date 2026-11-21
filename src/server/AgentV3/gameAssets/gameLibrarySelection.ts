@@ -78,7 +78,9 @@ export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REV
     + `(and the animation role the game uses, in brackets). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes; `
     + `and when the user asked for a SPECIFIC thing that is not listed and a code-built version would not be what they meant (a particular creature, `
     + `vehicle or character look), also tell them where to get it free and how to attach it — the guide below.\n`
-    + lines.join('\n') + '\n' + ownModelGuide([]);
+    + lines.join('\n')
+    + `\ntextures (add_library_models { textures }): seamless 128 px CC0 surfaces — grass, bricks, roofs, tile, wood — 25 variants each, for ground, walls, roofs and floors instead of flat colour.`
+    + '\n' + ownModelGuide([]);
 }
 
 /** The file only NavBharatAI's 3D game kit writes: its presence is what makes a project a game library models can join. */

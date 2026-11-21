@@ -755,6 +755,14 @@ const out = { ok: true, stage: 'loading the game' };
 const watchdog = setTimeout(async () => {
   let fps = null;
   try { fps = out.fps ?? null; } catch (e) { /* nothing measured yet */ }
+  // 🔴 WHAT WAS ALREADY MEASURED IS KEPT (failedbr #2485, Q-3230). The game had been started and played with the keyboard,
+  // its speed and camera read — and the clock ran out in a LATER stage (the score/sound probe, or the phone). This line
+  // threw all of it away and reported "the game was never played". Once the keyboard stage is done (out.playedKeyboard),
+  // everything measured is sent with what did not finish; only a run that never got that far is "not run".
+  if (out.playedKeyboard) {
+    say({ ...out, ok: true, partial: true, unfinished: out.stage, phoneChecked: out.phoneChecked === true });
+    process.exit(0);
+  }
   say({ ok: false, partial: true, webgl: out.webgl, stage: out.stage, fps, started: out.started ?? null,
     error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
   process.exit(0);
@@ -976,6 +984,7 @@ try {
   // ── SCORE, SOUND AND PLAY AGAIN (2026-11-19 game-gap audit: none of the three was ever checked) ─────────────────
   // MEASURED only; the verdict decides. The round is ended through the kit's own hook — never by guessing a losing
   // move — and the play-again control is found by its words and PRESSED, as a player would.
+  out.playedKeyboard = true;   // from here on a timeout keeps what the keyboard stage measured (the watchdog above)
   out.stage = 'checking the score, the sound and play again';
   try {
     out.sounds = await page.evaluate(() => (typeof window.__nbSounds === 'number' ? window.__nbSounds : null));
@@ -1049,6 +1058,7 @@ try {
     out.touchSurface = false;
   }
   await m.close();
+  out.phoneChecked = true;
   out.errors = errors.slice(0, 5);
   out.errorStacks = errorStacks.slice(0, 5);
   out.errorCount = errors.length;
@@ -1201,6 +1211,10 @@ export interface PlaytestRun {
   cameraInside?: number[];
   /** The script hit its own deadline (autopsy 61279465): `stage` says how far it got, `fps` how fast the page drew. */
   partial?: boolean;
+  /** A run that timed out AFTER the keyboard stage keeps its measures (Q-3230): the stage that did not finish… */
+  unfinished?: string;
+  /** …and whether the phone (touch) stage completed. false on such a run: the phone dimension was not measured. */
+  phoneChecked?: boolean;
   stage?: string;
   diagnostic?: string | null;
   started?: string | null;
@@ -1316,6 +1330,8 @@ export interface PlaytestScore {
   dimensions: Record<Dimension, number>;
   weakest: Dimension;
   respondedTo: string[];
+  /** Dimensions our check never reached (it ran out of time first): not scored, never a defect (Q-3230). */
+  unmeasured?: Dimension[];
   /** A driving game whose picture stayed still at idle AND while the accelerator was held — see below. */
   stalledVehicle?: boolean;
   /** A driving game whose road moved UP the screen as it drove — the camera faces the vehicle (Q-861). */
@@ -1517,12 +1533,15 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   const alive = idle >= STILL_BELOW ? 100 : 60;
   const rep = (replay.progress ? 60 : 0) + (replay.restart ? 40 : 0);
   const dimensions: Record<Dimension, number> = { runs, responds, mobile, stable, smooth, alive, replay: rep };
+  // A dimension our own check never reached is NOT a zero (Q-3230): it costs no points and names no defect.
+  const unmeasured: Dimension[] = phoneUnmeasured(run) ? ['mobile'] : [];
   let total = 0, weight = 0;
-  for (const d of Object.keys(DIMENSION_WEIGHTS) as Dimension[]) { total += dimensions[d] * DIMENSION_WEIGHTS[d]; weight += DIMENSION_WEIGHTS[d]; }
+  for (const d of Object.keys(DIMENSION_WEIGHTS) as Dimension[]) { if (unmeasured.includes(d)) continue; total += dimensions[d] * DIMENSION_WEIGHTS[d]; weight += DIMENSION_WEIGHTS[d]; }
   // The weakest dimension is the one costing the most points, so a tie goes to what matters more.
   let weakest: Dimension = 'responds';
   let worst = -1;
   for (const d of Object.keys(DIMENSION_WEIGHTS) as Dimension[]) {
+    if (unmeasured.includes(d)) continue;
     const lost = (100 - dimensions[d]) * DIMENSION_WEIGHTS[d];
     if (lost > worst) { worst = lost; weakest = d; }
   }
@@ -1530,11 +1549,17 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   if (stalledVehicle || backwards) weakest = 'responds';
   return {
     overall: Math.round(total / weight), dimensions, weakest, respondedTo,
+    ...(unmeasured.length ? { unmeasured } : {}),
     ...(stalledVehicle ? { stalledVehicle: true } : {}),
     ...(cameraFacesVehicle ? { cameraFacesVehicle: true } : {}),
     ...(steeringMirrored ? { steeringMirrored: true } : {}),
     ...(cameraInsideVehicle ? { cameraInsideVehicle: true } : {}),
   };
+}
+
+/** The run ended on our clock before the phone stage finished: the phone dimension was not measured (Q-3230). PURE. */
+export function phoneUnmeasured(run: PlaytestRun): boolean {
+  return run.partial === true && run.ok === true && run.phoneChecked !== true;
 }
 
 /** At or above this, with nothing at zero, a game is reported as playable. */
@@ -1621,12 +1646,14 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   if (checkerLacksWebGL(run)) return playtestNotRunVerdict('the checking browser could not create a WebGL context, so this 3D game could not be drawn or played here — that is NavBharatAI\'s checker, not the game');
   if (!run.ok) return playtestNotRunVerdict(run.error || run.diagnostic || '');
   const score = scorePlaytest(run, replay);
-  const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).map((d) => `${LABEL[d]} ${score.dimensions[d]}`).join(' · ');
+  const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).map((d) => `${LABEL[d]} ${(score.unmeasured ?? []).includes(d) ? 'not checked' : score.dimensions[d]}`).join(' · ');
+  // Said in the head, never as a defect of the game: our check ran out of time, and this is the part it did not reach.
+  const unfinishedNote = run.partial && run.unfinished ? ` The check ran out of time while ${run.unfinished}, so ${phoneUnmeasured(run) ? 'play on a phone (touch) was not checked' : 'that part was not checked'} — that is NavBharatAI's check, not the game.` : '';
   const played = score.respondedTo.length ? `it responded to ${score.respondedTo.join(', ')}` : 'it did not respond to the arrows/WASD, Space or a drag';
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
   const pictureNote = typeof run.brightness === 'number' ? `; picture brightness ${run.brightness}/255, contrast ${run.spread ?? 0}` : '';
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${firstPlayError(run)}` : '';
-  const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
+  const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay' && !(score.unmeasured ?? []).includes(d));
   const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored && !score.cameraInsideVehicle;
   /**
    * 🔴 A PROBE THAT COULD NOT LOOK DOES NOT READ AS A PASS (Q-1038) — `playtestNotRunVerdict`'s own
@@ -1694,7 +1721,7 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
     typeof run.kitScoreStart === 'number' && typeof run.kitScoreEnd === 'number' ? ` Score ${run.kitScoreStart} → ${run.kitScoreEnd} while played.` : '',
     rc?.ended === 'gameover' ? (rc.pressed && rc.after === 'playing' ? ` Play again works ("${rc.pressed}").` : ' Play again did NOT start a new round.') : '',
   ].join('');
-  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}${probeNote}`;
+  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}${probeNote}${unfinishedNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
     : score.cameraInsideVehicle ? `${CAMERA_INSIDE_VEHICLE_FIX} (measured: inside a ${(run.cameraInside ?? []).join(' × ')} m part of it)`
@@ -1799,7 +1826,7 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
     const d = score.dimensions;
     if (d.runs === 0) out.push({ code: 'GAME_DEFECT_BLANK', evidence: 'game surface blank or a single colour' });
     else if (d.responds === 0) out.push({ code: 'GAME_DEFECT_INPUT_IGNORED', evidence: 'picture did not change more with controls than without' });
-    if (d.mobile === 0) out.push({ code: 'GAME_DEFECT_NO_TOUCH', evidence: 'phone drag/tap changed nothing and no on-screen controls' });
+    if (d.mobile === 0 && !(score.unmeasured ?? []).includes('mobile')) out.push({ code: 'GAME_DEFECT_NO_TOUCH', evidence: 'phone drag/tap changed nothing and no on-screen controls' });
     if (score.cameraFacesVehicle || score.steeringMirrored || score.cameraInsideVehicle) out.push({ code: 'GAME_DEFECT_CAMERA_WRONG', evidence: score.cameraInsideVehicle ? 'the camera sat inside the vehicle\'s own geometry while driving' : score.cameraFacesVehicle ? 'road moved up the screen while driving' : 'view panned left when LEFT was held' });
     if (score.stalledVehicle) out.push({ code: 'GAME_DEFECT_VEHICLE_STALLED', evidence: 'picture still at idle and with the accelerator held' });
   }

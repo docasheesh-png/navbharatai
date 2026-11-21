@@ -157,7 +157,8 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
   });
   it('an element that never stops moving is pressed on itself — for that failure alone', () => {
     const mod = clickExplorerModule({ base: 'http://x/' });
-    expect(mod).toContain("if (!/not stable/i.test(String(e && e.message || e))) throw e;");
+    // Q-3231 (2026-11-21): the message is read once, because a captured mouse is released and the press made again first.
+    expect(mod).toContain("if (!/not stable/i.test(message)) throw e;");
     expect(mod).toContain("await loc.dispatchEvent('click');");
     expect(mod).not.toContain(`first().click({ timeout: 4000 })`);
     // A first press, a second-level control's parent, and a light/dark switch's further presses (autopsy

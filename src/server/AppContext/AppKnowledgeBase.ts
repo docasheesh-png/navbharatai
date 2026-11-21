@@ -2105,6 +2105,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
 
   // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
   {
+    id: 'game_fix_and_undo',
+    name: 'Fix my game safely, and go back if a change made it worse',
+    path: 'NavBharatAI Pro → after a game is built, the suggestions show "Make the game playable" when NavBharatAI found problems while playing it; after any change, a "Go back" card appears if that change made the game worse',
+    description: 'NavBharatAI plays every game it builds in a real browser (keys, a mouse drag and a thumb on a phone screen) and lists what it found (2026-11-21). Fixing is your choice: tap "Make the game playable" and it fixes exactly the problems it measured, as a normal change that is saved like every other. Nothing is changed in your game without you asking. After every change to a game, NavBharatAI plays it again and compares it with how it played before. If the change made it worse — the screen went blank, the controls stopped working, it no longer plays by touch, it hits an error, or its play score fell below playable — you see a plain sentence saying what went wrong and a one-tap "Go back" button that restores the saved version from just before that change. Going back keeps the newer version too, so you can return to it from Time Machine. You can also type "undo" or "pehle wala" at any time to pick a version.',
+    howToUse: 'Tap "Make the game playable" in the suggestions when it appears. If a change makes the game worse, tap "Go back" on the card, or "Keep this version" to stay. Type "undo" to choose any earlier version.',
+    relatedFeatures: ['game_menus_settings', 'game_runner_starter'],
+    keywords: ['game fix', 'game theek karo', 'bugs dhundho', 'game me bug', 'game toot gaya', 'game kharab ho gaya', 'undo', 'pehle wala', 'go back', 'wapas lao', 'version wapas', 'game repair', 'fix my game', 'game broke', 'restore game'],
+  },
+  {
     id: 'game_runner_starter',
     name: 'Endless runner games that work from the first build',
     path: 'NavBharatAI Pro → chat → ask for an endless runner (for example "Subway Surfers jaisa game banao", "temple run type game", "endless runner with coins")',

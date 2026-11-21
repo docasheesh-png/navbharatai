@@ -69,6 +69,7 @@ import { HISTORY_TAB_NOTE } from './versionHelp';
 import { VersionTimeline } from '../versions/VersionTimeline';
 import { historyKeyFor } from '../../lib/versionRestoreClient';
 import { VersionUndoCard } from './VersionUndoCard';
+import { GameUndoCard, gameUndoOffer } from './GameUndoCard';
 import { wantsVersionUndo } from '../../lib/versionUndoIntent';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
@@ -799,6 +800,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [featureConfirm, setFeatureConfirm] = useState<{ plan: FeaturePlanView; launch: (answer?: { include: string[]; exclude: string[] }) => void } | null>(null);
   // Undo / pehle wala / reverse in Pro chat → in-chat version picker (never auto-restore; never send to Other → Versioning).
   const [versionUndoOpen, setVersionUndoOpen] = useState(false);
+  // The "this change made your game worse — go back?" card (GameUndoCard): closed per build once answered.
+  const [gameUndoClosedFor, setGameUndoClosedFor] = useState<string | null>(null);
   const submissionRef = useRef(new SubmissionScope());
   // Optimistic messages cancelled before launch must never purge the previous server turn.
   const localSubmissionMessagesRef = useRef(new Set<number>());
@@ -5479,6 +5482,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 onCancel={cancelSubmission}
               />
             )}
+            {(() => {
+              const offer = state.done ? gameUndoOffer(state.diagnostics as { issues?: Array<{ code?: string; message?: string; detail?: string; autoResolved?: boolean }> } | undefined) : null;
+              const key = state.buildId ?? offer?.versionId ?? null;
+              if (!offer || (key !== null && gameUndoClosedFor === key)) return null;
+              return (
+                <GameUndoCard
+                  offer={offer}
+                  workspaceId={state.workspaceId}
+                  userId={userId}
+                  email={email}
+                  onDismiss={() => setGameUndoClosedFor(key)}
+                  onRestored={(files, message) => {
+                    handleVersionRestored(files);
+                    setUserMsgs((c) => [...c, { role: 'agent', text: message, ts: Date.now() }]);
+                    setGameUndoClosedFor(key);
+                  }}
+                />
+              );
+            })()}
             {versionUndoOpen && (
               <VersionUndoCard
                 historyKey={historyKeyFor(state.workspaceId, userId)}

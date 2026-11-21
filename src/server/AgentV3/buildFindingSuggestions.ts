@@ -553,6 +553,10 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  * the admin on 2026-10-11 (Q-380, closed): leave it — a crashed build stays free and NavBharatAI absorbs it.
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
+  // gameRegression.ts (admin 2026-11-21): this turn made the game worse. Its answer is not a prompt to send but the one-tap
+  // "Go back" card (GameUndoCard) that restores the saved version from just before the turn — a new prompt would build
+  // on top of the broken game.
+  'GAME_GOT_WORSE',
   // userModels.ts: a model the user attached was not added. The message names each file and its exact fix (export as
   // .glb, remove compression, attach the missing file) — only the user can re-export or re-attach it; no button can.
   'USER_MODELS_NOT_ALL_ADDED',

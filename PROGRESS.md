@@ -103331,3 +103331,21 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — Game repair, carefully back on: optional, asked, and one tap to undo a change that made it worse
+
+- **Admin:** "isko savdhani se on karo … optional karo, app/game banne ke bad user se hi pucho … agar game tut jaye to user
+  ek prompt se wapas undo ho jaye."
+- **Found first (mapped end to end):** the ASK already existed — the playtest's problems become a one-tap "Make the game
+  playable" offer that runs only when tapped, as a normal turn; the real version system already saves every good build
+  whole (BuildHistoryStore / Time Machine) and `/restore-version` saves the current app before restoring; "undo /
+  pehle wala" already opens the version picker. What was MISSING: nothing compared the game before and after a turn, so
+  a change that broke a working game ended silently. The old automatic repair stays suspended (it edited unasked and
+  rolled back from an incomplete snapshot).
+- **Fix:** `gameRegression.ts` (pure): the previous turn's measure is read from the stored report BEFORE this turn's first
+  progress save; after this turn's playtest, a new unplayable defect or a ≥15-point drop below 75 is "worse"; the
+  version to go back to is the newest good one saved before the turn. The route records `GAME_GOT_WORSE` (detail = that
+  version id); `GameUndoCard` shows the plain sentence with one-tap "Go back" (the Time Machine's own restore route) and
+  "Keep this version". `docs/security/game-auto-repair-suspension.md` records what replaced the suspended path.
+- **Proof:** `tests/aGameMadeWorseCanBeUndone.test.ts` (12; five reversions each failed, one after a stronger case was
+  added); census green; both typechecks clean.

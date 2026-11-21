@@ -103523,3 +103523,20 @@ its final head and the merge with `main` (#4397) was checked clean. The 122 rows
 IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`; their ledgers stay in the entries above. Rows still open after it:
 the admin-decision rows (Q-3137, Q-3139, Q-3142, Q-3148, Q-3157, Q-3161, Q-3164, Q-3180, Q-3198 and the older ones) and the
 untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only new reports are autopsied).
+
+## 2026-11-21 — #4403 merged; a character customizer on request; the builder picks by meaning (intent map)
+- **#4403 merged:** batch 11 village houses, 125 textures, FBX pictures, Q-3019, CC-BY packaging.
+- **Character customizer** (admin: "par user agar bole to … user jo chahe change bol sakta hai, unexpected"):
+  - `generate_character_customizer` is a recipe, run only when the user means it.
+  - It writes one framework-free module into the USER'S game. The module discovers the parts of ANY loaded model: a colour picker per named material, show/hide per mesh part, size, a pose picker, reset, and the look saved per character.
+  - Materials are cloned per character.
+  - Tested by compiling the generated module with esbuild and driving it with real three.js. Test: `aPlayerCanCustomizeTheirCharacter`.
+- **Intent map** (admin: "words par nahi intention par … universal intent picker"):
+  - `gameCapabilities.ts` describes every game capability by the OUTCOME the user wants.
+  - It tells near-twins apart by who changes the thing and when.
+  - Its example phrasings (Hinglish, Devanagari, Tamil) are shown as examples, not triggers.
+  - The rule: build what they mean, never refuse or fake.
+  - It rides the library menu to every 3D game turn, with no extra classifier call. The library menu cap goes 8000 → 11000 chars (~2.5k tokens a turn in all).
+  - Test: `theBuilderPicksByMeaningNotWords`.
+- **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
+- **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.

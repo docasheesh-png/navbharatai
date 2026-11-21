@@ -5,6 +5,7 @@ import { REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
 import { sceneryFor } from './worldDressing';
 import { searchGameLibrary } from './gameLibrary';
 import { ownModelGuide } from './modelSourcesGuide';
+import { gameCapabilityMenu } from './gameCapabilities';
 export interface LibraryRequest {
   prompt: string;
   requirements?: ReadonlyArray<{ subject: string; role?: 'player' | 'opponent' | 'environment' | 'prop'; animation?: string }>;
@@ -71,7 +72,7 @@ export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REV
   }
   const lines = [...byCategory].sort(([a], [b]) => a.localeCompare(b)).map(([category, subjects]) =>
     `${category}: ${[...subjects].sort(([a], [b]) => a.localeCompare(b)).map(([s, roles]) => roles.size ? `${s} (${[...roles].join('/')})` : s).join(', ')}`);
-  return '[GAME_LIBRARY_MENU]\n'
+  return gameCapabilityMenu() + '\n[GAME_LIBRARY_MENU]\n'
     + `Every ready 3D model in the NavBharatAI library, by subject. The models already prepared above were matched from the WORDS of the request; `
     + `choose from this menu by its MEANING. When the game needs something listed here that was not prepared — a village story needs villagers, `
     + `houses and a well even if nobody typed "villager"; a hunting game needs a hunter and animals — call add_library_models with those subjects `

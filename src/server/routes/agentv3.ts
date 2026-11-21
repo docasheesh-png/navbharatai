@@ -446,9 +446,9 @@ import { withE2eExcluded, e2eExcludeNote, excludeE2eBeforeScaffolding } from '..
 import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../AgentV3/ambientModuleShim';
 import { shapeConflict } from '../AgentV3/appIdentity';
 import {
-  planSmokeChecks, classifySmokeStatus, parseFrontendShell, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
-  type SmokePlan, type SmokeResult,
+  planSmokeChecks, type SmokePlan,
 } from '../AgentV3/RouteSmokeCheck';
+import { runRouteSmokeCheck } from '../AgentV3/buildPhases/routeSmoke';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -24511,57 +24511,14 @@ async function noteBuildOutcome(
         }
       }
 
-      // ROUTE SMOKE CHECK (ROADMAP #1 Phase 4.2). "The build succeeded" and "the app works" are
-      // different claims, and only the first one was ever tested: the preview verifier proves a PAGE
-      // renders, while nothing proved the API behind it answers. An app could ship with every screen
-      // drawn and every button dead, and the report would say it passed.
-      //
-      // Calls the app's OWN declared routes and reports what actually came back. Two safety rules live
-      // in RouteSmokeCheck and are enforced there rather than here: GET only (a check must never run
-      // the user's writes against their data) and no path parameters (an invented id 404s, which we
-      // would then report as a broken route — a false alarm about working code).
-      //
-      // Never changes the verdict. This is EVIDENCE for the report, not a new way for a working build
-      // to be marked failed on a probe that could be wrong about a route it does not fully understand.
+      // ROUTE SMOKE CHECK (ROADMAP #1 Phase 4.2) — what it does lives in buildPhases/routeSmoke.ts (Q-3237); the gate stays here.
+      // Evidence for the report, never a gate: it cannot change the verdict.
       if (
         process.env.AGENTV3_ROUTE_SMOKE !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !abort.signal.aborted
         && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
       ) {
-        try {
-          const plan = routeSmokePlan;
-          if (plan && plan.targets.length > 0) {
-            const results: SmokeResult[] = [];
-            for (const target of plan.targets) {
-              if (abort.signal.aborted) break;
-              let status: number | null = null;
-              let frontendShell = false;
-              try {
-                const out = await withTimeout(
-                  actuator.runCommand(workspaceId, smokeCurlCommand(lastPreviewUrl, target)),
-                  15_000, 'route-smoke',
-                );
-                status = parseCurlStatus(out.stdout);
-                frontendShell = parseFrontendShell(out.stdout);
-              } catch { status = null; }
-              results.push(classifySmokeStatus(target, status, { frontendShell }));
-            }
-            const summary = summarizeSmoke(results, plan.skipped.length);
-            buildDiag.record({
-              phase: 'preview',
-              // A failure here is a real finding; a clean run is worth recording too, because "we
-              // checked and it worked" is the evidence this phase exists to produce.
-              severity: summary.hasFailures ? 'warning' : 'info',
-              code: summary.hasFailures ? 'ROUTE_SMOKE_FAILED' : 'ROUTE_SMOKE_PASSED',
-              message: summary.headline,
-              autoResolved: !summary.hasFailures,
-              detail: [
-                ...results.map((r) => `${r.verdict.toUpperCase()} ${r.path}${r.status === null ? '' : ` (${r.status})`}`),
-                ...plan.skipped.map((s) => `SKIPPED ${s.method} ${s.path} — ${s.why}`),
-              ].join('\n'),
-            });
-          }
-        } catch { /* the smoke check is evidence, never a gate — a failure here changes nothing */ }
+        await runRouteSmokeCheck({ plan: routeSmokePlan, previewUrl: lastPreviewUrl, run: (command) => actuator.runCommand!(workspaceId, command), aborted: () => abort.signal.aborted, record: (issue) => buildDiag.record(issue) });
       }
 
       // DOES EVERY PAGE ACTUALLY RENDER, OR ONLY THE HOME ONE? (admin 2026-08-06 — "E2E auto-run, and

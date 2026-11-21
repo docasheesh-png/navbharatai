@@ -968,6 +968,10 @@ break):
   work, add a new dated milestone entry — **never delete or rewrite existing
   entries** (they're the cross-session audit trail). Correct a stale claim by
   adding a new note, not by erasing the old one.
+- **The build route's handler only shrinks (admin 2026-11-21, Q-3237 option A).** The build handler in
+  `src/server/routes/agentv3.ts` is ~17,000 lines at TypeScript's control-flow limit (TS2563). A NEW build step goes in a
+  helper module (`src/server/AgentV3/buildPhases/`, or a named helper like `growthTurn.ts`) and is ONE call in the handler —
+  never an inline block. Existing phases are moved out one per PR, each locked in `tests/theBuildRouteIsSplitByPhase.test.ts`.
 - **An `/api` route nothing in the app calls is decided when its file is next touched (admin 2026-10-05, Q-162).**
   `tests/fixtures/uncalledApiRoutesBaseline.json` lists them; 45 are `undecided`. Touching a route file that has
   one means deciding it in the same PR — give it a screen, name its outside caller (change its reason), or delete

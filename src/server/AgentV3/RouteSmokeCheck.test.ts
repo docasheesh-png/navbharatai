@@ -159,16 +159,19 @@ describe('the call itself', () => {
 });
 
 describe('wired into the build, as evidence and not as a gate', () => {
+  // Since Q-3237 (2026-11-21) the route keeps the gate and the call; the body lives in buildPhases/routeSmoke.ts.
   const route = readFileSync(join(__dirname, '..', 'routes', 'agentv3.ts'), 'utf8');
+  const phase = readFileSync(join(__dirname, 'buildPhases', 'routeSmoke.ts'), 'utf8');
 
   it('runs after a successful build and calls the app\'s own routes', () => {
     expect(route).toContain("process.env.AGENTV3_ROUTE_SMOKE !== 'off'");
-    expect(route).toContain('smokeCurlCommand(lastPreviewUrl, target)');
-    expect(route).toContain('classifySmokeStatus(target, status, { frontendShell })');
+    expect(route).toContain('await runRouteSmokeCheck({ plan: routeSmokePlan, previewUrl: lastPreviewUrl,');
+    expect(phase).toContain('smokeCurlCommand(io.previewUrl, target)');
+    expect(phase).toContain('classifySmokeStatus(target, status, { frontendShell })');
   });
 
   it('records the clean run too — "we checked and it worked" is the evidence this phase is for', () => {
-    expect(route).toContain("code: summary.hasFailures ? 'ROUTE_SMOKE_FAILED' : 'ROUTE_SMOKE_PASSED'");
+    expect(phase).toContain("code: summary.hasFailures ? 'ROUTE_SMOKE_FAILED' : 'ROUTE_SMOKE_PASSED'");
   });
 
   it('never changes the build verdict', () => {
@@ -178,16 +181,18 @@ describe('wired into the build, as evidence and not as a gate', () => {
     const block = route.slice(at, route.indexOf('APP HEALTH CULTURE', at));
     expect(block).not.toMatch(/result\s*=\s*\{[^}]*ok:\s*false/);
     expect(block).toContain('never a gate');
+    expect(phase).not.toMatch(/ok:\s*false/);
+    expect(phase).toContain('never a gate');
   });
 
   it('reuses the file map the integrity pass already loaded, instead of paying for it twice', () => {
     // The post-answer stretch is already the slowest part of a build; a second full workspace load
     // for this would make it worse for a check that needs no new data.
     expect(route).toContain('routeSmokePlan = planSmokeChecks(');
-    expect(route).toContain('const plan = routeSmokePlan;');
+    expect(route).toContain('plan: routeSmokePlan');
   });
 
   it('says in the report what it did NOT check', () => {
-    expect(route).toContain('SKIPPED ${s.method} ${s.path}');
+    expect(phase).toContain('SKIPPED ${s.method} ${s.path}');
   });
 });

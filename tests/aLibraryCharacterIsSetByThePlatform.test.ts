@@ -127,3 +127,16 @@ describe('🛑 nothing is changed on a guess — said on every turn of a growing
     expect(GAME_NO_GUESS_RULE).toMatch(/never question a request that is already exact/);
   });
 });
+
+describe('🛑 the same rule in every lane that writes an app (admin: "han. user se puch lo clear na ho to")', () => {
+  it('architect, fast lane and one-shot each carry NO_GUESS_RULE; it is bounded so exact requests are never questioned', async () => {
+    const { NO_GUESS_RULE } = await import('../src/server/AgentV3/noEvalRule');
+    for (const f of ['src/server/AgentV3/systemPrompt.ts', 'src/server/AgentV3/SimpleBuilder.ts', 'src/server/AgentV3/OneShotBuilder.ts']) {
+      expect(readFileSync(join(__dirname, '..', f), 'utf8'), f).toMatch(/^\s*NO_GUESS_RULE,\s*$/m);
+    }
+    expect(NO_GUESS_RULE).toMatch(/do NOT pick one/);
+    expect(NO_GUESS_RULE).toMatch(/ask ONE short question/);
+    expect(NO_GUESS_RULE).toMatch(/obvious default/);
+    expect(NO_GUESS_RULE).toMatch(/Never question a request that is already exact/);
+  });
+});

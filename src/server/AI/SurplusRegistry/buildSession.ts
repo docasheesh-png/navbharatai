@@ -274,7 +274,7 @@ export async function createSurplusBuildSession(options: {
           finally { release(permit); }
           const failures = (failuresByModel.get(permit.model) ?? 0) + 1;
           failuresByModel.set(permit.model, failures);
-          const bench = !terminalPolicyFailure && failures >= SURPLUS_FAILURES_BEFORE_BENCH;
+          const bench = !terminalPolicyFailure && (failures >= SURPLUS_FAILURES_BEFORE_BENCH || refusedOutright(failure?.httpStatus));
           if (bench) {
             benchedModels.add(permit.model);
             if (model === permit.model) {
@@ -368,6 +368,16 @@ export interface SurplusAttemptFailure {
   httpStatus?: number;
   /** First failure of this model in the session: the retry stays on it, cache warm (Q-3019). */
   sameModelRetry?: boolean;
+}
+
+/**
+ * A REFUSED request leaves the rotation at once (failedbr #2485, Q-3234; admin decision 2026-11-21, option A). The engine
+ * answered HTTP 404 six times across three models — 85.5 s that returned nothing — because a refusal was treated like a blip
+ * and retried on the same model first. A 4xx is the engine saying it will not serve this request, not a passing fault;
+ * only "too many requests" (429) and "request timeout" (408) are passing, and keep the warm-cache retry. PURE.
+ */
+export function refusedOutright(httpStatus: number | undefined): boolean {
+  return typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 408 && httpStatus !== 429;
 }
 
 /** A model leaves this build's rotation only at this many failures (Q-3019: once was a cold-cache switch per blip). */

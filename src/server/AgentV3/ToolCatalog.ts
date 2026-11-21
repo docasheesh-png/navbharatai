@@ -3785,6 +3785,7 @@ export const CATALOG_TOOL_NAMES = [
   'object_spec',
   'add_library_models',
   'generate_game_runtime',
+  'generate_character_customizer',
   'generate_animation',
   'generate_ui_states',
   'generate_state',

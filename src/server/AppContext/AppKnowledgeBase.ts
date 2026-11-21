@@ -136,9 +136,9 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'game_character_customizer',
     name: 'A character customization screen in your game (on request)',
-    path: 'NavBharatAI Pro → your 3D game → ask "add a character customization screen" (or "character creator", "let players change their outfit colours")',
+    path: 'NavBharatAI Pro → your 3D game → ask, in your own words and language, for players to be able to change how the characters look',
     description: 'When you ask for it, NavBharatAI adds a customization panel to YOUR game, for any character in it — a library character, your own uploaded model, or a code-built one. It finds the character\'s parts by itself: a colour picker with ready colours for each part (skin, hair, clothes…), show/hide for parts like a hood or helmet, a size slider, a pose or animation picker when the character has them, and reset. The player\'s choice is saved and comes back the next time they open the game. The labels can be in your language. Anything more you want — a name field, outfits, accessories, a rotating preview, saving to an account — you ask for and it is added to the same panel.',
-    howToUse: 'In a 3D game, say "add a character customization screen" or "players should choose their character\'s colours". Then ask for anything else in plain words: "add a hat option", "labels in Hindi", "save the look to my login".',
+    howToUse: 'In a 3D game, ask in your own words — any language — for players (or yourself) to be able to change how the characters look; NavBharatAI understands the meaning, not a fixed phrase. Anything more (a hat option, labels in your language, saving the look to an account) you ask for the same way.',
     relatedFeatures: ['agentv3_builder', 'pro_own_3d_models'],
     keywords: ['character customization', 'character creator', 'customize character', 'character customize', 'avatar editor', 'outfit colour', 'skin colour', 'character screen', 'apna character', 'kapde ka rang', 'player look'],
   },

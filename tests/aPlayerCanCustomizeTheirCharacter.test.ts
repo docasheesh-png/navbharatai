@@ -4,9 +4,9 @@
  * USER'S game on request; it discovers the parts of ANY model (no fixed skeleton), and every control really changes the
  * model. The generated module is compiled with esbuild and run here with real three.js objects and a minimal DOM.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { transform } from 'esbuild';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -31,6 +31,8 @@ class FakeEl {
 const store = new Map<string, string>();
 type Mod = typeof import('./fixtures/characterCustomizerTypes');
 let mod: Mod;
+let tempDir = '';
+afterAll(() => { if (tempDir) rmSync(tempDir, { recursive: true, force: true }); });
 
 beforeAll(async () => {
   (globalThis as Record<string, unknown>).document = { body: new FakeEl('body'), createElement: (t: string) => new FakeEl(t) };
@@ -38,7 +40,8 @@ beforeAll(async () => {
   const src = generateCharacterCustomizer().files[CHARACTER_CUSTOMIZER_PATH];
   const js = (await transform(src, { loader: 'ts', format: 'esm' })).code
     .replace(/from ['"]three['"]/, `from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve('three')).href)}`);
-  const file = join(mkdtempSync(join(tmpdir(), 'nb-cc-')), 'characterCustomizer.mjs');
+  tempDir = mkdtempSync(join(tmpdir(), 'nb-cc-'));
+  const file = join(tempDir, 'characterCustomizer.mjs');
   writeFileSync(file, js);
   mod = await import(pathToFileURL(file).href) as Mod;
 });

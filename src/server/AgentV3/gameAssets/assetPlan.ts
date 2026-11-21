@@ -166,6 +166,9 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   wagon: ['wagon', 'wagons', 'cart', 'carts', 'wooden cart'], 'wooden fence': ['wooden fence', 'wood fence', 'lakdi ki baad', 'लकड़ी की बाड़'],
   'stone stairs': ['stone stairs', 'stone steps', 'outdoor stairs'], chimney: ['chimney', 'chimneys', 'चिमनी'], vine: ['vine', 'vines', 'creeper', 'बेल'],
 };
+/** The kit's own moving subjects (it builds them walking/running in code). Library-animated subjects are added per catalogue. */
+const MOVING_SUBJECTS: readonly string[] = ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
+  'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer', 'farm cow', 'farm horse', 'zebra'];
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
   walk: ['walk', 'walking', 'चलता', 'चलती', 'चलते', 'चलना', 'चलने', 'caminando'],
@@ -239,13 +242,17 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       return mentioned(text.trim(), word);
     });
   };
-  // A role is asked for only when a model of that subject PLAYS it (was a hand-typed list of subjects, which the 12 new
-  // people of batch 12 were not in — and which asked "dog" to run whether or not any dog could).
+  // Which subjects MOVE. The role is the GAME's need, not the library's stock: "a walking dog" asks for walk even though the
+  // library dog stands still, so no static dog is used and the code-built dog walks (assetIntegration.test). The hand list
+  // is the kit's own moving subjects; every subject a library model animates joins it from the catalogue — the 12 people
+  // of batch 12 were missing from the hand list, so "a running teenager" asked for no run at all.
   const plays = (subject: string, role: string) => served.some(c => c.subjects.includes(subject) && c.animations.includes(c.animationRoles?.[role] ?? role));
+  const flies = (subject: string) => ['bird', 'eagle', 'parrot'].includes(subject) || plays(subject, 'fly');
+  const moves = (subject: string) => MOVING_SUBJECTS.includes(subject) || plays(subject, 'walk') || plays(subject, 'run');
   return subjects.filter(subject => clauses.some(c => matching(subject, c))).slice(0, 6).map(subject => {
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
-    const animation = ['fly', 'run', 'walk'].find(role => plays(subject, role) && motion(role));
+    const animation = flies(subject) && motion('fly') ? 'fly' : moves(subject) ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });
 }

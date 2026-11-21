@@ -53,12 +53,15 @@ describe('library batch 12 — kinds for big worlds', () => {
     expect(subjects('a van')).toEqual(['van']); // the delivery van's own short name
   });
 
-  it('the new people walk and run when the prompt says so; a subject no model animates is not asked to', () => {
+  it('the new people walk and run when the prompt says so; the role is what the game needs', () => {
     expect(req('a young woman and a bearded man walking in the park')).toEqual([{ subject: 'young woman' }, { subject: 'bearded man', animation: 'walk' }]);
     expect(req('a running teenager')).toEqual([{ subject: 'teenager', animation: 'run' }]);
     expect(req('a flying bird')).toEqual([{ subject: 'bird', animation: 'fly' }]);
     expect(req('running man in a city')).toEqual([{ subject: 'man', animation: 'run' }]);
-    for (const r of req('a running dog and a walking cactus')) if (r.animation) expect(REVIEWED_GAME_ASSETS.some(c => c.subjects.includes(r.subject) && c.animations.includes(c.animationRoles?.[r.animation!] ?? r.animation!))).toBe(true);
-    expect(readFileSync('src/server/AgentV3/gameAssets/assetPlan.ts', 'utf8')).not.toMatch(/\['human', 'knight', 'dog'/);
+    // The role is the game's need: a walking dog still asks for walk (the library dog is static → the code-built dog walks).
+    expect(req('a walking dog')).toEqual([{ subject: 'dog', animation: 'walk' }]);
+    expect(req('a walking cactus')).toEqual([{ subject: 'cactus' }]);
+    // Every subject a library model animates moves, without being typed into a list.
+    for (const c of REVIEWED_GAME_ASSETS) if (c.animationRoles?.run && c.animations.includes(c.animationRoles.run)) expect(req(`a running ${c.subjects[0]}`)[0], c.id).toMatchObject({ animation: 'run' });
   });
 });

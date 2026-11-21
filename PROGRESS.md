@@ -103516,6 +103516,21 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
 - **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
   new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.
+## 2026-11-21 — #4397 merged; batch 11 (Medieval Village), textures, FBX pictures, Q-3019, CC-BY packaging
+- **#4397 merged:** batches 9 and 10, FBX attachments, the "where to get it" guide, and the library on every 3D turn.
+- **Batch 11:** the Medieval Village MegaKit (CC0). The kit has no whole house, so two whole village houses were assembled from its 2 m pieces: walls with a door and windows, a floor, and a roof with closed gables. The first assembly left the gables open and the inside showed. Also a wagon, wooden fence, stone stairs, chimney and vine. Test: `libraryBatch11`.
+- **Textures:** Screaming Brain Studios' Tiny Texture Pack (CC0) — 125 seamless 128 px surfaces (grass, bricks, roofs, tile, wood), losslessly recompressed from 10.3 to 4.2 MB.
+  - `add_library_models({ textures })` puts one into a game: durable first, then the sandbox, with the three.js lines to repeat it.
+  - Test: `theGameGetsRealSurfaceTextures`.
+- **FBX pictures:** the picture an FBX names, attached beside it, is embedded as its base colour.
+  - UVs are flipped for glTF on those meshes; the first try put a silver blade in brown.
+  - A missing picture is named to the user. Test: `anFbxBecomesAModelInTheGame` (+3).
+- **Q-3019 closed:** a Surplus model is benched only at its SECOND failure, so the retry keeps a warm cache instead of a cold-cache switch per blip.
+  - Proven by reversion: putting the old rule back fails 5 tests. The two older tests now assert the new rule.
+- **Indian clothing:** a CC-BY model may ship packaged, only with its author credit, which reaches the game.
+  - No such model exists in the library yet. Sketchfab needs a login, so the admin downloads them.
+  - Test: `aCcByModelCarriesItsCredit`.
+- **Env:** `AGENTV3_EXTERNAL_GAME_ASSETS` is ON by default. ENV_REGISTRY now says the key can be deleted (a value of `admin` would keep it owner-only).
 ## 2026-11-21 — PR #4390 merged (3c91ff3); its 122 queue rows closed
 
 #4390 (failedbr #1913 → #669 autopsies; Q-3041…Q-3223 and the bulk rows Q-1553…Q-1573 it resolved) merged after CI went green on
@@ -103523,3 +103538,20 @@ its final head and the merge with `main` (#4397) was checked clean. The 122 rows
 IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`; their ledgers stay in the entries above. Rows still open after it:
 the admin-decision rows (Q-3137, Q-3139, Q-3142, Q-3148, Q-3157, Q-3161, Q-3164, Q-3180, Q-3198 and the older ones) and the
 untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only new reports are autopsied).
+
+## 2026-11-21 — #4403 merged; a character customizer on request; the builder picks by meaning (intent map)
+- **#4403 merged:** batch 11 village houses, 125 textures, FBX pictures, Q-3019, CC-BY packaging.
+- **Character customizer** (admin: "par user agar bole to … user jo chahe change bol sakta hai, unexpected"):
+  - `generate_character_customizer` is a recipe, run only when the user means it.
+  - It writes one framework-free module into the USER'S game. The module discovers the parts of ANY loaded model: a colour picker per named material, show/hide per mesh part, size, a pose picker, reset, and the look saved per character.
+  - Materials are cloned per character.
+  - Tested by compiling the generated module with esbuild and driving it with real three.js. Test: `aPlayerCanCustomizeTheirCharacter`.
+- **Intent map** (admin: "words par nahi intention par … universal intent picker"):
+  - `gameCapabilities.ts` describes every game capability by the OUTCOME the user wants.
+  - It tells near-twins apart by who changes the thing and when.
+  - Its example phrasings (Hinglish, Devanagari, Tamil) are shown as examples, not triggers.
+  - The rule: build what they mean, never refuse or fake.
+  - It rides the library menu to every 3D game turn, with no extra classifier call. The library menu cap goes 8000 → 11000 chars (~2.5k tokens a turn in all).
+  - Test: `theBuilderPicksByMeaningNotWords`.
+- **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
+- **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.

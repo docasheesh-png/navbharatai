@@ -16,13 +16,14 @@ function state(models: string[]): SurplusReviewedState {
   };
 }
 const params = { model: 'x', system: 'build', messages: [{ role: 'user' as const, content: 'Make app' }], tools: [], maxTokens: 100 };
-function setup(models: string[], failFirst: boolean, receiptThrows = false) {
+function setup(models: string[], failFirst: boolean | number, receiptThrows = false) {
+  const failures = failFirst === true ? 1 : failFirst === false ? 0 : failFirst;
   const s = state(models); let calls = 0;
   const adapter: SurplusReviewedAdapter = {
     readState: vi.fn(async () => s),
     routing: review => ({ provider: review.providerId, si_route: { objective: 'price' } }),
     dispatch: vi.fn(async (req: Record<string, unknown>) => {
-      if (failFirst && calls++ === 0) throw new Error('build budget hit mid-flight');
+      if (calls++ < failures) throw new Error('build budget hit mid-flight');
       return { model: req.model, choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } };
     }),
     identify: (raw: unknown) => { const r = raw as { model: string }; return { model: r.model, providerId: 'provider-a', completion: raw as never }; },
@@ -31,9 +32,18 @@ function setup(models: string[], failFirst: boolean, receiptThrows = false) {
   return { adapter, make: () => createSurplusBuildSession({ buildId: 'b', tier: 'weak', enabled: true, adapter, now: () => now }) };
 }
 describe('Surplus unsettled failure accounting is absorbed (no poisoned session)', () => {
-  it('next turn moves to Surplus-internal AI2 instead of 503 previous_call_accounting_unavailable', async () => {
+  it('one failed turn does not poison the session: the next turn runs, on the SAME model (warm cache, Q-3019)', async () => {
     const { adapter, make } = setup(['model-a', 'model-b'], true);
     const session = await make(); const runner = session!.runner();
+    await expect(runner.runTurn(params)).rejects.toThrow();
+    const ok = await runner.runTurn(params);
+    expect(ok.text).toBe('done'); expect(ok.model).toBe('model-a');
+    expect((adapter.dispatch as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toMatchObject({ model: 'model-a' });
+  });
+  it('a SECOND failure of the same model benches it: the next turn moves to Surplus-internal AI2, never a 503', async () => {
+    const { adapter, make } = setup(['model-a', 'model-b'], 2);
+    const session = await make(); const runner = session!.runner();
+    await expect(runner.runTurn(params)).rejects.toThrow();
     await expect(runner.runTurn(params)).rejects.toThrow();
     const ok = await runner.runTurn(params);
     expect(ok.text).toBe('done'); expect(ok.model).toBe('model-b');

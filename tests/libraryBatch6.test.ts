@@ -52,7 +52,10 @@ describe('library batch 6 — Quaternius guns and cars, packaged', () => {
   it('a packaged entry from any other provider or licence is refused', () => {
     const pistol = REVIEWED_LIBRARY_BATCH_6.find(a => a.id === 'q6-gun-pistol')!;
     expect(() => validateCatalogue([{ ...pistol, provider: 'github' } as never])).toThrow('Unreviewed packaged');
+    // CC-BY is packaged only WITH its credit (admin 2026-11-21); MIT and an empty credit stay refused.
     expect(() => validateCatalogue([{ ...pistol, license: { ...pistol.license, spdx: 'CC-BY-4.0', attribution: 'x' } } as never])).toThrow('Unreviewed packaged');
+    expect(() => validateCatalogue([{ ...pistol, license: { ...pistol.license, spdx: 'MIT', attribution: 'Somebody, MIT licence text' } } as never])).toThrow('Unreviewed packaged');
+    expect(() => validateCatalogue([{ ...pistol, license: { ...pistol.license, spdx: 'CC-BY-4.0', attribution: 'Model by A. Author (sketchfab.com/a-author), CC BY 4.0' } } as never])).not.toThrow();
   });
 
   it('real prompts, English and Hindi, get the new models — and a named car is not also "a car"', () => {

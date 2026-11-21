@@ -1,7 +1,8 @@
 // The two moments of a turn where the growth guard and the library's place-add act — kept out of the route's handler,
 // which reads and writes through the small ports below (routes/agentv3.ts is one very large function; a step that can be
 // a call is a call).
-import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, WORLD_FILE } from './growthGuard';
+import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
+import { PART_NAMES_FILE, rememberPartNames } from './partMeaning';
 import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, MAX_PLACES } from './worldGrow';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
@@ -18,13 +19,16 @@ export async function enforceGrowthAtTurnEnd(io: {
   write: (path: string, content: string) => Promise<void>;
   platformWrote: ReadonlyMap<string, string>;
   refused: readonly string[];
+  /** Every path written this turn (the platform's and the builder's) — how a NEW part is known. */
+  written?: readonly string[];
   record: (issue: Issue) => void;
   say: (text: string) => void;
   env?: NodeJS.ProcessEnv;
 }): Promise<{ restored: string[]; blocked: string[] }> {
   const none = { restored: [] as string[], blocked: [] as string[] };
   try {
-    if (!io.filesAtTurnStart || !growthGuardEnabled(io.env) || !growsByLists(io.filesAtTurnStart)) return none;
+    // A first build has nothing to guard yet, but the parts it makes are still filed under the user's words.
+    if (!io.filesAtTurnStart || !growthGuardEnabled(io.env) || !growsByLists(io.filesAtTurnStart)) { await rememberWhatTheUserCalledIt(io); return none; }
     const now: Record<string, string | null> = {};
     for (const p of growthProtectedPaths(io.filesAtTurnStart)) {
       // A read that FAILS is not a deleted file: only a clean "not found" counts as gone; anything else is left unjudged.
@@ -50,8 +54,31 @@ export async function enforceGrowthAtTurnEnd(io: {
       io.record({ phase: 'build', severity: 'info', code: 'GROWTH_GUARD_ASKED', autoResolved: true, message: `The user was told which working part(s) this turn would have changed and how to allow it: ${blocked.slice(0, 8).join(', ')}.` });
       try { io.say(ask.trim()); } catch { /* the report still says it */ }
     }
+    await rememberWhatTheUserCalledIt(io);
     return { restored: put.map((r) => r.path), blocked };
   } catch { return none; }   // a guard that cannot run leaves the turn exactly as it was
+}
+
+/**
+ * 📒 THE USER'S OWN WORDS ARE REMEMBERED (partMeaning.ts). A part made this turn is filed under what the user asked for
+ * ("sipahi daalo jo peecha kare" → police.ts), and a part the user's request was about is filed under those words too —
+ * so the next time they say it their way, the platform knows which part they mean. Best-effort; never fails a turn.
+ */
+async function rememberWhatTheUserCalledIt(io: Parameters<typeof enforceGrowthAtTurnEnd>[0]): Promise<void> {
+  try {
+    const start = io.filesAtTurnStart ?? {};
+    if (typeof start[FEATURES_INDEX] !== 'string' && !(io.written ?? []).includes(FEATURES_INDEX)) return;
+    const idOf = (p: string): string | null => { const m = /^src\/game\/features\/([^/]+)\.tsx?$/.exec(p); return m && m[1] !== 'index' ? m[1] : null; };
+    const made = (io.written ?? []).filter((p) => !(p in start)).map(idOf).filter((id): id is string => !!id);
+    const known = partsKnown(start);
+    const spokenOf = [...known.keys()].filter((id) => requestIsAbout(io.request, id, known));
+    const ids = [...new Set([...made, ...spokenOf])];
+    if (ids.length === 0) return;
+    let current: string | undefined;
+    try { current = await io.read(PART_NAMES_FILE); } catch { current = start[PART_NAMES_FILE]; }
+    const next = rememberPartNames(current, ids, io.request);
+    if (next !== current) await io.write(PART_NAMES_FILE, next);
+  } catch { /* remembering is a help, never a condition */ }
 }
 
 /**

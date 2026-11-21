@@ -18,6 +18,7 @@
 // (its words), a request about everything ("sab", "poora game"), or a repair ("fix", "theek karo") for edits; removing a
 // thing always needs a removal word AND its name. Kill switch: AGENTV3_GROWTH_GUARD=off.
 import { recipeFilePool } from '../lib/gameRecipeLayers';
+import { PART_NAMES_FILE, partKnowledge, requestMeans, type PartKnowledge } from './partMeaning';
 
 export const FEATURES_INDEX = 'src/game/features/index.ts';
 export const WORLD_FILE = 'src/game/world.ts';
@@ -34,12 +35,29 @@ export function growsByLists(filesAtTurnStart: Readonly<Record<string, string>> 
 }
 
 const norm = (s: string): string => String(s ?? '').normalize('NFKC').toLowerCase();
-const words = (s: string): string[] => norm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const words = (s: string): string[] => norm(s).split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
 /** 'missionDelivery' / 'mission-delivery' / 'old_town' → ['mission', 'delivery'] / ['old', 'town']. */
 export function nameTokens(id: string): string[] {
   return String(id ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
 }
 const GENERIC = new Set(['game', 'feature', 'features', 'index', 'main', 'new', 'the', 'and', 'for', 'city', 'town', 'village', 'world', 'map', 'system', 'manager', 'controller']);
+
+/**
+ * What the guard knows about the game's parts this turn — set once from the project as it was when the turn began
+ * (partMeaning.ts: each part's id, its own `about` list, the user's own words for it, and words that mean the same).
+ */
+export type PartsKnown = ReadonlyMap<string, PartKnowledge>;
+export function partsKnown(filesAtTurnStart: Readonly<Record<string, string>> | null | undefined): PartsKnown {
+  return filesAtTurnStart ? partKnowledge(filesAtTurnStart) : new Map();
+}
+/** Is the request about this part — by its name, or by what the user MEANS (partMeaning.requestMeans)? PURE. */
+export function requestIsAbout(request: string, id: string, known?: PartsKnown): boolean {
+  if (requestNames(request, id)) return true;
+  const mine = known?.get(id);
+  const vocabulary = mine ? mine.vocabulary : [id.replace(/([a-z0-9])([A-Z])/g, '$1 $2')];
+  const others = known ? [...known].filter(([other]) => other !== id).map(([, k]) => k.vocabulary) : [];
+  return requestMeans(request, vocabulary, others);
+}
 
 /** Does the request talk about this thing? Its id's own words (not the generic ones every game has) appear in the request. PURE. */
 export function requestNames(request: string, id: string): boolean {
@@ -65,12 +83,12 @@ const REMOVAL = /\b(?:remove|removes|removed|delete|deletes|deleted|drop|hata\w*
 const PERMIT = /\b(?:allow|allowed|permit|permission|go\s+ahead|ijaz+at|anumati|badal(?:ne)?\s+do|badal\s+sakte|chhed\s+sakte|jo\s+(?:bhi\s+)?zar+oo?ri|zar+oo?rat\s+ho\s+to|whatever\s+(?:is\s+)?need\w*|as\s+needed|if\s+needed)\b/i;
 
 /** May this turn EDIT an existing feature / place? PURE. */
-export function mayEdit(request: string, id: string): boolean {
-  return requestNames(request, id) || ABOUT_EVERYTHING.test(request) || REPAIR.test(request) || PERMIT.test(request);
+export function mayEdit(request: string, id: string, known?: PartsKnown): boolean {
+  return requestIsAbout(request, id, known) || ABOUT_EVERYTHING.test(request) || REPAIR.test(request) || PERMIT.test(request);
 }
-/** May this turn REMOVE it? Only when the user asks to remove, and names it. PURE. */
-export function mayRemove(request: string, id: string): boolean {
-  return REMOVAL.test(request) && requestNames(request, id);
+/** May this turn REMOVE it? Only when the user asks to remove, and the request is about it. PURE. */
+export function mayRemove(request: string, id: string, known?: PartsKnown): boolean {
+  return REMOVAL.test(request) && requestIsAbout(request, id, known);
 }
 
 const featureIdOf = (path: string): string => (path.split('/').pop() || '').replace(/\.tsx?$/, '');
@@ -92,12 +110,12 @@ export function parseFeatureList(source: string): FeatureList | null {
 }
 
 /** The features list with every entry `before` had and the request did not ask to remove put back. null = nothing to repair. PURE. */
-export function repairFeatureList(before: string, after: string | null, request: string): string | null {
+export function repairFeatureList(before: string, after: string | null, request: string, known?: PartsKnown): string | null {
   const b = parseFeatureList(before);
   if (!b) return null;                               // not our shape before the turn: not ours to judge
   const a = after === null ? null : parseFeatureList(after);
   if (!a) return before;                             // deleted, or no longer a list: the list as it was
-  const missing = b.listed.filter((name) => !a.listed.includes(name) && !mayRemove(request, name));
+  const missing = b.listed.filter((name) => !a.listed.includes(name) && !mayRemove(request, name, known));
   if (missing.length === 0) return null;
   let out = after as string;
   for (const name of missing) {
@@ -174,28 +192,30 @@ export interface GrowthVerdict { allow: boolean; reason?: string; restore?: stri
  * `after === null` means deleted. `platformWrote` is what the PLATFORM itself wrote there this turn (a kit refresh, a
  * recipe) — never a violation. When not allowed, `restore` is the content to put there. PURE.
  */
-export function growthVerdict(input: { path: string; before: string | undefined; after: string | null; request: string; platformWrote?: string | null }): GrowthVerdict {
-  const { path, before, after, request } = input;
+export function growthVerdict(input: { path: string; before: string | undefined; after: string | null; request: string; platformWrote?: string | null; known?: PartsKnown }): GrowthVerdict {
+  const { path, before, after, request, known } = input;
   if (typeof before !== 'string') return { allow: true };            // new this turn: adding is how a game grows
   if (after === before) return { allow: true };
   if (input.platformWrote != null && after === input.platformWrote) return { allow: true };
 
   if (path === FEATURES_INDEX) {
-    const fixed = repairFeatureList(before, after, request);
+    const fixed = repairFeatureList(before, after, request, known);
     return fixed === null ? { allow: true } : { allow: false, restore: fixed, reason: 'the features list lost a feature the request did not ask to remove' };
   }
   if (path === WORLD_FILE) {
     const fixed = repairWorld(before, after, request);
     return fixed === null ? { allow: true } : { allow: false, restore: fixed, reason: 'the map lost a place the request did not ask to remove' };
   }
+  // The platform's own record of what the user called each part: only the platform writes it.
+  if (path === PART_NAMES_FILE) return { allow: false, restore: before, reason: 'the record of what the user calls each part is kept by the platform' };
   if (path === APP_FILE) {
     const lost = lostMount(before, after);
     return lost.length === 0 ? { allow: true } : { allow: false, restore: before, reason: `src/App.tsx no longer mounts the game as it did (${lost.join(', ')})` };
   }
   if (FEATURE_FILE.test(path)) {
     const id = featureIdOf(path);
-    if (after === null) return mayRemove(request, id) ? { allow: true } : { allow: false, restore: before, reason: `the feature "${id}" was deleted, and the request did not ask to remove it` };
-    return mayEdit(request, id) ? { allow: true } : { allow: false, restore: before, reason: `the feature "${id}" was rewritten, and the request is not about it` };
+    if (after === null) return mayRemove(request, id, known) ? { allow: true } : { allow: false, restore: before, reason: `the feature "${id}" was deleted, and the request did not ask to remove it` };
+    return mayEdit(request, id, known) ? { allow: true } : { allow: false, restore: before, reason: `the feature "${id}" was rewritten, and the request is not about it` };
   }
   if (isKitFile(path)) {
     // The kit's own current version is the platform's write whoever carried it (a recipe run again, a layer brought up to date).
@@ -209,7 +229,7 @@ export function growthVerdict(input: { path: string; before: string | undefined;
 /** The files of a project the guard watches. PURE. */
 export function growthProtectedPaths(filesAtTurnStart: Readonly<Record<string, string>>): string[] {
   if (!growsByLists(filesAtTurnStart)) return [];
-  return Object.keys(filesAtTurnStart).filter((p) => p === FEATURES_INDEX || p === WORLD_FILE || p === APP_FILE || FEATURE_FILE.test(p) || isKitFile(p));
+  return Object.keys(filesAtTurnStart).filter((p) => p === FEATURES_INDEX || p === WORLD_FILE || p === APP_FILE || p === PART_NAMES_FILE || FEATURE_FILE.test(p) || isKitFile(p));
 }
 
 export interface GrowthRestore { path: string; restore: string; reason: string }
@@ -221,9 +241,10 @@ export function growthRestores(input: {
   platformWrote?: ReadonlyMap<string, string>;
 }): GrowthRestore[] {
   const out: GrowthRestore[] = [];
+  const known = partsKnown(input.filesAtTurnStart);
   for (const path of growthProtectedPaths(input.filesAtTurnStart)) {
     if (!(path in input.now)) continue;                               // not read: never judged on a guess
-    const v = growthVerdict({ path, before: input.filesAtTurnStart[path], after: input.now[path], request: input.request, platformWrote: input.platformWrote?.get(path) ?? null });
+    const v = growthVerdict({ path, before: input.filesAtTurnStart[path], after: input.now[path], request: input.request, platformWrote: input.platformWrote?.get(path) ?? null, known });
     if (!v.allow && typeof v.restore === 'string') out.push({ path, restore: v.restore, reason: v.reason || 'changed without being asked' });
   }
   return out;

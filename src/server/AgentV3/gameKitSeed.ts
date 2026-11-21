@@ -324,7 +324,9 @@ export function athreeMapHandoff(recipeResult: string): string {
  * the list (gameTurnHandoff), because the turn that adds the 30th thing is the one that must not touch the other 29.
  */
 export const GAME_FEATURES_RULE = '🧩 THIS GAME GROWS BY FEATURES. Everything the game has is one small file under src/game/features/'
-  + ' (export default defineFeature({ id, needs?, setup, update }) from src/game/play/features.ts) listed in src/game/features/index.ts.'
+  + ' (export default defineFeature({ id, about, needs?, setup, update }) from src/game/play/features.ts) listed in src/game/features/index.ts.'
+  + ' Give every feature about: the words the user used for it and would use again, in English AND in their language'
+  + ' (about: [\'police\', \'sipahi\', \'chase\']) — the platform reads them to know which part a later request means.'
   + ' To ADD what the user asks for: create ONE new feature file and add ONE line to that list. To CHANGE a thing: edit only that'
   + ' feature\'s file. To REMOVE it: take it out of the list. NEVER rewrite, merge or move the other features, src/App.tsx or the kit for a'
   + ' request that does not name them — a feature another one builds on is named in needs and read with api.get(id), never copied.'

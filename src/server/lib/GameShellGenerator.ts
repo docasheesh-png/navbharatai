@@ -2851,6 +2851,11 @@ export interface FeatureApi {
 export interface GameFeature<W = unknown> {
   /** A short unique name: 'coins', 'police', 'day-night', 'mission-delivery'. */
   id: string;
+  /**
+   * The words a player would use for this thing, in English and in their own language: ['police', 'sipahi', 'cop', 'chase'].
+   * NavBharatAI reads them to know which part of the game a later request is about.
+   */
+  about?: string[];
   /** Features this one builds on. They are set up first; if one of them is off, this one stays off too (and says why). */
   needs?: string[];
   /** Runs once. Add your objects here. Return a value to SHARE with other features (they read it with api.get(id)). */

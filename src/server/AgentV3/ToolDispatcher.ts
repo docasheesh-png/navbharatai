@@ -389,7 +389,7 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
-import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal } from './growthGuard';
+import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
 import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
@@ -1273,8 +1273,10 @@ export class ToolDispatcher {
   growthRefusedThisTurn(): string[] { return [...this.growthRefused]; }
   private growthBaseline: Readonly<Record<string, string>> | null = null;
   private growthRequest = '';
+  private growthKnown: PartsKnown = new Map();
   setGrowthBaseline(filesAtTurnStart: Readonly<Record<string, string>> | null, request: string | null): void {
     this.growthBaseline = filesAtTurnStart && growsByLists(filesAtTurnStart) ? filesAtTurnStart : null;
+    this.growthKnown = partsKnown(this.growthBaseline);
     this.growthRequest = typeof request === 'string' ? request : '';
   }
   /** Refuse a builder's write that changes what this turn was not asked to change. `after === null` = delete. */
@@ -1282,7 +1284,7 @@ export class ToolDispatcher {
     if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
     let rel = path;
     try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
-    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest });
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown });
     if (verdict.allow) return;
     this.growthRefused.add(rel);
     try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }

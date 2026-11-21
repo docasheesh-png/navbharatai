@@ -21685,6 +21685,17 @@ async function noteBuildOutcome(
           return { players: projectAdServingPlayers(files), ownAds: projectOwnAdSdks(files) };
         } catch { return { players: [], ownAds: [] }; }
       };
+      // 🧱 GROWTH GUARD, lock 2 (growthGuard.ts — admin 2026-11-21: "isko rocksolid karo"). Whatever door a change came
+      // through (a tool, a shell command, a script), every feature, every place on the map, the mount and the kit are
+      // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
+      // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
+      if (!abort.signal.aborted && !initialTerminalDecline) {
+        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
+          write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
+          platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
+          refused: dispatcher.growthRefusedThisTurn(), written: [...writtenFiles.keys()], record: (issue) => buildDiag.record(issue),
+          say: (text) => { events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }); } });
+      }
       // An initial decline must not manufacture artifacts through deterministic maintenance.
       // Keep the normal answer capture, release diagnostics and billing/finalization below.
       if (!initialTerminalDecline) try {
@@ -21707,17 +21718,6 @@ async function noteBuildOutcome(
         // backgrounding it risks the report finalising before these findings land — the exact blind spot
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
-        // 🧱 GROWTH GUARD, lock 2 (growthGuard.ts — admin 2026-11-21: "isko rocksolid karo"). Whatever door a change came
-        // through (a tool, a shell command, a script), every feature, every place on the map, the mount and the kit are
-        // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
-        // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
-        if (!abort.signal.aborted) {
-          await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
-            write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
-            platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
-            refused: dispatcher.growthRefusedThisTurn(), record: (issue) => buildDiag.record(issue),
-            say: (text) => { events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }); } });
-        }
         const integrityStartedAt = Date.now();
         etaFinalChecksAt = Date.now(); // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));

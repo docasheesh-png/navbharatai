@@ -75,7 +75,7 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
-import { enforceGrowthAtTurnEnd, addLibraryPlaceAtTurnStart, setLibraryCharacterAtTurnStart } from '../AgentV3/growthTurn';
+import { enforceGrowthAtTurnEnd, libraryActionsAtTurnStart } from '../AgentV3/growthTurn';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
@@ -19503,20 +19503,13 @@ async function noteBuildOutcome(
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
-      // 🗺️ A PLACE PICKED FROM THE LIBRARY IS ADDED BY THE PLATFORM ITSELF (worldGrow.ts, admin 2026-11-21). The library's
-      // own request for New city / New town / New village is a one-line change of the game's map: the platform makes it
-      // here, from the file as it is NOW in the sandbox, and tells the builder it is done. A typed wish ("ek aur shehar
-      // jodo") still goes to the builder with GAME_WORLD_RULE; this is only the exact library action.
+      // 🗺️🧍 WHAT IS PICKED IN THE LIBRARY IS DONE BY THE PLATFORM ITSELF (growthTurn.ts): a map place (worldGrow.ts) or the
+      // player's character (characterSwap.ts). Where it cannot be done, nothing is changed on a guess and the user is asked.
       if (!isImportTurn && !projectModuleRef) {
-        const placeHandoff = await addLibraryPlaceAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
-          write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) });
-        if (placeHandoff) buildPrompt = `${placeHandoff}\n\n---\n\n${buildPrompt}`;
-        // 🧍 The same for a character picked in the library ("Use as my character", characterSwap.ts): the platform adds that
-        // exact model and sets PLAYER.model; where it cannot, nothing is changed on a guess and the user is told and asked.
-        const characterHandoff = await setLibraryCharacterAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        const libraryHandoff = await libraryActionsAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
           addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
-        if (characterHandoff) buildPrompt = `${characterHandoff}\n\n---\n\n${buildPrompt}`;
+        if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
       }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();

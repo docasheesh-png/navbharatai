@@ -81,7 +81,9 @@ describe('🗺️ one more place, nothing else touched', () => {
 
   it('the route calls it before the builder, with the sandbox as the source of truth', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toMatch(/const placeHandoff = await addLibraryPlaceAtTurnStart\(\{ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: \(p\) => actuator\.readFile\(workspaceId, p\),/);
-    expect(route).toMatch(/if \(placeHandoff\) buildPrompt = `\$\{placeHandoff\}/);
+    // Since 2026-11-21 the place and the character share one call (growthTurn.libraryActionsAtTurnStart).
+    expect(route).toMatch(/const libraryHandoff = await libraryActionsAtTurnStart\(\{ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: \(p\) => actuator\.readFile\(workspaceId, p\),/);
+    expect(route).toMatch(/if \(libraryHandoff\) buildPrompt = `\$\{libraryHandoff\}/);
+    expect(readFileSync(join(__dirname, '..', 'src/server/AgentV3/growthTurn.ts'), 'utf8')).toContain('await addLibraryPlaceAtTurnStart(io)');
   });
 });

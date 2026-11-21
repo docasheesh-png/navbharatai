@@ -62,7 +62,7 @@ describe('🗺️ the seed plans the join, and mounts it', () => {
   });
 
   it('the App the platform mounts renders the starter (and a title can never break out of it)', () => {
-    expect(openWorldAppSource({ city: true })).toContain('<OpenWorldGame title="Open World" world={{ city: true }} features={FEATURES} />');
+    expect(openWorldAppSource({ city: true })).toContain('<OpenWorldGame title="Open World" world={WORLD} features={FEATURES} />');
     expect(openWorldAppSource({ title: '"} /><script>x</script>' })).not.toMatch(/<script>/);
   });
 

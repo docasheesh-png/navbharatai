@@ -35,11 +35,42 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * houses and parks, with traffic that obeys the lights and people who cross on the zebras. true for the default city;
    * false (default) for open country only. The player starts on one of its streets.
    */
-  city?: boolean | (CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number });
+  city?: boolean | RegionCity;
+  /**
+   * MORE PLACES ON THE MAP — how the world grows. Each entry is a city, a town or a village standing on its own levelled
+   * ground, spread out across the map with open country between them. Add an entry to make the map bigger; never edit
+   * the others. The first place (city, or regions[0]) is where the player starts. Up to 12.
+   */
+  regions?: WorldRegion[];
 }
+
+export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
+export type RegionKind = 'city' | 'town' | 'village';
+export type Compass = 'north' | 'north-east' | 'east' | 'south-east' | 'south' | 'south-west' | 'west' | 'north-west';
+export interface WorldRegion {
+  /** A short unique name: 'old-town', 'harbour', 'hill-village'. */
+  id: string;
+  kind: RegionKind;
+  /** Which way from the first place. Left out: the places spread around by themselves. */
+  toward?: Compass;
+  /** How far from the first place, in metres. Left out: far enough to be a journey, near enough to reach. */
+  distance?: number;
+  /** Change this place: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }. */
+  city?: RegionCity;
+}
+const COMPASS: Record<Compass, number> = { north: 0, 'north-east': Math.PI / 4, east: Math.PI / 2, 'south-east': (3 * Math.PI) / 4, south: Math.PI, 'south-west': (5 * Math.PI) / 4, west: (3 * Math.PI) / 2, 'north-west': (7 * Math.PI) / 4 };
+const REGION_PRESETS: Record<RegionKind, { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
+  city: { city: { blocksX: 4, blocksZ: 4, style: 'mixed' }, traffic: 12, people: 30, parkedCars: 4 },
+  town: { city: { blocksX: 3, blocksZ: 3, style: 'town', maxFloors: 4 }, traffic: 6, people: 16, parkedCars: 3 },
+  village: { city: { blocksX: 2, blocksZ: 2, style: 'town', maxFloors: 2, parks: 0.3 }, traffic: 2, people: 8, parkedCars: 1 },
+};
 
 /** The city standing on the map. Its own numbers (plan, routes, lots) are in CITY metres: use toWorld() to leave it. */
 export interface OpenWorldCity {
+  readonly id: string;
+  readonly kind: RegionKind;
+  /** Roughly how far the place reaches from its centre, in metres. */
+  readonly radius: number;
   readonly city: City;
   readonly traffic: CityTraffic | null;
   readonly people: CityPeople | null;
@@ -53,8 +84,12 @@ export interface OpenWorldCity {
 
 export interface OpenWorld {
   readonly map: AthreeMap;
-  /** The city, when options.city asked for one. */
+  /** The first place (where the player starts), or null in open country. */
   readonly city: OpenWorldCity | null;
+  /** Every place on the map, in the order listed. */
+  readonly regions: OpenWorldCity[];
+  /** The place the player is in or nearest to, and how far its centre is. null in a world with no places. */
+  nearestRegion(): { region: OpenWorldCity; distance: number } | null;
   /** Where the player starts: WORLD metres. */
   readonly spawn: { x: number; y: number; z: number };
   /** The player's position in WORLD metres (what the map's own functions take). */
@@ -71,7 +106,7 @@ export interface OpenWorld {
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, ...mapOptions } = options;
   const map = createAthreeMap({ profile: 'open-world', quality: 'mid', skyOptions: { lights: false }, ...mapOptions, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
@@ -105,18 +140,36 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const s = map.world.spawnPoints('player', 1)[0] ?? { x: 0, y: map.world.heightAt(0, 0), z: 0, heading: 0 };
   const spawn = { x: s.x, y: map.world.heightAt(s.x, s.z), z: s.z };
 
-  // THE CITY: the flattest dry place near the start is levelled (before any terrain is drawn), and the city stands on it.
-  const cityRoot = new THREE.Group();
-  let town: OpenWorldCity | null = null;
-  let townLocal: THREE.Object3D | null = null;
-  if (cityOption) {
-    const { traffic: trafficOption, people: peopleOption, parkedCars = 4, ...cityOptions } = cityOption === true ? {} : cityOption;
+  // THE PLACES ON THE MAP: each one (a city, a town, a village) gets the flattest dry ground in its direction, levelled
+  // BEFORE any terrain is drawn, and stands on it. The list grows one entry at a time; the first is where the player starts.
+  const wanted: WorldRegion[] = [
+    ...(cityOption ? [{ id: 'city', kind: 'city' as const, ...(cityOption === true ? {} : { city: cityOption }) }] : []),
+    ...(regionList || []),
+  ];
+  const towns: OpenWorldCity[] = [];
+  const roots: THREE.Group[] = [];
+  const locals: THREE.Object3D[] = [];
+  const taken: Array<{ x: number; z: number; r: number }> = [];
+  const seenIds = new Set<string>();
+  const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
+  for (const region of wanted) {
+    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || towns.length >= 12) continue;
+    seenIds.add(region.id);
+    const preset = REGION_PRESETS[region.kind] || REGION_PRESETS.city;
+    const { traffic: trafficOption, people: peopleOption, parkedCars = preset.parkedCars, ...own } = region.city || {};
+    const cityOptions: CityOptions = { ...preset.city, seed: 11 + towns.length * 17, ...own };
     const plan = planCity(cityOptions);
-    const hx = plan.width / 2 + 8, hz = plan.depth / 2 + 8;
-    let best = { x: spawn.x, z: spawn.z, cost: Number.POSITIVE_INFINITY };
-    for (const ring of [0, 1, 2, 3]) for (let k = 0; k < (ring ? 8 : 1); k++) {
-      const a = (k / 8) * Math.PI * 2, r = ring * Math.max(hx, hz) * 0.9;
-      const cx = spawn.x + Math.cos(a) * r, cz = spawn.z + Math.sin(a) * r;
+    const hx = plan.width / 2 + 8, hz = plan.depth / 2 + 8, reach = Math.max(hx, hz);
+    // Where to look: the first place is at the start; the others go the way they were asked, clear of what is there.
+    const first = towns.length === 0;
+    const angle = region.toward !== undefined ? COMPASS[region.toward] : (towns.length * 2.399963);   // the golden angle: spread, never stacked
+    const far = Math.max(region.distance ?? 0, first ? 0 : reach * 2 + 400 + towns.length * 250);
+    const home = first ? { x: spawn.x, z: spawn.z } : { x: towns[0].centre.x + Math.sin(angle) * far, z: towns[0].centre.z - Math.cos(angle) * far };
+    let best = { x: home.x, z: home.z, cost: Number.POSITIVE_INFINITY };
+    for (const ring of [0, 1, 2, 3, 4]) for (let k = 0; k < (ring ? 8 : 1); k++) {
+      const a = (k / 8) * Math.PI * 2, r = ring * reach * 0.9;
+      const cx = home.x + Math.cos(a) * r, cz = home.z + Math.sin(a) * r;
+      if (taken.some((t) => Math.hypot(cx - t.x, cz - t.z) < t.r + reach + 140)) continue;   // never on top of another place
       let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
       for (let i = -3; i <= 3 && !wet; i++) for (let j = -3; j <= 3; j++) {
         const x = cx + (i / 3) * hx, z = cz + (j / 3) * hz, h = map.world.heightAt(x, z);
@@ -126,31 +179,36 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const cost = wet ? Number.POSITIVE_INFINITY : (high - low) + r * 0.01;
       if (cost < best.cost) best = { x: cx, z: cz, cost };
     }
+    if (!Number.isFinite(best.cost) && !first) { console.error('[world] no dry ground was found for "' + region.id + '" in that direction; it was left out.'); continue; }
     const y = map.world.levelGround(best.x, best.z, hx, hz, 60);
+    taken.push({ x: best.x, z: best.z, r: reach });
     const city = createCity(cityOptions);
-    cityRoot.add(city.root);
-    const traffic = trafficOption === false ? null : createCityTraffic(city, trafficOption || {});
-    if (traffic) cityRoot.add(traffic.root);
-    const people = peopleOption === false ? null : createCityPeople(city, { traffic, ...(peopleOption || {}) });
-    if (people) cityRoot.add(people.root);
-    townLocal = new THREE.Object3D(); cityRoot.add(townLocal);
+    const root = new THREE.Group(); root.name = 'Region ' + region.id;
+    root.add(city.root);
+    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: preset.traffic, ...(trafficOption || {}) });
+    if (traffic) root.add(traffic.root);
+    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: preset.people, ...(peopleOption || {}) });
+    if (people) root.add(people.root);
+    const local = new THREE.Object3D(); root.add(local);
     const parked: THREE.Object3D[] = [];
-    const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
     for (let i = 0; i < Math.max(0, Math.min(12, parkedCars)); i++) {
       // Beside the kerb of a north-south street, between two crossings, nose along the street.
       const sx = plan.streetsX[(i * 2 + 1) % plan.streetsX.length];
-      const z0 = plan.streetsZ[i % (plan.streetsZ.length - 1)], z1 = plan.streetsZ[(i % (plan.streetsZ.length - 1)) + 1];
-      const car = createCar({ color: colours[i % colours.length] });
+      const zi = i % Math.max(1, plan.streetsZ.length - 1);
+      const z0 = plan.streetsZ[zi], z1 = plan.streetsZ[Math.min(plan.streetsZ.length - 1, zi + 1)];
+      const car = createCar({ color: colours[(i + towns.length) % colours.length] });
       car.position.set(sx + (plan.road / 2 - 1.3) * (i % 2 ? 1 : -1), city.heightAt(sx, (z0 + z1) / 2), z0 + (z1 - z0) * (0.3 + 0.4 * ((i * 0.37) % 1)));
       car.rotation.y = i % 2 ? Math.PI : 0;
-      cityRoot.add(car); parked.push(car); ctx.vehicles.add(car);
+      root.add(car); parked.push(car); ctx.vehicles.add(car);
     }
-    town = { city, traffic, people, parked, centre: { x: best.x, y, z: best.z }, toWorld: (x, z) => ({ x: best.x + x, z: best.z + z }) };
-    // Start on one of its streets.
-    spawn.x = best.x + city.spawn.x; spawn.z = best.z + city.spawn.z; spawn.y = y + city.spawn.y;
+    const centre = { x: best.x, y, z: best.z };
+    towns.push({ id: region.id, kind: region.kind, city, traffic, people, parked, centre, radius: reach, toWorld: (x, z) => ({ x: centre.x + x, z: centre.z + z }) });
+    roots.push(root); locals.push(local);
+    if (first) { spawn.x = best.x + city.spawn.x; spawn.z = best.z + city.spawn.z; spawn.y = y + city.spawn.y; }   // start on one of its streets
   }
+  const town: OpenWorldCity | null = towns[0] || null;
   map.update(spawn.x, spawn.z, 0, spawn.y);
-  if (town) { cityRoot.position.set(town.centre.x - chunks.origin.x, town.centre.y, town.centre.z - chunks.origin.z); ctx.scene.add(cityRoot); cityRoot.updateMatrixWorld(true); }
+  towns.forEach((t, i) => { roots[i].position.set(t.centre.x - chunks.origin.x, t.centre.y, t.centre.z - chunks.origin.z); ctx.scene.add(roots[i]); roots[i].updateMatrixWorld(true); });
   layGround(spawn.x, spawn.z);
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
   ctx.player.setWater(map.world.seaLevel);
@@ -162,7 +220,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
   };
   return {
-    map, spawn, playerWorld, city: town,
+    map, spawn, playerWorld, city: town, regions: towns,
+    nearestRegion() {
+      const at = playerWorld();
+      let found: { region: OpenWorldCity; distance: number } | null = null;
+      for (const t of towns) { const d = Math.hypot(at.x - t.centre.x, at.z - t.centre.z); if (!found || d < found.distance) found = { region: t, distance: d }; }
+      return found;
+    },
     heightAt: (x, z) => map.world.heightAt(x, z),
     place(object, x, z, lift = 0) {
       object.position.set(x - chunks.origin.x, map.world.heightAt(x, z) + lift, z - chunks.origin.z);
@@ -179,20 +243,23 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         ctx.player.object.position.x -= shift.dx; ctx.player.object.position.z -= shift.dz;
         ctx.camera.position.x -= shift.dx; ctx.camera.position.z -= shift.dz;
         for (const [object] of anchored) { object.position.x -= shift.dx; object.position.z -= shift.dz; }
-        cityRoot.position.x -= shift.dx; cityRoot.position.z -= shift.dz;
+        for (const root of roots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
       }
       layGround(at.x, at.z);
-      if (town && townLocal) {
-        // Traffic and people keep clear of the player: they are told where the player is in the CITY's own metres.
-        townLocal.position.set(at.x - town.centre.x, at.y - town.centre.y, at.z - town.centre.z);
-        const seated = ctx.vehicles.seated;
-        town.traffic?.update(delta, seated ? [townLocal, seated] : [townLocal]);
-        town.people?.update(delta, [townLocal]);
-      }
+      // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
+      const seated = ctx.vehicles.seated;
+      towns.forEach((t, i) => {
+        const d = Math.hypot(at.x - t.centre.x, at.z - t.centre.z);
+        roots[i].visible = d < t.radius + 2600;
+        if (d > t.radius + 500) return;
+        locals[i].position.set(at.x - t.centre.x, at.y - t.centre.y, at.z - t.centre.z);
+        t.traffic?.update(delta, seated ? [locals[i], seated] : [locals[i]]);
+        t.people?.update(delta, [locals[i]]);
+      });
     },
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();
-      if (town) { town.people?.dispose(); town.traffic?.dispose(); town.city.dispose(); ctx.scene.remove(cityRoot); }
+      towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
     },
   };
@@ -265,12 +332,14 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
   return [
     "import { OpenWorldGame } from './game/OpenWorldGame';",
     "import { FEATURES } from './game/features';",
+    "import { WORLD } from './game/world';",
     '',
     '// The player is already standing on NavBharatAI\'s big map' + (options.city ? ', on a street of its city' : '') + '. Make it your game through the',
     '// FEATURES list in src/game/features/index.ts: one small file per thing the game has (coins, enemies, missions, rules).',
+    '// The MAP grows the same way: its places (city, town, village) are the regions list in src/game/world.ts.',
     '// The world, the player and the camera are the kit\'s.',
     'export default function App() {',
-    `  return <OpenWorldGame title=${JSON.stringify(title)}${options.city ? ' world={{ city: true }}' : ''} features={FEATURES} />;`,
+    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} features={FEATURES} />;`,
     '}',
     '',
   ].join('\n');
@@ -289,6 +358,26 @@ export const GAME_FEATURES_INDEX = [
   '];',
   '',
 ].join('\n');
+
+export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
+/** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
+export function gameWorldFileSource(options: { city?: boolean } = {}): string {
+  return [
+    '// THIS GAME\'S MAP. The land is NavBharatAI\'s big Athree map; the places on it are the regions list below.',
+    '// To make the map BIGGER: add one more region (a city, a town or a village; say which way with toward, or leave it out).',
+    '// To change ONE place: edit only its entry (city: { blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }).',
+    '// The first region is where the player starts. Nothing else needs to change.',
+    "import type { OpenWorldOptions } from './play/openWorld';",
+    '',
+    'export const WORLD: OpenWorldOptions = {',
+    '  seed: 7,',
+    '  regions: [',
+    ...(options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
+    '  ],',
+    '};',
+    '',
+  ].join('\n');
+}
 
 export function generateOpenWorld(): RecipeOutput {
   return {
@@ -311,6 +400,10 @@ export function generateOpenWorld(): RecipeOutput {
       'and one line in the FEATURES list in src/game/features/index.ts, passed as <OpenWorldGame features={FEATURES} />. A feature that needs',
       'another names it in needs: [\'coins\'] and reads what it shared with api.get(\'coins\'). Each feature is guarded: one that throws is switched',
       'off and named in the console, and the rest of the game keeps running. To add the next thing, add the next file — never rewrite the others.',
+      'GROW THE MAP BY REGIONS: world={{ regions: [{ id: \'main-city\', kind: \'city\' }, { id: \'old-town\', kind: \'town\', toward: \'east\' }, { id: \'hill-village\', kind: \'village\' }] }}',
+      'stands each place on its own levelled ground, spread across the map with open country and roads between them (up to 12; far places are',
+      'not drawn, only near ones run their traffic). Keep the list in src/game/world.ts; a bigger map is ONE more entry. world.regions lists',
+      'them and world.nearestRegion() says where the player is.',
       'world={{ city: true }} levels ground near the start and stands a city on it (streets, crossings, pavements, shops, apartments, offices,',
       'parks), with traffic that obeys the lights, people who cross on the zebras, and parked cars the player gets into with Use (E). world.city',
       'gives the city, its traffic, its people, the parked cars and toWorld(x, z) for its lots and routes. Pass city options',

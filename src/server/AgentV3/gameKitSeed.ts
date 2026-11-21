@@ -333,6 +333,25 @@ export const GAME_FEATURES_RULE = '🧩 THIS GAME GROWS BY FEATURES. Everything 
 export const GAME_FEATURES_INDEX_FILE = 'src/game/features/index.ts';
 
 /**
+ * 🗺️ HOW A MAP GROWS (admin 2026-11-21: "user 1-1 kar ke ya ek sath kayi map jod ke ek bada giant map bhi banwa sakta hai;
+ * user agar bole map / jameen bada karo, ya racing game me bole track / road bada karo — to intention ke anusar new map /
+ * road add hote rahe"). The map is a LIST too: each place is one entry in src/game/world.ts, on its own levelled ground. The
+ * rule maps the user's WISH to the smallest change that fulfils it, and is said on every turn of a game that has the file.
+ */
+export const GAME_WORLD_FILE = 'src/game/world.ts';
+export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; kinds: city, town, village). Read what the user'
+  + ' WANTS, not the words: "map / zameen bada karo", "aur jagah chahiye", "ek aur shehar / gaon jodo", "duniya chhoti hai" → ADD one'
+  + ' region per place asked for (several at once when they ask for several; a new id each; toward: north / east / … when they say where),'
+  + ' and never edit or remove the regions already there. "Yeh shehar bada karo", "zyada traffic / log" → edit ONLY that region\'s own'
+  + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }). A different land (desert,'
+  + ' islands, mountains) → WORLD.style / seed. Up to 12 regions: at 12, say so and offer to make one of them bigger instead. Never'
+  + ' build a place by hand beside the list, and never replace the map to make it bigger.';
+/** Racing on the kit's road library: a longer road is a prop, never a hand-built track. */
+export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingRoadGame>): twelve road maps that join seamlessly into an endless road.'
+  + ' "Track / road bada karo", "lambi race" → raise finishKm (or pass finishKm={null} for a road that never ends); "aur gaadiyan" →'
+  + ' opponents. Never hand-build a second track or shorten the road to add something else.';
+
+/**
  * The builder's instruction when the platform mounted the open-world starter: the game ALREADY plays, so the builder adds
  * to it. failedbr #2485: told only "build the game IN the map", a weak builder wrote CustomGame.tsx, its own
  * characterController.ts and WorldSetup.ts beside the kit, and never joined them to the map.
@@ -341,11 +360,10 @@ export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP
   + ' animated player is standing on NavBharatAI\'s Athree map — on a street of its city when the game has one — with the follow camera,'
   + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). DO NOT rewrite src/App.tsx\'s world,'
   + ' and NEVER write your own world, ground, player, character controller, camera or game component beside it (no CustomGame, no'
-  + ' WorldSetup, no characterController of your own). ' + GAME_FEATURES_RULE + ' In a feature, setup(ctx, world) adds things with'
+  + ' WorldSetup, no characterController of your own). ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
   + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
   + ' world.city gives the city, its traffic, people, parked cars and'
-  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. Change the city or the map through the world prop'
-  + ' ({ city: { blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }, seed, quality }).';
+  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0.';
 
 /** The builder's instruction for the preview's Tune panel (kit core/tuning.ts). */
 export const TUNING_RULE = '🎚️ TUNABLE NUMBERS: declare the numbers a creator will want to adjust by playing — player speed, jump height, '
@@ -510,6 +528,15 @@ export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): 
   return results.some(result => result.recipe === 'generate_game_3d' && result.ok);
 }
 
+/** The growth rules a project's OWN files call for: its features list, its map's regions, its road-library race. PURE. */
+export function projectGrowthRules(files: Readonly<Record<string, string>>): string {
+  return [
+    typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
+    typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
+    /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
+  ].filter(Boolean).join('\n\n');
+}
+
 /** BR1954: the game request/API contract is a build prerequisite, not a reward for a fresh seed.
  * Pure snapshot handoff. No reads, writes, recipes, provider calls or continuation after Stop.
  * Module/import scopes remain independent; the seed's preservation/refresh gates are untouched.
@@ -523,13 +550,13 @@ export function gameTurnHandoff(
   if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped) return { contract: null, block: '' };
   // A game that grows by features is one on EVERY turn, whatever the turn's words are ("add coins", "police bhi daalo"
   // name no game): the project's own list says so, and the rule that protects the other features is said regardless.
-  if (!turnIsGame(prompt)) return { contract: null, block: typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '' };
+  if (!turnIsGame(prompt)) return { contract: null, block: projectGrowthRules(files) };
   const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
   const api = kitTypeContract(producers, 12_000);
   // Read from the project itself, so it holds on the 30th turn exactly as on the first — whoever built the game.
-  const grows = typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '';
+  const grows = projectGrowthRules(files);
   return { contract, block: [
     grows,
     contract ? gameContractBlock(contract) : '',

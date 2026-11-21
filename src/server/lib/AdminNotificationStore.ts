@@ -121,8 +121,43 @@ export async function saveNotification(input: { message: string; target: Notific
   try {
     await db.collection(COLLECTION).doc(note.id).set(note, { merge: false });
   } catch { /* best-effort */ }
+  // This instance shows the new message on its next poll rather than after the cache expires.
+  latestCache.clear();
   return note;
 }
+
+/**
+ * 🔴 READ BUDGET (Firestore bill audit, 2026-11-21): the inbox query ran ~27,000 times in 30 days — every
+ * signed-in user's bell polled it every 90 s, and every poll read the SAME newest-50 documents, because the
+ * list is shared (a broadcast is one document every user reads) and only the per-user filter differs.
+ *
+ * So the shared newest-N list is cached per instance for NOTIFICATIONS_CACHE_TTL_MS, and the per-user part
+ * (targeting, read and dismissed state) is still computed per request from the user's own state document,
+ * which is never cached — marking read or dismissing shows at once. A save on THIS instance clears the
+ * cache immediately; another instance's save becomes visible within the TTL.
+ */
+export const NOTIFICATIONS_CACHE_TTL_MS = 5 * 60_000;
+
+/** A per-instance memo of one async read, with an expiry and an explicit invalidation. PURE (clock injected). */
+export function createTtlCache<T>(ttlMs: number, now: () => number = Date.now) {
+  let value: T | undefined;
+  let at = 0;
+  let inFlight: Promise<T> | null = null;
+  return {
+    async get(load: () => Promise<T>): Promise<T> {
+      if (value !== undefined && now() - at < ttlMs) return value;
+      if (inFlight) return inFlight;
+      inFlight = load().then((v) => { value = v; at = now(); return v; }).finally(() => { inFlight = null; });
+      return inFlight;
+    },
+    clear(): void { value = undefined; at = 0; },
+  };
+}
+
+const latestCache = createTtlCache<AdminNotification[]>(NOTIFICATIONS_CACHE_TTL_MS);
+
+/** Test seam: forget the cached list. */
+export function __clearNotificationCache(): void { latestCache.clear(); }
 
 /** List the notifications applicable to a user, newest first, each flagged read/unread. Never throws. */
 export async function listNotificationsForUser(
@@ -133,8 +168,13 @@ export async function listNotificationsForUser(
   const db = getDb();
   if (!db) return [];
   try {
-    const snap = await db.collection(COLLECTION).orderBy('createdAt', 'desc').limit(Math.max(1, limit)).get();
-    const all = snap.docs.map((d) => d.data() as AdminNotification);
+    // The shared list is read at the default size and cached; a caller asking for fewer gets a slice of it.
+    const size = Math.max(1, limit);
+    const read = async () => {
+      const snap = await db.collection(COLLECTION).orderBy('createdAt', 'desc').limit(Math.max(size, NOTIFICATIONS_DEFAULT_LIMIT)).get();
+      return snap.docs.map((d) => d.data() as AdminNotification);
+    };
+    const all = (size <= NOTIFICATIONS_DEFAULT_LIMIT ? await latestCache.get(read) : await read()).slice(0, size);
     const state = uid ? await getUserState(uid) : { readIds: new Set<string>(), dismissedIds: new Set<string>() };
     // Dismissed ones are filtered out entirely — to this user they are deleted, and they never come
     // back. The document itself survives for everyone else (see dismissNotifications).

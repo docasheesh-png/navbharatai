@@ -1,3 +1,4 @@
+import { analyticsWindowNote } from '../lib/adminAnalyticsWindow';
 import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
 import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
 import { TestChatBotPanel } from './admin/TestChatBotPanel';
@@ -2265,7 +2266,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Row 2: 4 more metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined', 'bg-amber-500 text-on-accent', Zap)}
+                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), `${analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined'}${analyticsWindowNote(analytics?.window)}`, 'bg-amber-500 text-on-accent', Zap)}
                 {/* 🔒 "AT MOST" WHEN THE COST IS A FLOOR. Some calls cannot be priced (a provider that
                     reported no tokens, or a row written before usage was recorded), so the real cost is
                     at least what we summed and the margin is at most what we show. This card used to
@@ -2280,7 +2281,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     ? statCard(pm.marginLabel, pm.marginValue, pm.marginSub, pm.positive ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)
                     : statCard('Platform margin', '—', 'Not reported by this server yet', 'bg-surface', TrendingUp);
                 })()}
-                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500 text-on-accent', Tag)}
+                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, `Paid transactions${analyticsWindowNote(analytics?.window)}`, 'bg-pink-500 text-on-accent', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500 text-on-accent', Cpu)}
               </div>
 
@@ -2967,7 +2968,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </>
                   );
                 })()}
-                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500 text-on-accent', Tag)}
+                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, `Successful payments${analyticsWindowNote(analytics?.window)}`, 'bg-pink-500 text-on-accent', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500 text-on-accent', Cpu)}
                 {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500 text-on-accent', UserCheck)}
               </div>
@@ -3332,7 +3333,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="flex justify-between">
                     <span className="text-muted">
                       {/* chat providers only — this panel is the chat burn; the whole platform is the margin card (Q-114) */}
-                      {analytics?.providerCostComplete === false ? 'Chat provider cost (at least)' : 'Chat provider cost'}
+                      {analytics?.providerCostComplete === false ? 'Chat provider cost (at least)' : 'Chat provider cost'}{analyticsWindowNote(analytics?.window)}
                     </span>
                     <span className="text-warn font-black">{analytics?.pricedCalls === 0 && analytics?.unpricedCalls > 0 ? 'Unpriced' : `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`}</span>
                   </div>

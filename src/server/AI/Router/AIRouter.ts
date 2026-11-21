@@ -58,7 +58,14 @@ export interface StreamOutcome {
 const inFlight = new Map<string, number>();
 const MAX_IN_FLIGHT = 8;
 
+/**
+ * When this instance last consulted a provider's breaker or asked for a slot — i.e. was routing AI calls.
+ * The cross-instance cooldown sync reads Firestore only while this is recent (see startSync below).
+ */
+let lastProviderCallMs = 0;
+
 function isOnCooldown(name: string): boolean {
+  lastProviderCallMs = Date.now();
   // OPEN → skip on the fast path. HALF_OPEN (cooldown elapsed) returns false so the
   // next request flows through as a recovery trial probe.
   return getBreaker(name).isBlocking();
@@ -104,10 +111,14 @@ function mergeRemoteCooldowns(remote: Record<string, number>) {
   }
 }
 
-// Start the cross-instance cooldown sync once at module load (no-op under tests).
-providerCooldownStore.startSync(mergeRemoteCooldowns);
+// Start the cross-instance cooldown sync once at module load (no-op under tests). It reads Firestore only
+// while this instance is making AI calls (ProviderCooldownStore's read-budget note, 2026-11-21).
+// Only the store's OWN method is used here (its interval and activity window live in the store): many
+// tests mock this module with just `providerCooldownStore`, so a constant imported from it is undefined there.
+providerCooldownStore.startSync(mergeRemoteCooldowns, { lastActivityMs: () => lastProviderCallMs });
 
 export function acquireSlot(name: string): boolean {
+  lastProviderCallMs = Date.now();
   const count = inFlight.get(name) || 0;
   if (count >= MAX_IN_FLIGHT) return false;
   inFlight.set(name, count + 1);

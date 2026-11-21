@@ -97,7 +97,10 @@ export interface NotificationInbox {
   deleteIds: (ids: string[]) => Promise<boolean>;
 }
 
-/** The inbox itself: fetched on sign-in, polled every 90 s, shared by the ☰ dot, the sidebar row and the panel. */
+/** How often a visible tab re-reads the inbox. */
+export const NOTIFICATION_POLL_MS = 180_000;
+
+/** The inbox itself: fetched on sign-in, polled every 3 min while visible, shared by the ☰ dot, the sidebar row and the panel. */
 export function useNotificationInbox(user: FirebaseUser | null): NotificationInbox {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
@@ -115,12 +118,21 @@ export function useNotificationInbox(user: FirebaseUser | null): NotificationInb
     } catch { /* best-effort — the count just stays as it was */ }
   }, [user]);
 
-  // Load on sign-in + poll every 90s so an admin message shows up without a reload.
+  // Load on sign-in, poll every 3 minutes while the tab is VISIBLE, and reload the moment it becomes
+  // visible again. Every signed-in tab polled every 90 s, hidden or not — ~27,000 inbox reads in a month (Firestore
+  // bill audit, 2026-11-21); the server also caches the shared list (AdminNotificationStore).
   useEffect(() => {
     void load();
     if (pollRef.current) clearInterval(pollRef.current);
-    if (user) pollRef.current = setInterval(() => void load(), 90_000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    if (!user) return;
+    const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+    pollRef.current = setInterval(() => { if (visible()) void load(); }, NOTIFICATION_POLL_MS);
+    const onVisible = () => { if (visible()) void load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [user, load]);
 
   const markReadVisible = useCallback(async () => {
@@ -146,7 +158,7 @@ export function useNotificationInbox(user: FirebaseUser | null): NotificationInb
    * caller's own inbox and nobody else's.
    *
    * The rows are removed only AFTER the server confirms. An optimistic removal would show a message as
-   * deleted and have it reappear on the next 90-second poll, which reads as the button being broken —
+   * deleted and have it reappear on the next poll, which reads as the button being broken —
    * and a FAILED delete is reported to the panel rather than looking like nothing happened.
    */
   const deleteIds = useCallback(async (ids: string[]): Promise<boolean> => {

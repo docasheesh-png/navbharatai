@@ -103619,3 +103619,17 @@ The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans �
 - **Root cause, moving subjects:** walk and run were asked for only for a hand-typed list of subjects, which the new people were not on. Now the list also includes every subject a library model animates. The role stays the game's need: "walking dog" still asks for walk, so the code-built dog walks.
 - **Root cause, duplicate models:** batch 12 first listed three people that batch 4 already had. `buildLibraryBatch.mts` now refuses a model already in the library (reversion proven), and a test asserts that no model is in the catalogue twice.
 - **Library menu:** subjects with the same roles now share one line. It went from 11558 to about 10700 chars, under the 11000 cap.
+## 2026-11-21 — #4406 merged; FBX from Sketchfab / Mixamo / avatar creators now converts
+- #4406 merged: the character customizer on request, and the intent map.
+- The admin added 3 Indian-clothing models to Drive: a man in a dhoti, a man in a kurta, a woman in a saree. Their FBX exports exposed two class bugs in the server FBX import:
+  - **Embedded pictures:** FBXLoader calls `window.URL.createObjectURL`, so all 3 failed to parse in Node. `withLentWindow` now lends a window for the synchronous parse only, captures the pictures (they now go into the GLB), then removes it.
+  - **Face shape keys:** 126 morph targets were 42 MB of a 55 MB GLB. `dropMorphTargets` removes them and the user is told.
+  - Test: `anFbxBecomesAModelInTheGame` (+2).
+- **NOT in the library — licences unverified.** None of the 3 zips carries a licence file, and sketchfab.com is unreachable from this session.
+  - The dhoti model looks like Sketchfab's "Indian Man In Dhoti" (earlier search: CC-BY).
+  - The kurta and saree went through Mixamo (a "mixamo.com" clip, an avatar-creator body), and their licence is unknown.
+  - Also too heavy for the 8 MB user path (13 MB / 23 MB after the fix; 65k / 118k triangles).
+  - Waiting on the admin for each model's licence (a page screenshot).
+- **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
+  - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
+  - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.

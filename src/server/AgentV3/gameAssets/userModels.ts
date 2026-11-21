@@ -534,9 +534,14 @@ export async function fbxToGlb(bytes: Uint8Array, warnings: string[], files: Rea
   const noPictures = { path: '', setPath(p: string) { this.path = p; return this; }, load: (url: string) => Object.assign(new THREE.Texture(), { userData: { fileName: String(url ?? '') } }) };
   manager.addHandler(/./, noPictures);
   let root: Node3 & { animations: { name: string }[] };
+  const embedded = new Map<string, Blob>();
   try {
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    root = new FBXLoader(manager).parse(ab, '') as unknown as typeof root;
+    // EMBEDDED pictures (most Sketchfab / Mixamo exports carry them inside the FBX) make FBXLoader call
+    // window.URL.createObjectURL — Node has no window, so such an FBX never parsed at all (3 of 3 real Indian-clothing
+    // models, 2026-11-21). A window is lent only for this synchronous parse, then removed, so no other server code ever
+    // sees one; it records each embedded picture under a key the texture handler receives, and the picture goes back in.
+    root = withLentWindow(embedded, () => new FBXLoader(manager).parse(ab, '')) as unknown as typeof root;
   } catch { throw new UserModelError('this FBX file could not be read — export it as .glb (Blender: File → Export → glTF 2.0) and attach that'); }
   const TEXTURE_SLOTS = ['map', 'normalMap', 'specularMap', 'emissiveMap', 'alphaMap', 'aoMap', 'bumpMap', 'lightMap', 'displacementMap', 'roughnessMap', 'metalnessMap'];
   let texturesDropped = false;
@@ -563,12 +568,16 @@ export async function fbxToGlb(bytes: Uint8Array, warnings: string[], files: Rea
     for (const [mi, list] of [...byMaterial].sort((a, b) => a[0] - b[0])) { g.addGroup(out.length, list.length, mi); for (const v of list) out.push(v); }
     g.setIndex(out);
   });
+  // Face shape keys (morph targets) from avatar creators: a Mixamo-rigged kurta and saree carried 126 each, 42 MB of the
+  // 55 MB GLB. A game runtime never animates them (clips move bones), so they are left out — and the user is told.
+  const morphTargets = dropMorphTargets(root);
+  if (morphTargets) warnings.push(`its ${morphTargets} face shape keys (expressions) were left out — a game does not use them, and they made the file several times larger`);
   for (const clip of root.animations) clip.name = clip.name.replace(/^.*\|/, '');
   // FBX stores its own axis and unit settings, which do not always survive conversion: say so once, with the exact way out.
   warnings.push('it was converted from FBX — if it looks turned on its side or the wrong size, ask to turn or resize it, or export it as .glb for the exact look');
   const pictures = new Map<string, Uint8Array>(); const missing = new Set<string>();
   for (const [material, file] of wantedPicture) {
-    const bytes = findResource(files, fbxPath, file.replace(/\\/g, '/').split('/').pop() ?? file);
+    const bytes = embedded.has(file) ? new Uint8Array(await embedded.get(file)!.arrayBuffer()) : findResource(files, fbxPath, file.replace(/\\/g, '/').split('/').pop() ?? file);
     const isPicture = bytes && ((bytes[0] === 0x89 && bytes[1] === 0x50) || (bytes[0] === 0xff && bytes[1] === 0xd8));
     if (isPicture) pictures.set(material, bytes!); else missing.add(file.replace(/\\/g, '/').split('/').pop() ?? file);
   }
@@ -650,4 +659,30 @@ export function embedBaseColorPictures(glb: Uint8Array, byMaterial: ReadonlyMap<
   out.writeUInt32LE(paddedJson.length, 12); out.writeUInt32LE(0x4e4f534a, 16); paddedJson.copy(out, 20);
   out.writeUInt32LE(bin.length, 20 + paddedJson.length); out.writeUInt32LE(0x004e4942, 24 + paddedJson.length); bin.copy(out, 28 + paddedJson.length);
   return new Uint8Array(out);
+}
+
+/**
+ * Run a synchronous parse with a borrowed `window.URL.createObjectURL` that records each blob under a key, then remove it
+ * (only if this call added it) — so no other server code ever sees a `window`. Used for FBXLoader's embedded pictures.
+ */
+export function withLentWindow<T>(embedded: Map<string, Blob>, parse: () => T): T {
+  const g = globalThis as unknown as { window?: unknown };
+  const lent = !('window' in g);
+  if (lent) g.window = { URL: { createObjectURL: (blob: Blob) => { const key = `nbblob:${embedded.size}`; embedded.set(key, blob); return key; } } };
+  try { return parse(); } finally { if (lent) delete g.window; }
+}
+
+/** Remove every mesh's morph targets (face shape keys); returns the most any one mesh had. */
+export function dropMorphTargets(root: { traverse(cb: (n: { geometry?: unknown }) => void): void }): number {
+  let most = 0;
+  root.traverse((n) => {
+    const geo = n.geometry as { morphAttributes?: Record<string, unknown[]> } | undefined;
+    const keys = Object.values(geo?.morphAttributes ?? {}).reduce((m, list) => Math.max(m, Array.isArray(list) ? list.length : 0), 0);
+    if (!geo || !keys) return;
+    most = Math.max(most, keys);
+    geo.morphAttributes = {};
+    const mesh = n as { morphTargetInfluences?: unknown; morphTargetDictionary?: unknown };
+    mesh.morphTargetInfluences = undefined; mesh.morphTargetDictionary = undefined;
+  });
+  return most;
 }

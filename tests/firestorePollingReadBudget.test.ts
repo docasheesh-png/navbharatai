@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { cooldownSyncTick, COOLDOWN_SYNC_INTERVAL_MS } from '../src/server/lib/ProviderCooldownStore';
+import { cooldownSyncTick, isRecentlyActive, COOLDOWN_SYNC_INTERVAL_MS, COOLDOWN_SYNC_ACTIVE_WINDOW_MS } from '../src/server/lib/ProviderCooldownStore';
 import { createTtlCache, NOTIFICATIONS_CACHE_TTL_MS } from '../src/server/lib/AdminNotificationStore';
 import { walletsCreatedOn } from '../src/server/lib/adminUserActivity';
 import { analyticsWindowNote } from '../src/lib/adminAnalyticsWindow';
@@ -26,13 +26,19 @@ describe('provider cooldown sync', () => {
     expect(merge).toHaveBeenCalledWith({ GROK: 5 });
     expect(await cooldownSyncTick(async () => { throw new Error('x'); }, merge, () => true)).toBe(false);
   });
+  it('an instance idle past the window counts as inactive; one that just routed is active', () => {
+    expect(isRecentlyActive(0, COOLDOWN_SYNC_ACTIVE_WINDOW_MS)).toBe(false);
+    expect(isRecentlyActive(1_000, 1_000 + COOLDOWN_SYNC_ACTIVE_WINDOW_MS - 1)).toBe(true);
+  });
   it('reads only live cooldowns, at most once a minute, gated on router activity', () => {
     const store = readFileSync('src/server/lib/ProviderCooldownStore.ts', 'utf8');
     expect(store).toMatch(/collection\('provider_cooldowns'\)\.where\('until', '>', Date\.now\(\)\)\.get\(\)/);
     expect(store).not.toMatch(/collection\('provider_cooldowns'\)\.get\(\)/);
     expect(COOLDOWN_SYNC_INTERVAL_MS).toBeGreaterThanOrEqual(60_000);
     const router = readFileSync('src/server/AI/Router/AIRouter.ts', 'utf8');
-    expect(router).toMatch(/startSync\(\s*mergeRemoteCooldowns,\s*COOLDOWN_SYNC_INTERVAL_MS,\s*\(\) => Date\.now\(\) - lastProviderCallMs < COOLDOWN_SYNC_ACTIVE_WINDOW_MS/);
+    expect(router).toMatch(/startSync\(mergeRemoteCooldowns, \{ lastActivityMs: \(\) => lastProviderCallMs \}\)/);
+    // The router imports nothing else from the store: tests that mock it supply only the store object.
+    expect(router).toMatch(/import \{ providerCooldownStore \} from '\.\.\/\.\.\/lib\/ProviderCooldownStore';/);
     // Activity is marked on the path every routed call takes.
     expect(router).toMatch(/function isOnCooldown\(name: string\): boolean \{\s*lastProviderCallMs = Date\.now\(\);/);
   });

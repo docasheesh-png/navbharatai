@@ -7,7 +7,7 @@ import { freeBusyMessage, isFreeTierUniverse } from '../../lib/freeBusyMessage';
 import { maybeGatewayText } from '../InferenceGateway/runtime';
 
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
-import { providerCooldownStore, COOLDOWN_SYNC_INTERVAL_MS, COOLDOWN_SYNC_ACTIVE_WINDOW_MS } from '../../lib/ProviderCooldownStore';
+import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
 import { getBreaker, allBreakerNames } from './CircuitBreaker';
 import { tracer } from '../../observability/Tracer';
 import { shouldRaceStreams } from './streamRacePolicy';
@@ -113,11 +113,9 @@ function mergeRemoteCooldowns(remote: Record<string, number>) {
 
 // Start the cross-instance cooldown sync once at module load (no-op under tests). It reads Firestore only
 // while this instance is making AI calls (ProviderCooldownStore's read-budget note, 2026-11-21).
-providerCooldownStore.startSync(
-  mergeRemoteCooldowns,
-  COOLDOWN_SYNC_INTERVAL_MS,
-  () => Date.now() - lastProviderCallMs < COOLDOWN_SYNC_ACTIVE_WINDOW_MS,
-);
+// Only the store's OWN method is used here (its interval and activity window live in the store): many
+// tests mock this module with just `providerCooldownStore`, so a constant imported from it is undefined there.
+providerCooldownStore.startSync(mergeRemoteCooldowns, { lastActivityMs: () => lastProviderCallMs });
 
 export function acquireSlot(name: string): boolean {
   lastProviderCallMs = Date.now();

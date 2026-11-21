@@ -42,6 +42,11 @@ export const COOLDOWN_SYNC_INTERVAL_MS = 60_000;
 /** An instance that made an AI call within this window counts as active and keeps syncing. */
 export const COOLDOWN_SYNC_ACTIVE_WINDOW_MS = 10 * 60_000;
 
+/** Was the last AI routing activity within the sync's active window? PURE. */
+export function isRecentlyActive(lastActivityMs: number, nowMs: number): boolean {
+  return nowMs - lastActivityMs < COOLDOWN_SYNC_ACTIVE_WINDOW_MS;
+}
+
 /**
  * One sync tick: read and merge only when `isActive()`. Returns whether a read happened. PURE over its
  * arguments (the test passes fakes; the store passes Firestore). Never throws.
@@ -113,16 +118,19 @@ class ProviderCooldownStore {
   /**
    * Start a background sync loop that merges remote cooldowns into local state.
    * No-op under tests and idempotent (only one timer ever runs). The timer is
-   * unref'd so it never keeps the process alive on its own. `isActive` gates each
-   * tick: while it returns false nothing is read (see the read-budget note above).
+   * unref'd so it never keeps the process alive on its own. With `lastActivityMs`, a
+   * tick reads only when that activity is within COOLDOWN_SYNC_ACTIVE_WINDOW_MS (see
+   * the read-budget note above).
    */
   startSync(
     merge: (remote: Record<string, number>) => void,
-    intervalMs = COOLDOWN_SYNC_INTERVAL_MS,
-    isActive: () => boolean = () => true,
+    opts: { intervalMs?: number; lastActivityMs?: () => number } = {},
   ): void {
     if (this.syncTimer) return;
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+    const intervalMs = opts.intervalMs ?? COOLDOWN_SYNC_INTERVAL_MS;
+    const lastActivity = opts.lastActivityMs;
+    const isActive = () => (lastActivity ? isRecentlyActive(lastActivity(), Date.now()) : true);
     const tick = () => void cooldownSyncTick(() => this.readAll(), merge, isActive);
     tick();
     this.syncTimer = setInterval(tick, intervalMs);

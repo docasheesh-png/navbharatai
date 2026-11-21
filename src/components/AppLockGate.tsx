@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Lock, ShieldCheck, KeyRound, AlertTriangle, Mail, Loader2 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import { fetchOtpLoginOffered } from '../lib/signInOptions';
 import { areaLabel, type AppLockArea } from '../lib/appLockAreas';
 import {
   appLockStatus, cachedAppLockStatus, subscribeAppLock, currentUnlock, clearUnlock, resetAppLock,
@@ -205,6 +206,16 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
   const lockedForMs = status?.locked ? status.lockedForMs : 0;
   const noEmail = status?.channel === 'fresh-sign-in';
   const noContact = status?.channel === 'none';
+  // "Sign in again" signs this account OUT and relies on a mobile-OTP sign-in to get back in. While that
+  // sign-in is suspended (otpLoginSwitch.ts, 2026-11-21) the button would lock a phone-only person out of
+  // their own account, so it is offered only when the server says OTP sign-in is on. Null = still asking.
+  const [otpLoginOffered, setOtpLoginOffered] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!noEmail) return;
+    let live = true;
+    void fetchOtpLoginOffered(fetch).then((offered) => { if (live) setOtpLoginOffered(offered); });
+    return () => { live = false; };
+  }, [noEmail]);
   const what = label ?? areaLabel(area);
 
   return (
@@ -308,10 +319,12 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
           <div className="mt-5 space-y-3 text-left">
             <p className="rounded-xl border border-line bg-well p-3 text-[11px] leading-relaxed text-muted">
               {noEmail
-                ? `Your account signs in with your mobile number${status.destination ? ` (${status.destination})` : ''} and has no email address, so we cannot email you a code. Sign in again with your mobile OTP — that is your verification — and you will be able to set your PIN straight after.`
+                ? otpLoginOffered === false
+                  ? `Your account signs in with your mobile number${status.destination ? ` (${status.destination})` : ''} and has no email address, so we cannot email you a code. Mobile number sign-in is temporarily unavailable, so your PIN cannot be set right now. Please try again later — you stay signed in.`
+                  : `Your account signs in with your mobile number${status.destination ? ` (${status.destination})` : ''} and has no email address, so we cannot email you a code. Sign in again with your mobile OTP — that is your verification — and you will be able to set your PIN straight after.`
                 : 'Your account has no email address or mobile number on it, so there is no way to send you a verification code. Add one in Settings, then come back to set your PIN.'}
             </p>
-            {noEmail && (
+            {noEmail && otpLoginOffered === true && (
               <button onClick={() => void signInAgain()} className={`w-full rounded-xl px-4 py-3 text-sm font-bold ${PRIMARY}`}>
                 Sign in again
               </button>

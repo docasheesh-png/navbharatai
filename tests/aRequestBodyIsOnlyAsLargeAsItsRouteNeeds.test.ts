@@ -560,8 +560,11 @@ describe('🔒 formBodyParser: form bodies only where a standard requires them',
 
   const form = (path: string, body: string) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
 
-  it('only the OAuth token and revocation endpoints are form routes, at their own limits', () => {
-    expect(SMALL_BODY_ROUTES.filter((r) => r.form).map((r) => r.path).sort()).toEqual(['/api/failedbr/oauth/revoke', '/api/failedbr/oauth/token']);
+  it('only the OAuth token/revocation endpoints and the email unsubscribe are form routes, at their own limits', () => {
+    // Each is required by a standard to accept a form body: OAuth (RFC 6749 §4.1.3 / RFC 7009 §2.1) and the
+    // one-click unsubscribe a mail client POSTs as `List-Unsubscribe=One-Click` (RFC 8058, 2026-11-21).
+    expect(SMALL_BODY_ROUTES.filter((r) => r.form).map((r) => r.path).sort()).toEqual(['/api/email/unsubscribe', '/api/failedbr/oauth/revoke', '/api/failedbr/oauth/token']);
+    expect(formBodyLimits('/api/email/unsubscribe')).toEqual({ limit: '2kb', parameterLimit: 5 });
     expect(formBodyLimits('/api/v1/failedbr/oauth/token')).toEqual({ limit: '16kb', parameterLimit: 20 });
     expect(formBodyLimits('/api/failedbr/oauth/register')).toBeNull();
     expect(formBodyLimits('/api/profile/budget')).toBeNull();

@@ -9,7 +9,9 @@
 // No login: the HMAC in the link is the proof. The pages are plain server-rendered HTML so they work in any
 // mail app's browser without loading the app.
 
-import express, { type Express, type Request, type Response } from 'express';
+// The form body (page button, or RFC 8058 one-click) is parsed by the shared formBodyParser — this route is
+// listed in requestBodyLimits.ts SMALL_BODY_ROUTES with `form`, and routes never mount their own parser.
+import type { Express, Request, Response } from 'express';
 import {
   verifyUnsubscribeToken, unsubscribeSigningKey, setEmailPreference, mayEmail,
   EMAIL_CATEGORY_LABEL, type EmailCategory,
@@ -73,7 +75,7 @@ export function registerEmailUnsubscribeRoutes(app: Express): void {
       : unsubscribePage({ title: 'You are unsubscribed', message: `You do not get emails for ${label}.`, button: { label: 'Subscribe again', action: 'resubscribe', query: link.query } }));
   });
 
-  app.post('/api/email/unsubscribe', express.urlencoded({ extended: false, limit: '2kb' }), async (req: Request, res: Response) => {
+  app.post('/api/email/unsubscribe', async (req: Request, res: Response) => {
     const link = readLink(req);
     if (!link) return send(res, 400, INVALID);
     const body = (req.body ?? {}) as Record<string, unknown>;

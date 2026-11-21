@@ -111,6 +111,24 @@ describe('the unsubscribe page', () => {
   });
 });
 
+describe('the real form parser reads a mail client one-click body on this route', () => {
+  it('formBodyParser parses List-Unsubscribe=One-Click for /api/email/unsubscribe', async () => {
+    const express = (await import('express')).default;
+    const { formBodyParser } = await import('../src/server/lib/requestBodyLimits');
+    const app = express();
+    app.use(formBodyParser());
+    app.post('/api/email/unsubscribe', (req, res) => { res.json({ body: req.body }); });
+    const server = app.listen(0);
+    try {
+      const port = (server.address() as { port: number }).port;
+      const r = await fetch(`http://127.0.0.1:${port}/api/email/unsubscribe?u=x`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' });
+      expect((await r.json()).body).toEqual({ 'List-Unsubscribe': 'One-Click' });
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe('a store-approval email names whose mail it is', () => {
   it('passes the uid to the mailer, so the unsubscribe link belongs to that account', async () => {
     const email = vi.fn(async () => true);

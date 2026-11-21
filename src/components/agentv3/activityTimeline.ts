@@ -13,7 +13,7 @@
 // file_changed events — never synthetic), and the diff map (real patches), and produces the
 // ordered block list the chat renders. No I/O, no React — the component stays thin.
 
-import type { ActivityEntry } from './agentV3Types';
+import type { ActivityEntry, BuildProof } from './agentV3Types';
 
 /** The minimal message shape the grouper needs — the panel's ChatMsg satisfies it. */
 export interface TimelineMsgLike {
@@ -24,6 +24,8 @@ export interface TimelineMsgLike {
 
 export type ChatBlock<M extends TimelineMsgLike> =
   | { kind: 'msg'; key: string; msg: M }
+  /** One finished build's proof (check card + build health + feedback), at the end of its own turn. */
+  | { kind: 'proof'; key: string; ts: number; proof: BuildProof }
   | {
       kind: 'actions';
       key: string;
@@ -262,6 +264,7 @@ export function buildChatBlocks<M extends TimelineMsgLike>(
   msgs: M[],
   activity: ActivityEntry[],
   diffs: Record<string, string>,
+  proofs: BuildProof[] = [],
 ): Array<ChatBlock<M>> {
   const prose = msgs.filter((m) => m.role === 'user' || !isProgressNoise(m.text));
   // Latest per-file tick → the active group's progress note.
@@ -292,9 +295,22 @@ export function buildChatBlocks<M extends TimelineMsgLike>(
     group = [];
   };
 
+  // A build's proof closes its own turn: it is placed after everything at or before its anchor and
+  // before anything later, so a newer reply always renders BELOW an older build's proof.
+  const proofQueue = [...proofs].sort((a, b) => a.anchorTs - b.anchorTs);
+  let k = 0;
+  const placeProofsBefore = (ts: number): void => {
+    while (k < proofQueue.length && proofQueue[k].anchorTs < ts) {
+      flush();
+      blocks.push({ kind: 'proof', key: `proof-${proofQueue[k].key}`, ts: proofQueue[k].anchorTs, proof: proofQueue[k] });
+      k++;
+    }
+  };
+
   let i = 0;
   let j = 0;
   while (i < prose.length || j < activity.length) {
+    placeProofsBefore(Math.min(i < prose.length ? prose[i].ts : Infinity, j < activity.length ? activity[j].ts : Infinity));
     // Prose wins ties so "let me fix X" reads before the actions it narrates.
     if (j >= activity.length || (i < prose.length && prose[i].ts <= activity[j].ts)) {
       flush();
@@ -306,6 +322,7 @@ export function buildChatBlocks<M extends TimelineMsgLike>(
     }
   }
   flush();
+  placeProofsBefore(Infinity);
 
   // Attach the live progress note to the LAST block when it is a still-active action group and
   // the tick is newer than the group's start (an active build writing its files).

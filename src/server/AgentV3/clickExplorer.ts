@@ -942,12 +942,31 @@ async function judgeFailedPress(page, res, attr, marked, message, prefix) {
   res.note = 'it cannot be ' + (prefix.indexOf('used') >= 0 ? 'used' : 'pressed') + ': ' + what + ' is on top of it';
 }
 
+// 🖱️ A CAPTURED MOUSE IS OUR STATE, NOT THE APP'S DEFECT (failedbr #2485, Q-3231). A game captures the mouse when Play is
+// pressed (pointer lock: every pointer event goes to the canvas until Esc). A person presses Esc and clicks the button; our
+// instrument clicked straight on, the browser said the canvas "intercepts pointer events", and "Full screen" and "Mute"
+// were reported as covered — then a 115-second repair was run on a healthy HUD and undone. The lock is released the way
+// Esc releases it and the press is made once more; only a control that still cannot be pressed is the app's.
+async function releaseCapturedMouse(page) {
+  return page.evaluate(() => {
+    if (!document.pointerLockElement) return false;
+    try { document.exitPointerLock(); } catch (e) { return false; }
+    return true;
+  }).catch(() => false);
+}
+
 async function press(page, i) {
   const loc = page.locator('[data-nbai-x="' + i + '"]').first();
   try {
     await loc.click({ timeout: 4000 });
   } catch (e) {
-    if (!/not stable/i.test(String(e && e.message || e))) throw e;
+    const message = String(e && e.message || e);
+    if (/intercepts pointer events/i.test(message) && await releaseCapturedMouse(page)) {
+      await page.waitForTimeout(150);
+      await loc.click({ timeout: 4000 });
+      return;
+    }
+    if (!/not stable/i.test(message)) throw e;
     await loc.dispatchEvent('click');
   }
 }

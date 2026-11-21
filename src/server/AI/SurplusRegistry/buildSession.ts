@@ -286,7 +286,7 @@ export async function createSurplusBuildSession(options: {
           // slower "ok" call — the report said no engine wasted any time. It is now said, with codes only.
           attemptNotices++;
           notifyAttemptFailed(callbacks, { model: permit.model, stage: failure?.stage ?? 'dispatch', reason: failure?.reason ?? 'dispatch_failed',
-            attempt: failure?.attempt ?? 1, benched: bench, ...(bench && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure ? { sameModelRetry: true } : {}) });
+            attempt: failure?.attempt ?? 1, ...(typeof failure?.httpStatus === 'number' ? { httpStatus: failure.httpStatus } : {}), benched: bench, ...(bench && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure ? { sameModelRetry: true } : {}) });
         },
         onProviderUsed: permit => { model = permit.model; try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
         onTurnComplete(result, used) {
@@ -364,6 +364,8 @@ export interface SurplusAttemptFailure {
   /** The model was taken out of this build's rotation — the next turn starts on another model, with a cold cache. */
   benched?: boolean;
   nextModel?: string;
+  /** The attempt's HTTP status when the engine answered with one (Q-3234). A refused request (not 2xx) is said as such. */
+  httpStatus?: number;
   /** First failure of this model in the session: the retry stays on it, cache warm (Q-3019). */
   sameModelRetry?: boolean;
 }
@@ -373,7 +375,9 @@ export const SURPLUS_FAILURES_BEFORE_BENCH = 2;
 
 /** Plain words for the report: what failed, what it cost, what happens next. PURE. */
 export function describeSurplusAttemptFailure(f: SurplusAttemptFailure): string {
-  const parts = [`Surplus attempt ${f.attempt} on ${f.model} failed (${f.stage}: ${f.reason})`];
+  // An answer that was never a completion is not an "invalid completion": a refused request is named by its status.
+  const refused = typeof f.httpStatus === 'number' && (f.httpStatus < 200 || f.httpStatus >= 300);
+  const parts = [`Surplus attempt ${f.attempt} on ${f.model} failed (${f.stage}: ${refused ? `the engine refused the request, HTTP ${f.httpStatus}` : f.reason})`];
   if (typeof f.elapsedMs === 'number') parts.push(`after ${Math.round(f.elapsedMs / 100) / 10}s`);
   if (f.benched) parts.push(f.nextModel ? `— ${f.model} is benched for this build; the next turn moves to ${f.nextModel}, whose cache is cold` : `— ${f.model} is benched for this build`);
   if (f.sameModelRetry) parts.push(`— retried on the same model (its cache stays warm); a second failure benches it`);

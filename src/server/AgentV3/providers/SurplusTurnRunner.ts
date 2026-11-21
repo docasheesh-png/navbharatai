@@ -47,6 +47,9 @@ export interface SurplusTurnFailure {
   readonly reason: 'dispatch_failed' | 'empty_completion' | 'content_filter' | 'invalid_completion';
   readonly attempt: number;
   readonly hasResponse: boolean;
+  /** The transport's integer HTTP status for this attempt, when it answered at all (failedbr #2485, Q-3234: six attempts
+   *  answered 404 and the report called each one "invalid_completion"). An integer only — never upstream text. */
+  readonly httpStatus?: number;
 }
 /** Issued only after the session has reconciled this failed attempt to durable, known expense. */
 export interface SurplusFailureResolution {
@@ -302,7 +305,8 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
               return { ...narrative, text: guardSurplusNarrative(narrative.text, permit) };
             });
           } catch (error) {
-            const failure: SurplusTurnFailure = Object.freeze({ stage: 'response_validation', reason: failureReason(error), attempt, hasResponse: true });
+            const status = httpStatusOf(raw);
+            const failure: SurplusTurnFailure = Object.freeze({ stage: 'response_validation', reason: failureReason(error), attempt, hasResponse: true, ...(status !== undefined ? { httpStatus: status } : {}) });
             // Accounting can outlive the turn timer; a known refusal must never become availability.
             if (failure.reason === 'content_filter') policyRefused = true;
             const next = await fallback(await accountFailure(error, failure), failure, error);

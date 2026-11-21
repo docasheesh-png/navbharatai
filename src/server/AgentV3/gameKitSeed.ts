@@ -350,6 +350,16 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }). A different land (desert,'
   + ' islands, mountains) → WORLD.style / seed. Up to 12 regions: at 12, say so and offer to make one of them bigger instead. Never'
   + ' build a place by hand beside the list, and never replace the map to make it bigger.';
+/**
+ * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
+ * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the
+ * request can mean two things, the builder asks instead of choosing. Said on every turn of a game that grows by lists.
+ */
+export const GAME_NO_GUESS_RULE = '🛑 NEVER CHANGE THIS GAME ON A GUESS. If the request can mean more than one thing in THIS game — which character, car,'
+  + ' place or feature it is about; "isko accha / better karo" without saying what; a word that fits two parts, or none — do NOT pick one and do NOT'
+  + ' change that part. Do everything that IS clear, then ask ONE short question in the user\'s language that names the choices (for example: "Kaun sa'
+  + ' badlun — police ki gaadi ya aapki apni gaadi?"). Never fill a gap with your own idea of what they probably meant, never change a number, colour,'
+  + ' name or behaviour nobody asked about, and never question a request that is already exact.';
 /** Who the player is lives in ONE file, so replacing the character never touches the game. */
 export const GAME_PLAYER_FILE_PATH_IN_GAME = 'src/game/player.ts';
 export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/player.ts (PLAYER, passed as <OpenWorldGame player={PLAYER} />). "Character badlo",'
@@ -545,6 +555,7 @@ export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): 
 export function projectGrowthRules(files: Readonly<Record<string, string>>): string {
   return [
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
+    typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_NO_GUESS_RULE : '',
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',

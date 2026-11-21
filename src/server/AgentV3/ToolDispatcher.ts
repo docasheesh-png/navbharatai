@@ -109,6 +109,9 @@ import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSumm
 import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
+
+/** A recipe's files in flight at once: enough to end the one-by-one wait, few enough for any sandbox. */
+const RECIPE_WRITE_CONCURRENCY = 6;
 import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
@@ -4079,13 +4082,26 @@ export class ToolDispatcher {
     }
   }
 
+  /** How many of a recipe's files are in flight at once. Read by tests. */
+  static readonly RECIPE_WRITE_CONCURRENCY = RECIPE_WRITE_CONCURRENCY;
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
     if (runner) lines.push(runner);
     const refreshed: string[] = [];
     const refreshFailed: string[] = [];
-    for (const [path, content] of Object.entries(files)) {
+    // ⏱️ SEVERAL FILES AT ONCE (failedbr #2485, Q-3232: the kit seed took 61 s before the first model call). Each file is
+    // three sandbox round trips (this read, the write guard's own read, the write) and a game's kit is ~120 files, written
+    // strictly one after another — ~360 round trips in a row. The files of one recipe do not depend on each other, so a
+    // few go at once; the receipt keeps the recipe's own order. An additive composition stays one-at-a-time: its refusal
+    // promises that only EARLIER files may exist. After a failure no new file is started.
+    let stopped = false;
+    const one = async ([path, content]: [string, string]): Promise<string> => {
+      if (stopped) return `not written ${path} (an earlier file of this recipe failed)`;
+      try { return await writeOne(path, content); } catch (error) { stopped = true; throw error; }
+    };
+    const writeOne = async (path: string, content: string): Promise<string> => {
       let existing: string | null = null;
       let missing = false;
       try { existing = await this.actuator.readFile(this.workspaceId, path); }
@@ -4100,8 +4116,7 @@ export class ToolDispatcher {
       }
       if (!missing && existing === content) {
         this.noteKitCurrent(path, content);
-        lines.push(`Unchanged ${path} (already exactly what this recipe writes)`);
-        continue;
+        return `Unchanged ${path} (already exactly what this recipe writes)`;
       }
       if (additiveOnly && !missing) refuse('Additive composition found changed existing source at ' + path + '; no replacement attempted. Earlier new files may exist; inspect before retry.');
       // 🧬 An older kit version nobody edited is brought up to date (Q-863, gameRecipeLayers.ts): the recipe's
@@ -4113,25 +4128,27 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
           this.noteKitCurrent(path, wrote.content);
           refreshed.push(path);
-          lines.push(`Updated ${path}`);
+          return `Updated ${path}`;
         } catch {
           refreshFailed.push(path);
-          lines.push(`skipped existing ${path}`);
+          return `skipped existing ${path}`;
         }
-        continue;
       }
       // New files only. No recipe in this tree intentionally patches an existing router or App.tsx.
       if (!missing) {
         const stale = existing !== null && recipeFilePool().has(path) ? staleKitReason(path, existing, content) : null;
-        lines.push(`skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`);
-        continue;
+        return `skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`;
       }
       const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false, exclusiveCreate });
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
-      lines.push(`${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-    }
+      return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`;
+    };
+    lines.push(...await mapWithConcurrency(Object.entries(files), additiveOnly ? 1 : RECIPE_WRITE_CONCURRENCY, one));
+    const inOrder = Object.keys(files);
+    refreshed.sort((x, y) => inOrder.indexOf(x) - inOrder.indexOf(y));
+    refreshFailed.sort((x, y) => inOrder.indexOf(x) - inOrder.indexOf(y));
     const kitNote = kitVersionNote(refreshed, [], refreshFailed).trim();
     if (kitNote) lines.push(kitNote);
     return lines;

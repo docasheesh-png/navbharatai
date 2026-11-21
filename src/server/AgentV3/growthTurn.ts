@@ -4,6 +4,8 @@
 import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
 import { PART_NAMES_FILE, rememberPartNames } from './partMeaning';
 import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, MAX_PLACES } from './worldGrow';
+import { characterAsked, librarySubjectOf, modelWasAdded, setPlayerModel, characterSetHandoff, characterNotSetHandoff, PLAYER_FILE_PATH } from './characterSwap';
+import { libraryDisplayName } from './gameAssets/libraryThumbnails';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
 
@@ -109,4 +111,39 @@ export async function addLibraryPlaceAtTurnStart(io: {
     }
     return '';
   } catch { return ''; }   // the builder still has the request and the rule
+}
+
+/**
+ * A character picked in the Game Library (characterSwap.ts): the platform adds that exact model and sets PLAYER.model
+ * itself, then returns what the builder is told. Where it cannot, NOTHING is changed on a guess and the builder is told to
+ * say so and ask. '' when this turn is not that request, or the game has no player file. Never throws.
+ */
+export async function setLibraryCharacterAtTurnStart(io: {
+  prompt: string;
+  filesAtTurnStart: Readonly<Record<string, string>> | null;
+  read: (path: string) => Promise<string>;
+  write: (path: string, content: string) => Promise<void>;
+  /** Runs add_library_models for this exact library id and resolves its receipt. */
+  addModel: (id: string) => Promise<string>;
+  record: (issue: Issue) => void;
+}): Promise<string> {
+  const id = characterAsked(io.prompt);
+  if (!id || !io.filesAtTurnStart || typeof io.filesAtTurnStart[PLAYER_FILE_PATH] !== 'string') return '';
+  const name = libraryDisplayName(id);
+  const refuse = (why: string) => {
+    io.record({ phase: 'build', severity: 'info', code: 'PLAYER_CHARACTER_NOT_SET', autoResolved: true, message: `The library character "${name}" was not set as the player: ${why}. Nothing was changed; the user is told and asked.` });
+    return characterNotSetHandoff(name, why);
+  };
+  try {
+    const subject = librarySubjectOf(id);
+    if (!subject) return refuse('it is not a model in the NavBharatAI library');
+    const receipt = await io.addModel(id).catch((error) => `failed: ${error instanceof Error ? error.message : String(error)}`);
+    if (!modelWasAdded(receipt, subject)) return refuse(`the model could not be added to the game (${receipt.replace(/\s+/g, ' ').slice(0, 220)})`);
+    const live = await io.read(PLAYER_FILE_PATH).then((c) => (typeof c === 'string' ? c : null), () => null);
+    const set = live === null ? { ok: false as const } : setPlayerModel(live, subject);
+    if (!set.ok) return refuse(`the model is in the game now (subject '${subject}'), but ${PLAYER_FILE_PATH} is no longer in the shape the platform can set safely`);
+    if (set.changed) await io.write(PLAYER_FILE_PATH, set.source);
+    io.record({ phase: 'build', severity: 'info', code: 'PLAYER_CHARACTER_SET', autoResolved: true, message: `The platform set the library character "${name}" the user picked as the player (PLAYER.model = '${subject}').` });
+    return characterSetHandoff(name, subject);
+  } catch (error) { return refuse(`an unexpected error (${error instanceof Error ? error.message : String(error)})`); }
 }

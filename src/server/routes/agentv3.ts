@@ -75,7 +75,7 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
-import { enforceGrowthAtTurnEnd, addLibraryPlaceAtTurnStart } from '../AgentV3/growthTurn';
+import { enforceGrowthAtTurnEnd, addLibraryPlaceAtTurnStart, setLibraryCharacterAtTurnStart } from '../AgentV3/growthTurn';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
@@ -19511,6 +19511,12 @@ async function noteBuildOutcome(
         const placeHandoff = await addLibraryPlaceAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) });
         if (placeHandoff) buildPrompt = `${placeHandoff}\n\n---\n\n${buildPrompt}`;
+        // 🧍 The same for a character picked in the library ("Use as my character", characterSwap.ts): the platform adds that
+        // exact model and sets PLAYER.model; where it cannot, nothing is changed on a guess and the user is told and asked.
+        const characterHandoff = await setLibraryCharacterAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+          write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
+          addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
+        if (characterHandoff) buildPrompt = `${characterHandoff}\n\n---\n\n${buildPrompt}`;
       }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();

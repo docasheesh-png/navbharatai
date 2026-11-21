@@ -350,6 +350,15 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }). A different land (desert,'
   + ' islands, mountains) → WORLD.style / seed. Up to 12 regions: at 12, say so and offer to make one of them bigger instead. Never'
   + ' build a place by hand beside the list, and never replace the map to make it bigger.';
+/** Who the player is lives in ONE file, so replacing the character never touches the game. */
+export const GAME_PLAYER_FILE_PATH_IN_GAME = 'src/game/player.ts';
+export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/player.ts (PLAYER, passed as <OpenWorldGame player={PLAYER} />). "Character badlo",'
+  + ' "hero ko lal kapde / lamba / mota karo", "make my character a soldier" → edit ONLY that file. A different LOOK of the same person →'
+  + ' PLAYER.look ({ height, build, skin, hair, shirt, trousers, shoes }; colours 0xRRGGBB). A character FROM THE LIBRARY (the request names a'
+  + ' library id, or asks for a ready model: knight, zombie, animal…) → first add_library_models with that exact id/subject, then set'
+  + ' PLAYER.model to the subject it was saved under (PLAYER.modelHeight for its size); "wapas purana character" → model: null. Never build'
+  + ' a second player, never hide or replace the kit\'s hero by hand, and never touch the map, the controls or the features to change the'
+  + ' character. If the library does not have what was asked, say so and change PLAYER.look instead.';
 /** Racing on the kit's road library: a longer road is a prop, never a hand-built track. */
 export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingRoadGame>): twelve road maps that join seamlessly into an endless road.'
   + ' "Track / road bada karo", "lambi race" → raise finishKm (or pass finishKm={null} for a road that never ends); "aur gaadiyan" →'
@@ -537,6 +546,7 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
   return [
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
+    typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
   ].filter(Boolean).join('\n\n');
 }

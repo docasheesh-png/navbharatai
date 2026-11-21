@@ -97,6 +97,16 @@ export function browseLibrary(query: { q?: string; category?: string; limit?: nu
   };
 }
 
+/**
+ * 🧍 A LIBRARY MODEL AS THE PLAYER (failedbr #2485, admin 2026-11-21: "yeh jo character banta hai, isko user jab chahe
+ * replace karwa de, text se ya game library se chun ke"). The same tile, a second meaning: not "put this in the scene" but
+ * "this is who I play as". A map place is not a body, so it has no such instruction.
+ */
+export function useAsCharacterPrompt(row: Pick<LibraryBrowseRow, 'id' | 'name'>): string | null {
+  if (row.id.startsWith(MAP_PLACE_PREFIX)) return null;
+  return `Make the ${row.name} from the NavBharatAI library my game's player character (library id: "${row.id}"). Replace only the character I play as; keep the map, the controls and everything else as it is.`;
+}
+
 /** The instruction the composer receives: names the exact subject add_library_models resolves, and nothing runs until sent. */
 export function addToGamePrompt(row: Pick<LibraryBrowseRow, 'id' | 'name'>): string {
   if (row.id.startsWith(MAP_PLACE_PREFIX)) {

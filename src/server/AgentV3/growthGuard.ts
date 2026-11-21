@@ -171,7 +171,9 @@ export function repairWorld(before: string, after: string | null, request: strin
 }
 
 // ── the mount ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-const MOUNT_PARTS = ['<OpenWorldGame', 'features={FEATURES}', 'world={WORLD}'] as const;
+const MOUNT_PARTS = ['<OpenWorldGame', 'features={FEATURES}', 'world={WORLD}', 'player={PLAYER}'] as const;
+/** The game's own player (look, or a library character). Changed freely; never deleted — the mount reads it. */
+export const PLAYER_FILE = 'src/game/player.ts';
 /** The parts of the platform's mount that `before` had and `after` lost. PURE. */
 export function lostMount(before: string, after: string | null): string[] {
   if (!before.includes('<OpenWorldGame')) return [];
@@ -208,6 +210,7 @@ export function growthVerdict(input: { path: string; before: string | undefined;
   }
   // The platform's own record of what the user called each part: only the platform writes it.
   if (path === PART_NAMES_FILE) return { allow: false, restore: before, reason: 'the record of what the user calls each part is kept by the platform' };
+  if (path === PLAYER_FILE && after === null) return { allow: false, restore: before, reason: 'src/game/player.ts was deleted; the game reads its player character from it (set model: null for the default person instead)' };
   if (path === APP_FILE) {
     const lost = lostMount(before, after);
     return lost.length === 0 ? { allow: true } : { allow: false, restore: before, reason: `src/App.tsx no longer mounts the game as it did (${lost.join(', ')})` };
@@ -229,7 +232,7 @@ export function growthVerdict(input: { path: string; before: string | undefined;
 /** The files of a project the guard watches. PURE. */
 export function growthProtectedPaths(filesAtTurnStart: Readonly<Record<string, string>>): string[] {
   if (!growsByLists(filesAtTurnStart)) return [];
-  return Object.keys(filesAtTurnStart).filter((p) => p === FEATURES_INDEX || p === WORLD_FILE || p === APP_FILE || p === PART_NAMES_FILE || FEATURE_FILE.test(p) || isKitFile(p));
+  return Object.keys(filesAtTurnStart).filter((p) => p === FEATURES_INDEX || p === WORLD_FILE || p === PLAYER_FILE || p === APP_FILE || p === PART_NAMES_FILE || FEATURE_FILE.test(p) || isKitFile(p));
 }
 
 export interface GrowthRestore { path: string; restore: string; reason: string }

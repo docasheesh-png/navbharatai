@@ -58,7 +58,7 @@ import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
-import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
+import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -128,6 +128,11 @@ export interface GameOptions {
   playerBody?: THREE.Object3D | boolean;
   /** Shirt colour of the default body, so the hero stands out from the world. */
   playerColor?: number;
+  /**
+   * How the default body LOOKS: { height, build, skin, hair, shirt, trousers, shoes } (colours as 0xRRGGBB; build 0.85 slight
+   * … 1.2 heavy; height in metres). It stays the kit's animated person — it walks, runs, jumps and plays every action pose.
+   */
+  playerLook?: HumanoidOptions;
   /**
    * Which POSE the default body plays when an action button is pressed — so every button is SEEN doing its thing
    * (admin 2026-11-19: "jump, action, fight, fire etc me action ke movement dikhne chahiye"). Default:
@@ -362,7 +367,7 @@ export class Game {
     if (options.playerBody && typeof options.playerBody === 'object') {
       this.player.object.add(options.playerBody);
     } else if (options.playerBody !== false && !firstPerson) {
-      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87 });
+      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || {}) });
       this.player.object.add(this.hero.root);
     }
     // BOTH blend layers. Adding one is how half the effects end up invisible.

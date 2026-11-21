@@ -266,6 +266,96 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
 }
 `;
 
+export const GAME_PLAYER_BODY_PATH = 'src/game/play/playerBody.ts';
+export const GAME_PLAYER_BODY = String.raw`// WHO THE PLAYER IS — and how it is changed (admin 2026-11-21: "yeh jo character banta hai, isko user jab chahe replace
+// karwa de, text se ya game library se chun ke").
+//
+// The player's body is the kit's own animated person by default. It is changed in ONE place, src/game/player.ts:
+//   • look  — the same person with other colours, height or build (still walks, runs, jumps and plays every action pose);
+//   • model — a character from the game library, by its subject ("knight", "farmer"). It is loaded from the game's own
+//             saved models; while it loads, and if it cannot be loaded, the kit person stays — the player is never missing.
+// Nothing else in the game refers to the body, so replacing the character touches nothing else.
+import * as THREE from 'three';
+import type { GameContext } from '../Game';
+import type { HumanoidOptions } from '../three/humanoid';
+
+export interface PlayerChoice {
+  /** The kit person's look: { height, build, skin, hair, shirt, trousers, shoes } (colours as 0xRRGGBB). */
+  look?: HumanoidOptions;
+  /** A library character's subject (it must be one of the game's saved models), or null for the kit person. */
+  model?: string | null;
+  /** How tall the model stands, in metres. Default 1.75. */
+  modelHeight?: number;
+}
+
+export interface PlayerModelHandle { root: THREE.Object3D; source?: string; update(dt: number): void; dispose?(): void; play?(role: string, fade?: number): boolean }
+export type PlayerAssetModule = { loadRequestedAsset?: (subject: string, fallback: () => PlayerModelHandle) => Promise<PlayerModelHandle> };
+
+/** The game's saved library models, when it has any. A game without the file simply has none — never a broken build. */
+function assetModule(): Promise<PlayerAssetModule | null> {
+  try {
+    const found = import.meta.glob('../three/assetModels.ts') as Record<string, () => Promise<PlayerAssetModule>>;
+    const load = Object.values(found)[0];
+    return load ? load().catch(() => null) : Promise.resolve(null);
+  } catch { return Promise.resolve(null); }
+}
+
+/** Which clip a moving body plays. */
+export function locomotionRole(speed: number, grounded: boolean): 'idle' | 'walk' | 'run' | 'jump' {
+  if (!grounded) return 'jump';
+  return speed > 4.2 ? 'run' : speed > 0.25 ? 'walk' : 'idle';
+}
+
+export interface PlayerBody {
+  /** Call every step. */
+  update(delta: number): void;
+  /** 'person' while the kit person is shown; 'model' once the library character has taken its place. */
+  readonly showing: 'person' | 'model';
+  dispose(): void;
+}
+
+/** Apply the choice to the running game. The second loader argument exists for tests; a game reads its own saved models. */
+export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null, load: () => Promise<PlayerAssetModule | null> = assetModule): PlayerBody {
+  let model: PlayerModelHandle | null = null;
+  let role = '';
+  let gone = false;
+  const subject = typeof choice?.model === 'string' ? choice.model.trim() : '';
+  if (subject && ctx.hero) {
+    const empty = (): PlayerModelHandle => ({ root: new THREE.Group(), source: 'procedural', update() { /* nothing to move */ } });
+    void load().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(subject, empty) : null)).then((handle) => {
+      if (gone || !handle || handle.source !== 'model' || !ctx.hero) {
+        if (!gone) console.error('[player] the character "' + subject + '" is not one of this game\'s saved models; the default person is shown.');
+        handle?.dispose?.();
+        return;
+      }
+      // Stand it at the asked height, feet on the ground, where the kit person stands.
+      const box = new THREE.Box3().setFromObject(handle.root);
+      const tall = box.max.y - box.min.y;
+      if (Number.isFinite(tall) && tall > 0.01) { const k = (choice?.modelHeight ?? 1.75) / tall; handle.root.scale.multiplyScalar(k); handle.root.position.y -= box.min.y * k; }
+      ctx.player.object.add(handle.root);
+      ctx.hero.root.scale.setScalar(0.0001);       // the kit person steps aside (the shell still drives it)
+      model = handle;
+    }).catch((error) => { console.error('[player] the character could not be loaded: ' + String(error)); });
+  }
+  return {
+    get showing() { return model ? 'model' as const : 'person' as const; },
+    update(delta) {
+      if (!model || !ctx.hero) return;
+      model.root.rotation.y = ctx.hero.root.rotation.y;
+      model.root.visible = ctx.hero.root.visible;
+      const next = locomotionRole(ctx.player.speed, ctx.player.isGrounded);
+      if (next !== role) { role = next; if (!model.play?.(next)) model.play?.(next === 'run' ? 'walk' : 'idle'); }
+      model.update(delta);
+    },
+    dispose() {
+      gone = true;
+      if (model) { model.root.removeFromParent(); model.dispose?.(); model = null; }
+      if (ctx.hero) ctx.hero.root.scale.setScalar(1);
+    },
+  };
+}
+`;
+
 export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — a character on NavBharatAI's big map, playable as it stands: the kit's own animated person,
 // the follow camera, the joystick and keys, terrain that streams as you walk, roads, plants, rivers, the sea and the sky.
 // Make it your game through its props: setup() adds your things to the world (cars, enemies, pickups, missions) and
@@ -275,6 +365,7 @@ import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions } from './Game';
 import { createOpenWorld, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
 import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
+import { applyPlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
 
 export interface OpenWorldGameProps {
   title?: string;
@@ -286,6 +377,11 @@ export interface OpenWorldGameProps {
    * touches the others. Keep the list in src/game/features/index.ts.
    */
   features?: ReadonlyArray<GameFeature<OpenWorld>>;
+  /**
+   * WHO THE PLAYER IS: the kit person's look (colours, height, build), or a character model from the game library.
+   * Keep it in src/game/player.ts — changing the character is changing that one file.
+   */
+  player?: PlayerChoice;
   /** Add your game to the world. Runs once, after the player is standing on the map. */
   setup?: (ctx: GameContext, world: OpenWorld) => void;
   /** Your rules, at a fixed 60 Hz, after the world has streamed for this step. */
@@ -294,17 +390,20 @@ export interface OpenWorldGameProps {
   options?: Omit<GameOptions, 'container' | 'setup' | 'update'>;
 }
 
-export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, setup, update, options }: OpenWorldGameProps) {
+export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, setup, update, options }: OpenWorldGameProps) {
   const world = useRef<OpenWorld | null>(null);
   const host = useRef<FeatureHost<OpenWorld> | null>(null);
   const listed = useRef(features); listed.current = features;
+  const body = useRef<PlayerBody | null>(null);
   const hooks = useRef({ setup, update }); hooks.current = { setup, update };
   const gameOptions = useMemo<Omit<GameOptions, 'container'>>(() => ({
     camera: 'third-person', gameId: 'open-world', minimap: true,
     startScreen: { title, ...(subtitle ? { subtitle } : {}) },
+    ...(player?.look ? { playerLook: player.look } : {}),
     ...options,
     setup(ctx) {
       world.current = createOpenWorld(ctx, worldOptions);
+      body.current = applyPlayerChoice(ctx, player);
       hooks.current.setup?.(ctx, world.current);
       host.current = createFeatureHost<OpenWorld>(listed.current || []);
       host.current.setup(ctx, world.current);
@@ -312,6 +411,7 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     update(ctx, delta) {
       if (!world.current) return;
       world.current.frame(ctx, delta);
+      body.current?.update(delta);
       hooks.current.update?.(ctx, world.current, delta);
       host.current?.update(ctx, world.current, delta);
     },
@@ -333,13 +433,14 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
     "import { OpenWorldGame } from './game/OpenWorldGame';",
     "import { FEATURES } from './game/features';",
     "import { WORLD } from './game/world';",
+    "import { PLAYER } from './game/player';",
     '',
     '// The player is already standing on NavBharatAI\'s big map' + (options.city ? ', on a street of its city' : '') + '. Make it your game through the',
     '// FEATURES list in src/game/features/index.ts: one small file per thing the game has (coins, enemies, missions, rules).',
     '// The MAP grows the same way: its places (city, town, village) are the regions list in src/game/world.ts.',
     '// The world, the player and the camera are the kit\'s.',
     'export default function App() {',
-    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} features={FEATURES} />;`,
+    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES} />;`,
     '}',
     '',
   ].join('\n');
@@ -356,6 +457,21 @@ export const GAME_FEATURES_INDEX = [
   '',
   'export const FEATURES: GameFeature<OpenWorld>[] = [',
   '];',
+  '',
+].join('\n');
+
+export const GAME_PLAYER_FILE_PATH = 'src/game/player.ts';
+/** The game's own player — the user's file (never a kit file): created once; changing the character is changing this. */
+export const GAME_PLAYER_FILE = [
+  "// THIS GAME'S PLAYER. To change how the character looks, edit look (colours are 0xRRGGBB; height in metres; build 0.85 slight to 1.2 heavy).",
+  "// To use a character from the game library instead, add it to the game first, then set model to its subject (for example 'knight').",
+  '// Set model back to null for the default person. Nothing else in the game needs to change.',
+  "import type { PlayerChoice } from './play/playerBody';",
+  '',
+  'export const PLAYER: PlayerChoice = {',
+  '  look: { shirt: 0x2e5a87 },',
+  '  model: null,',
+  '};',
   '',
 ].join('\n');
 
@@ -381,7 +497,7 @@ export function gameWorldFileSource(options: { city?: boolean } = {}): string {
 
 export function generateOpenWorld(): RecipeOutput {
   return {
-    files: { [OPEN_WORLD_BRIDGE_PATH]: GAME_OPEN_WORLD_BRIDGE, [OPEN_WORLD_STARTER_PATH]: GAME_OPEN_WORLD_STARTER },
+    files: { [OPEN_WORLD_BRIDGE_PATH]: GAME_OPEN_WORLD_BRIDGE, [OPEN_WORLD_STARTER_PATH]: GAME_OPEN_WORLD_STARTER, [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY },
     dependencies: [],
     instructions: [
       'Added the open-world starter: src/game/OpenWorldGame.tsx and src/game/play/openWorld.ts. It JOINS the Athree map and the game shell —',

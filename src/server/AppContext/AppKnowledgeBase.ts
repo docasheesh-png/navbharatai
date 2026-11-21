@@ -106,6 +106,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['open world', 'open-world', 'gta', 'gta jaisa', 'big map', 'bada map', 'bahut bada map', 'city game', 'shehar', 'sadak', 'traffic', 'explore', 'ghoomna', 'free roam', 'battle royale map', 'character on map', 'map nahi aaya', 'parked car', 'gaadi me baithna'],
   },
   {
+    id: 'game_player_character',
+    name: 'Change the character you play as (by text, or from the game library)',
+    path: 'NavBharatAI Pro → chat → ask to change the character — or the mode button under the message box → Game library → Use as my character',
+    description: 'In an open-world game the character you play as can be replaced at any time without touching the rest of the game. By text: change the look of the built-in person (shirt, trousers, hair and skin colour, height, build). From the library: choose any 3D model and it becomes the character you play as — it stands where the player stands, is sized to a person, turns with your controls and plays its own idle / walk / run moves when the model has them. If a model cannot be loaded the built-in person stays, so the player is never missing. The character lives in one file of your project (src/game/player.ts). Honest limits: this works in games built on the open-world starter; a library model only has the moves it was made with, so action poses such as punch or shoot are complete on the built-in person and may be missing on a model.',
+    howToUse: 'By text: "mera character lal shirt aur kaali pant me karo", "hero ko lamba karo". From the library: open Game library, tap "Use as my character", tap a model, then send the message. To go back, ask "wapas purana character kar do".',
+    relatedFeatures: ['game_open_world', 'game_library_picker'],
+    keywords: ['change character', 'replace character', 'character badlo', 'character badalna', 'hero badlo', 'player badlo', 'my character', 'mera character', 'character ka rang', 'character kapde', 'use as my character', 'player model', 'skin', 'avatar', 'character bekar hai', 'naya character'],
+  },
+  {
     id: 'game_physics',
     name: 'Real physics in 3D games (falling, rolling, toppling, ragdoll)',
     path: 'NavBharatAI Pro → chat → ask for a 3D game with physics (for example "boxes that fall over", "explosion se cheezein ude", "ragdoll when the enemy dies")',

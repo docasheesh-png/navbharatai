@@ -92,7 +92,7 @@ describe('🗺️ the game\'s own map file, and the rule that grows it', () => {
     expect(gameWorldFileSource({ city: true })).toContain("{ id: 'main-city', kind: 'city' },");
     expect(gameWorldFileSource({})).not.toContain('main-city');
     expect(openWorldAppSource({ city: true })).toContain("import { WORLD } from './game/world';");
-    expect(openWorldAppSource({ city: true })).toContain('world={WORLD} features={FEATURES}');
+    expect(openWorldAppSource({ city: true })).toContain('world={WORLD} player={PLAYER} features={FEATURES}');
     expect(GAME_WORLD_FILE_PATH).toBe(GAME_WORLD_FILE);
     expect(read('src/server/AgentV3/ToolDispatcher.ts')).toMatch(/if \(!mapped\) \{\s*const worldFile = await this\.guardedWrite\(GAME_WORLD_FILE_PATH, gameWorldFileSource\(/);
   });

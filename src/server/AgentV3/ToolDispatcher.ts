@@ -390,7 +390,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -10450,6 +10450,15 @@ export class ToolDispatcher {
               this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }
+            // The game's own player (look, or a library character): created once, never replaced.
+            let cast = false;
+            try { await this.actuator.readFile(this.workspaceId, GAME_PLAYER_FILE_PATH); cast = true; }
+            catch (error) { if (!isNotFoundError(error)) throw error; }
+            if (!cast) {
+              const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE, { agent, source: 'generate_open_world' });
+              this.state?.recordFileChange({ path: GAME_PLAYER_FILE_PATH, kind: playerFile.kind }, agent);
+              getWorkspaceMemory(this.workspaceId).indexFile(GAME_PLAYER_FILE_PATH, playerFile.content);
+            }
             // The game's own list of features: created once, never replaced (it is the user's game from then on).
             let listed = false;
             try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
@@ -10463,7 +10472,7 @@ export class ToolDispatcher {
             const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
             this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
             getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
-            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} features={FEATURES} /> (the map\'s places are in src/game/world.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
           }
         }
         this.scheduleCheckpoint('open world starter');

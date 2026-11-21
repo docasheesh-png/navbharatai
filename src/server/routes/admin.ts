@@ -1838,7 +1838,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       //   • the top-10 wallets are an ordered `limit(10)`;
       //   • chat usage and purchases are read for the last ANALYTICS_WINDOW_DAYS only (the window the
       //     platform margin already used), capped, and the payload says so (`window`).
-      // `tests/adminAnalyticsReadBudget.test.ts` fails if a whole-collection read comes back.
+      // `tests/firestorePollingReadBudget.test.ts` fails if a whole-collection read comes back.
       const nowMs = Date.now();
       const today2 = new Date(nowMs).toISOString().slice(0, 10);
       // Midnight UTC of the window's first day — the SAME first day platformMarginWindow filters on.

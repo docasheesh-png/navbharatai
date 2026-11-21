@@ -7,7 +7,9 @@ import { readFileSync } from 'node:fs';
 
 const admin = readFileSync('src/server/routes/admin.ts', 'utf8');
 const monitorRoute = admin.slice(admin.indexOf("app.get('/api/admin/monitor'"), admin.indexOf("app.get('/api/admin/metrics/history'"));
-const analyticsRoute = admin.slice(admin.indexOf("app.get('/api/admin/analytics'"), admin.indexOf("app.get('/api/admin/analytics'") + 12_000);
+// The WHOLE handler, up to the next route — a fixed character window broke the day a comment grew (2026-11-21).
+const analyticsStart = admin.indexOf("app.get('/api/admin/analytics'");
+const analyticsRoute = admin.slice(analyticsStart, admin.indexOf('app.get(', analyticsStart + 10));
 
 describe('/api/admin/monitor — the analysers read the same data the charts draw', () => {
   it('feeds alerts, finops and insights from the scoped snapshot, never the raw since-boot one', () => {

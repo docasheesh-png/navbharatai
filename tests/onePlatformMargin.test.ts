@@ -103,7 +103,9 @@ describe('🔒 the wiring', () => {
 
   it('the route sends it, built from the three records and never from what users were billed', () => {
     const route = code('src/server/routes/admin.ts');
-    const block = route.slice(route.indexOf("app.get('/api/admin/analytics'"), route.indexOf("app.get('/api/admin/analytics'") + 12_000);
+    // The whole handler, up to the next route — never a fixed character window (2026-11-21).
+    const start = route.indexOf("app.get('/api/admin/analytics'");
+    const block = route.slice(start, route.indexOf('app.get(', start + 10));
     expect(block).toContain('agentV3CostTelemetry.list(PLATFORM_MARGIN_DAYS + 1)');
     expect(block).toContain('assistantSpendStore.summary(PLATFORM_MARGIN_DAYS + 1)');
     expect(block).toContain('platformMargin,');

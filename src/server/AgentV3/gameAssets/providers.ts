@@ -19,7 +19,13 @@ import { REVIEWED_LIBRARY_BATCH_11 } from './reviewedLibraryBatch11';
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
 /** Providers whose CC0 packs the admin downloaded and we converted offline: their models may ship inside the server image. */
-const PACKAGED_PROVIDERS: readonly GameAssetProviderId[] = ['quaternius', 'kaykit'];
+const PACKAGED_PROVIDERS: readonly GameAssetProviderId[] = ['quaternius', 'kaykit', 'sketchfab'];
+/**
+ * A packaged model may be CC0, or CC-BY 4.0 WITH its author credit (admin 2026-11-21, Indian clothing: "CC-BY lein, credit
+ * game me apne-aap judega"): the credit travels into the game's ATTRIBUTION.txt and the in-game credit (assetSeed).
+ */
+const packagedLicenceOk = (c: ReviewedAsset): boolean => c.license.spdx === 'CC0-1.0'
+  || (c.license.spdx === 'CC-BY-4.0' && typeof c.license.attribution === 'string' && c.license.attribution.trim().length >= 8);
 export interface ReviewedAsset extends AssetCandidate {
   /** Curated library classification; no gameplay or device certification. */
   libraryCategory?: ObjectCategory;
@@ -71,7 +77,7 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
     // A PACKAGED model ships inside the server image (assets/game-models/<sha256>.glb) because it is an offline conversion
     // with no pinned public GLB (2026-11-20, the admin's Quaternius packs: OBJ/FBX converted to GLB). Allowed only for the
     // reviewed CC0 providers (Quaternius; KayKit since batch 8, 2026-11-20), with its exact byte size declared — the transport refuses any file whose size or hash differs.
-    if (c.packaged && (!PACKAGED_PROVIDERS.includes(c.provider) || !/^[a-f0-9]{64}$/.test(c.sha256) || c.bytes === undefined || c.license.spdx !== 'CC0-1.0')) throw new Error('Unreviewed packaged model');
+    if (c.packaged && (!PACKAGED_PROVIDERS.includes(c.provider) || !/^[a-f0-9]{64}$/.test(c.sha256) || c.bytes === undefined || !packagedLicenceOk(c))) throw new Error('Unreviewed packaged model');
     assetDownloadUrl(c.downloadUrl, new Set(c.downloadOrigins));
     for (const origin of c.downloadOrigins) if (new URL(origin).origin !== origin) throw new Error('Invalid reviewed origin');
     if (c.optimization !== undefined && (!['compact-v1', 'animation-selection-v1'].includes(c.optimization) || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');
@@ -90,7 +96,8 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
       if (u.username || u.password || u.search || u.hash || u.protocol !== 'https:') throw new Error('Private or expiring URL in public provenance');
     }
     if (c.hiddenNodes !== undefined && (c.hiddenNodes.length > 32 || !c.hiddenNodes.every(n => /^[A-Za-z0-9_.-]{1,64}$/.test(n)))) throw new Error('Unreviewed hidden nodes');
-    if (c.provider === 'sketchfab') throw new Error('Sketchfab requires a separately authorized download adapter; signed URLs cannot be a catalogue source');
+    // A PACKAGED Sketchfab model (downloaded by the admin, converted offline, shipped in the image) needs no download adapter.
+    if (c.provider === 'sketchfab' && !c.packaged) throw new Error('Sketchfab requires a separately authorized download adapter; signed URLs cannot be a catalogue source');
     const key = `${c.provider}:${c.id}:${c.revision}`;
     if (ids.has(key)) throw new Error('Duplicate asset revision'); ids.add(key);
   }

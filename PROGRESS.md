@@ -103519,6 +103519,21 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   still for 5 s. A blast topples it away from the blast. A ball rolls and stops at a kit wall. Mass 0 never moves. A
   ragdoll lands with its head near the ground, no body below the ground, every joint's pivots still meeting, at rest.
   Four reversions each failed: no joint constraints, no scene walls, no conditional dependency, and wall-clock stepping.
+## 2026-11-21 — Tune a game with sliders in the preview (admin plan: "a tuning panel … without prompting again")
+
+- **Kit `core/tuning.ts`:** `tunable(key, default, { label, min, max, step })` returns a live handle; saved values come from
+  `src/game/tuning.values.ts` (a declared DATA file — `GAME_RUNTIME_DATA_FILES` — kept by the kit once edited) and win over
+  the default; every value is clamped. Inside a frame it announces its sliders to the parent (`{ nbTuneList }`) and accepts
+  `{ nbTuneSet }` ONLY from `window.parent`.
+- **Preview:** `src/lib/gameTuning.ts` validates the frame's list (≤ 30, plain keys, finite numbers, min < max) and writes the
+  file byte-for-byte as the kit's `tuningFile()` does; `TuningPanel.tsx` (sliders, Save, Reset); `PreviewSurface` listens only
+  to its own frames, shows a Tune button in the toolbar, sends each change with `postToPreview`, and Save writes the file
+  through the owner-verified `/api/agentv3/import-files` (live sandbox + durable store) and `onFileEdited`.
+- **Games declare tunables:** the runner starter's Game speed slider; `TUNING_RULE` in the kit handoff tells the builder to
+  declare speed, gravity, enemy count, difficulty… with `tunable()`.
+- **Proof:** `tests/theGameCanBeTunedInThePreview.test.ts` (9; four reversions each failed — any window setting a value,
+  saved values ignored, no range, the runner slider doing nothing). Module census, runtime pack, kit history and strict kit
+  compile updated for the declared data file.
 ## 2026-11-21 — Game repair, carefully back on: optional, asked, and one tap to undo a change that made it worse
 
 - **Admin:** "isko savdhani se on karo … optional karo, app/game banne ke bad user se hi pucho … agar game tut jaye to user

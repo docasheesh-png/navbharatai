@@ -188,7 +188,7 @@ describe('procedural world — an environment with no asset library', () => {
 
 describe('the pack itself', () => {
   it('takes exactly ONE dependency, and only for 3D', () => {
-    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }]);
+    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }, { name: 'cannon-es', version: '0.20.0' }]);
   });
 
   it('emits every advertised module', () => {
@@ -322,7 +322,7 @@ describe('generateGame3D — environment, surfaces and humanoid', () => {
 
   it('still takes exactly ONE dependency — the fix adds no packages', () => {
     // Every map, the sky and the character are generated in code. No asset CDN to 404, no licence.
-    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }]);
+    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }, { name: 'cannon-es', version: '0.20.0' }]);
   });
 });
 
@@ -447,6 +447,6 @@ describe('generateGame3D — the objects a world is made of', () => {
   });
 
   it('still zero new dependencies — every object is generated in code', () => {
-    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }]);
+    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }, { name: 'cannon-es', version: '0.20.0' }]);
   });
 });

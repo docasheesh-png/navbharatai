@@ -32,6 +32,12 @@ export interface GameRuntimeResult {
   instructions: string;
 }
 
+import { INDIC_GAME_STRINGS, INDIC_GAME_LANGUAGES } from './gameStringsIndic';
+
+/** The nine Indian-language tables, as TypeScript the kit's strings.ts compiles (JSON is valid TS; no backtick inside). */
+const INDIC_TABLES = INDIC_GAME_LANGUAGES.map((l) => '  ' + l + ': ' + JSON.stringify(INDIC_GAME_STRINGS[l]) + ',').join('\n');
+const INDIC_UNION = INDIC_GAME_LANGUAGES.map((l) => "'" + l + "'").join(' | ');
+
 const LOOP = `/**
  * The game loop — FIXED TIMESTEP with interpolated rendering.
  *
@@ -332,7 +338,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED' | 'ITEM_CRAFTED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'VEHICLE_CRASHED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED' | 'ITEM_CRAFTED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -617,8 +623,10 @@ export function resetRun(): void {
 
 const STRINGS = `/**
  * THE GAME'S OWN WORDS, IN THE PLAYER'S LANGUAGE (admin 2026-11-19 game-gap audit: every kit screen was hard-coded
- * English — "Paused", "Game over", "Play again"). This is the USER'S game, so its words follow the user: English and
- * Hindi are written here; any other language is supplied by the builder through options.strings (never guessed).
+ * English — "Paused", "Game over", "Play again"). This is the USER'S game, so its words follow the user: English, Hindi
+ * and nine more Indian languages are written here (Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada, Malayalam,
+ * Punjabi, Odia — 2026-11-20); any other language is supplied by the builder through options.strings (never guessed).
+ * The player can also pick the language in Settings; that choice is saved on the device and wins.
  * Placeholders like {score} are filled by t(key, { score }).
  */
 import { events } from './events';
@@ -648,11 +656,11 @@ const EN = {
   autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
   controls: 'Controls', pressKey: 'Press a key (Esc to cancel)', resetControls: 'Reset controls', up: 'Up', down: 'Down', reload: 'Reload',
-  crouch: 'Crouch / dive',
+  crouch: 'Crouch / dive', language: 'Language',
 };
 
 export type StringKey = keyof typeof EN;
-export type GameLanguage = 'en' | 'hi';
+export type GameLanguage = 'en' | 'hi' | ${INDIC_UNION};
 
 const HI: Record<StringKey, string> = {
   ready: 'तैयार?', play: 'खेलें', settings: 'सेटिंग्स', paused: 'रुका हुआ', resume: 'जारी रखें', restart: 'फिर से शुरू', menu: 'मेनू',
@@ -679,20 +687,36 @@ const HI: Record<StringKey, string> = {
   autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
   controls: 'कंट्रोल्स', pressKey: 'कोई कुंजी दबाएँ (रद्द करने के लिए Esc)', resetControls: 'कंट्रोल्स रीसेट करें', up: 'ऊपर', down: 'नीचे', reload: 'रीलोड',
-  crouch: 'झुकें / गोता',
+  crouch: 'झुकें / गोता', language: 'भाषा',
 };
 
-export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
+const INDIC: Record<Exclude<GameLanguage, 'en' | 'hi'>, Record<StringKey, string>> = {
+${INDIC_TABLES}
+};
+
+export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI, ...INDIC };
+/** Every language the kit writes, in the order the Settings list shows them. */
+export const GAME_LANGUAGES = Object.keys(GAME_STRINGS) as GameLanguage[];
+/** Each language in its own script — how a player finds theirs in a list. */
+export const GAME_LANGUAGE_NATIVE_NAMES: Readonly<Record<GameLanguage, string>> = {
+  en: 'English', hi: 'हिन्दी', ta: 'தமிழ்', te: 'తెలుగు', bn: 'বাংলা', mr: 'मराठी', gu: 'ગુજરાતી', kn: 'ಕನ್ನಡ', ml: 'മലയാളം', pa: 'ਪੰਜਾਬੀ', or: 'ଓଡ଼ିଆ',
+};
 
 let active: Record<StringKey, string> = { ...EN };
 let activeLanguage: GameLanguage | 'custom' = 'en';
+/** What the game itself chose (setGameLanguage) — the player's own choice, when saved, is shown instead. */
+let creator: { language: GameLanguage | 'auto'; overrides: Partial<Record<StringKey, string>> } = { language: 'en', overrides: {} };
+const PLAYER_LANGUAGE_KEY = 'nb-game-lang-v1';
+const isLanguage = (v: unknown): v is GameLanguage => typeof v === 'string' && v in GAME_STRINGS;
 
 /** The page's own language, then the browser's — for language: 'auto'. */
 function detect(): GameLanguage {
   try {
     const page = typeof document !== 'undefined' ? document.documentElement?.lang ?? '' : '';
     const browser = typeof navigator !== 'undefined' ? navigator.language ?? '' : '';
-    return /^hi\\b/i.test(page) || (!page && /^hi\\b/i.test(browser)) ? 'hi' : 'en';
+    const code = (tag: string) => (tag.toLowerCase().match(/^[a-z]{2}/) ?? [''])[0];
+    const pick = page ? code(page) : code(browser);
+    return isLanguage(pick) ? pick : 'en';
   } catch { return 'en'; }
 }
 
@@ -701,14 +725,41 @@ function detect(): GameLanguage {
  * gives Tamil, Bangla or any other language, or changes one label. A non-string override is ignored.
  */
 export function setGameLanguage(language: GameLanguage | 'auto' = 'en', overrides: Partial<Record<StringKey, string>> = {}): GameLanguage {
-  const lang: GameLanguage = language === 'auto' ? detect() : (language in GAME_STRINGS ? language : 'en');
   const clean: Partial<Record<StringKey, string>> = {};
   for (const [k, v] of Object.entries(overrides ?? {})) if (k in EN && typeof v === 'string' && v.trim()) clean[k as StringKey] = v;
+  creator = { language: language === 'auto' || isLanguage(language) ? language : 'en', overrides: clean };
+  const chosen = playerLanguage();
+  return apply(chosen ?? resolve(creator.language), chosen ? {} : clean);
+}
+
+function resolve(language: GameLanguage | 'auto'): GameLanguage { return language === 'auto' ? detect() : language; }
+
+function apply(lang: GameLanguage, clean: Partial<Record<StringKey, string>>): GameLanguage {
   active = { ...GAME_STRINGS[lang], ...clean };
   activeLanguage = Object.keys(clean).length ? 'custom' : lang;
   events.emit('LANGUAGE_CHANGED', { language: lang });
   return lang;
 }
+
+/** The language the player picked in Settings on this device, or null (the game's own choice stands). */
+export function playerLanguage(): GameLanguage | null {
+  try { const v = localStorage.getItem(PLAYER_LANGUAGE_KEY); return isLanguage(v) ? v : null; } catch { return null; }
+}
+
+/**
+ * The player picks a language (Settings → Language); null goes back to the game's own. Saved on the device. The game's
+ * own word changes (options.strings) are kept only in the game's own language — they are written in that language.
+ */
+export function choosePlayerLanguage(language: GameLanguage | null): GameLanguage {
+  const lang = isLanguage(language) ? language : null;
+  try { if (lang) localStorage.setItem(PLAYER_LANGUAGE_KEY, lang); else localStorage.removeItem(PLAYER_LANGUAGE_KEY); } catch { /* not saved */ }
+  const own = resolve(creator.language);
+  const target = lang ?? own;
+  return apply(target, target === own ? creator.overrides : {});
+}
+
+/** The language on screen right now (the player's choice, else the game's). */
+export function currentGameLanguage(): GameLanguage { return playerLanguage() ?? resolve(creator.language); }
 
 export function gameLanguage(): GameLanguage | 'custom' { return activeLanguage; }
 

@@ -56,7 +56,7 @@ import { groundScene } from './three/surfaces';
 import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
-import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
+import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
@@ -152,8 +152,9 @@ export interface GameOptions {
   orientation?: 'landscape' | 'portrait' | 'any';
   /**
    * The language of the game's own screens and buttons (start, pause, settings, game over, touch buttons). Default 'en';
-   * 'hi' is Hindi; 'auto' follows the page. For any other language pass strings with every word you need — a key you
-   * leave out stays English, never blank.
+   * 'hi' Hindi, 'ta' Tamil, 'te' Telugu, 'bn' Bangla, 'mr' Marathi, 'gu' Gujarati, 'kn' Kannada, 'ml' Malayalam,
+   * 'pa' Punjabi, 'or' Odia; 'auto' follows the page. For any other language pass strings with every word you need — a
+   * key you leave out stays English, never blank. The player can change it in Settings → Language (saved on the device).
    */
   language?: GameLanguage | 'auto';
   strings?: Partial<Record<StringKey, string>>;
@@ -392,6 +393,10 @@ export class Game {
     this.input.axis = () => { const a = readAxis(); this.playerAxes.add(a); notePlayerAxis(a); return a; };
     // A drifting car pours tyre smoke where its rear wheels are (driveVehicle reports it).
     this.disposers.push(onVehicleDrift((at) => this.particles.burst('smoke', at.x, at.y, at.z, 0.35)));
+    // The PLAYER's crash is felt (sparks, crunch, jolt, buzz — the feedback table); a rival's crash is not the player's.
+    this.disposers.push(onVehicleCrash((at, vehicle, impact) => {
+      if (vehicle === this.playerVehicle) events.emit('VEHICLE_CRASHED', { position: at, impact });
+    }));
     // And which action buttons the GAME reads (see gameReadsButtons). Same answers as before.
     const buttonActions = new Set(DEFAULT_TOUCH_BUTTONS.map((b) => b.action));
     for (const m of ['isDown', 'wasPressed', 'wasReleased'] as const) {
@@ -1166,7 +1171,7 @@ import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
-import { t, type StringKey } from '../core/strings';
+import { t, choosePlayerLanguage, currentGameLanguage, GAME_LANGUAGES, GAME_LANGUAGE_NATIVE_NAMES, type GameLanguage, type StringKey } from '../core/strings';
 import { REBINDABLE_ACTIONS, rebindKey, resetKeyBindings, primaryKey, keyLabel, captureKey } from '../core/keybinds';
 import { prefersTouch } from './touchControls';
 import { lastRaceResults } from '../three/race';
@@ -1225,6 +1230,13 @@ const roundIcon: React.CSSProperties = { pointerEvents: 'auto', width: 44, heigh
 function useSettings(): GameSettings {
   const [value, setValue] = useState<GameSettings>(settings.get());
   useEffect(() => settings.subscribe(setValue), []);
+  return value;
+}
+
+/** The language on screen, live: every kit screen re-renders in the new words the moment it changes. */
+function useLanguage(): GameLanguage {
+  const [value, setValue] = useState<GameLanguage>(currentGameLanguage());
+  useEffect(() => events.on('LANGUAGE_CHANGED', () => setValue(currentGameLanguage())), []);
   return value;
 }
 
@@ -1867,6 +1879,7 @@ function ControlsSection({ game }: { game: Game }) {
 
 function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
   const s = useSettings();
+  const lang = useLanguage();
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { back.current?.focus(); }, []);
   return (
@@ -1906,6 +1919,13 @@ function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
           ))}
         </div>
       </div>
+      <div style={row}>
+        <span>{t('language')}</span>
+        <select aria-label={t('language')} value={lang} onChange={(e) => choosePlayerLanguage(e.target.value as GameLanguage)}
+          style={{ minHeight: 40, padding: '6px 10px', borderRadius: 8, border: '2px solid rgba(255,255,255,0.55)', background: 'rgba(0,0,0,0.35)', color: '#fff', fontSize: 15 }}>
+          {GAME_LANGUAGES.map((l) => <option key={l} value={l} style={{ color: '#111' }}>{GAME_LANGUAGE_NATIVE_NAMES[l]}</option>)}
+        </select>
+      </div>
       <ControlsSection game={game} />
       <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
@@ -1931,6 +1951,7 @@ function SeatPrompt({ game }: { game: Game }) {
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
+  useLanguage();   // a new language re-renders every screen in its words
   // Large text (Settings): the menus and the top bar drawn a quarter bigger.
   const zoom = prefs.largeText ? 1.25 : 1;
   const load = useLoading();
@@ -2601,15 +2622,216 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
 }
 `;
 
+const LANE_RUNNER_GAME = `import { useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { GameCanvas } from './GameCanvas';
+import type { GameContext, GameOptions } from './Game';
+import { events } from './core/events';
+import { state, setStatus, addScore } from './core/state';
+import { LaneRunner, runnerInput, type RunnerOptions } from './core/runner';
+import { bindSwipe } from './core/swipe';
+import { createHumanoid } from './three/humanoid';
+
+/**
+ * ORIGINAL ENDLESS-RUNNER STARTER (admin 2026-11-20 engine plan: a complete, working game per genre, so the builder
+ * changes the theme and rules instead of wiring a loop, a camera and controls and getting one of them wrong).
+ * The rules are the kit's LaneRunner (a row always has a way through; no tunnelling at speed); this file draws them
+ * and wires the kit: start screen, pause, game over with Play again, settings, language, swipes and keys.
+ *
+ * 🔴 LEFT IS LEFT. LaneRunner's lane 0 is the player's LEFT and run.x grows to the RIGHT. The camera sits behind the
+ * runner looking down +Z, and from there the screen's right is world -X — so the runner is drawn at x = -run.x
+ * (runnerWorldX). Drawing it at +run.x makes Right move the runner LEFT on screen.
+ */
+export interface LaneRunnerGameProps {
+  title?: string;
+  subtitle?: string;
+  /** Lanes across the track (1 to 5, default 3). */
+  lanes?: number;
+  /** Starting and top speed, metres per second (defaults 10 and 30). */
+  startSpeed?: number;
+  maxSpeed?: number;
+  runnerColor?: number;
+  trackColor?: number;
+  skyColor?: number;
+  /** The same seed gives the same course (default: a new course every run). */
+  seed?: number;
+}
+
+/** World x for a runner x: the camera looks down +Z, so the screen's right is world -X. */
+export function runnerWorldX(x: number): number { return -x; }
+
+const LANE_WIDTH = 2.2;
+
+export interface LaneRunnerScene {
+  run: LaneRunner;
+  setup: (ctx: GameContext) => void;
+  update: (ctx: GameContext, dt: number) => void;
+  /** Begin a fresh run (Play and Play again call this through GAME_STARTED). */
+  restart: () => void;
+  dispose: () => void;
+}
+
+/** The runner game without React: the GameCanvas starter below uses it, and so can a game of your own. */
+export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunnerScene {
+  const lanes = Math.max(1, Math.min(5, Math.round(props.lanes ?? 3)));
+  const runnerOptions: RunnerOptions = { lanes, laneWidth: LANE_WIDTH, startSpeed: props.startSpeed ?? 10, maxSpeed: props.maxSpeed ?? 30, seed: props.seed ?? Date.now() };
+  const run = new LaneRunner(runnerOptions);
+  const width = lanes * LANE_WIDTH + 1;
+  const geometries: THREE.BufferGeometry[] = [];
+  const materials: THREE.Material[] = [];
+  const geo = <T extends THREE.BufferGeometry>(g: T): T => { geometries.push(g); return g; };
+  const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => { const m = new THREE.MeshStandardMaterial({ color, roughness: 0.8, ...extra }); materials.push(m); return m; };
+  const block = { geo: geo(new THREE.BoxGeometry(LANE_WIDTH * 0.85, 2.4, 1.2)), mat: mat(0xd94841) };
+  const low = { geo: geo(new THREE.BoxGeometry(LANE_WIDTH * 0.9, 0.5, 0.4)), mat: mat(0xf2c14e) };
+  const high = { geo: geo(new THREE.BoxGeometry(LANE_WIDTH * 0.95, 0.35, 0.4)), mat: mat(0x3d8bfd) };
+  const post = { geo: geo(new THREE.BoxGeometry(0.15, 2.2, 0.15)), mat: mat(0x6b7280) };
+  const coin = { geo: geo(new THREE.CylinderGeometry(0.35, 0.35, 0.08, 16)), mat: mat(0xffd23f, { metalness: 0.6, roughness: 0.3, emissive: 0x6b4f00 }) };
+  const root = new THREE.Group();
+  root.name = 'Lane runner';
+  const track = new THREE.Group();
+  const ground = new THREE.Mesh(geo(new THREE.BoxGeometry(width, 0.1, 400)), mat(props.trackColor ?? 0x4a4e57));
+  ground.position.y = -0.05;
+  track.add(ground);
+  for (let i = 1; i < lanes; i++) {
+    const line = new THREE.Mesh(geo(new THREE.BoxGeometry(0.08, 0.02, 400)), mat(0xf5f5f5));
+    line.position.set(runnerWorldX((i - lanes / 2) * LANE_WIDTH), 0.01, 0);
+    track.add(line);
+  }
+  for (const side of [-1, 1]) {
+    const grass = new THREE.Mesh(geo(new THREE.BoxGeometry(60, 0.08, 400)), mat(0x5f9e4f));
+    grass.position.set(side * (width / 2 + 30), -0.06, 0);
+    track.add(grass);
+  }
+  root.add(track);
+  // Posts beside the track every 8 m, recycled as the runner passes: what makes the speed visible.
+  const POSTS = 30, SPACING = 8;
+  const posts: THREE.Mesh[] = [];
+  for (let i = 0; i < POSTS * 2; i++) { const p = new THREE.Mesh(post.geo, post.mat); posts.push(p); root.add(p); }
+  const runner = createHumanoid({ height: 1.7, shirt: props.runnerColor ?? 0x2563eb });
+  root.add(runner.root);
+  const obstacleMeshes = new Map<number, THREE.Mesh | THREE.Group>();
+  const coinMeshes = new Map<number, THREE.Mesh>();
+  let scored = 0;
+
+  const clearPieces = () => {
+    for (const m of obstacleMeshes.values()) root.remove(m);
+    for (const m of coinMeshes.values()) root.remove(m);
+    obstacleMeshes.clear(); coinMeshes.clear();
+  };
+  const restart = () => {
+    run.reset(props.seed ?? Date.now());
+    clearPieces();
+    scored = 0;
+    runner.revive();
+    runner.root.scale.set(1, 1, 1);
+  };
+  const offStart = events.on('GAME_STARTED', restart);
+
+  const obstacleMesh = (kind: string): THREE.Mesh | THREE.Group => {
+    if (kind === 'block') { const m = new THREE.Mesh(block.geo, block.mat); m.position.y = 1.2; m.castShadow = true; return m; }
+    if (kind === 'low') { const m = new THREE.Mesh(low.geo, low.mat); m.position.y = 0.25; return m; }
+    // 'high': a bar on two posts — slide under it.
+    const g = new THREE.Group();
+    const bar = new THREE.Mesh(high.geo, high.mat); bar.position.y = 1.35; g.add(bar);
+    for (const s of [-1, 1]) { const p = new THREE.Mesh(post.geo, post.mat); p.position.set(s * LANE_WIDTH * 0.47, 1.1, 0); g.add(p); }
+    return g;
+  };
+
+  const sync = () => {
+    const x = runnerWorldX(run.x);
+    runner.root.position.set(x, run.y, run.distance);
+    runner.root.scale.y = run.sliding ? 0.55 : 1;
+    track.position.z = run.distance + 150;
+    for (let i = 0; i < posts.length; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      const slot = Math.floor(i / 2);
+      const z = Math.floor(run.distance / SPACING) * SPACING + (slot - 4) * SPACING;
+      posts[i].position.set(side * (width / 2 + 0.6), 1.1, z);
+    }
+    const seen = new Set<number>();
+    for (const o of run.obstacles) {
+      seen.add(o.id);
+      let m = obstacleMeshes.get(o.id);
+      if (!m) { m = obstacleMesh(o.kind); obstacleMeshes.set(o.id, m); root.add(m); }
+      m.position.x = runnerWorldX(run.laneX(o.lane)); m.position.z = o.z;
+    }
+    for (const [id, m] of obstacleMeshes) if (!seen.has(id)) { root.remove(m); obstacleMeshes.delete(id); }
+    const coinsSeen = new Set<number>();
+    for (const c of run.pickups) {
+      coinsSeen.add(c.id);
+      let m = coinMeshes.get(c.id);
+      if (!m) { m = new THREE.Mesh(coin.geo, coin.mat); m.rotation.z = Math.PI / 2; coinMeshes.set(c.id, m); root.add(m); }
+      m.position.set(runnerWorldX(run.laneX(c.lane)), 0.8, c.z);
+      m.rotation.y += 0.08;
+    }
+    for (const [id, m] of coinMeshes) if (!coinsSeen.has(id)) { root.remove(m); coinMeshes.delete(id); }
+  };
+
+  return {
+    run,
+    restart,
+    setup: (ctx) => {
+      ctx.scene.background = new THREE.Color(props.skyColor ?? 0x9bd3f0);
+      ctx.scene.fog = new THREE.Fog(props.skyColor ?? 0x9bd3f0, 40, 160);
+      ctx.scene.add(root);
+      sync();
+      ctx.follow(runner.root);
+    },
+    update: (ctx, dt) => {
+      if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); return; }
+      for (const ev of run.update(dt, runnerInput(ctx.input))) {
+        const at = { x: runnerWorldX(run.x), y: run.y + 1, z: run.distance };
+        if (ev.type === 'jump') { runner.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
+        else if (ev.type === 'coin') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.coin.lane)), y: 0.8, z: ev.coin.z } });
+        else if (ev.type === 'crash') { runner.die(); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
+      }
+      runner.update(dt, run.alive ? run.speed : 0, !run.jumping);
+      const score = run.score;
+      if (score > scored) { addScore(score - scored); scored = score; }
+      sync();
+    },
+    dispose: () => {
+      offStart();
+      clearPieces();
+      root.removeFromParent();
+      runner.dispose();
+      for (const g of geometries) g.dispose();
+      for (const m of materials) m.dispose();
+    },
+  };
+}
+
+/** The ready runner: <LaneRunnerGame title="Mumbai Dash" />. Swipe or use arrows / A D (lanes), Space / W (jump), S (slide). */
+export function LaneRunnerGame(props: LaneRunnerGameProps = {}) {
+  const scene = useRef<LaneRunnerScene | null>(null);
+  const unbind = useRef<(() => void) | null>(null);
+  if (!scene.current) scene.current = createLaneRunnerScene(props);
+  useEffect(() => () => { unbind.current?.(); scene.current?.dispose(); }, []);
+  const s = scene.current;
+  const options: Omit<GameOptions, 'container'> = {
+    camera: 'chase', playerBody: false, gameId: 'lane-runner-starter', touchControls: false, orientation: 'portrait',
+    startScreen: {
+      title: props.title ?? 'Endless Run', subtitle: props.subtitle ?? 'Dodge, jump and slide. How far can you go?',
+      controls: { touch: 'Swipe left or right to change lanes · up to jump · down to slide', keyboard: 'Arrows or A / D to change lanes · Space or W to jump · S to slide · Esc to pause' },
+    },
+    setup: (ctx) => s.setup(ctx),
+    update: (ctx, dt) => s.update(ctx, dt),
+  };
+  return <GameCanvas options={options} onReady={(game) => { unbind.current?.(); unbind.current = bindSwipe(window, game.input); }} />;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/Game.ts': GAME,
   'src/game/RacingRoadGame.tsx': RACING_ROAD_GAME,
+  'src/game/LaneRunnerGame.tsx': LANE_RUNNER_GAME,
   'src/game/GameCanvas.tsx': GAME_CANVAS,
   'src/game/ui/Hud.tsx': HUD,
   'src/game/ui/touchControls.ts': TOUCH_CONTROLS,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'racingroadgame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'racingroadgame', 'lanerunnergame'];
+
 
 /**
  * Generate the shell. `gamecanvas` renders the HUD and constructs the Game, so a subset that would not
@@ -2691,6 +2913,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       if (wanted.has(base)) files[path] = content;
     }
     // GameCanvas constructs Game and renders Hud; Hud imports Game's type. Neither compiles alone.
+    if (files['src/game/LaneRunnerGame.tsx']) files['src/game/GameCanvas.tsx'] = FILES['src/game/GameCanvas.tsx'];
     if (files['src/game/GameCanvas.tsx'] || files['src/game/ui/Hud.tsx'] || files['src/game/RacingRoadGame.tsx']) {
       files['src/game/Game.ts'] = FILES['src/game/Game.ts'];
     }
@@ -2713,6 +2936,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
+      (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +
       // 🔴 THE TYPES FIRST, AND FIRST ON PURPOSE (Q-909, autopsy 50378049). The example below touches
       // three of GameContext's nine members, so for the rest the reported build GUESSED — ctx.canvas,
       // ctx.followTarget (both private fields of Game) and ctx.crosshairTarget (nothing at all) — and

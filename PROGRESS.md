@@ -103324,6 +103324,77 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
 - #1426, #1425, #1417, #1406, #1397, #1392, #1377, #1372, #1371, #1362, #1358 — user stops; the slow glm-5.3 / Nemotron first calls and GLM flashx silences are the Weak-tier provider class already open.
 
 
+## 2026-11-20 — Ready-to-play endless runner starter; one list of genre starters (engine plan, item 3)
+
+- **Checked first:** item 2 of the plan (a playtest that plays) already exists — `gamePlaytest.ts` plays every canvas game
+  (start, keys, drag, touch, errors, FPS) and `gameRepair.ts` gates completion; AUTOMATIC repair is deliberately suspended
+  (docs/security/game-auto-repair-suspension.md: rollback from an incomplete snapshot could lose user files). Left
+  suspended — re-enabling needs the reviewed byte-preserving snapshot protocol that note describes, and the admin's call.
+- **Starters before this:** racing (`RacingRoadGame`) and the royale practice. A runner was wired from parts every time.
+- **Fix:** `src/game/LaneRunnerGame.tsx` in the shell — `createLaneRunnerScene()` draws the kit's LaneRunner (track,
+  lane lines, recycled posts for speed, block / low / high obstacles, spinning coins, the humanoid running, jumping,
+  sliding, dying) and wires the kit (GameCanvas start screen, pause, game over + Play again via GAME_STARTED, settings,
+  language, swipes + keys, score into core/state, jump/coin/crash feedback events). Lane 0 is the LEFT on screen: drawn at
+  `x = -run.x` because the chase camera looks down +Z (screen-right is world -X).
+- **Class fix:** `src/server/lib/gameStarters.ts` is the ONE list of starters; `actionVisibility`, `endlessRaceCourse`
+  and `shellBypass` each hard-coded RacingRoadGame and now read it; the seed gives each starter only to its genre
+  (a racing request no longer receives the whole shell; a runner no longer receives the race).
+- **Proof:** `tests/theRunnerStarterPlays.test.ts` (8): Right moves right on screen through the real chase camera; a bot
+  playing through the player's own input survives 90 s / 1200+ m; standing still → game over; Play again is clean; the
+  right starter per genre. Seven reversions each failed. Kit strict compile + shell/seed/reader suites green.
+## 2026-11-20 — Game menus in nine more Indian languages + Settings → Language (game-gap audit)
+
+- **Problem:** the game kit's own screens (start, pause, settings, game over, shop, controls, captions) were English or
+  Hindi only. A Tamil, Telugu or Bangla player got English menus unless the builder translated every word, and a missed
+  word stayed English. Nothing told the builder which language the request wanted.
+- **Root cause / class:** the kit had two languages and no path from "the request is in Tamil" to "the game is in Tamil".
+- **Fix:**
+  - `src/server/lib/gameStringsIndic.ts`: full tables for Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada, Malayalam,
+    Punjabi and Odia (every key, every `{placeholder}`, technical tokens kept). Typed as `Record<StringKey, string>` in the
+    generated `core/strings.ts`, so a new key that is not translated everywhere fails the kit's strict compile.
+  - `core/strings.ts`: 11 languages, `'auto'` detects all of them, and a **player choice** (`choosePlayerLanguage`) saved
+    on the device that wins over the game's own; the game's word changes stay in the game's own language only.
+  - Shell: **Settings → Language** list (each language in its own script); every screen re-renders on a change.
+  - `AgentV3/gameLanguage.ts`: the request decides — a language NAMED as the game's language ("Tamil mein", "in Telugu",
+    "Bangla version") or the SCRIPT the request is written in; a subject mention ("a Tamil movie quiz") is not a choice.
+    The kit handoff tells the builder `language: 'ta'` and to write the game's own text in it.
+- **Proof:** `tests/theGameSpeaksIndianLanguages.test.ts` (24 tests; five reversions each failed).
+- 🟡 **Open:** the nine tables were written without a native speaker reviewing every word. They are ordinary words, and any
+  word can be changed with `options.strings`, but a native-speaker pass per language is recommended.
+## 2026-11-20 — Cars crash into walls and into each other (engine audit, item 1 of the admin-approved plan)
+
+- **Measured first, with the real kit:** cars already stopped at walls (an earlier claim of mine in this session that
+  they did not was wrong — `vehicleTravel` sweeps the body against scenery). Two real defects:
+  1. a car drove straight THROUGH a parked car at full speed — vehicles were never obstacles, only scenery was;
+  2. a car that clipped a wall at an angle stopped dead and stayed glued to it.
+- **Class:** the vehicle sweep knew one kind of obstacle (scenery) and one outcome (full stop).
+- **Fix (shared `objects.ts`, so every driving game gets it):**
+  - every kit vehicle (car, auto, bus, truck, tractor, motorcycle, bicycle) and every model `driveVehicle` moves is a
+    vehicle body; the sweep also tests the other bodies in the same scene (capsule–capsule, binary-searched fraction);
+    bodies that left their scene are forgotten; overlapping cars can always separate (never lock together);
+  - a blocked car slides along what it hit; the speed loss is paid once at contact, then only scraping friction;
+    a head-on hit still stops dead (existing tests pin it);
+  - `onVehicleCrash(at, vehicle, impact)` once per hit (> 3 m/s lost, 0.3 s apart); the shell turns the PLAYER's crash
+    into `VEHICLE_CRASHED` → sparks, impact sound, trauma, haptic via the feedback table.
+- **Proof:** `tests/aCarHitsWhatItDrivesInto.test.ts` (9 tests, eight reversions each failed); all 28 existing vehicle
+  test files (485 tests) pass.
+- 🟡 **Not built yet:** pushing the other car, dents and damage.
+## 2026-11-20 — City blocks in the 3D game kit (game-gap audit)
+
+- **Problem:** a "city" game was one straight road with houses beside it — the kit had `createRoad()` (one strip),
+  `createTraffic()` (one strip) and one/two-storey houses. Builders hand-placed boxes: streets that did not meet,
+  buildings in the road, pavements at the wrong height, and a draw call per box.
+- **Fix:** `src/server/lib/GameCityGenerator.ts` → kit file `src/game/three/city.ts`:
+  - `planCity()` (pure, seeded): streets, crossings, lots (two rows per block, so every lot faces a street), parks (never
+    every block), street lights, a spawn in the left lane. Styles: town / mixed / downtown; size and tallest floor bounded.
+  - `cityRoute()`: along the streets, turning only at crossings, in the LEFT lane (India), ending at a door.
+  - `createCity()`: asphalt with centre dashes and zebra crossings, raised pavements, shops (awning, signboard + `lot.sign`
+    anchor for the name), apartments (balconies, water tanks), office towers, houses (yard + compound wall), parks (trees,
+    paths, benches, fountain), street lights — merged per block (a 6×6 city ≈ 180 meshes). Streets/pavements are ground
+    colliders, buildings solid. `city.heightAt` is the ground for `driveVehicle`, which already stops at the solid buildings; `city.solidAt` is for movers a game positions by hand. (An earlier draft said driveVehicle had no walls — wrong; measured, it sweeps against solid colliders.)
+  - 3D instructions + kit handoff name `createCity()`; AppKnowledgeBase `game_city_blocks`.
+- **Proof:** `tests/aCityHasStreetsAndBlocks.test.ts` (10 tests; seven reversions each failed).
+- 🟡 **Not built yet:** traffic that turns at crossings, traffic lights, pedestrians.
 ## 2026-11-20 — #4389 merged (Q-2750/2753/2766/2769 closed; Surplus retries reported); game library batch 6
 - #4389 merged: every failed Surplus attempt (benched or retried by the stay-alive loop) now reaches the build report as one `SURPLUS` provider notice with codes only (`aRetriedAttemptIsReported`). Q-3019 stays IN PROGRESS for its speed half (retry the same model before benching, decided from the new notices).
 - **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
@@ -103380,3 +103451,21 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
   - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
 - **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.
+
+## 2026-11-20 — City traffic: the grid comes alive (engine plan, item 4)
+
+- **Gap:** city.ts gave streets and buildings, and nothing moved on them — `createTraffic()` drives one straight road.
+- **Fix:** `src/server/lib/GameCityTrafficGenerator.ts` → kit file `src/game/three/citytraffic.ts`: the kit's cars, autos
+  and buses drive the city grid in the LEFT lane, turn at crossings (never a U-turn unless the street ends), obey traffic
+  lights (one street green at a time, amber between, neighbouring crossings offset; two instanced meshes for every lamp
+  in the city), keep a gap to the vehicle ahead, stop for the player, and are deterministic per seed.
+- **Found by the test, fixed at the class:** the first version checked the gap only within a street — measured, a vehicle
+  turned onto a street on top of one that had just entered it 52 times in two minutes. Now a vehicle passes its stop line
+  only when its light is green, the crossing is EMPTY (one vehicle in a crossing at a time) and the street it turns into
+  has room (so a queue never blocks the crossing). Each vehicle chooses its next street in advance.
+- `dispose()` never frees the vehicles' geometry: the kit shares parts between all vehicles, the player's car included.
+- **Proof:** `tests/cityTrafficObeysTheRoad.test.ts` (8): two minutes of 20 vehicles checked every frame (on the street,
+  left lane, never through red, never inside the gap, never two in a crossing, everyone moves, most turn); rush hour of
+  45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
+  player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
+- 🟡 **Not built yet:** pedestrians.

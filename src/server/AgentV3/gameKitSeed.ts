@@ -278,6 +278,12 @@ export function athreeMapHandoff(recipeResult: string): string {
     + (usage ? `\nHow to use it (from the recipe):\n${usage}` : '');
 }
 
+/** The builder's instruction for the preview's Tune panel (kit core/tuning.ts). */
+export const TUNING_RULE = '🎚️ TUNABLE NUMBERS: declare the numbers a creator will want to adjust by playing — player speed, jump height, '
+  + 'gravity, enemy count and speed, spawn rate, difficulty, time limits — with tunable(key, default, { label, min, max }) from '
+  + 'src/game/core/tuning.ts, and read handle.value every frame (never copy it once). NavBharatAI\'s preview shows each as a slider '
+  + 'and saves the chosen values into src/game/tuning.values.ts; never edit that file by hand and never hard-code those numbers.';
+
 export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string; endlessRaceCourse?: boolean; request?: string } = {}): string {
   const done = results.filter((r) => r.ok);
   if (done.length === 0) return '';
@@ -343,6 +349,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
+    // The creator's Tune panel (admin 2026-11-21): numbers worth adjusting become sliders in the preview.
+    has('generate_game_runtime') ? TUNING_RULE : '',
     // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
     has('generate_game_runtime') || has('generate_game_shell') ? gameLanguageHandoff(gameLanguageForRequest(opts.request)) : '',
     has('generate_game_2d')

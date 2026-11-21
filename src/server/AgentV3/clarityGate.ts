@@ -119,6 +119,48 @@ export function shouldJudgeClarity(i: {
     && !i.importing && i.attachments === 0 && !i.askedLastTurn && !i.alreadyAsking;
 }
 
+/**
+ * Why the judge was NOT consulted — the first condition of `shouldJudgeClarity` that failed — or `null` when it
+ * runs. 🔴 failedbr #1896 (2026-11-20): "Ham tumko jo banane wale game banakar do" (make the game you were going to
+ * make) was built as a space shooter without a question, and the report could not say whether the judge had read
+ * it as clear or had never been asked: its decision went only to the server log. The report now carries it. PURE.
+ */
+export function clarityJudgeSkipReason(i: Parameters<typeof shouldJudgeClarity>[0]): string | null {
+  if (shouldJudgeClarity(i)) return null;
+  if (i.isStarterPrompt) return 'the request is a starter chip';
+  if (typeof i.prompt === 'string' && (i.prompt.match(/\S+/g) ?? []).length >= LONG_SPEC_WORDS) return `the request has ${LONG_SPEC_WORDS} or more words`;
+  if (!i.enabled) return 'the clarity gate is off';
+  if (!i.newBuild) return 'this turn is not a new build';
+  if (!i.workspaceHoldsOnlyOurStarter) return 'the workspace already holds an app';
+  if (i.earlierBuildableRequest) return 'an earlier message in this conversation names an app';
+  if (i.importing) return 'a project is being imported';
+  if (i.attachments > 0) return 'a file is attached';
+  if (i.askedLastTurn) return 'we asked last turn';
+  return 'a question is already being asked';
+}
+
+/**
+ * The whole clarity decision for a new build, with its report line: the judge runs when `shouldJudgeClarity` says so,
+ * and the line says what it decided or why it was not asked (failedbr #1896). `vagueCategory` is set only on a
+ * 'vague' verdict, which is the one that answers with a question instead of a build. Kept out of the route so the
+ * chat handler's branch budget (Q-979) does not grow.
+ */
+export async function clarityDecision(
+  inputs: Parameters<typeof shouldJudgeClarity>[0],
+  judge: () => Promise<ClarityVerdict>,
+): Promise<{ vagueCategory: ClarityCategory | null; line: string }> {
+  if (!shouldJudgeClarity(inputs)) {
+    return { vagueCategory: null, line: `The clarity judge was not consulted: ${clarityJudgeSkipReason(inputs) ?? 'its conditions were not met'}.` };
+  }
+  const v = await judge();
+  console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
+  const vague = v.verdict === 'vague';
+  return {
+    vagueCategory: vague ? v.category : null,
+    line: `The clarity judge read the request as ${v.verdict} (${v.category}, ${v.ms} ms)${vague ? ', so it was answered with one question instead of a build' : ''}.`,
+  };
+}
+
 /** At or above this many words a request is a spec, not a vague order — the judge is not consulted. */
 export const LONG_SPEC_WORDS = 15;
 
@@ -217,10 +259,23 @@ export function clarifyReply(category: ClarityCategory, voice: PlatformVoice): {
   return { text, chips };
 }
 
-/** The note on a build whose request stayed vague after our one question — build the best guess. PURE. */
-export function bestGuessPrompt(firstRequest: string, reply: string): string {
-  return `${String(firstRequest ?? '').trim()}\n${String(reply ?? '').trim()}\n\n`
+/**
+ * The note on a build whose request stayed vague after our one question — build the best guess. PURE.
+ *
+ * 🔴 THE ANSWER REPLACES THE QUESTION'S SUBJECT (failedbr #1357, 2026-11-20). We asked what to build after "All GTA V game
+ * app"; the reply was "Make a i videos kahani app for youtubers". Both lines went to the builder, every reader saw "GTA"
+ * first — "clone of GTA", game domain, a game kit — and the app the user then asked for was never the subject. When the
+ * reply names an app itself (`replyNamesTheApp`, the caller's `mentionsBuildNoun`), the reply IS the request; the first one
+ * stays only when the reply names nothing ("haan", "jo theek lage").
+ */
+export function bestGuessPrompt(firstRequest: string, reply: string, replyNamesTheApp = false): string {
+  const asked = replyNamesTheApp ? '' : `${String(firstRequest ?? '').trim()}\n`;
+  return `${asked}${String(reply ?? '').trim()}\n\n`
     + '[PLATFORM NOTE] The user was already asked once what to build. Do not ask again: choose the single most likely concrete app '
-    + 'from what they said, build it with sensible defaults, and begin your first message with ONE short line, in the user\'s language, '
-    + 'saying what you assumed (e.g. "Maine ise ek <app type> maan kar banaya hai" — name the app type you chose from THEIR words; never default to a billing/shop app unless they asked for one).';
+    // failedbr #1188, #1182, #1180 (2026-11-20): the example was past tense ("…maan kar banaya hai" — "I have built it as")
+    // and Roman Hindi, so the opening line claimed a finished app at second 15, before one file existed, and a Bengali user
+    // got Latin-script Hinglish back. It now says what is being built, in the user's own language AND script.
+    + 'from what they said, build it with sensible defaults, and begin your first message with ONE short line, in the user\'s own language '
+    + 'and in the same script they typed, saying what you are about to build and why (e.g. in English: "I\'m building this as a <app type> — tell me if you meant something else"). '
+    + 'Never say it is already built: nothing exists yet. Name the app type you chose from THEIR words; never default to a billing/shop app unless they asked for one.';
 }

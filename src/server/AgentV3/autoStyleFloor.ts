@@ -39,19 +39,21 @@ export function classWords(cls: string): string[] {
 const R = {
   container: 'max-width: 960px; margin: 0 auto; padding: 16px; box-sizing: border-box;',
   card: 'border: 1px solid rgba(127,127,127,.25); border-radius: 12px; padding: 16px; margin-bottom: 12px; background: rgba(127,127,127,.06);',
-  button: 'display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 16px; border-radius: 8px; border: 1px solid #4f46e5; background: #4f46e5; color: #fff; font-weight: 600; cursor: pointer;',
-  buttonQuiet: 'display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; font-weight: 600; cursor: pointer;',
+  // Every spacing value on the 4px grid (failedbr #1228, 2026-11-20): this file is OURS, and its 2px/6px/10px were
+  // reported as "src/nb-autostyle.css (5)" off-grid values against the user's app.
+  button: 'display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 16px; border-radius: 8px; border: 1px solid #4f46e5; background: #4f46e5; color: #fff; font-weight: 600; cursor: pointer;',
+  buttonQuiet: 'display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; font-weight: 600; cursor: pointer;',
   title: 'font-size: 1.5rem; font-weight: 700; margin: 0 0 12px; line-height: 1.25;',
   subtitle: 'font-size: 1.1rem; font-weight: 600; margin: 0 0 8px;',
   muted: 'opacity: .75; font-size: .9rem;',
-  grid: 'display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));',
-  compactGrid: 'display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));',
+  grid: 'display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));',
+  compactGrid: 'display: grid; gap: 4px; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));',
   stack: 'display: flex; flex-direction: column; gap: 8px;',
   row: 'display: flex; flex-wrap: wrap; align-items: center; gap: 8px;',
   spread: 'display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;',
-  badge: 'display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .8rem; background: rgba(127,127,127,.15);',
-  input: 'padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; width: 100%; box-sizing: border-box;',
-  option: 'display: block; width: 100%; text-align: left; padding: 10px 12px; margin: 6px 0; border-radius: 8px; border: 1px solid rgba(127,127,127,.35); background: transparent; color: inherit; cursor: pointer;',
+  badge: 'display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: .8rem; background: rgba(127,127,127,.15);',
+  input: 'padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; width: 100%; box-sizing: border-box;',
+  option: 'display: block; width: 100%; text-align: left; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid rgba(127,127,127,.35); background: transparent; color: inherit; cursor: pointer;',
   active: 'outline: 2px solid #6366f1; background: rgba(99,102,241,.12);',
   success: 'background: rgba(34,197,94,.15); border-color: #22c55e;',
   danger: 'background: rgba(239,68,68,.12); border-color: #ef4444;',
@@ -119,4 +121,24 @@ export function autoStyleSheet(classes: Iterable<string>): string {
 export function withAutoStyleImport(mount: string): string | null {
   if (typeof mount !== 'string' || mount.includes('nb-autostyle.css')) return null;
   return `${AUTO_STYLE_IMPORT}\n${mount}`;
+}
+
+/** The Vite mounts the floor is imported from. */
+const FLOOR_MOUNTS = new Set(['src/main.tsx', 'src/main.jsx']);
+
+/**
+ * 🔴 THE FLOOR SHEET LEFT BEHIND (Q-2316; failedbr #1823, #1822, 2026-11-20). Both builds ended with
+ * `src/nb-autostyle.css` "imported by nothing": the platform had laid the floor and imported it from the mount, and a
+ * later rewrite of `src/main.tsx` dropped the import. The floor re-imports only when its own sheet CHANGES, and a new
+ * turn starts with no memory of it, so the sheet stayed on disk, unstyled and flagged, for the rest of the project.
+ *
+ * The import is now kept the way the design kit's rules are kept (`keepKitOnRewrite`): a write to the mount that drops
+ * a floor import the file already had gets it back, first. A mount that never had it is left alone. `null` when
+ * nothing needs keeping. PURE.
+ */
+export function keepAutoStyleImport(path: string, existing: string, next: string): string | null {
+  const p = String(path ?? '').replace(/^\.?\/+/, '');
+  if (!FLOOR_MOUNTS.has(p)) return null;
+  if (typeof existing !== 'string' || !existing.includes('nb-autostyle.css')) return null;
+  return withAutoStyleImport(next);
 }

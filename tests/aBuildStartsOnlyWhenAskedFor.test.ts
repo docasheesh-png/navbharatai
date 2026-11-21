@@ -93,7 +93,8 @@ describe('a build starts only when the message confirms it (Q-200)', () => {
 
   it('the route: an unconfirmed build is answered and offered; a yes builds the offered request', () => {
     expect(route).toContain("const offerToBuild = buildCheck !== null && !buildCheck.confirmed;");
-    expect(route).toContain("(intent === 'new_build' || (intent === 'edit_existing' && !earlierRequestLeftAnApp))");
+    // failedbr #1278: the condition moved into buildConfirmationApplies (a new build; an edit with no app yet; or code with no words).
+    expect(route).toContain("&& buildConfirmationApplies(intent, earlierRequestLeftAnApp, prompt)");
     const accept = route.indexOf('if (offerAccepted && lastRequestTurn) {');
     expect(accept).toBeGreaterThan(0);
     expect(route.slice(accept, accept + 300)).toContain('prompt = lastRequestTurn.text;');

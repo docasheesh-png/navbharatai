@@ -166,7 +166,7 @@ describe('§4 a config file the starter already has is edited, never rewritten b
       scaffoldPaths: ['package.json', 'tsconfig.json', 'vite.config.ts', 'src/App.tsx', 'src/main.tsx'],
       readExisting: async (p) => { read.push(p); return `CURRENT-${p}`; },
       generate: async (_system, user) => {
-        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Notes.tsx :: notes list\nvite.config.ts :: vite config\npackage.json :: manifest\ntsconfig.json :: ts config';
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Notes.tsx :: notes list\nvite.config.ts :: vite config with a dev proxy for /api\npackage.json :: manifest adding marked for markdown notes\ntsconfig.json :: ts config';
         const p = /Now write THIS file in full:\n {2}(\S+)/.exec(user)?.[1] ?? '';
         if (p) seen[p] = user;
         return `<<<FILE ${p}>>>\nexport default function X(){return null}\n<<<ENDFILE>>>`;

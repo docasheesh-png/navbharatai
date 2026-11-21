@@ -45,7 +45,9 @@ const VEHICLES_LAND: CatalogEntry[] = [
     parts: ['single front wheel under a fork', 'canvas roof on thin posts', 'OPEN sides with no doors', 'bench seat visible from outside', 'handlebar steering, not a wheel', 'yellow-and-green or black-and-yellow paint'],
     tell: 'The three-wheel stance and the open sides are the silhouette — you can see straight THROUGH it, which no car does.' },
   { id: 'bus', name: 'bus', category: 'vehicle-land', builder: 'createBus',
-    words: 'bus|coach|minibus|school\\s*bus', hi: 'बस',
+    // "bus" is also Hinglish "bas" (just / only): "vah bus phone nahin ghusa rahata" made a kids' learning game a BUS hero
+    // object (failedbr #898). Not a vehicle when a Hinglish word stands right beside it; "school bus", "bus game" still are.
+    words: '(?<!\\b(?:vah|woh|wo|aur|to|ab|bas|ki|ke|toh|par)\\s{1,2})bus(?!\\s+(?:phone|mobile|wo|woh|yeh|ye|itna|itni|ek|kar|karo|ho|hai|kuch|mein|ab|abhi|isi|ise|use|usko|mujhe|hum|tum|aap|thoda|thodi|khel|padh|dekh)\\b)|coach|minibus|school\\s*bus', hi: 'बस',
     dims: '11 m long, 2.5 m wide, 3.2 m tall, wheelbase 5.6 m, wheel radius 0.50 m',
     parts: ['a long flat-sided box with a flat front', 'a ROW of windows the full length at one height', 'a door with steps', 'large wheels partly hidden by the body', 'destination board above the windscreen'],
     tell: 'The window band running the whole length at a constant height is what makes it a bus rather than a large van.' },
@@ -566,7 +568,8 @@ const COLLECTIBLES: CatalogEntry[] = [
     parts: ['a colour that means its effect and NOTHING else in the level shares', 'an emissive core or an internal glow', 'a distinct silhouette readable from 20 m', 'a bob-and-spin animation', 'a burst effect plus a sound on pickup'],
     tell: 'Colour-code by EFFECT and never reuse those colours for scenery. A player must know what a pickup does before they reach it.' },
   { id: 'marker', name: 'checkpoint / portal / marker', category: 'collectible',
-    words: 'checkpoint|portal|spawn|waypoint|marker|flag|finish\\s*line|goal\\s*marker|teleport', hi: 'चेकपॉइंट|झंडा',
+    // "spawn" is a PLACE only as a noun (spawn point / zone / pad): "randomly spawn car" is a verb (failedbr #1261).
+    words: 'checkpoint|portal|(?:re)?spawn\\s*(?:point|zone|pad|area|location)s?|waypoint|marker|flag|finish\\s*line|goal\\s*marker|teleport', hi: 'चेकपॉइंट|झंडा',
     dims: 'a checkpoint gate 4-6 m wide and 4 m tall; a floor pad 2 m across; a flag 2.5 m tall',
     parts: ['a shape readable from a DISTANCE and from any angle', 'an animated element — a rotating ring, a rippling surface, a waving flag', 'a clear before/after state so the player knows it triggered', 'a light or emissive so it is visible in every lighting preset'],
     tell: 'It must be legible from across the level and it must visibly CHANGE when used. A static prop the player cannot tell they have activated is a bug report waiting to happen.' },
@@ -589,7 +592,9 @@ const CONTAINERS: CatalogEntry[] = [
 /** Food. */
 const FOOD: CatalogEntry[] = [
   { id: 'fruit', name: 'fruit / vegetable', category: 'food',
-    words: 'fruit|apple|mango|banana|vegetable|sabzi|tomato|potato|coconut|orange', hi: 'फल|सब्ज़ी|सब्जी|आम|केला',
+    // "banana" is also the Hindi verb "to make" ("ek game banana hai") — failedbr #1068 got a fruit in a zombie game. The
+    // fruit only where no build noun precedes it and no auxiliary completes it into the verb (IntentClassifier's homograph).
+    words: 'fruit|apple|mango|(?<!\\b(?:app|apps|game|website|site|software|application|project|tool)\\s{1,3})banana(?!\\s+(?:hai|h|he|tha|thi|chahta|chahti|chahte|chahiye|padega|padegi|hoga|hogi|ka|ki|ke))|vegetable|sabzi|tomato|potato|coconut|orange', hi: 'फल|सब्ज़ी|सब्जी|आम|केला',
     dims: 'apple 0.08 m, mango 0.12 m, banana 0.18 m, coconut 0.15 m, watermelon 0.30 m',
     parts: ['a stem, calyx or crown — never a bare ball', 'an asymmetric shape, slightly dented', 'colour variation across the surface, not one flat tone', 'a small specular sheen on the skin'],
     tell: 'Check it against a 0.18 m hand. Food is the easiest thing in a game to build twice too large, and a plain sphere is a marble.' },

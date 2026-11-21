@@ -157,7 +157,7 @@ describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that s
   it('the settle flip is really given the fact — both halves of it', () => {
     // PIN UPDATED (Q-1019): a third kind of final answer joined the first argument. Both halves of the
     // fact this test is about — the question and the refusal — are still passed, which is its whole claim.
-    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,1400}?modelAnswer\.asked \|\| modelAnswer\.pointed \|\| modelAnswer\.notOurs,\s*modelAnswer\.declined,\s*\)/);
+    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,1400}?modelAnswer\.asked \|\| modelAnswer\.pointed \|\| modelAnswer\.notOurs,\s*modelAnswer\.declined,\s*isEditMode,[^\n]*\n\s*\)/);
   });
 
   it('🔑 the predicate is IMPORTED, never re-implemented beside its sibling', () => {

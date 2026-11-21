@@ -38,7 +38,7 @@ import { reasoningAwareAsk } from '../reasoningAsk';
 import type { ProviderSilenceMemory } from '../providerSilenceMemory';
 import { BuildStoppedError, isBuildStoppedError, raceStop, throwIfStopped } from '../stopSignal';
 import {
-  EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
+  EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, isStalledTurn, recordSlowSample,
   type SlowRungState,
 } from '../slowRungBench';
 
@@ -1021,6 +1021,11 @@ export function makeMultiProviderTurnRunner(
               ...(result.usage?.measured === false ? { measured: false as const } : {}),
             });
             slowRungs.set(slowKey, next);
+            // A stalled answer is engine time, not the request's (failedbr #696, Q-3209): it reaches the waste ledger
+            // the ending reads, so a cap filled by stalled calls is never called "not converging".
+            if (isStalledTurn({ outputTokens: result.usage?.outputTokens ?? 0, observedMs: answeredInMs, ...(result.usage?.measured === false ? { measured: false as const } : {}) })) {
+              opts.onAttemptWasted?.(reportName, 'stalled', Math.max(0, answeredInMs));
+            }
             if (!slowBenched.has(slowKey) && isRungTooSlow(next)) {
               if (canBenchAnother(slowBenched.size, distinctSlowRungs)) {
                 slowBenched.add(slowKey);

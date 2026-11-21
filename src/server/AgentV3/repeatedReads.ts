@@ -98,8 +98,10 @@ export function repeatedReadNotice(
     );
   }
   return (
-    `[NOTE — you have now read ${path} ${times} in this build, and it has NOT changed since your `
-    + 'first read. The full content follows, but you already have it. Re-reading a file you have not '
+    // failedbr #1077 (2026-11-20): the comparison is with the LAST read (the ledger keeps the latest copy), so "since your
+    // first read" was false for a file edited between the first and the last — and the model then "fixed" a non-issue.
+    `[NOTE — you have now read ${path} ${times} in this build, and it has NOT changed since you last `
+    + 'read it. The full content follows, but you already have it. Re-reading a file you have not '
     + 'edited costs a step and buys nothing — work from what you have, and read again only after you '
     + 'change it.]\n'
   );

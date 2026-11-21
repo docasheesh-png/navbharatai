@@ -1753,6 +1753,8 @@ export class BuildDiagnostics {
    * it gets a plain note, and the build's own first call — when it comes — replaces that note with the real split.
    */
   private firstCallTimed = false;
+  /** Planner time spent before the first builder call — named in TIME_TO_FIRST_CALL, never called setup. */
+  private plannerMsBeforeFirstCall = 0;
   private preBuildCallNote?: { issue: BuildIssue; latencyMs: number };
   private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number, completedAt = this.now()): void {
     if (this.firstCallTimed) return; // only the first call that ran inside this build's timer
@@ -1797,7 +1799,7 @@ export class BuildDiagnostics {
       // build `npm install` runs in the background boot, CONCURRENT with the build — it does not gate
       // this first call — and a resumed sandbox already carries node_modules. Naming it here sent an
       // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
-      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) ${callTime!.split ? `The first call then took ${callTime!.text} — provider time, not setup.` : `The first call itself then took ${callTime!.text}; that is model time, not setup.`}`;
+      : `${seconds}s of preparation before the build's first model call began — ${this.plannerMsBeforeFirstCall >= 1000 ? `${Math.round(this.plannerMsBeforeFirstCall / 1000)}s of it was the planner's own model call (it plans a big app before the build starts); the rest is ` : ''}sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) ${callTime!.split ? `The first call then took ${callTime!.text} — provider time, not setup.` : `The first call itself then took ${callTime!.text}; that is model time, not setup.`}`;
     // …UNLESS A FAST LANE ALREADY BURNED THAT WINDOW, IN WHICH CASE NONE OF THE ABOVE IS TRUE
     // (autopsy a38c6fef, 2026-09-13). A lane's model call is not RECORDED until it returns, so a lane
     // that is abandoned at its deadline leaves this window looking like pure setup. In the real report
@@ -1901,6 +1903,12 @@ export class BuildDiagnostics {
      * the stop's detail line (autopsy 9c612cdb). Absent for the user's Stop, whose record is unchanged.
      */
     stopCause?: AbortCause;
+    /**
+     * A planner call made BEFORE the build's first builder call (roadmap, blueprint, project planner). It is not the
+     * build's first model call, so it does not end the preparation window; its time is named inside it instead
+     * (failedbr #1200, #1188, #1179: "0s of preparation" printed after a 15 s planner call).
+     */
+    planner?: boolean;
   }): void {
     // The answering engine's own time is only ever PART of the caller's wait — never more than it.
     const answerMs = typeof rec.answerMs === 'number' && Number.isFinite(rec.answerMs) && rec.answerMs >= 0
@@ -1912,7 +1920,11 @@ export class BuildDiagnostics {
     const receivedAt = this.now();
     const completedAt = typeof rec.ts === 'number' && Number.isFinite(rec.ts) && rec.ts > 0 && rec.ts <= receivedAt
       ? rec.ts : receivedAt;
-    this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs, completedAt);
+    if (rec.planner === true) {
+      if (!this.firstCallTimed && typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) && rec.latencyMs > 0) this.plannerMsBeforeFirstCall += rec.latencyMs;
+    } else {
+      this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs, completedAt);
+    }
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
@@ -2368,7 +2380,10 @@ export class BuildDiagnostics {
         const problemWord = PROBLEM_WORD_RE.test(tForMatch);
         // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
         // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.
-        const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch);
+        // A QUOTED SYMPTOM IS NAMED, NOT REPORTED (failedbr #1334, 2026-11-20): "I'll start by looking at … where this
+        // "Failed to fetch" error comes from." was filed as an ERROR twice — the only failure verb was inside the user's own
+        // quoted error message. Quoted spans are left out of the failure test; an unquoted "failed" is still a failure.
+        const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(withoutQuotedSpans(tForMatch));
         // REMEDIATION INTENT is progress, not a failure (PaisaTrack "fix all error" autopsy 2026-07-21:
         // "Now I'll fix both errors: … Fix the TypeScript type error" was recorded severity=error on a
         // SUCCESSFUL build, inflating the count to "1 error" under an "All Errors Fixed!" summary). When a
@@ -2795,6 +2810,16 @@ export class BuildDiagnostics {
    * the wait was timed at all (autopsy 303e8a6f: 62% of an 11.4 s wait was in no line). Every SETUP_TIMING goes
    * through here or `closeSetupWindow` — a census forbids a hand-written one in the route.
    */
+  /**
+   * A setup step that is usually instant, recorded only when it was not (failedbr #1319/#1263/#1277: 2–6 s before the first
+   * call sat "outside every timed step"). Below `minMs` it is not a step worth a report line, so none is written.
+   */
+  recordSetupTimingIfSlow(t: { message: (ms: number) => string; detail?: string; startMs: number }, minMs = 250): void {
+    const ms = this.now() - t.startMs;
+    if (!(ms >= minMs)) return;
+    this.recordSetupTiming({ startMs: t.startMs, message: t.message(ms), ...(t.detail ? { detail: t.detail } : {}) });
+  }
+
   recordSetupTiming(t: { message: string; detail?: string; startMs: number; endMs?: number }): void {
     const endMs = Number.isFinite(t.endMs) ? (t.endMs as number) : this.now();
     const startMs = Number.isFinite(t.startMs) ? Math.min(t.startMs, endMs) : endMs;
@@ -2990,6 +3015,28 @@ export class BuildDiagnostics {
    * silence unrelated warnings; a readiness warning that a later pass made FALSE must be cleared by
    * its own sentence and nothing else.
    */
+  /**
+   * AN EARLIER FAILED TYPECHECK IS ANSWERED BY THE CURRENT ONE (failedbr #1258, #1253, 2026-11-20). The gate read
+   * "Failed: 1 build-breaking blocker ($ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2)" and "Proven: the project
+   * typechecks" in one line: the failure was an earlier run, the proof a later whole-project run on the current files,
+   * and the end-of-build back-fill that matches a later success by its exact command text never ran before the gate and
+   * would not have matched the write-time check's own command anyway. When the gate's own typecheck evidence for the
+   * current revision is `passed`, every earlier failed typecheck command is answered. Returns how many. Any other
+   * evidence ('failed', 'not-run', unknown) answers nothing.
+   */
+  answerTypecheckFailuresWhenProven(typecheck: unknown): number {
+    if (typecheck !== 'passed') return 0;
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== 'SANDBOX_CMD_FAILED' || issue.autoResolved === true) continue;
+      if (!isTypecheckCommand(commandKey(String(issue.message ?? '')))) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) this.notify();
+    return cleared;
+  }
+
   resolveOnRecheck(code: string, opts: { messageIncludes?: string } = {}): number {
     const needle = typeof opts.messageIncludes === 'string' ? opts.messageIncludes : null;
     let cleared = 0;
@@ -3865,6 +3912,11 @@ export function isNeverRootCause(code: string): boolean {
  * capped exactly as the SANDBOX_CMD_FAILED message renders it, so an issue message and a recorded
  * command compare equal without re-parsing either. PURE.
  */
+/** A whole-project TypeScript check: `tsc --noEmit` (any path to tsc, vue-tsc too) or the project's typecheck script. PURE. */
+export function isTypecheckCommand(command: string): boolean {
+  return /(?:^|[\s/&;|])(?:vue-)?tsc\b[^|;&]*--noEmit\b|\bnpm\s+run\s+(?:typecheck|type-check|tsc)\b/.test(String(command ?? ''));
+}
+
 export function commandKey(commandOrMessage: string): string {
   const raw = (commandOrMessage || '').trim();
   // Issue messages render as `$ <command> → exit N (Ms)`; recorded commands are the bare command.
@@ -4157,6 +4209,11 @@ function judgeEtaPromise(
   return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}${waitNote}.` };
 }
 
+/** The text with its double-quoted, curly-quoted and back-ticked spans removed — what the writer says, not what it quotes. PURE. */
+export function withoutQuotedSpans(text: string): string {
+  return String(text ?? '').replace(/"[^"\n]{1,200}"|“[^”\n]{1,200}”|`[^`\n]{1,200}`/g, ' ');
+}
+
 /**
  * The build's own verdict CODE — the last `OUTCOME_*` issue it recorded, or '' when it recorded none.
  *
@@ -4205,8 +4262,16 @@ export function outcomeCodeOf(
  */
 export function buildWasStopped(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
-  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD');
+  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD' || i?.code === ENGINE_STOP_CODE);
 }
+
+/**
+ * The code for a stop the ENGINE made while working on a request NavBharatAI itself composed (failedbr #1334, 2026-11-20).
+ * It used to be filed as USER_STOPPED_BUILD with the message "…not by the user" — a code that contradicted its own line,
+ * and a reader (`stoppedByUser`) that had to tell the two apart by matching our prose. `buildWasStopped` counts both;
+ * `stoppedByUser` counts only the user's. Legacy records keep their message check below.
+ */
+export const ENGINE_STOP_CODE = 'ENGINE_STOPPED_BUILD' as const;
 
 export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
@@ -4586,6 +4651,13 @@ export function deriveRootCause(input: {
   // instead of the generic "no specific error" (which reads like the app silently failed).
   if (issues.some(isInfra)) {
     return 'The build sandbox became unavailable mid-build (reaped/expired/unreachable), so the app could not be finished or verified. This is an infrastructure condition, not a defect in the generated app.';
+  }
+  // 🔴 A QUESTION IS NOT A FAILURE WITH NO ERROR (failedbr #1619, #1564, #1537, 2026-11-20). "Make sure video", "Sell app"
+  // and a native-Android JARVIS spec were each answered with a question to the user (TURN_ANSWERED_A_QUESTION) — no
+  // build was attempted, so nothing failed — and the report said "Build did not succeed, but no specific error was
+  // captured", which reads as a silent crash. The turn's own record says what it was.
+  if (ok === false && issues.some((i) => i.code === 'TURN_ANSWERED_A_QUESTION')) {
+    return 'This turn asked the user a question instead of building, so no build was attempted — it is waiting on their answer, not a failure.';
   }
   if (ok === false) return 'Build did not succeed, but no specific error was captured.';
   return undefined; // still running / nothing to report yet

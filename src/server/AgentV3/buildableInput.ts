@@ -207,7 +207,9 @@ export type UnbuildableReason =
   /** Words, but far too few to be an instruction (e.g. "app"). */
   | 'too-short'
   /** An order to make something, with no something: "banao", "build", "make it". */
-  | 'no-object';
+  | 'no-object'
+  /** The request points at an image ("the website provided in the image") — whether one is attached is the caller's to check. */
+  | 'image-missing';
 
 export interface BuildableVerdict {
   /** True when the engine should build exactly as it does today. The overwhelmingly common case. */
@@ -224,6 +226,37 @@ export interface UnbuildableVerdict {
 }
 
 export type InputVerdict = BuildableVerdict | UnbuildableVerdict;
+
+const PICTURE_WORD = String.raw`(?:image|screenshot|screen\s?shot|photo|picture|pic|mock-?up|reference\s+image|design\s+image)s?\b(?!\s+(?:gallery|galleries|upload\w*|editor|slider|carousel|grid|generator|search|compress\w*|filter|viewer|crop\w*))`;
+/** Only phrases that BUILD FROM an image — never an app that works ON images ("count people in the image"). */
+const POINTS_AT_IMAGE = new RegExp([
+  String.raw`\b(?:provided|given|shown|attached|uploaded|shared|depicted)\s+(?:in|on|above|below)\s+(?:the\s+|this\s+|my\s+)?${PICTURE_WORD}`,
+  String.raw`\b(?:like|same\s+as|similar\s+to|based\s+on|according\s+to|as\s+per|exactly\s+like|following)\s+(?:the\s+|this\s+|my\s+|attached\s+|above\s+|given\s+)?${PICTURE_WORD}`,
+  String.raw`\bas\s+(?:shown|given|in)\s+(?:in\s+)?(?:the\s+)?${PICTURE_WORD}`,
+  String.raw`\b(?:the|this|my)\s+(?:attached|uploaded|above|below|given)\s+${PICTURE_WORD}`,
+  String.raw`\b(?:image|photo|screenshot|pic|picture)\s+(?:jaisa|jaisi|jaise|ke\s+jaisa|ki\s+tarah)\b`,
+  String.raw`\b(?:image|photo|screenshot|pic|picture)\s+(?:me|mein|mai)\s+(?:diya|di|dikhaya|dikhayi|hai\s+(?:waisa|vaisa|wahi))\b`,
+  String.raw`(?:फोटो|तस्वीर|इमेज|स्क्रीनशॉट|चित्र)\s*(?:जैसा|जैसी|जैसे|की\s+तरह|में\s+दिया|में\s+दिखाया)`,
+].join('|'), 'i');
+
+/** Does the request rely on an image it points at ("as shown in the image", "is photo jaisa")? PURE. */
+export function pointsAtAnImage(prompt: string): boolean {
+  return POINTS_AT_IMAGE.test(String(prompt ?? ''));
+}
+
+/** The unbuildable reasons the route answers in chat instead of building (a turn with no attachment, import or edit). */
+const DIVERTED_REASONS: ReadonlySet<UnbuildableReason> = new Set(['link-only', 'empty', 'image-missing']);
+export function divertsToChat(verdict: InputVerdict): verdict is UnbuildableVerdict {
+  return !verdict.buildable && DIVERTED_REASONS.has(verdict.reason);
+}
+
+/** The chat steer for an unbuildable turn: only the missing image has one, and only when nothing was attached. */
+export function steerForUnbuildable(reason: UnbuildableReason, attachments: number): string {
+  return reason === 'image-missing' && attachments === 0 ? MISSING_IMAGE_STEER : '';
+}
+
+/** Said to the chat reply when the request points at an image nobody attached (Q-3214). */
+export const MISSING_IMAGE_STEER = '\n\nTHIS TURN: the user\'s request points at an image (a design or screenshot to build from), but NO image was attached. Do not build, do not guess the design. Say in one or two short sentences, in the user\'s language, that you do not see the image, and ask them to attach it with the paperclip (or paste it) or describe what it shows — then you will build from it.';
 
 /** Strip links and filler, and report what real instruction is left. PURE. */
 export function instructionWords(prompt: string): string[] {
@@ -290,6 +323,19 @@ export function assessBuildInput(prompt: string): InputVerdict {
       message: voiceOf(raw) === 'en'
         ? 'I did not understand what to make. Tell me in a line or two what the app should do — for example "a shop billing app with GST" — and I will build it right away.'
         : clarifyReply(categoryFromWords(raw), voiceOf(raw)).text,
+    };
+  }
+
+  // THE IMAGE IT POINTS AT (failedbr #690, Q-3214). "Build a campus connect website which is provided in the image"
+  // arrived with no image; the builder globbed for one, found none, and spent 29 minutes on a generic guess without a
+  // word to the user. The design IS the image, so nothing else in the message can stand in for it. The route diverts
+  // this only when the turn carries no attachment (an attached image makes the same words a complete request).
+  if (pointsAtAnImage(raw)) {
+    return {
+      buildable: false,
+      reason: 'image-missing',
+      links,
+      message: 'Your message points to an image, but I do not see one attached. Please attach it with the paperclip (or paste it), or describe what it shows — then I will build it from that.',
     };
   }
 

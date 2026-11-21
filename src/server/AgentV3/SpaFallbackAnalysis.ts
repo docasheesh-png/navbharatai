@@ -162,3 +162,23 @@ export function spaFallbackRepairInstruction(finding: SpaFallbackFinding): strin
     'Do NOT change any working API route or client code — only add the static-serve + catch-all. Keep everything that already works.',
   ].join('\n');
 }
+
+/** Does this file start an Express server (the only kind the fallback check speaks about)? PURE. */
+export function startsExpressServer(path: string, content: string): boolean {
+  return CODE_RE.test(String(path ?? '')) && typeof content === 'string' && EXPRESS_RE.test(content) && LISTEN_RE.test(content);
+}
+
+/**
+ * The write-time half of `SPA_FALLBACK_MISSING` (failedbr #1803, #1801, 2026-11-20). Both MP3-converter builds wrote a
+ * `server.ts` that served the client with no catch-all, although the prompt asks for one; the end-of-build check named
+ * it, but both builds were stopped before any repair ran, so the app kept answering "Cannot GET" on a reload. The same
+ * finding is now said when the server file is written, while the model still has it open. `''` when the written server
+ * is fine, or when nothing written starts a server. PURE.
+ */
+export function spaFallbackWriteNote(written: Record<string, string>, project: Record<string, string>): string {
+  const servers = Object.entries(written).filter(([p, c]) => startsExpressServer(p, c)).map(([p]) => p);
+  if (servers.length === 0) return '';
+  const finding = analyzeSpaFallback({ ...project, ...written });
+  if (!finding || !servers.includes(finding.file)) return '';
+  return `\n\nServer check after this write: ${finding.message}\nAdd exactly this, after every API route:\n${spaFallbackSnippet(finding)}`;
+}

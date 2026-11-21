@@ -38,3 +38,40 @@ describe('exam and classroom terms are never unknown service names (failedbr #20
   });
 });
 
+
+// …and from failedbr #1888 (a shop's GST bill: "the CGST and SGST split per slab" was flagged).
+describe('Indian tax and invoice terms are never unknown service names (failedbr #1888)', () => {
+  it('the real #1888 request names no unknown service', () => {
+    expect(unknownNamesInRequest('Build a GST billing app for a shop: show the bill with taxable value, the CGST and SGST split per slab, and the final total in rupees.')).toEqual([]);
+  });
+  it.each(['CGST', 'SGST', 'IGST', 'UTGST', 'SAC', 'TCS', 'GSTR', 'ITC', 'IRN'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Build an invoice app that shows the ${w} amount on every bill.`)).toEqual([]);
+  });
+});
+
+// …and from failedbr #1533 ("CORS" read as a typo) and #1441 ("15db SNR"), plus the family a sweep found beside them.
+describe('engineering vocabulary is never an unknown service name (failedbr #1533, #1441)', () => {
+  it('the real #1441 request names no unknown service', () => {
+    expect(unknownNamesInRequest('Create an app that can do speech separation  in background noise upto 15db SNR real time using audioflinger')).toEqual([]);
+  });
+  it.each(['CORS', 'SNR', 'CSRF', 'OAUTH', 'SSO', 'MFA', 'RBAC', 'ORM', 'SSR', 'WASM', 'DSP', 'FFT', 'NOSQL', 'BLE', 'RFID', 'LIDAR', 'SSH', 'UDP', 'WCAG', 'CTR', 'MRR', 'UUID'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Build an app with ${w} support for my shop.`)).toEqual([]);
+  });
+});
+
+// …and from failedbr #1384 ("GTA") and #1373 ("SSS" rank): game titles and ranks name a game, not a service.
+describe('game titles and ranks are never unknown service names (failedbr #1384, #1373)', () => {
+  it.each(['GTA', 'PUBG', 'BGMI', 'FIFA', 'WWE', 'SSS', 'MLBB', 'KBC'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Make a game like ${w} with levels for my phone.`)).toEqual([]);
+  });
+});
+
+describe('Indian places and public-works terms are not services (failedbr #1326)', () => {
+  it('the civil engineer request names nothing unknown', () => {
+    expect(unknownNamesInRequest('I am civil engineer ,i want prepare ai app for prepare DPR OF PONDS ,DETAILED estimate,costing , BOQ,leveling graph and others all works ,which is most important for prepare DPR OF PONDS IN MINOR WATER RESOURCES DEPARTMENT BIHAR')).toEqual([]);
+    expect(unknownNamesInRequest('PWD SOR rates for MAHARASHTRA and a PMGSY road tracker for JHARKHAND')).toEqual([]);
+  });
+  it('a coined product name is still asked about', () => {
+    expect(unknownNamesInRequest('connect my app to the ZORBLAX feed for BIHAR')).toEqual(['ZORBLAX']);
+  });
+});

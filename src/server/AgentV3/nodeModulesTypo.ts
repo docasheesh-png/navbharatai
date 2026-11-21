@@ -9,8 +9,14 @@
 
 const TYPO = /(^|[\s;&|(`'"])\.node_modules\//g;
 
+// 🔴 …AND `. ./node_modules/.bin/tsc` IS THE SAME TYPO WITH A SPACE (failedbr #1617, 2026-11-20). A build ran
+// `. ./node_modules/.bin/tsc --noEmit` seven times. `.` (and `source`) runs a file AS SHELL in the current shell, so
+// bash read tsc's JavaScript line by line, and its `import …` lines ran ImageMagick's `import` ("unable to open X
+// server") — never the compiler. Sourcing a package binary is never what was meant; it is rewritten to run it.
+const SOURCED_BIN = /(^|[;&|(`]\s*|&&\s*|\|\|\s*)(?:\.|source)\s+((?:\.\/)?node_modules\/\.bin\/)/g;
+
 export function fixNodeModulesTypo(command: string): { command: string; fixed: boolean } {
   const raw = String(command ?? '');
-  const out = raw.replace(TYPO, '$1./node_modules/');
+  const out = raw.replace(TYPO, '$1./node_modules/').replace(SOURCED_BIN, '$1./node_modules/.bin/');
   return { command: out, fixed: out !== raw };
 }

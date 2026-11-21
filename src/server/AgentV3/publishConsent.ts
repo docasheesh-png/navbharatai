@@ -75,8 +75,12 @@ const FEATURE_BEFORE = [
   /\b(?:posts?|videos?|pdfs?|files?|photos?|notes?|content|articles?|blogs?|notices?|assignments?|results?|courses?|lectures?|images?|documents?)\s+$/i,
   /(?:वीडियो|पोस्ट|फोटो|फ़ोटो|फाइल|फ़ाइल|नोट्स|पीडीएफ)\s*$/,
 ];
-/** "deployment tracker" is a product, not an order to deploy. */
-const COMPOUND_AFTER = /^\s+(?:tracker|dashboard|pipeline|manager|logs?|history|status|tool|system|platform|monitor)\b/i;
+/**
+ * "deployment tracker" is a product, not an order to deploy — and "Deployment instructions (Vercel)", "a deployment guide",
+ * "deploy steps in the README" are DOCUMENTS the user wants written (failedbr #961, 2026-11-20: a deliverables list asking for
+ * deployment instructions switched the deploy tool on). Applied to every publish word, not only "-ment".
+ */
+const COMPOUND_AFTER = /^\s+(?:tracker|dashboard|pipeline|manager|logs?|history|status|tool|system|platform|monitor|instructions?|guides?|steps?|docs?|documentation|notes?|readme|section|checklist|details|how-?to|tutorial|walkthrough)\b/i;
 
 /** Is THIS occurrence of a publish word an order about the app, rather than a feature inside it? */
 function isAnOrder(text: string, index: number, word: string): boolean {
@@ -84,7 +88,7 @@ function isAnOrder(text: string, index: number, word: string): boolean {
   const after = text.slice(index + word.length, index + word.length + 48);
   if (FEATURE_AFTER.some((re) => re.test(after))) return false;
   if (FEATURE_BEFORE.some((re) => re.test(before))) return false;
-  if (/ment$/i.test(word) && COMPOUND_AFTER.test(after)) return false;
+  if (COMPOUND_AFTER.test(after)) return false;
   return true;
 }
 

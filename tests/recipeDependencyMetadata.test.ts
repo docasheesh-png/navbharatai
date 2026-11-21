@@ -33,6 +33,8 @@ describe('recipe dependency metadata, without regenerating unused kit instructio
     const expected = declaredVersions(before);
     expect([...expected]).toEqual([
       ['three', { version: '^0.180.0', dev: false }],
+      // The 3D kit's physics.ts (pinned): installed only when a game's files import it (recipeDependenciesNeeded).
+      ['cannon-es', { version: '0.20.0', dev: false }],
       ['@types/three', { version: '^0.180.0', dev: true }],
     ]);
     expect(recipeDependencyVersions()).toEqual(expected);

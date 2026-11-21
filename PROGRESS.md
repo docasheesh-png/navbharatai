@@ -103452,6 +103452,20 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
 - **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.
 
+## 2026-11-20 — What the library lacks is made with the Object Forge (admin: "han")
+
+- **Class:** an object the user named that neither the reviewed model library nor the 3D kit provides was left to one
+  generic system-prompt line, so a weak builder drew it from boxes (the Athree map's class before it was seeded).
+- **What the platform now does (`AgentV3/forgeForMissing.ts`):** after the 3D kit seed, it reads the objects the user
+  named (`forgeSubjects.subjectWordsIn`), drops those the library serves (`gameAssetRequirements`) or the kit builds,
+  and hands the builder, per object, the `author_object` instruction with its kind's worked example and checklist. The
+  builder also tells the user, in the user's own language, that they can attach their own model (.glb/.gltf/.obj/.fbx
+  or a zip) and ask where to get free ones. The download guide is the other session's `modelSourcesGuide.ts` (#4397).
+- **Checked after:** `ToolDispatcher._warnIfForgeSkipped` adds a readiness WARNING (never a blocker) for an assigned
+  object with no Forge object saved. Diagnostic `FORGE_SUBJECTS_ASSIGNED` names the assignment.
+- **Not done, and why:** the platform writing the Forge spec itself needs a model call outside the builder's turn, which
+  stays held in `ToolDispatcher` (`describe`) until it has admitted billing and cancellation — a money decision.
+- Locked by `tests/whatTheLibraryLacksIsForged.test.ts`; removing the library check fails it.
 ## 2026-11-20 — #4396 merged (batch 8); batches 9–10, FBX import, "where to get it", library on every 3D turn
 - #4396 merged. It also merged the other session's switch: the library is ON by default (`7aac6be51`). The admin can now delete `AGENTV3_EXTERNAL_GAME_ASSETS` from Cloud Run — a value of `admin` would keep it owner-only.
 - **Batch 9:** the Quaternius Farm Animal Pack (CC0 per the pack page). Cow, horse and zebra idle/walk/run/jump/die; llama, pig, sheep and pug idle/jump. Every moving role proven live.
@@ -103487,6 +103501,101 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
 
+## 2026-11-21 — People in the city; cars wait behind the zebra (admin plan: "people walking in the city")
+
+- **Kit file `src/game/three/citypeople.ts`** (`GameCityPeopleGenerator.ts`): people walk the pavement loop around each
+  block and, at corners, sometimes cross to the next block — only on the zebra, kerb to kerb, briskly (≥ 1.4 m/s), only
+  when the cars on that street have red for the WHOLE crossing (sampled every 0.5 s) and no car is near; they stop for the
+  player; `people.bodies` passed to `traffic.update` makes cars stop for them. The crowd is two instanced meshes (body and
+  head) — two draw calls for up to 150 people, for budget phones.
+- **Found by the test, fixed:** the first light check sampled only "now" and "at the far kerb" — a light red at both and
+  green in between let people start across just before green (8,823 frames on the road off red). The whole window is now
+  checked, and the crossing is kerb to kerb so it fits inside one red.
+- **Sibling found while designing it, fixed:** traffic's stop line sat 1 m past the crossing's edge — a waiting car's
+  bumper was ON the zebra stripes. `CITY_ZEBRA` is now the one source of the zebra's size; the stop line (`stopBack`) is
+  1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
+- **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
+  new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.
+## 2026-11-21 — Games stay smooth on budget phones (admin plan: "smooth on cheap Android phones")
+
+- **Found first:** the kit already adapts at run time (perf governor: steps quality down after ~3 s of stutter), and the
+  playtest scores frame rate — but in the sandbox's SOFTWARE renderer, which says little about a phone GPU. Two gaps:
+  1. every game STARTED at the highest picture, so a cheap phone's first impression was 3–6 s of stutter;
+  2. nothing measured how much each frame asks of the GPU, so a game too heavy for budget phones passed unnoticed.
+- **Fix:** `core/perf` `budgetDevice()` (deviceMemory ≤ 3 GB, or — when memory is not reported — ≤ 2 cores; cores alone
+  are not trusted: cheap phones have 8, iPhones report 4) and `createPerfGovernor({ startDrop })`; the shell starts a
+  budget phone one level down, never above the player's choice, climbing back after a smooth run. The playtest hook
+  reports the last frame's draw calls / triangles / geometries / textures (`window.__nbKit.load`, from renderer.info);
+  the playtest reads it after a round; over `BUDGET_PHONE` (300 calls, 600k triangles) → `GAME_DEFECT_TOO_HEAVY` and a
+  `GAME_TOO_HEAVY` finding with a one-tap "Make it smooth on budget phones" fix (merge, instance, lite detail, reuse).
+  A game that does not report its load is never accused.
+- **Proof:** `tests/aGameStaysSmoothOnABudgetPhone.test.ts` (6; four reversions each failed); census, playtest, repair and
+  perf suites green (32 files, 477 tests).
+## 2026-11-21 — Real physics for 3D games: things fall, roll, topple, and ragdoll
+
+- **Why:** the admin's plan item "real physics: objects that fall over, roll and ragdoll". The kit had none: a crate
+  a car hit never moved, a stack could not topple, and a character's death could only be a canned pose.
+- **What:** a new kit module `three/physics.ts` (`src/server/lib/GamePhysicsGenerator.ts`) built on cannon-es 0.20.0
+  (MIT, no dependencies, pinned). Hand-writing a rigid-body solver was rejected: stacks jitter and objects tunnel.
+  - `createPhysics(scene)` has gravity and a ground, and turns the scene's solid kit colliders into fixed walls.
+  - `add(mesh, { mass })` sizes a box or sphere from the mesh. Also: `remove`, `explode(point, strength, radius)`,
+    `ragdoll(humanoid)` (11 bones pinned at the joints, driving the kit humanoid's joints), and `step(dt)`
+    (fixed 60 Hz from the game's own dt), `dispose`.
+  - cannon-es is installed **only** when physics.ts ships; the repo pins the same version as a devDependency so
+    our tests run against exactly what users get.
+- **Root cause caught while building:** cannon's `fixedStep` reads the wall clock, so a game stepped by its own `dt`
+  (and every test) barely moved. The module uses `world.step(1/60, dt, 6)`.
+- **Proof:** `tests/thingsFallRollAndRagdoll.test.ts` (7). A crate comes to rest at y = 0.5. A five-box stack stands
+  still for 5 s. A blast topples it away from the blast. A ball rolls and stops at a kit wall. Mass 0 never moves. A
+  ragdoll lands with its head near the ground, no body below the ground, every joint's pivots still meeting, at rest.
+  Four reversions each failed: no joint constraints, no scene walls, no conditional dependency, and wall-clock stepping.
+## 2026-11-21 — Tune a game with sliders in the preview (admin plan: "a tuning panel … without prompting again")
+
+- **Kit `core/tuning.ts`:** `tunable(key, default, { label, min, max, step })` returns a live handle; saved values come from
+  `src/game/tuning.values.ts` (a declared DATA file — `GAME_RUNTIME_DATA_FILES` — kept by the kit once edited) and win over
+  the default; every value is clamped. Inside a frame it announces its sliders to the parent (`{ nbTuneList }`) and accepts
+  `{ nbTuneSet }` ONLY from `window.parent`.
+- **Preview:** `src/lib/gameTuning.ts` validates the frame's list (≤ 30, plain keys, finite numbers, min < max) and writes the
+  file byte-for-byte as the kit's `tuningFile()` does; `TuningPanel.tsx` (sliders, Save, Reset); `PreviewSurface` listens only
+  to its own frames, shows a Tune button in the toolbar, sends each change with `postToPreview`, and Save writes the file
+  through the owner-verified `/api/agentv3/import-files` (live sandbox + durable store) and `onFileEdited`.
+- **Games declare tunables:** the runner starter's Game speed slider; `TUNING_RULE` in the kit handoff tells the builder to
+  declare speed, gravity, enemy count, difficulty… with `tunable()`.
+- **Proof:** `tests/theGameCanBeTunedInThePreview.test.ts` (9; four reversions each failed — any window setting a value,
+  saved values ignored, no range, the runner slider doing nothing). Module census, runtime pack, kit history and strict kit
+  compile updated for the declared data file.
+## 2026-11-21 — Game repair, carefully back on: optional, asked, and one tap to undo a change that made it worse
+
+- **Admin:** "isko savdhani se on karo … optional karo, app/game banne ke bad user se hi pucho … agar game tut jaye to user
+  ek prompt se wapas undo ho jaye."
+- **Found first (mapped end to end):** the ASK already existed — the playtest's problems become a one-tap "Make the game
+  playable" offer that runs only when tapped, as a normal turn; the real version system already saves every good build
+  whole (BuildHistoryStore / Time Machine) and `/restore-version` saves the current app before restoring; "undo /
+  pehle wala" already opens the version picker. What was MISSING: nothing compared the game before and after a turn, so
+  a change that broke a working game ended silently. The old automatic repair stays suspended (it edited unasked and
+  rolled back from an incomplete snapshot).
+- **Fix:** `gameRegression.ts` (pure): the previous turn's measure is read from the stored report BEFORE this turn's first
+  progress save; after this turn's playtest, a new unplayable defect or a ≥15-point drop below 75 is "worse"; the
+  version to go back to is the newest good one saved before the turn. The route records `GAME_GOT_WORSE` (detail = that
+  version id); `GameUndoCard` shows the plain sentence with one-tap "Go back" (the Time Machine's own restore route) and
+  "Keep this version". `docs/security/game-auto-repair-suspension.md` records what replaced the suspended path.
+- **Proof:** `tests/aGameMadeWorseCanBeUndone.test.ts` (12; five reversions each failed, one after a stronger case was
+  added); census green; both typechecks clean.
+## 2026-11-21 — #4397 merged; batch 11 (Medieval Village), textures, FBX pictures, Q-3019, CC-BY packaging
+- **#4397 merged:** batches 9 and 10, FBX attachments, the "where to get it" guide, and the library on every 3D turn.
+- **Batch 11:** the Medieval Village MegaKit (CC0). The kit has no whole house, so two whole village houses were assembled from its 2 m pieces: walls with a door and windows, a floor, and a roof with closed gables. The first assembly left the gables open and the inside showed. Also a wagon, wooden fence, stone stairs, chimney and vine. Test: `libraryBatch11`.
+- **Textures:** Screaming Brain Studios' Tiny Texture Pack (CC0) — 125 seamless 128 px surfaces (grass, bricks, roofs, tile, wood), losslessly recompressed from 10.3 to 4.2 MB.
+  - `add_library_models({ textures })` puts one into a game: durable first, then the sandbox, with the three.js lines to repeat it.
+  - Test: `theGameGetsRealSurfaceTextures`.
+- **FBX pictures:** the picture an FBX names, attached beside it, is embedded as its base colour.
+  - UVs are flipped for glTF on those meshes; the first try put a silver blade in brown.
+  - A missing picture is named to the user. Test: `anFbxBecomesAModelInTheGame` (+3).
+- **Q-3019 closed:** a Surplus model is benched only at its SECOND failure, so the retry keeps a warm cache instead of a cold-cache switch per blip.
+  - Proven by reversion: putting the old rule back fails 5 tests. The two older tests now assert the new rule.
+- **Indian clothing:** a CC-BY model may ship packaged, only with its author credit, which reaches the game.
+  - No such model exists in the library yet. Sketchfab needs a login, so the admin downloads them.
+  - Test: `aCcByModelCarriesItsCredit`.
+- **Env:** `AGENTV3_EXTERNAL_GAME_ASSETS` is ON by default. ENV_REGISTRY now says the key can be deleted (a value of `admin` would keep it owner-only).
 ## 2026-11-21 — PR #4390 merged (3c91ff3); its 122 queue rows closed
 
 #4390 (failedbr #1913 → #669 autopsies; Q-3041…Q-3223 and the bulk rows Q-1553…Q-1573 it resolved) merged after CI went green on
@@ -103494,3 +103603,81 @@ its final head and the merge with `main` (#4397) was checked clean. The 122 rows
 IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`; their ledgers stay in the entries above. Rows still open after it:
 the admin-decision rows (Q-3137, Q-3139, Q-3142, Q-3148, Q-3157, Q-3161, Q-3164, Q-3180, Q-3198 and the older ones) and the
 untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only new reports are autopsied).
+
+## 2026-11-21 — The ❗️ button: game "Go back" moves into it, and "Find and fix bugs" finally does something
+
+- **Admin:** "alag se card dikhaoge, to user paresan ho jayega! koi new button nahi, existing ❗️ button ko hi update
+  kar do" — and "❗️ me 'bug fix' popup … us par click karo, kuch bhi nahi hota hai, builder chalta hi nahi hai".
+- **Go back lives in the ❗️ list.** The separate GameUndoCard is gone. A finished build's GAME_GOT_WORSE finding becomes
+  a row in "What you need to do" (`userActionView.mergeLiveActions`, `gameUndo.ts`) with "Go back" (the Time Machine
+  restore, current app saved first) and "Keep this version".
+- **Root cause of the dead bug-fix button:** the build offers the optional deep bug hunt as a gate and waits 30 s,
+  then carries on. `releaseGate` keeps the row open (rightly), but it still offered "Find and fix bugs", which answered
+  a gate nobody was waiting on. The tap did nothing and the row was marked done.
+  **Class:** an approve row whose gate expired offering an answer button.
+- **Fix (the class):** `gateExpired(action, liveGateCallId)`. A row is live only while the running build holds that
+  exact gate.
+  - An expired bug-hunt row's "Find and fix bugs" starts a NEW turn ("Find and fix the bugs in my app.") with
+    `bugHunt: true`. The route passes `preApproved` to `offerBugHunt`, which runs the review without asking again. On
+    an app that did not finish, it says why and charges nothing for it.
+  - Every other expired gate shows no Approve: "The build carried on without this answer" + Dismiss.
+- **Proof:** `tests/theAlertListActuallyDoesIt.test.ts` (9) + the reworked `tests/aGameMadeWorseCanBeUndone.test.ts`.
+  Reversions failed: `gateExpired` always false (2 failed), and the pre-approved branch removed (1 failed).
+## 2026-11-21 — #4403 merged; a character customizer on request; the builder picks by meaning (intent map)
+- **#4403 merged:** batch 11 village houses, 125 textures, FBX pictures, Q-3019, CC-BY packaging.
+- **Character customizer** (admin: "par user agar bole to … user jo chahe change bol sakta hai, unexpected"):
+  - `generate_character_customizer` is a recipe, run only when the user means it.
+  - It writes one framework-free module into the USER'S game. The module discovers the parts of ANY loaded model: a colour picker per named material, show/hide per mesh part, size, a pose picker, reset, and the look saved per character.
+  - Materials are cloned per character.
+  - Tested by compiling the generated module with esbuild and driving it with real three.js. Test: `aPlayerCanCustomizeTheirCharacter`.
+- **Intent map** (admin: "words par nahi intention par … universal intent picker"):
+  - `gameCapabilities.ts` describes every game capability by the OUTCOME the user wants.
+  - It tells near-twins apart by who changes the thing and when.
+  - Its example phrasings (Hinglish, Devanagari, Tamil) are shown as examples, not triggers.
+  - The rule: build what they mean, never refuse or fake.
+  - It rides the library menu to every 3D game turn, with no extra classifier call. The library menu cap goes 8000 → 11000 chars (~2.5k tokens a turn in all).
+  - Test: `theBuilderPicksByMeaningNotWords`.
+- **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
+- **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.
+
+## 2026-11-21 — Big worlds stream; library batch 12 (variety); the longest name wins
+
+The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans … kya navbharatai pura alag world bana dega?" They then approved: "ok models streaming banao, phir library variety badhao".
+
+- **Model streaming.** `GameWorldStreamingGenerator.ts` writes `src/game/three/worldStreaming.ts` into every game that gets library models. It is written once; a later turn keeps the game's copy.
+  - **What was there:** every model loaded at game start and stayed until the end. Each copy had its own draw calls. `dressWorld` capped a world at 120 copies over 120 m. Only the terrain streamed.
+  - **What it does now:**
+    - The world is split into cells, and only the cells near the camera exist, with one ring of slack.
+    - Each model loads once.
+    - All copies of a static model in a cell are drawn as one InstancedMesh per part.
+    - Far cells swap to the reduced mesh (the existing LOD level 1) without a rebuild.
+    - Animated copies get their own handle each, capped per device: phone 12, mid 24, desktop 48.
+    - Unused models are freed past the device budget.
+    - Collision marks are copied onto the instanced parts. The kit's collision already tests every instance (`shapesFor`).
+  - **How the builder is told:** in the asset handoff, in `add_library_models`, and through a new `big-world` outcome in the intent map.
+  - **Checks:** the generated module typechecks under strict mode with @types/three 0.180. Test: `aBigWorldStreamsModels` runs the emitted code with real three.js. Reversion proven three times: the cache, freeing far cells, and the actor cap.
+  - **Not proven yet:** a frame-rate measurement in a real game on a phone. Watch the first big-world build for that.
+- **Library batch 12:** 40 CC0 models from kayquer kits, live-admitted 40/40, with thumbnails.
+  - 9 kinds of home, plus 6 town buildings and a beach umbrella.
+  - 4 trees.
+  - 8 vehicle bodies.
+  - 12 people with walk and run.
+  - Subjects that are everyday game words were refused: boss, pickup, manager, navigator, coach.
+- **Root cause, matcher class:** a word inside a longer known name was also matched on its own ("pickup truck" → truck + pickup truck). Each earlier batch patched one hand-written exclusion at a time. Now the longest known name in a clause wins; the old exclusion table stays for non-subject senses (rock music, log in).
+- **Root cause, moving subjects:** walk and run were asked for only for a hand-typed list of subjects, which the new people were not on. Now the list also includes every subject a library model animates. The role stays the game's need: "walking dog" still asks for walk, so the code-built dog walks.
+- **Root cause, duplicate models:** batch 12 first listed three people that batch 4 already had. `buildLibraryBatch.mts` now refuses a model already in the library (reversion proven), and a test asserts that no model is in the catalogue twice.
+- **Library menu:** subjects with the same roles now share one line. It went from 11558 to about 10700 chars, under the 11000 cap.
+## 2026-11-21 — #4406 merged; FBX from Sketchfab / Mixamo / avatar creators now converts
+- #4406 merged: the character customizer on request, and the intent map.
+- The admin added 3 Indian-clothing models to Drive: a man in a dhoti, a man in a kurta, a woman in a saree. Their FBX exports exposed two class bugs in the server FBX import:
+  - **Embedded pictures:** FBXLoader calls `window.URL.createObjectURL`, so all 3 failed to parse in Node. `withLentWindow` now lends a window for the synchronous parse only, captures the pictures (they now go into the GLB), then removes it.
+  - **Face shape keys:** 126 morph targets were 42 MB of a 55 MB GLB. `dropMorphTargets` removes them and the user is told.
+  - Test: `anFbxBecomesAModelInTheGame` (+2).
+- **NOT in the library — licences unverified.** None of the 3 zips carries a licence file, and sketchfab.com is unreachable from this session.
+  - The dhoti model looks like Sketchfab's "Indian Man In Dhoti" (earlier search: CC-BY).
+  - The kurta and saree went through Mixamo (a "mixamo.com" clip, an avatar-creator body), and their licence is unknown.
+  - Also too heavy for the 8 MB user path (13 MB / 23 MB after the fix; 65k / 118k triangles).
+  - Waiting on the admin for each model's licence (a page screenshot).
+- **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
+  - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
+  - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.

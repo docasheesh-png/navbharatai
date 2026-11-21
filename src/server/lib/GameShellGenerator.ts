@@ -43,7 +43,7 @@ import { events } from './core/events';
 import { state, setStatus, resetRun, save as saveState, load as loadState, hasSave, clearSave } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
-import { createPerfGovernor, steppedQuality } from './core/perf';
+import { createPerfGovernor, steppedQuality, budgetDevice } from './core/perf';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { showHint } from './core/levels';
 import { dialogue } from './core/dialogue';
@@ -310,7 +310,8 @@ export class Game {
   /** The pixel ratio the renderer chose for this device; quality scales DOWN from it, never up. */
   private basePixelRatio = 1;
   /** Watches the frame rate and steps the picture down when the device cannot keep up (core/perf.ts). */
-  private readonly perf = createPerfGovernor();
+  // A budget phone starts one picture level lower (core/perf budgetDevice) instead of stuttering for its first seconds.
+  private readonly perf = createPerfGovernor({ startDrop: budgetDevice() ? 1 : 0 });
   private chosenQuality: GameSettings['quality'] = 'high';
   private autoQuality = true;
   private reduceMotion = false;
@@ -474,7 +475,10 @@ export class Game {
     this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
     // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
     // Read-only except endRound, which only does what losing does — harmless in a single-player game.
-    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
+    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
+      // How much the last frame asked of the GPU — what decides whether a cheap phone keeps up (the playtest's budget check).
+      load: () => { const i = this.renderer.info; return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures }; },
+      endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
     if (typeof window !== 'undefined') {
       (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
       this.disposers.push(() => {
@@ -2630,6 +2634,7 @@ import { events } from './core/events';
 import { state, setStatus, addScore } from './core/state';
 import { LaneRunner, runnerInput, type RunnerOptions } from './core/runner';
 import { bindSwipe } from './core/swipe';
+import { tunable } from './core/tuning';
 import { createHumanoid } from './three/humanoid';
 
 /**
@@ -2676,6 +2681,8 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
   const lanes = Math.max(1, Math.min(5, Math.round(props.lanes ?? 3)));
   const runnerOptions: RunnerOptions = { lanes, laneWidth: LANE_WIDTH, startSpeed: props.startSpeed ?? 10, maxSpeed: props.maxSpeed ?? 30, seed: props.seed ?? Date.now() };
   const run = new LaneRunner(runnerOptions);
+  // The Tune panel in NavBharatAI's preview shows this as a slider (core/tuning): the whole run faster or slower.
+  const pace = tunable('gameSpeed', 1, { label: 'Game speed', min: 0.5, max: 2, step: 0.05 });
   const width = lanes * LANE_WIDTH + 1;
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -2779,13 +2786,14 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     },
     update: (ctx, dt) => {
       if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); return; }
-      for (const ev of run.update(dt, runnerInput(ctx.input))) {
+      const t = dt * pace.value;
+      for (const ev of run.update(t, runnerInput(ctx.input))) {
         const at = { x: runnerWorldX(run.x), y: run.y + 1, z: run.distance };
         if (ev.type === 'jump') { runner.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
         else if (ev.type === 'coin') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.coin.lane)), y: 0.8, z: ev.coin.z } });
         else if (ev.type === 'crash') { runner.die(); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
       }
-      runner.update(dt, run.alive ? run.speed : 0, !run.jumping);
+      runner.update(t, run.alive ? run.speed * pace.value : 0, !run.jumping);
       const score = run.score;
       if (score > scored) { addScore(score - scored); scored = score; }
       sync();

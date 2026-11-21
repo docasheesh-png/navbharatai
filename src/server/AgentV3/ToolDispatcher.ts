@@ -4,9 +4,12 @@ import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from '.
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
-import { addLibraryModels } from './gameAssets/assetSeed';
+import { addLibraryModels, workspaceGameAssetPersistence } from './gameAssets/assetSeed';
+import { GAME_WORLD_STREAMING_PATH } from '../lib/GameWorldStreamingGenerator';
 import { externalGameAssetsEnabled, libraryRequirement } from './gameAssets/assetPlan';
 import { ownModelGuide } from './gameAssets/modelSourcesGuide';
+import { addLibraryTextures, textureResultNote } from './gameAssets/textureLibrary';
+import { generateCharacterCustomizer } from '../lib/CharacterCustomizerGenerator';
 import { REVIEWED_GAME_ASSETS } from './gameAssets/providers';
 import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
@@ -395,6 +398,7 @@ import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { generateWorld2D, world2dEnabled, WORLD2D_DIR } from '../lib/world2d/World2DGenerator';
 import { world2dIntent } from './world2dIntent';
 import { gameKitWants3D, gameTurnRequest } from './gameKitSeed';
+import { forgeNotUsedFor, forgeNotUsedWarning, type MissingObject } from './forgeForMissing';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
@@ -1228,6 +1232,9 @@ export class ToolDispatcher {
 
   /** This build is a race whose course the request did not describe: check its code streams the endless track. */
   requireEndlessRaceCourse(): void { this._endlessRaceCourse = true; }
+  /** The objects the library and kit lack, which the builder was told to make with the Forge (forgeForMissing.ts). */
+  private _forgeSubjects: MissingObject[] = [];
+  requireForgeSubjects(missing: readonly MissingObject[]): void { this._forgeSubjects = [...missing]; }
 
   /**
    * Files the USER put in the workspace, and the request this build answers — so a shell delete of one
@@ -2310,7 +2317,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report))));
+        return await this._warnIfForgeSkipped(await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report)))));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2373,6 +2380,24 @@ export class ToolDispatcher {
    * A 3D game that builds its own renderer and never mounts the kit's shell (shellBypass.ts) — it loses the touch controls,
    * menus, HUD and music. A WARNING: the game may still run on a desktop. Fail-open on its own trouble.
    */
+  /** Advisory: an object the builder was asked to make with the Forge has no Forge object (forgeForMissing.ts). Never blocks. */
+  private async _warnIfForgeSkipped(report: ReadinessReport): Promise<ReadinessReport> {
+    if (this._forgeSubjects.length === 0) return report;
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'forge-used-list');
+      const objects = listed.map((p) => p.replace(/^\.?\//, '')).filter((p) => p.startsWith(OBJECTS_DIR) && /\.[tj]sx?$/.test(p));
+      if (objects.length > RACE_SCAN_MAX_FILES) return report;
+      const files = new Map<string, string>();
+      for (const p of objects) {
+        try { files.set(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'forge-used-read')); }
+        catch { return report; } // an unreadable file is not evidence the Forge was skipped
+      }
+      const skipped = forgeNotUsedFor(this._forgeSubjects, files);
+      if (skipped.length) return { ...report, warnings: [...report.warnings, forgeNotUsedWarning(skipped)] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
+
   private async _warnIfShellSkipped(report: ReadinessReport): Promise<ReadinessReport> {
     try {
       const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'shell-bypass-list');
@@ -4094,6 +4119,66 @@ export class ToolDispatcher {
    * when the new code imports names it lacks the note says which. Returns the note for the tool result.
    * Best-effort: a failure leaves the recipe's own result exactly as it was.
    */
+  /** add_library_models' model half (moved out of the dispatch switch unchanged, 2026-11-21, when textures joined it). */
+  private async addLibraryModelsForTool(input: unknown, agent: AgentRole): Promise<string> {
+    // THE LIBRARY IN AN EXISTING GAME (2026-11-19). The seed adds library models only to NEW games; "add a cow to my
+    // game" had no way to fetch the library cow. Same gate, downloads, proofs and durable saves as the seed,
+    // merged into the game's current loader/manifest/credits; the user's customization file is never replaced.
+    const alRec = (input as Record<string, unknown>) || {};
+    const raw = Array.isArray(alRec.models) ? alRec.models : [];
+    const asked = raw.map((m) => (typeof m === 'string' ? { subject: m } : m && typeof m === 'object' ? m as Record<string, unknown> : null))
+      .filter((m): m is Record<string, unknown> => !!m && ((typeof m.subject === 'string' && m.subject.trim() !== '') || typeof m.id === 'string')).slice(0, 6);
+    // An exact library id (what the in-app Game library sends) pins THAT model: other models serving its subjects
+    // are left out of this call's catalogue, so "the brown cow I tapped" never arrives as a different cow.
+    const pinned = asked.map((m) => typeof m.id === 'string' ? REVIEWED_GAME_ASSETS.find((c) => c.id === m.id) : undefined);
+    asked.forEach((m, i) => { const pin = pinned[i]; if (pin) m.subject = pin.subjects[0]; else if (typeof m.subject !== 'string') m.subject = String(m.id); });
+    const pins = pinned.filter((c): c is NonNullable<typeof c> => !!c);
+    const pinnedSubjects = new Set(pins.flatMap((c) => c.subjects));
+    const catalogue = pins.length ? REVIEWED_GAME_ASSETS.filter((c) => pins.includes(c) || !c.subjects.some((s2) => pinnedSubjects.has(s2))) : undefined;
+    if (!asked.length) return 'Name the library models to add, for example: add_library_models({ models: [{ subject: "cow" }, { subject: "farmer", animation: "walk" }] }). Find names with object_spec({ library_query: "…" }).';
+    if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) {
+      return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
+    }
+    if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library model was added. Build these objects with the existing recipes instead.';
+    const requirements: AssetRequirement[] = []; const unknown: string[] = []; const unplayable: string[] = [];
+    for (const m of asked) {
+      const asked1 = libraryRequirement(String(m.subject), m.animation, REVIEWED_GAME_ASSETS);
+      if (!asked1) { unknown.push(String(m.subject)); continue; }
+      if (asked1.droppedRole) unplayable.push(`${asked1.requirement.subject} (${asked1.droppedRole})`);
+      if (!requirements.some((r) => r.subject === asked1.requirement.subject)) requirements.push(asked1.requirement);
+    }
+    if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.\n${ownModelGuide(unknown)}`;
+    const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
+    const existing = {
+      assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
+      attribution: await read('public/game-assets/ATTRIBUTION.txt'), customizations: await read('src/game/three/assetCustomizations.ts'),
+      runtime: await read('src/game/three/externalAssets.ts'), streaming: await read(GAME_WORLD_STREAMING_PATH),
+    };
+    const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
+    const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
+    const ready = result.outcomes.filter((o) => o.outcome.kind === 'model').map((o) => o.subject);
+    const missed = result.outcomes.filter((o) => o.outcome.kind !== 'model').map((o) => o.subject);
+    if (result.status !== 'prepared' || !ready.length) return `No library model could be added this time (${missed.join(', ') || 'none ready'}); build ${[...missed, ...unknown].join(', ') || 'these objects'} with the existing recipes instead. Nothing in the game was changed.`;
+    // The runtime imports the kit's core modules (events, loading): pull in any the game is missing.
+    const layers = await this.addMissingRecipeLayers(result.files, agent);
+    this.scheduleCheckpoint('library models');
+    return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
+      + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
+      + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.\n${ownModelGuide(unknown)}\n` : '')
+      + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
+      + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts. For many copies or a big world: createWorldStreamer from ${GAME_WORLD_STREAMING_PATH} (world.place([...]); world.update(camera.position, dt) every frame).${layers}`;
+  }
+
+  /** add_library_models' texture half: packaged CC0 textures into the game, durably first (textureLibrary.ts). */
+  private async addLibraryTexturesForTool(asked: readonly unknown[]): Promise<string> {
+    if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) return 'The NavBharatAI library is not switched on for this account, so no texture was added.';
+    if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library texture was added.';
+    const writeBinary = this.actuator.writeBinaryFile.bind(this.actuator);
+    const result = await addLibraryTextures(asked, this.workspaceId, { writeBinaryFile: (id, p, b) => writeBinary(id, p, b) }, workspaceGameAssetPersistence(this.libraryOwnerUid ?? undefined));
+    if (result.added.length) this.scheduleCheckpoint('library textures');
+    return textureResultNote(result);
+  }
+
   private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
     let layersNote = '';
     const all: Record<string, string> = { ...written };
@@ -10505,52 +10590,13 @@ export class ToolDispatcher {
       }
 
       case 'add_library_models': {
-        // THE LIBRARY IN AN EXISTING GAME (2026-11-19). The seed adds library models only to NEW games; "add a cow to my
-        // game" had no way to fetch the library cow. Same gate, downloads, proofs and durable saves as the seed,
-        // merged into the game's current loader/manifest/credits; the user's customization file is never replaced.
-        const alRec = (input as Record<string, unknown>) || {};
-        const raw = Array.isArray(alRec.models) ? alRec.models : [];
-        const asked = raw.map((m) => (typeof m === 'string' ? { subject: m } : m && typeof m === 'object' ? m as Record<string, unknown> : null))
-          .filter((m): m is Record<string, unknown> => !!m && ((typeof m.subject === 'string' && m.subject.trim() !== '') || typeof m.id === 'string')).slice(0, 6);
-        // An exact library id (what the in-app Game library sends) pins THAT model: other models serving its subjects
-        // are left out of this call's catalogue, so "the brown cow I tapped" never arrives as a different cow.
-        const pinned = asked.map((m) => typeof m.id === 'string' ? REVIEWED_GAME_ASSETS.find((c) => c.id === m.id) : undefined);
-        asked.forEach((m, i) => { const pin = pinned[i]; if (pin) m.subject = pin.subjects[0]; else if (typeof m.subject !== 'string') m.subject = String(m.id); });
-        const pins = pinned.filter((c): c is NonNullable<typeof c> => !!c);
-        const pinnedSubjects = new Set(pins.flatMap((c) => c.subjects));
-        const catalogue = pins.length ? REVIEWED_GAME_ASSETS.filter((c) => pins.includes(c) || !c.subjects.some((s2) => pinnedSubjects.has(s2))) : undefined;
-        if (!asked.length) return 'Name the library models to add, for example: add_library_models({ models: [{ subject: "cow" }, { subject: "farmer", animation: "walk" }] }). Find names with object_spec({ library_query: "…" }).';
-        if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) {
-          return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
-        }
-        if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library model was added. Build these objects with the existing recipes instead.';
-        const requirements: AssetRequirement[] = []; const unknown: string[] = []; const unplayable: string[] = [];
-        for (const m of asked) {
-          const asked1 = libraryRequirement(String(m.subject), m.animation, REVIEWED_GAME_ASSETS);
-          if (!asked1) { unknown.push(String(m.subject)); continue; }
-          if (asked1.droppedRole) unplayable.push(`${asked1.requirement.subject} (${asked1.droppedRole})`);
-          if (!requirements.some((r) => r.subject === asked1.requirement.subject)) requirements.push(asked1.requirement);
-        }
-        if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.\n${ownModelGuide(unknown)}`;
-        const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
-        const existing = {
-          assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
-          attribution: await read('public/game-assets/ATTRIBUTION.txt'), customizations: await read('src/game/three/assetCustomizations.ts'),
-          runtime: await read('src/game/three/externalAssets.ts'),
-        };
-        const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
-        const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
-        const ready = result.outcomes.filter((o) => o.outcome.kind === 'model').map((o) => o.subject);
-        const missed = result.outcomes.filter((o) => o.outcome.kind !== 'model').map((o) => o.subject);
-        if (result.status !== 'prepared' || !ready.length) return `No library model could be added this time (${missed.join(', ') || 'none ready'}); build ${[...missed, ...unknown].join(', ') || 'these objects'} with the existing recipes instead. Nothing in the game was changed.`;
-        // The runtime imports the kit's core modules (events, loading): pull in any the game is missing.
-        const layers = await this.addMissingRecipeLayers(result.files, agent);
-        this.scheduleCheckpoint('library models');
-        return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
-          + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
-          + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.\n${ownModelGuide(unknown)}\n` : '')
-          + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
-          + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
+        // Library TEXTURES (2026-11-21) ride the same tool: { textures: [{ surface, variant }] } alone, or with models.
+        const alIn = (input as Record<string, unknown>) || {};
+        const textureAsk = Array.isArray(alIn.textures) ? alIn.textures : [];
+        const textureNote = textureAsk.length ? await this.addLibraryTexturesForTool(textureAsk) : '';
+        if (textureNote && !(Array.isArray(alIn.models) && alIn.models.length)) return textureNote;
+        const modelsNote = await this.addLibraryModelsForTool(input, agent);
+        return textureNote ? `${textureNote}\n${modelsNote}` : modelsNote;
       }
 
       case 'generate_game_3d': {
@@ -10588,6 +10634,14 @@ export class ToolDispatcher {
         const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');
         return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}${grLayers}`;
+      }
+
+      case 'generate_character_customizer': {
+        // Only when the user asks (admin 2026-11-21): a customization panel for any loaded model (CharacterCustomizerGenerator.ts).
+        const cc = generateCharacterCustomizer();
+        const ccWritten = await this.writeRecipeFiles(cc.files, agent);
+        this.scheduleCheckpoint('character customizer');
+        return `Wired the character customizer:\n${ccWritten.join('\n')}\n\n${cc.instructions}`;
       }
 
       case 'generate_animation': {

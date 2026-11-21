@@ -35,6 +35,11 @@ export interface UserActionView {
    */
   approveLabel?: string;
   denyLabel?: string;
+  /**
+   * CLIENT-ONLY: the saved version a "this change made your game worse" row goes back to (gameRegression.ts →
+   * GAME_GOT_WORSE). Set only by mergeLiveActions from the finished build's own report.
+   */
+  restoreVersionId?: string;
   blocking: boolean;
   status: UserActionStatus;
   createdAt: number;
@@ -127,6 +132,8 @@ export function traySummary(openCount: number): string {
 
 /** What the running build is asking for RIGHT NOW, as the panel already holds it in memory. */
 export interface LiveAsks {
+  /** The finished build found the game worse than before its turn — offer to go back (admin 2026-11-21: in the ❗️ list, not a card). */
+  gameUndo?: { key: string; versionId: string; message: string };
   pendingSecrets?: { callId: string; secrets: Array<{ name: string; why: string }> };
   pendingPermission?: { callId: string; action: string; title?: string; why?: string; approveLabel?: string; denyLabel?: string };
   pendingClarify?: { questions: string[] };
@@ -180,6 +187,18 @@ export function mergeLiveActions(stored: readonly UserActionView[], live: LiveAs
       ...(g.denyLabel?.trim() ? { denyLabel: g.denyLabel.trim() } : {}),
     });
   }
+  if (live.gameUndo?.versionId) {
+    add({
+      ...base,
+      id: `live:undo:${live.gameUndo.key}`,
+      kind: 'approve',
+      title: GAME_UNDO_TITLE,
+      why: live.gameUndo.message,
+      restoreVersionId: live.gameUndo.versionId,
+      approveLabel: 'Go back',
+      denyLabel: 'Keep this version',
+    });
+  }
   for (const q of live.pendingClarify?.questions ?? []) {
     if (!q) continue;
     add({ ...base, id: `live:question:${q}`, kind: 'question', title: q, why: 'I assumed an answer and carried on building. Tell me if it is wrong.' });
@@ -197,3 +216,34 @@ export function mergeLiveActions(stored: readonly UserActionView[], live: LiveAs
 export function isLiveOnly(action: UserActionView): boolean {
   return action.id.startsWith('live:');
 }
+
+/** The ❗️ row a game made worse by the last change gets. */
+export const GAME_UNDO_TITLE = 'This change made your game worse';
+
+/**
+ * The optional deep bug hunt's button label — the same words the server's offer uses (optionalBugHunt.ts
+ * bugHuntOfferCopy, asserted equal in tests/theAlertListActuallyDoesIt.test.ts, because the browser cannot import it).
+ */
+export const BUG_HUNT_APPROVE_LABEL = 'Find and fix bugs';
+
+/**
+ * A GATE NOBODY IS WAITING ON (admin 2026-11-21: "us par click karo, bug fix to hota nahi hai, kuch bhi nahi hota").
+ *
+ * A build waits a short time on a gate (30 s for the bug hunt) and then carries on. `releaseGate` keeps the row open
+ * (the user should see that they were asked) but clears `blocking`. Its Approve button then sent an answer to a gate
+ * that no longer existed: the tap did nothing, and the row was even marked done. Such a row must never offer to answer.
+ */
+export function gateExpired(action: UserActionView, liveGateCallId?: string | null): boolean {
+  if (action.kind !== 'approve' || !isOpen(action) || action.restoreVersionId || isLiveOnly(action)) return false;
+  // Waiting = the running build holds THIS gate right now. A stored row still marked blocking after its build
+  // ended (the release write is best-effort) is just as dead as a released one.
+  return !(liveGateCallId && action.callId === liveGateCallId);
+}
+
+/** An expired bug-hunt offer: its button starts a NEW turn that runs the hunt (the yes is given up front). */
+export function isExpiredBugHunt(action: UserActionView, liveGateCallId?: string | null): boolean {
+  return gateExpired(action, liveGateCallId) && action.approveLabel === BUG_HUNT_APPROVE_LABEL;
+}
+
+/** The message that new turn sends. Plain words, so the conversation reads as what the user asked for. */
+export const BUG_HUNT_TURN_PROMPT = 'Find and fix the bugs in my app.';

@@ -39,7 +39,7 @@ describe('an attached FBX becomes a checked model in the game', () => {
     expect(refused).toEqual([]);
     expect([...files.keys()]).toEqual(['weapons/sword.glb']);
     validateGlb(files.get('weapons/sword.glb')!, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS);
-    expect(warnings.get('weapons/sword.glb')!.join(' ')).toMatch(/textures could not be carried over from FBX[\s\S]*export it as \.glb/);
+    expect(warnings.get('weapons/sword.glb')!.join(' ')).toMatch(/picture\(s\) knight_texture\.png were not attached[\s\S]*attach the picture files with the FBX/);
   });
 
   it('a broken FBX is refused with the export step, never dropped', async () => {
@@ -63,5 +63,70 @@ describe('when the library has no such model, the user is told where to get it a
   it('it reaches the builder in the library menu, and in add_library_models when a name is not in the library', () => {
     expect(gameLibraryMenuHandoff()).toContain('NavBharatAI Pro → paperclip → Choose file');
     expect(readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8').match(/ownModelGuide\(unknown\)/g)?.length).toBe(2);
+  });
+});
+
+describe('an FBX with its picture attached keeps its look (admin 2026-11-21)', () => {
+  const uvs = (glb: Uint8Array) => {
+    const b = Buffer.from(glb); const n = b.readUInt32LE(12);
+    const doc = JSON.parse(b.subarray(20, 20 + n).toString('utf8'));
+    const bin = b.subarray(28 + n);
+    const acc = doc.accessors[doc.meshes[0].primitives[0].attributes.TEXCOORD_0];
+    const view = doc.bufferViews[acc.bufferView];
+    const start = (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+    return Array.from({ length: 4 }, (_, i) => [bin.readFloatLE(start + i * 8), bin.readFloatLE(start + i * 8 + 4)]);
+  };
+  it('the picture the FBX names, attached beside it, goes into the GLB as its base colour, and nothing is reported missing', async () => {
+    const { files, warnings, refused } = await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')], ['knight_texture.png', fixture('knight_texture.png')]]));
+    expect(refused).toEqual([]);
+    const glb = files.get('sword.glb')!;
+    validateGlb(glb, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS);
+    const b = Buffer.from(glb); const doc = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString('utf8'));
+    expect(doc.images).toHaveLength(1);
+    expect(doc.images[0].mimeType).toBe('image/png');
+    expect(doc.materials.some((m: { pbrMetallicRoughness?: { baseColorTexture?: unknown } }) => m.pbrMetallicRoughness?.baseColorTexture)).toBe(true);
+    expect(warnings.get('sword.glb')!.join(' ')).not.toMatch(/not attached|could not be carried over/);
+  });
+  it('its UVs are flipped for glTF (they showed the silver blade in the grip\'s brown), and only when a picture goes in', async () => {
+    const plain = (await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')]]))).files.get('sword.glb')!;
+    const textured = (await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')], ['knight_texture.png', fixture('knight_texture.png')]]))).files.get('sword.glb')!;
+    const a = uvs(plain), b = uvs(textured);
+    for (let i = 0; i < a.length; i++) { expect(b[i][0]).toBeCloseTo(a[i][0], 5); expect(b[i][1]).toBeCloseTo(1 - a[i][1], 5); }
+  });
+  it('without the picture, the user is told exactly which file to attach', async () => {
+    const { warnings } = await convertFbxFiles(new Map([['sword.fbx', fixture('sword.fbx')]]));
+    expect(warnings.get('sword.glb')!.join(' ')).toMatch(/picture\(s\) knight_texture\.png were not attached/);
+  });
+});
+
+describe('FBX exports from Sketchfab / Mixamo / avatar creators (2026-11-21: 3 of 3 real Indian-clothing models failed)', () => {
+  it('an FBX with EMBEDDED pictures parses: a window is lent only for the parse, its pictures are captured, and it is removed', async () => {
+    const { withLentWindow } = await import('../src/server/AgentV3/gameAssets/userModels');
+    const embedded = new Map<string, Blob>();
+    const key = withLentWindow(embedded, () => (globalThis as unknown as { window: { URL: { createObjectURL(b: Blob): string } } }).window.URL.createObjectURL(new Blob([new Uint8Array([0x89, 0x50])], { type: 'image/png' })));
+    expect(key).toBe('nbblob:0');
+    expect(embedded.get('nbblob:0')!.type).toBe('image/png');
+    expect('window' in globalThis).toBe(false);
+    // A parse that throws still removes it; a window that already existed is left exactly as it was.
+    expect(() => withLentWindow(new Map(), () => { throw new Error('bad fbx'); })).toThrow('bad fbx');
+    expect('window' in globalThis).toBe(false);
+    const mine = { mine: true }; (globalThis as unknown as { window: unknown }).window = mine;
+    try { withLentWindow(new Map(), () => 0); expect((globalThis as unknown as { window: unknown }).window).toBe(mine); }
+    finally { delete (globalThis as unknown as { window?: unknown }).window; }
+  });
+
+  it('face shape keys (morph targets) are left out — 126 of them were 42 MB of a 55 MB avatar — and the count is returned to tell the user', async () => {
+    const THREE = await import('three');
+    const { dropMorphTargets } = await import('../src/server/AgentV3/gameAssets/userModels');
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+    geo.morphAttributes.position = Array.from({ length: 5 }, () => new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+    const mesh = new THREE.Mesh(geo); mesh.updateMorphTargets();
+    const root = new THREE.Group(); root.add(mesh, new THREE.Mesh(new THREE.BoxGeometry()));
+    expect(dropMorphTargets(root)).toBe(5);
+    expect(Object.keys(geo.morphAttributes)).toEqual([]);
+    expect(mesh.morphTargetInfluences).toBeUndefined();
+    expect(dropMorphTargets(root)).toBe(0);
+    expect(readFileSync('src/server/AgentV3/gameAssets/userModels.ts', 'utf8')).toMatch(/face shape keys \(expressions\) were left out/);
   });
 });

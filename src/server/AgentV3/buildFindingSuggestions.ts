@@ -397,6 +397,14 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     withEvidence: true,
   },
   {
+    // The playtest read the game's own renderer (2026-11-21): a frame asks more than a budget phone draws smoothly.
+    code: 'GAME_TOO_HEAVY',
+    title: 'Make it smooth on budget phones',
+    detail: 'Your game asks more of the phone each frame than a cheap Android phone can draw smoothly.',
+    prompt: 'NavBharatAI measured this game\'s drawing load and it is more than a budget Android phone draws smoothly. Make it lighter without changing how it looks or plays: merge static scenery into fewer meshes, use InstancedMesh for repeated objects (trees, crates, coins, buildings), use the kit\'s lite detail for far objects, reuse geometries and materials instead of creating one per object, and keep the lights to the kit\'s rig.',
+    withEvidence: true,
+  },
+  {
     // Measured at phone size (mobileLayoutCheck.ts, admin 2026-09-30: "mobile first"). Most users hold a
     // phone, so this is offered before the desktop-only design polish below.
     code: 'MOBILE_LAYOUT_ISSUES',
@@ -562,6 +570,10 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  * the admin on 2026-10-11 (Q-380, closed): leave it — a crashed build stays free and NavBharatAI absorbs it.
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
+  // gameRegression.ts (admin 2026-11-21): this turn made the game worse. Its answer is not a prompt to send but the one-tap
+  // "Go back" card (the ❗️ list row, gameUndo.ts) that restores the saved version from just before the turn — a new prompt would build
+  // on top of the broken game.
+  'GAME_GOT_WORSE',
   // userModels.ts: a model the user attached was not added. The message names each file and its exact fix (export as
   // .glb, remove compression, attach the missing file) — only the user can re-export or re-attach it; no button can.
   'USER_MODELS_NOT_ALL_ADDED',

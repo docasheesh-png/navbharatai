@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { generateGameRuntime, GAME_RUNTIME_MODULES } from './GameRuntimeGenerator';
+import { generateGameRuntime, GAME_RUNTIME_MODULES, GAME_RUNTIME_DATA_FILES } from './GameRuntimeGenerator';
 
 /**
  * THE RUNTIME IS WHERE AI-GENERATED GAMES ARE WON OR LOST.
@@ -195,8 +195,10 @@ describe('the pack itself', () => {
   });
 
   it('emits every advertised module', () => {
-    expect(Object.keys(all.files)).toHaveLength(GAME_RUNTIME_MODULES.length);
+    // One file per module, plus the declared data files (the Tune panel's saved values) — nothing undeclared.
+    expect(Object.keys(all.files)).toHaveLength(GAME_RUNTIME_MODULES.length + GAME_RUNTIME_DATA_FILES.length);
     for (const m of GAME_RUNTIME_MODULES) expect(all.files[`src/game/core/${m}.ts`]).toBeTruthy();
+    for (const f of GAME_RUNTIME_DATA_FILES) expect(all.files[f]).toBeTruthy();
   });
 
   it('a subset that would not compile pulls in what it imports', () => {
@@ -205,8 +207,8 @@ describe('the pack itself', () => {
   });
 
   it('an unmatched or empty filter falls back to the full pack', () => {
-    expect(Object.keys(generateGameRuntime(['nonsense']).files)).toHaveLength(GAME_RUNTIME_MODULES.length);
-    expect(Object.keys(generateGameRuntime([]).files)).toHaveLength(GAME_RUNTIME_MODULES.length);
+    expect(Object.keys(generateGameRuntime(['nonsense']).files)).toHaveLength(GAME_RUNTIME_MODULES.length + GAME_RUNTIME_DATA_FILES.length);
+    expect(Object.keys(generateGameRuntime([]).files)).toHaveLength(GAME_RUNTIME_MODULES.length + GAME_RUNTIME_DATA_FILES.length);
   });
 
   it('junk input never throws', () => {

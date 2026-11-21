@@ -11,7 +11,7 @@
  * String.raw: no backticks and no dollar-brace sequences inside the module text.
  */
 export const GAME_CITY_TRAFFIC = String.raw`import * as THREE from 'three';
-import { CITY_ROAD_Y, type City, type CityPlan } from './city';
+import { CITY_ROAD_Y, CITY_ZEBRA, type City, type CityPlan } from './city';
 import { createAutoRickshaw, createBus, createCar } from './objects';
 
 export type CityTrafficKind = 'car' | 'auto' | 'bus';
@@ -48,8 +48,8 @@ export interface TrafficCar {
 export interface CityTraffic {
   root: THREE.Group;
   cars: TrafficCar[];
-  /** The light a vehicle travelling along this axis sees at crossing (i, j). */
-  lightAt(i: number, j: number, axis: 'x' | 'z'): LightColour;
+  /** The light a vehicle travelling along this axis sees at crossing (i, j) — now, or ahead seconds from now. */
+  lightAt(i: number, j: number, axis: 'x' | 'z', ahead?: number): LightColour;
   /** Advance. avoid: objects no vehicle may drive into (the player, the player's car). */
   update(dt: number, avoid?: THREE.Object3D[]): void;
   dispose(): void;
@@ -96,6 +96,11 @@ export function trafficPose(plan: CityPlan, from: [number, number], to: [number,
   // Facing (dx, dz) the driver's left is (dz, -dx): +Z forward has +X on the left.
   const off = plan.road / 4;
   return { x: ax + dx * along + dz * off, z: az + dz * along - dx * off, heading: Math.atan2(dx, dz) };
+}
+
+/** Distance from a crossing's centre back to the stop line: past the crossing, the zebra and a metre more. PURE. */
+export function stopBack(plan: CityPlan): number {
+  return plan.road / 2 + CITY_ZEBRA.gap + CITY_ZEBRA.depth + 1;
 }
 
 /** Length of the street between two neighbouring crossings. PURE. */
@@ -171,7 +176,7 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
     if (lampsZ.instanceColor) lampsZ.instanceColor.needsUpdate = true;
     if (lampsX.instanceColor) lampsX.instanceColor.needsUpdate = true;
   };
-  const lightAt = (i: number, j: number, axis: 'x' | 'z'): LightColour => (useLights ? trafficLight(i, j, axis, clock, green) : 'green');
+  const lightAt = (i: number, j: number, axis: 'x' | 'z', ahead = 0): LightColour => (useLights ? trafficLight(i, j, axis, clock + Math.max(0, ahead), green) : 'green');
 
   const place = (c: TrafficCar) => {
     const p = trafficPose(plan, c.from, c.to, c.along);
@@ -206,8 +211,9 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
       if (useLights) paintLights();
       for (const c of cars) {
         const len = edgeLength(plan, c.from, c.to);
-        // The stop line: a vehicle that has not reached it holds there on amber or red.
-        const stopAt = len - plan.road / 2 - 1 - c.length / 2;
+        // The stop line, 1 m BEHIND the zebra crossing (2026-11-21: it used to sit 1 m past the crossing's edge, which put
+        // a waiting car's bumper on the zebra stripes). A vehicle that has not reached it holds there on amber or red.
+        const stopAt = len - stopBack(plan) - c.length / 2;
         const axis: 'x' | 'z' = c.from[0] !== c.to[0] ? 'x' : 'z';
         let limit = Infinity;
         if (c.along <= stopAt + 0.01) {

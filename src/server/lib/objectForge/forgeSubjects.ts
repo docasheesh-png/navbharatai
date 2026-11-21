@@ -41,6 +41,22 @@ export function subjectKindOf(text: string): SubjectKind {
   return 'prop';
 }
 
+/** Every subject word the description names, with its kind, in the order they appear (each word once). PURE. */
+export function subjectWordsIn(text: string): Array<{ word: string; kind: SubjectKind }> {
+  const t = tokens(text);
+  const out: Array<{ word: string; kind: SubjectKind }> = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < t.length; i++) {
+    let match: { word: string; kind: SubjectKind } | undefined; let length = 0;
+    for (const [kind, words] of WORDS) for (const word of words) {
+      const phrase = word.split(' ');
+      if (phrase.length > length && phrase.every((part, j) => t[i + j] === part)) { match = { word, kind }; length = phrase.length; }
+    }
+    if (match && !seen.has(match.word)) { seen.add(match.word); out.push(match); }
+  }
+  return out;
+}
+
 const EXAMPLE_FOR: Record<SubjectKind, string> = {
   rail: 'train', road: 'car', bike: 'bike', air: 'plane', water: 'boat', animal: 'quadruped', bird: 'quadruped', plant: 'tree', building: 'house', person: 'person', prop: 'sword',
 };

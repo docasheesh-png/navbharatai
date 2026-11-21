@@ -2518,7 +2518,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'Add READY 3D models from the NavBharatAI library to the CURRENT game (use it when a game already exists and the user asks '
         + 'for an object the library has — "add a cow", "put a castle here", "use a real motorcycle"). It downloads, verifies and '
         + 'proves each model, saves it into the project and adds it to src/game/three/assetModels.ts without touching earlier models '
-        + 'or the user\'s assetCustomizations.ts. Up to 6 per call; names come from the [GAME_LIBRARY_MENU] or object_spec({ library_query }). Choose by what the game MEANS, not only the words the user typed (a village story needs villagers). Then load each with '
+        + 'or the user\'s assetCustomizations.ts. Also puts seamless surface TEXTURES (grass, bricks, roofs, tile, wood) in the game via `textures`. Up to 6 models per call; names come from the [GAME_LIBRARY_MENU] or object_spec({ library_query }). Choose by what the game MEANS, not only the words the user typed (a village story needs villagers). Then load each with '
         + 'loadRequestedAsset(subject, fallback). It answers honestly when the library is off for this account or a model is not available — '
         + 'then build that object with the existing recipes.',
       input_schema: {
@@ -2529,8 +2529,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'object', properties: { subject: { type: 'string', maxLength: 64 }, id: { type: 'string', maxLength: 80 }, animation: { type: 'string', maxLength: 32, description: 'An animation role the model has (walk, run, fly, jog, jump, crouch, aim, shoot, reload, die, hit, drive, punch …); the [GAME_LIBRARY_MENU] lists each subject\'s roles.' } } },
             description: 'The library models to add, e.g. [{ "subject": "cow" }, { "subject": "farmer", "animation": "walk" }]. When the user\'s message names an exact library id (sent from the in-app Game library), pass it as { "id": "…" } so that exact model is used.',
           },
+          textures: {
+            type: 'array', maxItems: 8,
+            items: { type: 'object', properties: { surface: { type: 'string', enum: ['bricks', 'grass', 'roofs', 'tile', 'wood'] }, variant: { type: 'integer', minimum: 1, maximum: 25 } }, required: ['surface'] },
+            description: 'Seamless CC0 surface textures (128 px tiles) to put in the game, e.g. [{ "surface": "grass" }, { "surface": "bricks", "variant": 3 }] — for ground, walls, roofs, floors and wood. The answer gives the exact three.js lines to repeat them.',
+          },
         },
-        required: ['models'],
+        required: [],
       },
     },
     {
@@ -2611,8 +2616,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
-              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable, city, citytraffic. Default = all; imports are pulled in automatically. '
-              + 'city = createCity({ blocksX, blocksZ, style }): a whole grid of city blocks — streets, crossings, pavements, shops, apartments, offices, houses, parks; city.spawn, city.route(from, to) for left-lane AI routes, city.lotsOf(kind) for mission targets. citytraffic = createCityTraffic(city): vehicles that drive the grid, turn at crossings and obey traffic lights. '
+              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable, city, citytraffic, citypeople, physics. Default = all; imports are pulled in automatically. '
+              + 'city = createCity({ blocksX, blocksZ, style }): a whole grid of city blocks — streets, crossings, pavements, shops, apartments, offices, houses, parks; city.spawn, city.route(from, to) for left-lane AI routes, city.lotsOf(kind) for mission targets. citytraffic = createCityTraffic(city): vehicles that drive the grid, turn at crossings and obey traffic lights. citypeople = createCityPeople(city, { traffic }): people on the pavements who cross on the zebras when the cars have red. '
+              + 'physics = createPhysics(scene): real rigid bodies — physics.add(mesh, { mass }) falls, rolls, stacks and topples; physics.explode(point, strength, radius); physics.ragdoll(humanoid) for a character that goes limp; physics.step(dt) each frame. '
               + 'breakable = makeBreakable(crate, { health }): the player\'s shots and swings break it into debris (breakableTargets() + hitBreakables(hits)); '
               + 'buildings = createEnterableHouse(): opt-in interiors, stairs and hinged doors; legacy createHouse() stays scenery. '
               + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
@@ -2658,10 +2664,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting, swipe, runner, keybinds. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting, swipe, runner, keybinds, tuning. Default = all; imports are pulled in automatically.',
           },
         },
       },
+    },
+    {
+      name: 'generate_character_customizer',
+      description:
+        'In-game control for players to change how characters look (colours, parts, size, pose), in any words. '
+        + 'Run it when that is what the user MEANS, whatever the language. '
+        + 'Only on request; a change the user wants NOW is assetCustomizations.ts, not this. Writes src/game/three/characterCustomizer.ts: it works on ANY loaded model '
+        + '(library, the user\'s own .glb, or code-built) by discovering the model\'s named materials (colour pickers with presets) and mesh parts '
+        + '(show/hide), plus size, a pose picker when roles exist, reset, and the look saved per character and re-applied. Labels take the user\'s '
+        + 'language. Anything the panel lacks that the user asks for is added to the same module.',
+      input_schema: { type: 'object', properties: {} },
     },
     {
       name: 'generate_animation',
@@ -3769,6 +3786,7 @@ export const CATALOG_TOOL_NAMES = [
   'object_spec',
   'add_library_models',
   'generate_game_runtime',
+  'generate_character_customizer',
   'generate_animation',
   'generate_ui_states',
   'generate_state',
@@ -3982,6 +4000,8 @@ export const RECIPE_TOOLS = [
   'generate_file_upload',
   // 🔴 AUTOPSY f496c75b (2026-09-30): the prompt's step 2 for every 3D game, and it was on neither list.
   // The census that guards this read tool names as `[a-z]+(?:_[a-z]+)+`, so the digit in `3d` hid it.
+  // A character customization panel for ANY loaded model, written into the user's game only when they ask (2026-11-21).
+  'generate_character_customizer',
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',

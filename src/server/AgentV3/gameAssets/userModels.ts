@@ -518,7 +518,7 @@ function ensureFileReader(): void {
 }
 
 /** One FBX → GLB bytes, or a plain refusal. Warnings say what did not come across. */
-export async function fbxToGlb(bytes: Uint8Array, warnings: string[]): Promise<Uint8Array> {
+export async function fbxToGlb(bytes: Uint8Array, warnings: string[], files: ReadonlyMap<string, Uint8Array> = new Map(), fbxPath = ''): Promise<Uint8Array> {
   if (bytes.byteLength > FBX_MAX_BYTES) throw new UserModelError(`this FBX is larger than ${FBX_MAX_BYTES / 1024 / 1024} MB — export it as .glb (Blender: File → Export → glTF 2.0) and attach that`);
   ensureFileReader();
   const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
@@ -529,20 +529,34 @@ export async function fbxToGlb(bytes: Uint8Array, warnings: string[]): Promise<U
   // A loading manager whose handler only hands back an empty Texture lets it parse; the slots are cleared below anyway.
   // (three by a variable specifier: a typed `declare module 'three'` here would shadow the client's own three imports.)
   const threeSpecifier = 'three';
-  const THREE = await import(threeSpecifier) as { LoadingManager: new () => { addHandler(re: RegExp, loader: unknown): void }; Texture: new () => object };
+  const THREE = await import(threeSpecifier) as { LoadingManager: new () => { addHandler(re: RegExp, loader: unknown): void }; Texture: new () => { userData?: Record<string, unknown> } };
   const manager = new THREE.LoadingManager();
-  const noPictures = { path: '', setPath(p: string) { this.path = p; return this; }, load: () => new THREE.Texture() };
+  const noPictures = { path: '', setPath(p: string) { this.path = p; return this; }, load: (url: string) => Object.assign(new THREE.Texture(), { userData: { fileName: String(url ?? '') } }) };
   manager.addHandler(/./, noPictures);
   let root: Node3 & { animations: { name: string }[] };
+  const embedded = new Map<string, Blob>();
   try {
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    root = new FBXLoader(manager).parse(ab, '') as unknown as typeof root;
+    // EMBEDDED pictures (most Sketchfab / Mixamo exports carry them inside the FBX) make FBXLoader call
+    // window.URL.createObjectURL — Node has no window, so such an FBX never parsed at all (3 of 3 real Indian-clothing
+    // models, 2026-11-21). A window is lent only for this synchronous parse, then removed, so no other server code ever
+    // sees one; it records each embedded picture under a key the texture handler receives, and the picture goes back in.
+    root = withLentWindow(embedded, () => new FBXLoader(manager).parse(ab, '')) as unknown as typeof root;
   } catch { throw new UserModelError('this FBX file could not be read — export it as .glb (Blender: File → Export → glTF 2.0) and attach that'); }
   const TEXTURE_SLOTS = ['map', 'normalMap', 'specularMap', 'emissiveMap', 'alphaMap', 'aoMap', 'bumpMap', 'lightMap', 'displacementMap', 'roughnessMap', 'metalnessMap'];
   let texturesDropped = false;
+  // The base-colour picture each material named, by material: put back into the GLB after export when the user
+  // attached that picture beside the FBX (Node cannot hand pictures to the exporter, so they go in afterwards).
+  const wantedPicture = new Map<string, string>();
+  let materialSeq = 0;
   root.traverse((n) => {
     for (const m of ([] as Record<string, unknown>[]).concat((n.material as Record<string, unknown>) ?? [])) {
       m.transparent = false; m.opacity = 1;
+      const map = m.map as { userData?: { fileName?: string } } | null | undefined;
+      if (map?.userData?.fileName) {
+        if (typeof m.name !== 'string' || !m.name) m.name = `Material_${++materialSeq}`;
+        wantedPicture.set(m.name as string, map.userData.fileName);
+      }
       for (const slot of TEXTURE_SLOTS) if (m[slot]) { m[slot] = null; texturesDropped = true; }
     }
     const g = n.geometry;
@@ -554,14 +568,37 @@ export async function fbxToGlb(bytes: Uint8Array, warnings: string[]): Promise<U
     for (const [mi, list] of [...byMaterial].sort((a, b) => a[0] - b[0])) { g.addGroup(out.length, list.length, mi); for (const v of list) out.push(v); }
     g.setIndex(out);
   });
+  // Face shape keys (morph targets) from avatar creators: a Mixamo-rigged kurta and saree carried 126 each, 42 MB of the
+  // 55 MB GLB. A game runtime never animates them (clips move bones), so they are left out — and the user is told.
+  const morphTargets = dropMorphTargets(root);
+  if (morphTargets) warnings.push(`its ${morphTargets} face shape keys (expressions) were left out — a game does not use them, and they made the file several times larger`);
   for (const clip of root.animations) clip.name = clip.name.replace(/^.*\|/, '');
   // FBX stores its own axis and unit settings, which do not always survive conversion: say so once, with the exact way out.
   warnings.push('it was converted from FBX — if it looks turned on its side or the wrong size, ask to turn or resize it, or export it as .glb for the exact look');
-  if (texturesDropped) warnings.push('its textures could not be carried over from FBX, so it shows its plain colours — for the full look, export it as .glb (Blender: File → Export → glTF 2.0) and attach that');
+  const pictures = new Map<string, Uint8Array>(); const missing = new Set<string>();
+  for (const [material, file] of wantedPicture) {
+    const bytes = embedded.has(file) ? new Uint8Array(await embedded.get(file)!.arrayBuffer()) : findResource(files, fbxPath, file.replace(/\\/g, '/').split('/').pop() ?? file);
+    const isPicture = bytes && ((bytes[0] === 0x89 && bytes[1] === 0x50) || (bytes[0] === 0xff && bytes[1] === 0xd8));
+    if (isPicture) pictures.set(material, bytes!); else missing.add(file.replace(/\\/g, '/').split('/').pop() ?? file);
+  }
+  // three.js counts texture rows from the bottom (FBXLoader's UVs assume a flipped picture); glTF from the top. The
+  // exporter would flip the picture itself, but here the picture goes in untouched afterwards — so the UVs flip instead,
+  // on exactly the meshes that will get one (the first try showed a silver sword's blade in its grip's brown).
+  root.traverse((n) => {
+    const mats = ([] as { name?: string }[]).concat((n.material as { name?: string }) ?? []);
+    const uv = (n.geometry as unknown as { attributes?: { uv?: { count: number; getY(i: number): number; setY(i: number, v: number): void; needsUpdate?: boolean } } } | undefined)?.attributes?.uv;
+    if (!uv || !mats.some(m => m?.name && pictures.has(m.name))) return;
+    for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+    uv.needsUpdate = true;
+  });
+  let glb: Uint8Array;
   try {
-    const glb = await new GLTFExporter().parseAsync(root as never, { binary: true, animations: root.animations as never, onlyVisible: true });
-    return new Uint8Array(glb as ArrayBuffer);
+    glb = new Uint8Array(await new GLTFExporter().parseAsync(root as never, { binary: true, animations: root.animations as never, onlyVisible: true }) as ArrayBuffer);
   } catch { throw new UserModelError('this FBX could not be converted — export it as .glb (Blender: File → Export → glTF 2.0) and attach that'); }
+  if (pictures.size) glb = embedBaseColorPictures(glb, pictures);
+  if (missing.size) warnings.push(`its picture(s) ${[...missing].slice(0, 6).join(', ')} were not attached, so those parts show their plain colours — attach the picture files with the FBX (or all in one zip) for the full look`);
+  else if (texturesDropped && !pictures.size) warnings.push('its textures could not be carried over from FBX, so it shows its plain colours — for the full look, export it as .glb (Blender: File → Export → glTF 2.0) and attach that');
+  return glb;
 }
 
 /** Every .fbx in the files becomes a .glb beside it (same name) before the models are checked; failures are refusals. */
@@ -573,9 +610,79 @@ export async function convertFbxFiles(files: ReadonlyMap<string, Uint8Array>): P
     const w: string[] = [];
     try {
       const glbPath = path.replace(/\.fbx$/i, '.glb');
-      out.set(glbPath, await fbxToGlb(bytes, w));
+      out.set(glbPath, await fbxToGlb(bytes, w, files, path));
       warnings.set(glbPath, w);
     } catch (error) { refused.push({ from: path, reason: userModelRefusalReason(error, bytes.byteLength) }); }
   }
   return { files: out, warnings, refused };
+}
+
+/**
+ * Put base-colour pictures into an exported GLB, by material name: each picture is appended to the binary chunk with its
+ * own buffer view, image and texture, and the material's baseColorTexture points at it (its colour becomes white, so the
+ * picture shows as drawn). The UVs are already in the GLB — the exporter writes them whether or not a map was set. PURE.
+ */
+export function embedBaseColorPictures(glb: Uint8Array, byMaterial: ReadonlyMap<string, Uint8Array>): Uint8Array {
+  const b = Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLength = b.readUInt32LE(12);
+  const doc = JSON.parse(b.subarray(20, 20 + jsonLength).toString('utf8')) as {
+    materials?: { name?: string; pbrMetallicRoughness?: Record<string, unknown> }[]; images?: unknown[]; textures?: unknown[]; samplers?: unknown[];
+    bufferViews?: unknown[]; buffers?: { byteLength: number }[];
+  };
+  const binStart = 20 + jsonLength;
+  const binLength = binStart + 8 <= b.length ? b.readUInt32LE(binStart) : 0;
+  const parts: Buffer[] = [binLength ? Buffer.from(b.subarray(binStart + 8, binStart + 8 + binLength)) : Buffer.alloc(0)];
+  let offset = parts[0].length;
+  doc.images ??= []; doc.textures ??= []; doc.bufferViews ??= []; doc.samplers ??= [];
+  if (!doc.samplers.length) doc.samplers.push({ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 });
+  const done = new Map<string, number>();
+  for (const material of doc.materials ?? []) {
+    const picture = material.name ? byMaterial.get(material.name) : undefined;
+    if (!picture) continue;
+    let texture = done.get(material.name!);
+    if (texture === undefined) {
+      const padded = Buffer.alloc(Math.ceil(picture.byteLength / 4) * 4); padded.set(picture);
+      doc.bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: picture.byteLength });
+      parts.push(padded); offset += padded.length;
+      doc.images.push({ bufferView: doc.bufferViews.length - 1, mimeType: picture[0] === 0xff ? 'image/jpeg' : 'image/png' });
+      doc.textures.push({ source: doc.images.length - 1, sampler: 0 });
+      texture = doc.textures.length - 1; done.set(material.name!, texture);
+    }
+    material.pbrMetallicRoughness = { ...(material.pbrMetallicRoughness ?? {}), baseColorTexture: { index: texture }, baseColorFactor: [1, 1, 1, 1] };
+  }
+  if (!done.size) return glb;
+  doc.buffers = [{ byteLength: offset }];
+  const bin = Buffer.concat(parts, offset);
+  const json = Buffer.from(JSON.stringify(doc)); const paddedJson = Buffer.alloc(Math.ceil(json.length / 4) * 4, 32); json.copy(paddedJson);
+  const out = Buffer.alloc(28 + paddedJson.length + bin.length);
+  out.writeUInt32LE(0x46546c67, 0); out.writeUInt32LE(2, 4); out.writeUInt32LE(out.length, 8);
+  out.writeUInt32LE(paddedJson.length, 12); out.writeUInt32LE(0x4e4f534a, 16); paddedJson.copy(out, 20);
+  out.writeUInt32LE(bin.length, 20 + paddedJson.length); out.writeUInt32LE(0x004e4942, 24 + paddedJson.length); bin.copy(out, 28 + paddedJson.length);
+  return new Uint8Array(out);
+}
+
+/**
+ * Run a synchronous parse with a borrowed `window.URL.createObjectURL` that records each blob under a key, then remove it
+ * (only if this call added it) — so no other server code ever sees a `window`. Used for FBXLoader's embedded pictures.
+ */
+export function withLentWindow<T>(embedded: Map<string, Blob>, parse: () => T): T {
+  const g = globalThis as unknown as { window?: unknown };
+  const lent = !('window' in g);
+  if (lent) g.window = { URL: { createObjectURL: (blob: Blob) => { const key = `nbblob:${embedded.size}`; embedded.set(key, blob); return key; } } };
+  try { return parse(); } finally { if (lent) delete g.window; }
+}
+
+/** Remove every mesh's morph targets (face shape keys); returns the most any one mesh had. */
+export function dropMorphTargets(root: { traverse(cb: (n: { geometry?: unknown }) => void): void }): number {
+  let most = 0;
+  root.traverse((n) => {
+    const geo = n.geometry as { morphAttributes?: Record<string, unknown[]> } | undefined;
+    const keys = Object.values(geo?.morphAttributes ?? {}).reduce((m, list) => Math.max(m, Array.isArray(list) ? list.length : 0), 0);
+    if (!geo || !keys) return;
+    most = Math.max(most, keys);
+    geo.morphAttributes = {};
+    const mesh = n as { morphTargetInfluences?: unknown; morphTargetDictionary?: unknown };
+    mesh.morphTargetInfluences = undefined; mesh.morphTargetDictionary = undefined;
+  });
+  return most;
 }

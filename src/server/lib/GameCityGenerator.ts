@@ -79,6 +79,11 @@ export interface CityPlan {
 export const CITY_ROAD_Y = 0.03;
 /** Kerb height: the pavement top is CITY_ROAD_Y + CITY_KERB. */
 export const CITY_KERB = 0.15;
+/**
+ * The zebra crossing on every arm of a crossing: it starts gap metres past the crossing's edge and runs depth metres
+ * along the street. ONE place (2026-11-21): traffic stops behind it and pedestrians walk on it, from these numbers.
+ */
+export const CITY_ZEBRA = { gap: 0.8, depth: 3 } as const;
 
 const WASHES = [0xe9c46a, 0xf4a6a6, 0x9ec9e6, 0xf1e3c8, 0xc7e0b4, 0xe8b07a, 0xd7c3e6, 0xf6f1e7];
 const OFFICE = [0x8fa3b0, 0xa7b4bd, 0x6f8796, 0xc9d3d9, 0x9aa5ad];
@@ -394,7 +399,7 @@ export function createCity(options: CityOptions = {}): City {
     box(streets, len, 0.06, road, (X[i] + X[i + 1]) / 2, CITY_ROAD_Y - 0.03, z, 0x3a3c40);
   }
   const markY = CITY_ROAD_Y + 0.006, white = 0xf2f2f2;
-  const zebraDepth = 3, zebraGap = 0.8;
+  const zebraDepth = CITY_ZEBRA.depth, zebraGap = CITY_ZEBRA.gap;
   // Centre dashes on every stretch between two crossings, stopping short of the zebra crossings.
   const dashes = (a: number, b: number, fixed: number, alongX: boolean) => {
     const start = a + road / 2 + zebraGap + zebraDepth + 1, end = b - road / 2 - zebraGap - zebraDepth - 1;

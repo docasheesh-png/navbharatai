@@ -463,6 +463,9 @@ import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gam
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { forgeAssignment, forgeMissingHandoff } from '../AgentV3/forgeForMissing';
+import { objectForgeEnabled } from '../lib/objectForge/ObjectForgeGenerator';
+import { REVIEWED_GAME_ASSETS } from '../AgentV3/gameAssets/providers';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, salvageReadInstruction, repairCompilerFiles, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -725,6 +728,7 @@ import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey } from '../AgentV3/restorePoint';
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { gameMeasureFromIssues, gameGotWorse, versionBeforeTurn, gameUndoMessage } from '../AgentV3/gameRegression';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -12003,6 +12007,8 @@ async function noteBuildOutcome(
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
     );
+    // The user started this turn as a bug hunt from the ❗️ list: the deep review runs without asking again.
+    const bugHuntAskedByUser = req.body?.bugHunt === true;
     if (weakScopeBlocked) {
       intent = 'chat';
       setAdmittedSurplusScope(surplusSession, false);
@@ -14732,6 +14738,9 @@ async function noteBuildOutcome(
       outcomeBuildId = buildId;
       const promptHash = computePromptHash(prompt);
       emit({ type: 'build_meta', buildId, promptHash, workspaceId });
+      // 🎮 THE GAME AS IT WAS MEASURED BEFORE THIS TURN (gameRegression.ts, admin 2026-11-21): read NOW, before this turn's
+      // first progress save overwrites the stored report, so a turn that makes the game worse can be compared and undone.
+      const previousReportAtStart = loadDiagnostics(workspaceId).catch(() => null);
       const buildDiag = new BuildDiagnostics({
         buildId, promptHash,
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
@@ -19602,6 +19611,15 @@ async function noteBuildOutcome(
                     message: 'The request is a race and says nothing about its course, so the builder is instructed to use NavBharatAI\'s editable endless road library (twelve 10–100 km maps by default). Actual use is checked separately.' });
                 }
                 buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), request: gameTurnRequest(prompt, milestoneRequest), endlessRaceCourse: endlessRace })}\n\n---\n\n${buildPrompt}`;
+                // 🧩 The objects the user named that neither the library nor the kit provides go to the Object Forge, said per
+                // object, and checked after the build (forgeForMissing.ts, admin 2026-11-20). Only a 3D kit, only with the Forge on.
+                const missingObjects = forgeAssignment(gameTurnRequest(prompt, milestoneRequest), REVIEWED_GAME_ASSETS, { kit3D: gameKitSeeded.includes('generate_game_3d'), forgeOn: objectForgeEnabled() });
+                if (missingObjects.length > 0) {
+                  dispatcher.requireForgeSubjects(missingObjects);
+                  buildPrompt = `${forgeMissingHandoff(missingObjects)}\n\n${buildPrompt}`;
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'FORGE_SUBJECTS_ASSIGNED', autoResolved: true,
+                    message: `Not in the model library, so assigned to the Object Forge: ${missingObjects.map((m) => m.word).join(', ')}. Use is checked after the build (advisory).` });
+                }
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0
@@ -24796,6 +24814,21 @@ async function noteBuildOutcome(
               gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
+              // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
+              const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');
+              if (heavy) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: ${heavy.evidence}.`, autoResolved: false });
+              // 🎮 DID THIS TURN MAKE THE GAME WORSE? Compared with the measure from before the turn; if so, the user is told
+              // in plain words and offered a one-tap "Go back" to the saved version from just before it (the ❗️ list row (gameUndo.ts) reads
+              // the version id from this finding's detail). Nothing is changed automatically.
+              try {
+                const before = gameMeasureFromIssues((await previousReportAtStart)?.issues);
+                const worse = gameGotWorse(before, { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) });
+                if (worse) {
+                  const versions = await buildHistoryStore.list(restorePointKey(workspaceId, null)).catch(() => []);
+                  const versionId = versionBeforeTurn(versions, buildStartedAt);
+                  if (versionId) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_GOT_WORSE', message: gameUndoMessage(worse), detail: versionId, autoResolved: false });
+                }
+              } catch { /* observation only — never in the way of the build */ }
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
             try {
@@ -26498,6 +26531,7 @@ async function noteBuildOutcome(
         wait: (callId) => waitForUser(callId, bugHuntWaitMs()),
         say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
         record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
+        preApproved: bugHuntAskedByUser,
       });
       if (completedAppReviewEligible({ ok: result.ok, headroom: reviewHeadroomOk, allowed: reviewerAllowed, deferred: !!reviewDeferredToShell, runProven: runProof().proven, stopped: abort.signal.aborted }) && bugHunt.runReview) {
         try {

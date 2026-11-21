@@ -20,6 +20,7 @@ export const P = {
   city2: KAYQUER('kit-cidade-lowpoly', 'd9de7e25d476d8b8572971840b129c28a68e9cf7', 'Kayque Rotondo and Cláudia Dias Roxinol'),
   props2: KAYQUER('kit-props-brasil-lowpoly', '8ce8d7dd75e3159296060592ac41d9ff33a53fd2', 'Kayque Rotondo and Cláudia Dias Roxinol'),
   buildings2: KAYQUER('kit-predios-brasil-lowpoly', 'debc570a318410464cac71fd97981d42b93e7eb3', 'Kayque Rotondo and Cláudia Dias Roxinol'),
+  fleet: KAYQUER('scitizia-frota-64', 'f3c7d624249e886229966b4dede3ebd2b55ee5db', 'kayquer', 'modelos'),
   racing: KENNEY('Starter-Kit-Racing', '2f2e5f2646dda89cb21d4e8539bab60c6e955dc8', 2023, 'LICENSE'),
   platformer: KENNEY('Starter-Kit-3D-Platformer', '3fa8a04b1c01ab23db43123d4ce814a34c3fc7f0', 2023, 'LICENSE.md'),
   fps: KENNEY('Starter-Kit-FPS', '185fd2326d74a5cf858cffc616f87cf9696f9cc0', 2025, 'LICENSE.md'),

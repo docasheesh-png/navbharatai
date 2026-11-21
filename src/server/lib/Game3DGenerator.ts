@@ -31,6 +31,8 @@
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
 import { GAME_CITY } from './GameCityGenerator';
 import { GAME_CITY_TRAFFIC } from './GameCityTrafficGenerator';
+import { GAME_CITY_PEOPLE } from './GameCityPeopleGenerator';
+import { GAME_PHYSICS, GAME_PHYSICS_VERSION } from './GamePhysicsGenerator';
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
 // L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
@@ -7120,10 +7122,14 @@ const FILES: Record<string, string> = {
   'src/game/three/city.ts': GAME_CITY,
   // Traffic that drives the city's grid: left lane, turns at crossings, obeys the lights (2026-11-20).
   'src/game/three/citytraffic.ts': GAME_CITY_TRAFFIC,
+  // People on the pavements, crossing on the zebras when the cars have red (2026-11-21).
+  'src/game/three/citypeople.ts': GAME_CITY_PEOPLE,
+  // Real rigid-body physics: things fall, roll, stack, topple, and characters ragdoll (cannon-es, 2026-11-21).
+  'src/game/three/physics.ts': GAME_PHYSICS,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics',
 ];
 
 /**
@@ -7148,6 +7154,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // race.ts drives rival cars on the streamed road (objects.ts) — first, so objects' own dependencies follow below.
     if (files['src/game/three/race.ts']) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
     // City traffic drives the kit's vehicles (objects.ts) on the city's grid (city.ts).
+    if (files['src/game/three/citypeople.ts']) files['src/game/three/city.ts'] = FILES['src/game/three/city.ts'];
     if (files['src/game/three/citytraffic.ts']) { files['src/game/three/city.ts'] = FILES['src/game/three/city.ts']; files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts']; }
     if (files['src/game/three/world.ts']) {
       files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
@@ -7170,6 +7177,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
+    // physics.ts turns the scene's solid colliders into fixed obstacles.
+    if (files['src/game/three/physics.ts']) files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];
     if (files['src/game/three/city.ts'] || files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
       files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];
     }
@@ -7181,7 +7190,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
   return {
     files,
     // The ONLY dependency the whole game stack takes, and only when 3D is actually used.
-    dependencies: [{ name: 'three', version: '^0.180.0' }],
+    // cannon-es only when physics.ts ships: a game without it never installs a physics engine.
+    dependencies: [{ name: 'three', version: '^0.180.0' }, ...(files['src/game/three/physics.ts'] ? [{ name: 'cannon-es', version: GAME_PHYSICS_VERSION }] : [])],
     // 🔒 THE EXAMPLE BELOW IS COMPILED IN CI (tests/aRecipeExampleCompiles.test.ts), so keep it a whole
     // module with real imports. It used to be a list of fragments that named variables it never made
     // (canvas, car, rider, terrain, buildings), told a vehicle game to use a 'third-person' rig with
@@ -7192,7 +7202,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
       'Explorable houses: createHouse({ enterable: true }) or createEnterableHouse(). Flat roof, one/two storeys, real doorway and stairs. Legacy createHouse() is solid scenery. Game shell wires E/mobile Use; custom loops must call interactHouseDoor and updateHouseDoors. Supply all NPC occupants. Do not replace interiors with decorative assets.\n' +
       (files['src/game/three/city.ts'] ? 'City: const city = createCity({ blocksX: 5, blocksZ: 5, style: \'mixed\' }); scene.add(city.root) — streets, crossings, pavements, shops, apartments, offices, houses, parks, street lights, centred on the origin. Put the player at city.spawn facing city.spawnHeading. Driving: pass { ground: city.heightAt } to driveVehicle; driveVehicle already stops a car at the city\'s buildings and poles (they are solid), so nothing more is needed — city.solidAt(x, z, radius) is only for a mover your own code positions by hand. city.route(from, to) gives left-lane waypoints for AI cars, taxis and deliveries; city.lotsOf(\'shop\') and lot.entrance give mission targets; lot.sign is where to write a shop name. Never hand-place a street grid.\n' : '') +
+      (files['src/game/three/physics.ts'] ? 'Physics: const physics = createPhysics(scene) (gravity, a ground at y = 0, the scene\'s solid colliders as fixed walls); physics.add(mesh, { mass }) for anything that should fall, roll, stack or topple (0 = fixed); physics.explode(point, strength, radius) throws nearby bodies outward; const doll = physics.ragdoll(humanoid) makes a kit character go limp and fall (doll.push(impulse), doll.remove()); call physics.step(dt) every frame. Never fake a fall with a hand-written tween, and never add physics to the player\'s own walking capsule or a driven car (those already collide).\n' : '') +
       (files['src/game/three/citytraffic.ts'] ? 'City traffic: const traffic = createCityTraffic(city, { count: 15 }); scene.add(traffic.root); then traffic.update(dt, [playerObject]) every frame — cars, autos and buses drive the grid in the left lane, turn at crossings, obey the traffic lights (traffic.lightAt), keep their gap and stop for the player. Never animate city traffic by hand.\n' : '') +
+      (files['src/game/three/citypeople.ts'] ? 'City people: const people = createCityPeople(city, { count: 40, traffic }); scene.add(people.root); then people.update(dt, [playerObject]) and traffic.update(dt, [playerObject, ...people.bodies]) every frame — people walk the pavements and cross on the zebras only when the cars have red, and cars stop for them. Two draw calls for the whole crowd.\n' : '') +
       `${kitTypeContract(files)}\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +

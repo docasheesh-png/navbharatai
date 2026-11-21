@@ -18,16 +18,22 @@ describe('the builder chooses library models by meaning', () => {
 
   it('the menu names EVERY catalogue subject, and the roles each can play', () => {
     for (const c of REVIEWED_GAME_ASSETS) for (const s of c.subjects) expect(menu, s).toMatch(new RegExp(`(: |, )${s}( \\(|,|\\n|$)`));
-    expect(menu).toMatch(/villager \(walk\/run\/jog\/jump\/crouch\/aim\/shoot\/reload\/die\/hit\/drive\)/);
-    expect(menu).toMatch(/bird \(fly\)/);
+    // Subjects that play the same roles share one line, the roles written once (2026-11-21: the per-subject form spent
+    // 1.5 KB repeating "(walk/run)" once the library had 48 people).
+    const rolesOf = (subject: string) => menu.split('\n').find(l => new RegExp(`: (.*, )?${subject}(,|$)`).test(l))?.match(/^[a-z-]+ \(([^)]*)\):/)?.[1];
+    expect(rolesOf('villager')).toBe('walk/run/jog/jump/crouch/aim/shoot/reload/die/hit/drive');
+    expect(rolesOf('bird')).toBe('fly');
+    expect(rolesOf('young woman')).toBe('walk/run');
+    expect(rolesOf('cactus')).toBeUndefined();
     expect(menu).toMatch(/MEANING/);
-    // Paid on every build that has the library: keep it a menu, not a dump of the catalogue.
-    expect(menu.length).toBeLessThan(8000);
+    // Paid on every 3D game turn: keep it a menu, not a dump of the catalogue. 2026-11-21: 8000 → 11000 for the intent map
+    // (gameCapabilities.ts, ~2.7 KB) that lets the builder pick by meaning in any language — ~2.5k tokens a turn in all.
+    expect(menu.length).toBeLessThan(11000);
   });
 
   it('a subject appears once even when several models serve it', () => {
-    const characterLine = menu.split('\n').find(l => l.startsWith('character: '))!;
-    expect(characterLine.match(/(^|, |: )woman( \(|,|$)/g)).toHaveLength(1);
+    const characterLines = menu.split('\n').filter(l => /^character( \([^)]*\))?: /.test(l)).join('\n');
+    expect(characterLines.match(/(, |: )woman(,|$)/gm)).toHaveLength(1);
   });
 
   it('the menu reaches a new game only when the library is on for the account', () => {
@@ -62,7 +68,8 @@ describe('an EXISTING 3D game sees the library on every later turn (admin 2026-1
 
   it('a later turn on a project with the 3D kit gets the menu first; the prompt itself is kept whole', async () => {
     const out = await withLibraryMenuForExistingGame('add a cow to my game', { intent: 'edit_existing', read: read({ [THREE_KIT_MARKER]: 'export const x = 1;' }), env: on });
-    expect(out.startsWith('[GAME_LIBRARY_MENU]')).toBe(true);
+    expect(out.startsWith('[WHAT THE USER MEANS → WHAT TO DO]')).toBe(true);
+    expect(out).toContain('[GAME_LIBRARY_MENU]');
     expect(out.endsWith('\n\nadd a cow to my game')).toBe(true);
   });
 

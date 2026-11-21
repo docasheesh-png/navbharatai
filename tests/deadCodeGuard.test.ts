@@ -88,8 +88,6 @@ const KNOWN_UNREACHABLE = new Set([
   // Forge describe-only calls are held until admitted budget/cancellation is wired. The independently
   // tested helper is retained for that integration; remove this exemption when its caller returns.
   'src/server/lib/objectForge/forgeSelfAuthor.ts',
-  // Subject examples/checklists belong to the same held describe-only helper, not a live provider path.
-  'src/server/lib/objectForge/forgeSubjects.ts',
   // Deliberately dormant benchmark prerequisite: no authority issuer or production driver.
   // Activation requires separate privacy/transport/template/budget review; remove only with that wiring.
   // canaryResumeProvenance.test.ts independently asserts that production entry points remain absent.

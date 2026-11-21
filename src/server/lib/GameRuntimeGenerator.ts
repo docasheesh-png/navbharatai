@@ -2659,6 +2659,7 @@ export function tuningFile(values: Record<string, number>): string {
   const lines = Object.keys(values).filter((k) => KEY.test(k) && Number.isFinite(values[k])).sort()
     .map((k) => '  ' + k + ': ' + Number(values[k]) + ',');
   return '// Saved from the Tune panel in NavBharatAI\\'s preview. Edit here or drag the sliders and Save again.\\n'
+    + '// Each number overrides the default its game declared with tunable(); the game still keeps it inside that slider\\'s range.\\n'
     + 'export const TUNING: Record<string, number> = {\\n' + lines.join('\\n') + (lines.length ? '\\n' : '') + '};\\n';
 }
 
@@ -2666,18 +2667,24 @@ export function tuningFile(values: Record<string, number>): string {
 export function clearTunables(): void { entries.clear(); }
 
 // ── The preview bridge ── only inside a frame, and only the parent window (NavBharatAI's preview) may set a value.
+// The list goes ONLY to the parent's own origin, never to '*': known from the page that framed us (the referrer) or
+// from the parent's first message. Unknown origin = nothing is sent.
+let parentOrigin: string | null = null;
+try { parentOrigin = typeof document !== 'undefined' && document.referrer ? new URL(document.referrer).origin : null; } catch { parentOrigin = null; }
 let announceQueued = false;
 function announce(): void {
   if (typeof window === 'undefined' || window.parent === window || announceQueued) return;
   announceQueued = true;
   queueMicrotask(() => {
     announceQueued = false;
-    try { window.parent.postMessage({ nbTuneList: tunables() }, '*'); } catch { /* no parent to tell */ }
+    if (!parentOrigin || parentOrigin === 'null') return;
+    try { window.parent.postMessage({ nbTuneList: tunables() }, parentOrigin); } catch { /* no parent to tell */ }
   });
 }
 if (typeof window !== 'undefined' && window.parent !== window) {
   window.addEventListener('message', (e: MessageEvent) => {
     if (e.source !== window.parent) return;
+    if (typeof e.origin === 'string' && e.origin && e.origin !== 'null') parentOrigin = e.origin;
     const d = e.data as { nbTune?: string; nbTuneSet?: { key?: unknown; value?: unknown } } | null;
     if (!d || typeof d !== 'object') return;
     if (d.nbTune === 'list') announce();
@@ -2691,6 +2698,7 @@ if (typeof window !== 'undefined' && window.parent !== window) {
 
 /** The saved Tune-panel values: empty until the creator presses Save. The kit never overwrites an edited copy. */
 const TUNING_VALUES = `// Saved from the Tune panel in NavBharatAI's preview. Edit here or drag the sliders and Save again.
+// Each number overrides the default its game declared with tunable(); the game still keeps it inside that slider's range.
 export const TUNING: Record<string, number> = {
 };
 `;

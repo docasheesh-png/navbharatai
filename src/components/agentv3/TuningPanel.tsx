@@ -30,7 +30,7 @@ export function TuningPanel({ items, onChange, onSave, onClose }: {
         <p className="flex-1 text-xs font-medium text-body">Tune the game</p>
         <button type="button" onClick={onClose} className="p-1 rounded-lg text-faint hover:text-body hover:bg-raised" aria-label="Close the tune panel"><X className="w-4 h-4" /></button>
       </div>
-      <div className="max-h-[50vh] overflow-y-auto px-3 pb-2 space-y-3">
+      <div className="max-h-[50vh] supports-[height:100dvh]:max-h-[50dvh] overflow-y-auto px-3 pb-2 space-y-3">
         {items.map((i) => (
           <label key={i.key} className="block">
             <span className="flex justify-between text-[11px] text-muted"><span>{i.label}</span><span className="tabular-nums text-body">{(values[i.key] ?? i.value).toFixed(digits(i.step))}</span></span>

@@ -58,16 +58,20 @@ describe('🎚️ the kit side', () => {
   it('inside the preview only the parent window may set a value; the game announces its sliders to it', async () => {
     const listeners: Array<(e: any) => void> = [];
     const posted: any[] = [];
-    const parent = { postMessage: (m: any) => posted.push(m) };
+    const parent = { postMessage: (m: any, origin: string) => posted.push([m, origin]) };
     (globalThis as any).window = { parent, addEventListener: (_t: string, fn: any) => listeners.push(fn) };
     const T = await load();
     const h = T.tunable('jump', 1.5, { min: 0.5, max: 3 });
     await Promise.resolve();
-    expect(posted.at(-1)).toEqual({ nbTuneList: [expect.objectContaining({ key: 'jump', value: 1.5 })] });
-    listeners.forEach((fn) => fn({ source: { evil: true }, data: { nbTuneSet: { key: 'jump', value: 2.5 } } }));
+    expect(posted).toEqual([]);                                  // the parent's origin is not known yet: nothing sent, never to '*'
+    listeners.forEach((fn) => fn({ source: parent, origin: 'https://navbharatai.com', data: { nbTune: 'list' } }));
+    await Promise.resolve();
+    expect(posted.at(-1)).toEqual([{ nbTuneList: [expect.objectContaining({ key: 'jump', value: 1.5 })] }, 'https://navbharatai.com']);
+    listeners.forEach((fn) => fn({ source: { evil: true }, origin: 'https://evil.example', data: { nbTuneSet: { key: 'jump', value: 2.5 } } }));
     expect(h.value).toBe(1.5);                                   // not from the preview: ignored
-    listeners.forEach((fn) => fn({ source: parent, data: { nbTuneSet: { key: 'jump', value: 2.5 } } }));
+    listeners.forEach((fn) => fn({ source: parent, origin: 'https://navbharatai.com', data: { nbTuneSet: { key: 'jump', value: 2.5 } } }));
     expect(h.value).toBe(2.5);
+    expect(posted.every(([, origin]) => origin === 'https://navbharatai.com')).toBe(true);
   });
 });
 
@@ -104,6 +108,7 @@ describe('🎚️ the preview side', () => {
     const src = readFileSync(join(__dirname, '../src/components/agentv3/PreviewSurface.tsx'), 'utf8');
     expect(src).toMatch(/if \(!isFromOurPreviewFrame\(e, \[liveIframeRef\.current\?\.contentWindow, inBrowserIframeRef\.current\?\.contentWindow\]\)\) return;\n\s*const list = readTuneList\(e\.data\);/);
     expect(src).toMatch(/onChange=\{\(key, value\) => postToPreview\(tuneSetMessage\(key, value\)\)\}/);
+    expect(src).toMatch(/onLoad=\{\(\) => \{[^}]*postToPreview\(\{ \.\.\.TUNE_LIST_ASK \}\)/);   // the ask tells the game our origin
     expect(src).toMatch(/fetch\('\/api\/agentv3\/import-files'[\s\S]{0,200}files: \{ \[TUNING_VALUES_PATH\]: content \}/);
     expect(src).toMatch(/onFileEdited\?\.\(TUNING_VALUES_PATH, content\)/);
   });

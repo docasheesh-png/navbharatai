@@ -363,7 +363,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
   ],
   "src/game/core/tuning.ts": [
-    "2708481f622e997e5e747fea0298b28a431d9f82d22001fe386c521b30f224cf"
+    "2708481f622e997e5e747fea0298b28a431d9f82d22001fe386c521b30f224cf",
+    "1dfcf0013380119f767d8de6f0d6ebace39bf1c817a8fd2356439746d9ba0d99"
   ],
   "src/game/forge/behave.ts": [
     "a6a8751f2a3e0a244fcb606b7e1f558a0617c95e713a710205ebdabd7751ce7e",
@@ -586,7 +587,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "5c0ef0de6cda1c524fcf860d364ba8244b27f271796cd283fe7d0832f9475430"
   ],
   "src/game/tuning.values.ts": [
-    "df54a4e99b2923fc64ce2c2a99e1ab441bde2e33efd10dff02f726583a263d65"
+    "df54a4e99b2923fc64ce2c2a99e1ab441bde2e33efd10dff02f726583a263d65",
+    "24ba8f6782458e660fd18acc8c54656ff01e935c5e4fe17eacc584aa5ec35c97"
   ],
   "src/game/ui/Hud.tsx": [
     "2165d4e2e95b9e5990146f5afcfecbf35d0bf8a0cc1bd457f723a2492ace73b4",

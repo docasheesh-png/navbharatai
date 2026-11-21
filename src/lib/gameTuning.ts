@@ -39,5 +39,6 @@ export function tuningValuesFile(values: Record<string, number>): string {
   const lines = Object.keys(values).filter((k) => KEY.test(k) && Number.isFinite(values[k])).sort()
     .map((k) => '  ' + k + ': ' + Number(values[k]) + ',');
   return '// Saved from the Tune panel in NavBharatAI\'s preview. Edit here or drag the sliders and Save again.\n'
+    + '// Each number overrides the default its game declared with tunable(); the game still keeps it inside that slider\'s range.\n'
     + 'export const TUNING: Record<string, number> = {\n' + lines.join('\n') + (lines.length ? '\n' : '') + '};\n';
 }

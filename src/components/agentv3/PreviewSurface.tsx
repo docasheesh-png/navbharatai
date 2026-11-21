@@ -37,7 +37,7 @@ import { readAnswer, isRecord } from '../../lib/serverAnswer';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
 import { TuningPanel } from './TuningPanel';
-import { readTuneList, tuneSetMessage, tuningValuesFile, TUNING_VALUES_PATH, type TuneItem } from '../../lib/gameTuning';
+import { readTuneList, tuneSetMessage, tuningValuesFile, TUNING_VALUES_PATH, TUNE_LIST_ASK, type TuneItem } from '../../lib/gameTuning';
 import { choosePreviewSource, modeForSource, previewSourceLabel, previewSourceTitle, previewToolsFor, type PreviewChoice } from './previewSource';
 import {
   appendConsoleEntry, consoleErrorCount as countConsoleErrors, consoleRowFixable,
@@ -2040,7 +2040,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(idleSnapshotUrl && frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'} />
+            <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; postToPreview({ ...TUNE_LIST_ASK }); }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(idleSnapshotUrl && frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'} />
           </ResponsiveFrame>
         )}
       </div>

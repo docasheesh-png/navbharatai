@@ -1080,9 +1080,9 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
     "provider": "github",
     "id": "lib12-young-woman",
     "revision": "6bb938b401b382f924261da145e2fe184793515b",
-    "sourceUrl": "https://github.com/kayquer/scitizia-pessoas-64/blob/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_19.glb",
-    "downloadUrl": "https://raw.githubusercontent.com/kayquer/scitizia-pessoas-64/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_19.glb",
-    "sha256": "8456a726bf914096d156a53cb25082139f912342c44ba3d5c33cccc3d2b55235",
+    "sourceUrl": "https://github.com/kayquer/scitizia-pessoas-64/blob/6bb938b401b382f924261da145e2fe184793515b/modelos/rosa.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/kayquer/scitizia-pessoas-64/6bb938b401b382f924261da145e2fe184793515b/modelos/rosa.glb",
+    "sha256": "4a2195d77df9810b1fae19d30146dcffb5b7dd2b021eea1c0b80c8ab0b189768",
     "subjects": [
       "young woman",
       "girl"
@@ -1092,7 +1092,7 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
       "andar",
       "correr"
     ],
-    "height": 1.63,
+    "height": 1.65,
     "yaw": 0,
     "downloadOrigins": [
       "https://raw.githubusercontent.com"
@@ -1123,8 +1123,8 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
       "correr"
     ],
     "optimization": "animation-selection-v1",
-    "sourceSha256": "308c554860aa822245396af21749a9b81b03d1b4d6f1c8d3dec20a26c3828d32",
-    "bytes": 252056,
+    "sourceSha256": "69327af34e47722dd9a873afeb9c62e73d74427229c26d8e771adf03c9a12085",
+    "bytes": 315144,
     "libraryCategory": "character"
   },
   {
@@ -1231,9 +1231,9 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
     "provider": "github",
     "id": "lib12-road-worker",
     "revision": "6bb938b401b382f924261da145e2fe184793515b",
-    "sourceUrl": "https://github.com/kayquer/scitizia-pessoas-64/blob/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_06.glb",
-    "downloadUrl": "https://raw.githubusercontent.com/kayquer/scitizia-pessoas-64/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_06.glb",
-    "sha256": "468a27806ff957bfc8d70377eb16df8567df02f4a8dde5c61b76ef4513a86e22",
+    "sourceUrl": "https://github.com/kayquer/scitizia-pessoas-64/blob/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_18.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/kayquer/scitizia-pessoas-64/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_18.glb",
+    "sha256": "10afb7598d11a13201173fd34fc39a63606b389d89d63f791a580aa143d3a93e",
     "subjects": [
       "road worker",
       "traffic warden"
@@ -1274,18 +1274,19 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
       "correr"
     ],
     "optimization": "animation-selection-v1",
-    "sourceSha256": "261cf6fb1407f1db5485b953891823927f958d784c32940ceb14b175b954f59d",
-    "bytes": 234012,
+    "sourceSha256": "75a4ec70c6b31112268e3aab5a48fd8952a139b262409837586a23ce58886f94",
+    "bytes": 239948,
     "libraryCategory": "character"
   },
   {
     "provider": "github",
-    "id": "lib12-woman-in-jacket",
+    "id": "lib12-grey-haired-woman",
     "revision": "6bb938b401b382f924261da145e2fe184793515b",
-    "sourceUrl": "https://github.com/kayquer/scitizia-pessoas-64/blob/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_09.glb",
-    "downloadUrl": "https://raw.githubusercontent.com/kayquer/scitizia-pessoas-64/6bb938b401b382f924261da145e2fe184793515b/modelos/multidao_09.glb",
-    "sha256": "20d5dee8384d2fb702bfd7b4d86933a2763d27a29379024738f85876298c2024",
+    "sourceUrl": "https://github.com/kayquer/scitizia-pessoas-64/blob/6bb938b401b382f924261da145e2fe184793515b/modelos/zelia.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/kayquer/scitizia-pessoas-64/6bb938b401b382f924261da145e2fe184793515b/modelos/zelia.glb",
+    "sha256": "f70afd2d7ff1634d0e2340885c2ae3adaa8ca696c9926cb12b26ff42da9429d5",
     "subjects": [
+      "grey haired woman",
       "woman in jacket"
     ],
     "animations": [
@@ -1293,7 +1294,7 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
       "andar",
       "correr"
     ],
-    "height": 1.65,
+    "height": 1.66,
     "yaw": 0,
     "downloadOrigins": [
       "https://raw.githubusercontent.com"
@@ -1324,8 +1325,8 @@ export const REVIEWED_LIBRARY_BATCH_12: readonly ReviewedAsset[] = [
       "correr"
     ],
     "optimization": "animation-selection-v1",
-    "sourceSha256": "d7a6dd65f5cacb510611c736ed82fc3118949c2f61312fadbb50c55ae71fccf2",
-    "bytes": 237564,
+    "sourceSha256": "1b6d033534dcd7e2d5e0f190344c208ea39ea0811c454f162395a44ae8fed7ac",
+    "bytes": 349796,
     "libraryCategory": "character"
   },
   {

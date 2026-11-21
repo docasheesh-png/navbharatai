@@ -35,6 +35,13 @@ describe('library batch 12 — kinds for big worlds', () => {
     expect(new Set(REVIEWED_GAME_ASSETS.map(a => a.id)).size).toBe(REVIEWED_GAME_ASSETS.length);
   });
 
+  it('no model is in the library twice under two names (batch 12 first re-listed three batch-4 people), and the builder refuses one', () => {
+    const bySha = new Map<string, string[]>();
+    for (const a of REVIEWED_GAME_ASSETS) bySha.set(a.sha256, [...(bySha.get(a.sha256) ?? []), a.id]);
+    expect([...bySha.values()].filter(ids => ids.length > 1)).toEqual([]);
+    expect(readFileSync('scripts/library/buildLibraryBatch.mts', 'utf8')).toMatch(/is the same model as \$\{twin\?\.id\}/);
+  });
+
   it('no new subject is a word games use for something else (boss fight, item pickup, inventory manager, railway coach)', () => {
     const all = REVIEWED_LIBRARY_BATCH_12.flatMap(a => a.subjects);
     for (const risky of ['boss', 'pickup', 'manager', 'navigator', 'coach', 'tree', 'jeep', 'godown']) expect(all, risky).not.toContain(risky);

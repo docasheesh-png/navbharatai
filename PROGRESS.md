@@ -103516,6 +103516,21 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
 - **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
   new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.
+## 2026-11-21 — Tune a game with sliders in the preview (admin plan: "a tuning panel … without prompting again")
+
+- **Kit `core/tuning.ts`:** `tunable(key, default, { label, min, max, step })` returns a live handle; saved values come from
+  `src/game/tuning.values.ts` (a declared DATA file — `GAME_RUNTIME_DATA_FILES` — kept by the kit once edited) and win over
+  the default; every value is clamped. Inside a frame it announces its sliders to the parent (`{ nbTuneList }`) and accepts
+  `{ nbTuneSet }` ONLY from `window.parent`.
+- **Preview:** `src/lib/gameTuning.ts` validates the frame's list (≤ 30, plain keys, finite numbers, min < max) and writes the
+  file byte-for-byte as the kit's `tuningFile()` does; `TuningPanel.tsx` (sliders, Save, Reset); `PreviewSurface` listens only
+  to its own frames, shows a Tune button in the toolbar, sends each change with `postToPreview`, and Save writes the file
+  through the owner-verified `/api/agentv3/import-files` (live sandbox + durable store) and `onFileEdited`.
+- **Games declare tunables:** the runner starter's Game speed slider; `TUNING_RULE` in the kit handoff tells the builder to
+  declare speed, gravity, enemy count, difficulty… with `tunable()`.
+- **Proof:** `tests/theGameCanBeTunedInThePreview.test.ts` (9; four reversions each failed — any window setting a value,
+  saved values ignored, no range, the runner slider doing nothing). Module census, runtime pack, kit history and strict kit
+  compile updated for the declared data file.
 ## 2026-11-21 — Game repair, carefully back on: optional, asked, and one tap to undo a change that made it worse
 
 - **Admin:** "isko savdhani se on karo … optional karo, app/game banne ke bad user se hi pucho … agar game tut jaye to user

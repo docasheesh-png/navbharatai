@@ -100,7 +100,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3c18a7c3d0d16e60fea19ce885c6d34dc5c013e12e6b2ca6cbfcfd76fe480111"
   ],
   "src/game/LaneRunnerGame.tsx": [
-    "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40"
+    "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40",
+    "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
@@ -362,6 +363,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/core/swipe.ts": [
     "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
   ],
+  "src/game/core/tuning.ts": [
+    "2708481f622e997e5e747fea0298b28a431d9f82d22001fe386c521b30f224cf",
+    "1dfcf0013380119f767d8de6f0d6ebace39bf1c817a8fd2356439746d9ba0d99"
+  ],
   "src/game/forge/behave.ts": [
     "a6a8751f2a3e0a244fcb606b7e1f558a0617c95e713a710205ebdabd7751ce7e",
     "ef706e2fd58806041271a2162e66d6986d1916cb4ee7fd1dbcad15d3f657081f",
@@ -586,6 +591,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "39ac5bad22db409ec7c08c8e08fd1d4975aa1e3253f3172ab132770aa5b4869c",
     "0ef6a9dd2e19a764d7ac11c54bbc9ada669862827b00abf33bf3fb803c20ba7f",
     "5c0ef0de6cda1c524fcf860d364ba8244b27f271796cd283fe7d0832f9475430"
+  ],
+  "src/game/tuning.values.ts": [
+    "df54a4e99b2923fc64ce2c2a99e1ab441bde2e33efd10dff02f726583a263d65",
+    "24ba8f6782458e660fd18acc8c54656ff01e935c5e4fe17eacc584aa5ec35c97"
   ],
   "src/game/ui/Hud.tsx": [
     "2165d4e2e95b9e5990146f5afcfecbf35d0bf8a0cc1bd457f723a2492ace73b4",

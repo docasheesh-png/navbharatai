@@ -2133,6 +2133,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
     keywords: ['endless runner', 'runner game', 'subway surfers', 'subway surfer jaisa', 'temple run', 'daudne wala game', 'running game', 'lane change', 'jump and slide', 'swipe game', 'coin collect game', 'infinite runner'],
   },
   {
+    id: 'game_tuning_panel',
+    name: 'Tune a game with sliders in the preview',
+    path: 'NavBharatAI Pro → preview → the "Tune" button in the preview toolbar (shown when the game has adjustable numbers)',
+    description: 'While a game plays in the preview, the Tune button opens sliders for the numbers the game made adjustable (2026-11-21) — for example game speed, jump height, gravity, how many enemies and how fast they are, spawn rate, difficulty or a time limit. Dragging a slider changes the running game at once, with no new prompt. Save writes the chosen values into the game, so the published game starts with them; Reset puts the game\'s own values back. Games NavBharatAI builds declare these numbers by themselves (the endless runner starts with a Game speed slider).',
+    howToUse: 'Open the preview, tap Tune, drag the sliders while you play, then tap Save. To get a slider for something new, ask ("enemy speed ka slider do").',
+    relatedFeatures: ['game_runner_starter', 'game_menus_settings'],
+    keywords: ['tune', 'tuning', 'slider', 'sliders', 'game speed', 'difficulty slider', 'speed kam karo', 'speed badhao', 'gravity', 'enemy speed', 'adjust game', 'game settings preview', 'balance game', 'without prompt'],
+  },
+  {
     id: 'games_ai',
     name: 'Games, Puzzles & Family-Fun AI',
     path: 'NavBharatAI Free chat → Mode (bottom bar) → Games, Puzzles & Family-Fun',

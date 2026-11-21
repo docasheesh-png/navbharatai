@@ -284,6 +284,7 @@ import {
   adminPassword,
   adminSessionSigningKey,
 } from '../lib/adminAuth';
+import { otpLoginSwitch } from '../lib/otpLoginSwitch';
 
 /** The window the Business panel's platform margin covers (Q-114). */
 const PLATFORM_MARGIN_DAYS = 30;
@@ -3262,6 +3263,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       return res.json({ ok: true, days, ...summariseOtpOutcomes(await listDailyOtpOutcomes(days)) });
     } catch (e) {
       return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // MOBILE OTP SIGN-IN SWITCH (admin 2026-11-21): suspend or resume OTP *sign-in*; verification is unaffected.
+  app.get('/api/admin/otp-login', verifyAdminToken, async (_req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await otpLoginSwitch.read());
+  });
+  app.post('/api/admin/otp-login', verifyAdminToken, async (req: Request, res: Response) => {
+    const suspended = req.body?.suspended;
+    if (typeof suspended !== 'boolean') return res.status(400).json({ error: 'Choose suspend or resume.' });
+    try {
+      const setting = await otpLoginSwitch.set(suspended);
+      audit('ADMIN_OTP_LOGIN_SWITCH', { admin: adminUsername(), suspended: setting.suspended });
+      return res.json(setting);
+    } catch {
+      return res.status(503).json({ error: 'The setting could not be saved. Refresh to check the current state, then try again.' });
     }
   });
 

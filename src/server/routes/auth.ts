@@ -8,6 +8,7 @@ import { otpSendDecision, phoneOwnerUid, phoneForLog, type OtpPurpose } from '..
 import { consumeDurableRate } from '../lib/DurableRateLimit';
 import { normalizePhoneForGift } from '../lib/giftIdentity';
 import { parseOtpOutcome, recordOtpOutcome } from '../lib/otpOutcomes';
+import { otpLoginSwitch, otpLoginAllows, OTP_LOGIN_SUSPENDED_CODE, OTP_LOGIN_SUSPENDED_MESSAGE, PHONE_TAKEN_WHILE_SUSPENDED_MESSAGE } from '../lib/otpLoginSwitch';
 
 /**
  * Authentication routes extracted from the server.ts monolith (Phase 1).
@@ -93,6 +94,14 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
+  // WHICH SIGN-IN METHODS ARE OFFERED RIGHT NOW (2026-11-21). The login screen asks before drawing the
+  // OTP tab, so a suspended method is not offered at all. Public: the person is signed out here.
+  app.get('/api/auth/sign-in-options', async (_req: Request, res: Response) => {
+    const setting = await otpLoginSwitch.read();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ otpLogin: !setting.suspended });
+  });
+
   // Secure Send-OTP Pre-Request Security Gateway / Cooldown Checker
   app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     try {
@@ -115,6 +124,13 @@ export function registerAuthRoutes(app: Express): void {
       // `phone.replace(...)` below and throw → a 500 on malformed input. Reject it cleanly as a 400.
       if (!phone || typeof phone !== 'string' || phone.length > 20) {
         return res.status(400).json({ success: false, message: "A valid phone number is required." });
+      }
+
+      // OTP SIGN-IN SUSPENDED (admin, 2026-11-21) — checked before any rate-limit bookkeeping, so nothing is
+      // spent. Verification ('verify') is not sign-in and is unaffected. The installed phone apps, which send
+      // no purpose and so count as sign-in, show this message as-is.
+      if (!otpLoginAllows(purpose, await otpLoginSwitch.read())) {
+        return res.status(503).json({ success: false, code: OTP_LOGIN_SUSPENDED_CODE, message: OTP_LOGIN_SUSPENDED_MESSAGE });
       }
 
       // Normalize with the SAME function the gift marker uses. The old strip-the-symbols version left
@@ -169,7 +185,9 @@ export function registerAuthRoutes(app: Express): void {
           console.log(`[OTP GATE] refused verify for ${phoneForLog(phone)} — already owned by another account`);
           // 409, not 429: nothing is rate-limited here and retrying later cannot help. The body carries
           // the machine-readable code so the client can offer the way out rather than a dead end.
-          return res.status(409).json({ success: false, code: decision.code, message: decision.message });
+          // While OTP sign-in is suspended, "sign in with this number instead" is a shut door — do not offer it.
+          const message = (await otpLoginSwitch.read()).suspended ? PHONE_TAKEN_WHILE_SUSPENDED_MESSAGE : decision.message;
+          return res.status(409).json({ success: false, code: decision.code, message });
         }
       }
 

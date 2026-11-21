@@ -2619,6 +2619,109 @@ export class LaneRunner {
 }
 `;
 
+const TUNING = `/**
+ * TUNING — the numbers a creator wants to feel out by playing (admin 2026-11-21: "a tuning panel in the preview: sliders
+ * for speed, difficulty and so on, without prompting again"). A game declares what is adjustable:
+ *
+ *   const speed = tunable('speed', 10, { label: 'Speed', min: 4, max: 30 });
+ *   // every frame: player.velocity = speed.value;
+ *
+ * Inside NavBharatAI's preview a Tune panel shows a slider for each; dragging one changes the game at once (a message
+ * from the preview window — nothing else may set a value), and Save writes the values into src/game/tuning.values.ts,
+ * so the published game starts with them. Outside the preview nothing changes: the saved values are just the numbers.
+ */
+import { TUNING } from '../tuning.values';
+
+export interface TunableSpec { label?: string; min: number; max: number; step?: number }
+export interface TunableInfo { key: string; label: string; min: number; max: number; step: number; value: number; fallback: number }
+
+interface Entry { info: TunableInfo; handle: { value: number } }
+const entries = new Map<string, Entry>();
+const KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+/**
+ * Declare an adjustable number and get a handle whose .value is always the current one. The saved value (tuning.values.ts)
+ * wins over the fallback; every value is kept inside min..max. Declaring the same key again returns the same handle.
+ */
+export function tunable(key: string, fallback: number, spec: TunableSpec): { readonly value: number } {
+  const existing = entries.get(key);
+  if (existing) return existing.handle;
+  if (!KEY.test(key)) throw new Error('tunable: the key must be a short name of letters, digits and _ (got "' + key + '")');
+  const min = Number.isFinite(spec.min) ? spec.min : 0;
+  const max = Number.isFinite(spec.max) && spec.max > min ? spec.max : min + 1;
+  const step = Number.isFinite(spec.step) && (spec.step as number) > 0 ? (spec.step as number) : (max - min) / 100;
+  const saved = (TUNING as Record<string, unknown>)[key];
+  const start = clamp(typeof saved === 'number' && Number.isFinite(saved) ? saved : fallback, min, max);
+  const handle = { value: start };
+  entries.set(key, { info: { key, label: spec.label || key, min, max, step, value: start, fallback: clamp(fallback, min, max) }, handle });
+  announce();
+  return handle;
+}
+
+/** Every adjustable number, as the Tune panel lists it. */
+export function tunables(): TunableInfo[] {
+  return [...entries.values()].map((e) => ({ ...e.info, value: e.handle.value }));
+}
+
+/** Set one (kept inside its range). False for an unknown key or a value that is not a number. */
+export function setTunable(key: string, value: number): boolean {
+  const e = entries.get(key);
+  if (!e || typeof value !== 'number' || !Number.isFinite(value)) return false;
+  e.handle.value = clamp(value, e.info.min, e.info.max);
+  return true;
+}
+
+/** The source of src/game/tuning.values.ts holding these values — what the Tune panel's Save writes. */
+export function tuningFile(values: Record<string, number>): string {
+  const lines = Object.keys(values).filter((k) => KEY.test(k) && Number.isFinite(values[k])).sort()
+    .map((k) => '  ' + k + ': ' + Number(values[k]) + ',');
+  return '// Saved from the Tune panel in NavBharatAI\\'s preview. Edit here or drag the sliders and Save again.\\n'
+    + '// Each number overrides the default its game declared with tunable(); the game still keeps it inside that slider\\'s range.\\n'
+    + 'export const TUNING: Record<string, number> = {\\n' + lines.join('\\n') + (lines.length ? '\\n' : '') + '};\\n';
+}
+
+/** Forget every declared number (tests, a full reset). */
+export function clearTunables(): void { entries.clear(); }
+
+// ── The preview bridge ── only inside a frame, and only the parent window (NavBharatAI's preview) may set a value.
+// The list goes ONLY to the parent's own origin, never to '*': known from the page that framed us (the referrer) or
+// from the parent's first message. Unknown origin = nothing is sent.
+let parentOrigin: string | null = null;
+try { parentOrigin = typeof document !== 'undefined' && document.referrer ? new URL(document.referrer).origin : null; } catch { parentOrigin = null; }
+let announceQueued = false;
+function announce(): void {
+  if (typeof window === 'undefined' || window.parent === window || announceQueued) return;
+  announceQueued = true;
+  queueMicrotask(() => {
+    announceQueued = false;
+    if (!parentOrigin || parentOrigin === 'null') return;
+    try { window.parent.postMessage({ nbTuneList: tunables() }, parentOrigin); } catch { /* no parent to tell */ }
+  });
+}
+if (typeof window !== 'undefined' && window.parent !== window) {
+  window.addEventListener('message', (e: MessageEvent) => {
+    if (e.source !== window.parent) return;
+    if (typeof e.origin === 'string' && e.origin && e.origin !== 'null') parentOrigin = e.origin;
+    const d = e.data as { nbTune?: string; nbTuneSet?: { key?: unknown; value?: unknown } } | null;
+    if (!d || typeof d !== 'object') return;
+    if (d.nbTune === 'list') announce();
+    const set = d.nbTuneSet;
+    if (set && typeof set.key === 'string' && typeof set.value === 'number') {
+      if (setTunable(set.key, set.value)) announce();
+    }
+  });
+}
+`;
+
+/** The saved Tune-panel values: empty until the creator presses Save. The kit never overwrites an edited copy. */
+const TUNING_VALUES = `// Saved from the Tune panel in NavBharatAI's preview. Edit here or drag the sliders and Save again.
+// Each number overrides the default its game declared with tunable(); the game still keeps it inside that slider's range.
+export const TUNING: Record<string, number> = {
+};
+`;
+
 const KEYBINDS = `/**
  * KEY REBINDING (admin 2026-11-20 game-gap audit: the keys were fixed — a left-handed player, an AZERTY keyboard or a
  * player who wanted Jump on J had no way to change them). The player picks a key for each action in Settings → Controls,
@@ -2777,10 +2880,15 @@ const FILES: Record<string, string> = {
   'src/game/core/runner.ts': RUNNER,
   // Saved key bindings and the change-a-key capture — 2026-11-20 game-gap audit.
   'src/game/core/keybinds.ts': KEYBINDS,
+  'src/game/core/tuning.ts': TUNING,
+  'src/game/tuning.values.ts': TUNING_VALUES,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner', 'keybinds'];
+/** Files the runtime writes that are DATA, not a module: the Tune panel's saved values (rewritten by its Save, kept by the kit). */
+export const GAME_RUNTIME_DATA_FILES: readonly string[] = ['src/game/tuning.values.ts'];
+
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner', 'keybinds', 'tuning'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -2809,6 +2917,8 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/loading.ts']) { files['src/game/core/events.ts'] = FILES['src/game/core/events.ts']; files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts']; }
     if (files['src/game/core/meta.ts']) files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts'];
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    // The Tune panel's saved values travel with the tuning module (it imports them).
+    if (files['src/game/core/tuning.ts']) files['src/game/tuning.values.ts'] = FILES['src/game/tuning.values.ts'];
     if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/economy.ts'] || files['src/game/core/crafting.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];

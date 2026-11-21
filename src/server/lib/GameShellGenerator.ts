@@ -2634,6 +2634,7 @@ import { events } from './core/events';
 import { state, setStatus, addScore } from './core/state';
 import { LaneRunner, runnerInput, type RunnerOptions } from './core/runner';
 import { bindSwipe } from './core/swipe';
+import { tunable } from './core/tuning';
 import { createHumanoid } from './three/humanoid';
 
 /**
@@ -2680,6 +2681,8 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
   const lanes = Math.max(1, Math.min(5, Math.round(props.lanes ?? 3)));
   const runnerOptions: RunnerOptions = { lanes, laneWidth: LANE_WIDTH, startSpeed: props.startSpeed ?? 10, maxSpeed: props.maxSpeed ?? 30, seed: props.seed ?? Date.now() };
   const run = new LaneRunner(runnerOptions);
+  // The Tune panel in NavBharatAI's preview shows this as a slider (core/tuning): the whole run faster or slower.
+  const pace = tunable('gameSpeed', 1, { label: 'Game speed', min: 0.5, max: 2, step: 0.05 });
   const width = lanes * LANE_WIDTH + 1;
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -2783,13 +2786,14 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     },
     update: (ctx, dt) => {
       if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); return; }
-      for (const ev of run.update(dt, runnerInput(ctx.input))) {
+      const t = dt * pace.value;
+      for (const ev of run.update(t, runnerInput(ctx.input))) {
         const at = { x: runnerWorldX(run.x), y: run.y + 1, z: run.distance };
         if (ev.type === 'jump') { runner.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
         else if (ev.type === 'coin') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.coin.lane)), y: 0.8, z: ev.coin.z } });
         else if (ev.type === 'crash') { runner.die(); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
       }
-      runner.update(dt, run.alive ? run.speed : 0, !run.jumping);
+      runner.update(t, run.alive ? run.speed * pace.value : 0, !run.jumping);
       const score = run.score;
       if (score > scored) { addScore(score - scored); scored = score; }
       sync();

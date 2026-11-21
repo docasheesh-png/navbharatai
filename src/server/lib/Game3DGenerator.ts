@@ -29,6 +29,8 @@
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
+import { GAME_CITY } from './GameCityGenerator';
+import { GAME_CITY_TRAFFIC } from './GameCityTrafficGenerator';
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
 // L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
@@ -3250,7 +3252,7 @@ export function createCar(options: CarOptions = {}): THREE.Group {
       group.add(wheel);
     }
   }
-  return group;
+  return markVehicleBody(group);
 }
 
 /**
@@ -3368,7 +3370,7 @@ export function createAutoRickshaw(options: AutoRickshawOptions = {}): THREE.Gro
     w.position.set(sx * rearX, r, rearZ);
     g.add(w);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 export interface BusOptions extends BaseOpts { color?: number; stripe?: number; length?: number }
@@ -3451,7 +3453,7 @@ export function createBus(options: BusOptions = {}): THREE.Group {
     inner.position.set(sx * (W / 2 - tw * 1.55 - 0.03 * s), r, rearAxle);
     g.add(outer, inner);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 export interface TruckOptions extends BaseOpts { color?: number; cargoColor?: number; length?: number }
@@ -3533,7 +3535,7 @@ export function createTruck(options: TruckOptions = {}): THREE.Group {
     inner.position.set(sx * (W / 2 - tw * 1.55 - 0.04 * s), r, rearAxle);
     g.add(outer, inner);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 export interface TractorOptions extends BaseOpts { color?: number; length?: number }
@@ -3611,7 +3613,7 @@ export function createTractor(options: TractorOptions = {}): THREE.Group {
     front.position.set(sx * 0.66 * s, fr, frontZ);
     g.add(front);
   }
-  return g;
+  return markVehicleBody(g);
 }
 
 // ── WEAPONS (models) ─────────────────────────────────────────────────────────────────────────────
@@ -3960,6 +3962,7 @@ let vehicleListener: VehicleListener | null = null;
 
 function noteVehicle(vehicle: THREE.Object3D, axis: { x: number; y: number } | null): void {
   if (vehicleByPosition.get(vehicle.position) !== vehicle) vehicleByPosition.set(vehicle.position, vehicle);
+  markVehicleBody(vehicle);   // a hand-built car the game drives is an obstacle for other cars too
   vehicleListener?.(vehicle, axis);
 }
 
@@ -4150,11 +4153,37 @@ function resolveState(vehicle: THREE.Object3D, state: VehicleState | null | unde
 
 const vehicleBounds = new WeakMap<THREE.Object3D, THREE.Box3>();
 
-/** Sweep the whole vehicle, including its nose and tail, against scenery in its own scene. */
-function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning: VehicleTuning): number {
-  if (movement.lengthSq() === 0) return 1;
-  const colliders = worldColliders(collisionRoot(vehicle), [], vehicle, false);
-  if (!colliders.length) return 1;
+// 🚗 VEHICLES ARE OBSTACLES TO EACH OTHER (admin 2026-11-20 engine audit). The sweep below only ever saw SCENERY, and
+// no vehicle model is scenery, so the player's car drove straight through a parked car, the traffic and every rival
+// at full speed. Every vehicle the kit builds (and every model driveVehicle moves) is now an obstacle for the others.
+const vehicleBodies = new Set<THREE.Object3D>();
+const vehicleWasPlaced = new WeakSet<THREE.Object3D>();
+/** Mark a model as a vehicle body: other vehicles stop at it. The kit's vehicle factories do this themselves. */
+export function markVehicleBody<T extends THREE.Object3D>(vehicle: T): T { vehicleBodies.add(vehicle); return vehicle; }
+
+function carries(outer: THREE.Object3D, inner: THREE.Object3D): boolean {
+  for (let o: THREE.Object3D | null = inner.parent; o; o = o.parent) if (o === outer) return true;
+  return false;
+}
+
+/** The other vehicles in this vehicle's scene. One that has left its scene is forgotten (no leak). */
+function otherVehicles(vehicle: THREE.Object3D, root: THREE.Object3D | null): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  if (!root) return out;
+  for (const other of vehicleBodies) {
+    if (other === vehicle) continue;
+    const r = collisionRoot(other);
+    if (!r) { if (vehicleWasPlaced.has(other)) vehicleBodies.delete(other); continue; }
+    vehicleWasPlaced.add(other);
+    // A trailer this vehicle pulls, or the transporter carrying it, is not something it crashes into.
+    if (r !== root || !other.visible || carries(other, vehicle) || carries(vehicle, other)) continue;
+    out.push(other);
+  }
+  return out;
+}
+
+/** The vehicle as three capsules side by side, in world space — the same body for the sweep and for other cars. */
+function vehicleCapsules(vehicle: THREE.Object3D, tuning: VehicleTuning): Capsule[] {
   let bounds = vehicleBounds.get(vehicle);
   if (!bounds) {
     bounds = colliderLocalBounds(vehicle);
@@ -4172,17 +4201,87 @@ function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning:
   const radius = Math.max(0.05, Math.min(size.x * sx / 3, size.y * Math.abs(scale.y) / 2));
   const side = Math.max(0, size.x / 2 - radius / sx);
   const end = Math.max(0, size.z / 2 - radius / sz);
-  const bodies = [-side, 0, side].map((x) => new Capsule(
+  return [-side, 0, side].map((x) => new Capsule(
     new THREE.Vector3(center.x + x, center.y, center.z - end).applyMatrix4(vehicle.matrixWorld),
     new THREE.Vector3(center.x + x, center.y, center.z + end).applyMatrix4(vehicle.matrixWorld),
     radius,
   ));
+}
+
+/** Closest distance between segments p1-q1 and p2-q2. */
+function segmentDistance(p1: THREE.Vector3, q1: THREE.Vector3, p2: THREE.Vector3, q2: THREE.Vector3): number {
+  const d1 = q1.clone().sub(p1), d2 = q2.clone().sub(p2), r = p1.clone().sub(p2);
+  const a = d1.dot(d1), e = d2.dot(d2), f = d2.dot(r);
+  let s = 0, t = 0;
+  if (a <= 1e-12 && e <= 1e-12) return r.length();
+  if (a <= 1e-12) t = Math.min(1, Math.max(0, f / e));
+  else {
+    const c = d1.dot(r);
+    if (e <= 1e-12) s = Math.min(1, Math.max(0, -c / a));
+    else {
+      const b = d1.dot(d2), denom = a * e - b * b;
+      s = denom > 1e-12 ? Math.min(1, Math.max(0, (b * f - c * e) / denom)) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = Math.min(1, Math.max(0, -c / a)); }
+      else if (t > 1) { t = 1; s = Math.min(1, Math.max(0, (b - c) / a)); }
+    }
+  }
+  return p1.clone().addScaledVector(d1, s).distanceTo(p2.clone().addScaledVector(d2, t));
+}
+
+/** How far apart two capsule bodies are (negative = overlapping), with the first one moved by offset. */
+function bodyGap(a: readonly Capsule[], offset: THREE.Vector3, b: readonly Capsule[]): number {
+  let gap = Infinity;
+  for (const ca of a) {
+    const s = ca.start.clone().add(offset), e = ca.end.clone().add(offset);
+    for (const cb of b) gap = Math.min(gap, segmentDistance(s, e, cb.start, cb.end) - ca.radius - cb.radius);
+  }
+  return gap;
+}
+
+/** The fraction of movement this body can make before touching another vehicle (1 = free). */
+function vehicleFraction(bodies: readonly Capsule[], movement: THREE.Vector3, others: readonly THREE.Object3D[]): number {
+  if (!others.length || !bodies.length) return 1;
+  const reach = movement.length() + Math.max(...bodies.map((c) => c.start.distanceTo(c.end) / 2 + c.radius)) * 2 + 8;
+  const centre = bodies[1 % bodies.length].getCenter(new THREE.Vector3());
+  const near = others.filter((o) => o.getWorldPosition(new THREE.Vector3()).distanceTo(centre) < reach + 12)
+    .map((o) => vehicleCapsules(o, {}));
+  if (!near.length) return 1;
+  const gap = (t: number) => Math.min(...near.map((b) => bodyGap(bodies, movement.clone().multiplyScalar(t), b)));
+  if (gap(1) > 0) return 1;
+  const start = gap(0);
+  // Already touching (a rival that placed itself into this car, a car spawned against another): any move that does
+  // not push further in is allowed — backing away, or driving out alongside — so two cars can never lock together.
+  if (start <= 0) return gap(1) >= start - 1e-6 ? 1 : 0;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (gap(mid) > 0) lo = mid; else hi = mid; }
+  return lo;
+}
+
+/** Sweep the whole vehicle, including its nose and tail, against scenery AND other vehicles in its own scene. */
+function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning: VehicleTuning): number {
+  if (movement.lengthSq() === 0) return 1;
+  const root = collisionRoot(vehicle);
+  const colliders = worldColliders(root, [], vehicle, false);
+  const others = otherVehicles(vehicle, root);
+  if (!colliders.length && !others.length) return 1;
+  const bodies = vehicleCapsules(vehicle, tuning);
   const worldMovement = movement.clone();
   if (vehicle.parent) {
     const parent = vehicle.parent.matrixWorld;
     worldMovement.applyMatrix4(parent).sub(new THREE.Vector3().setFromMatrixPosition(parent));
   }
-  return sweepWorldCapsules(bodies, worldMovement, colliders);
+  const scenery = colliders.length ? sweepWorldCapsules(bodies, worldMovement, colliders) : 1;
+  return Math.min(scenery, vehicleFraction(bodies, worldMovement, others));
+}
+
+/** Told about every crash: where (the nose), which vehicle, and how much speed it lost (m/s). */
+export type VehicleCrashListener = (at: THREE.Vector3, vehicle: THREE.Object3D, impact: number) => void;
+const crashListeners = new Set<VehicleCrashListener>();
+/** Hear a vehicle crash into a wall or another vehicle (losing more than 3 m/s at once). The shell makes it felt. */
+export function onVehicleCrash(handler: VehicleCrashListener): () => void {
+  crashListeners.add(handler);
+  return () => { crashListeners.delete(handler); };
 }
 
 /**
@@ -4244,13 +4343,45 @@ export function driveVehicle(
   const travel = vehicleTravel(vehicle, movement, tuning);
   vehicle.position.x += movement.x * travel;
   vehicle.position.z += movement.z * travel;
+  // 🧱 SLIDE, DO NOT STICK (admin 2026-11-20 engine audit): a car that clipped a wall at an angle used to stop dead
+  // and stay glued to it. Now the part of the move that runs ALONG what it hit goes on, and keeps that share of the
+  // speed; a head-on hit has nothing left to slide and stops, as before.
+  let keep = 1;
+  if (travel < 1) {
+    const rest = movement.clone().multiplyScalar(1 - travel);
+    const restLength = rest.length();
+    vehicle.updateMatrixWorld(true);
+    let best: THREE.Vector3 | null = null;
+    for (const along of [new THREE.Vector3(rest.x, 0, 0), new THREE.Vector3(0, 0, rest.z)]) {
+      if (along.lengthSq() < 1e-10) continue;
+      const f = vehicleTravel(vehicle, along, tuning);
+      if (f > 0 && (!best || along.length() * f > best.length())) best = along.multiplyScalar(f);
+    }
+    keep = best && restLength > 1e-9 ? best.length() / restLength : 0;
+    if (keep < 0.15) keep = 0;
+    else if (best) { vehicle.position.x += best.x; vehicle.position.z += best.z; }
+  }
+  // The speed lost at the moment of contact is paid ONCE; scraping along the same wall after that only rubs a little
+  // off (otherwise the cut compounded every frame and a glancing hit still ended glued to the wall).
+  const contact = vehicle.userData as { nbScraping?: boolean };
+  if (keep > 0 && contact.nbScraping) keep = 1 - Math.min(0.5, 1.2 * dt);
+  contact.nbScraping = travel < 1 && keep > 0;
   // 🔴 FOLLOW THE GROUND. This used to stop at x/z, so y stayed wherever the car was born and every
   // racing game drove into its first hill. settleOnGround reads the same heights the terrain is drawn from.
   const slope = settleOnGround(vehicle, heading, dt, tuning, state);
   rollWheels(vehicle, speed * travel, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
   noteVehicle(vehicle, axis);
   // IN PLACE: the game's own state object now holds the new values, whether or not it keeps the return.
-  state.speed = travel < 1 ? 0 : speed;
+  const impact = Math.abs(speed) * (1 - keep);
+  state.speed = travel < 1 ? speed * keep : speed;
+  const crashClock = vehicle.userData as { nbCrashClock?: number };
+  crashClock.nbCrashClock = Math.max(0, (crashClock.nbCrashClock ?? 0) - dt);
+  if (travel < 1 && impact > 3 && crashClock.nbCrashClock === 0 && crashListeners.size > 0) {
+    crashClock.nbCrashClock = 0.3;   // one crash, not one per frame while the bumper rests on the wall
+    const nose = new THREE.Vector3(Math.sin(course), 0, Math.cos(course)).multiplyScalar(Math.sign(speed) * (tuning.length ?? 2.6) / 2);
+    const at = vehicle.position.clone().add(nose).add(new THREE.Vector3(0, 0.6, 0));
+    for (const listener of crashListeners) listener(at, vehicle, impact);
+  }
   state.heading = heading;
   if (slope) { state.pitch = slope.pitch; state.roll = slope.roll; }
   // A slide is SEEN: the body leans to the outside of the slide, and smoke pours from the rear tyres.
@@ -5964,6 +6095,7 @@ export function createMotorcycle(options: MotorcycleOptions = {}): Motorcycle {
   tailLight.position.set(0, seatY * 1.08, -L * 0.375);
   root.add(tailLight);
 
+  markVehicleBody(root);
   return {
     root,
     seat: seatAnchor,
@@ -6070,6 +6202,7 @@ export function createBicycle(options: BicycleOptions = {}): Motorcycle {
   bars.rotation.z = Math.PI / 2;
   steerGroup.add(bars);
 
+  markVehicleBody(root);
   return {
     root,
     seat: seatAnchor,
@@ -6767,6 +6900,197 @@ export function createAircraft(o: { kind?: 'jet' | 'prop'; colour?: number } = {
 }
 `;
 
+const BREAKABLE = `/**
+ * BREAKABLE OBJECTS (admin 2026-11-20 game-gap audit: crates, barrels, windows and walls took hits and nothing happened,
+ * or a builder hid the object and the player walked through the hole it left blocking nothing — or worse, it kept
+ * blocking while invisible). A breakable object has health; the player's own shots and swings reach it through the same
+ * target list the enemies use; at zero it LEAVES the scene (so it stops blocking) and shatters into debris that flies,
+ * falls, bounces, settles and then shrinks away and is disposed (so a long fight does not leak memory).
+ *
+ *   makeBreakable(crate, { health: 40, onBreak: () => loot.roll('crate', crate.position) });
+ *   // the player's weapon: include the breakables in its targets, then hand the hits back
+ *   const hits = gun.update(dt, [...enemyTargets, ...breakableTargets()]);
+ *   hitBreakables(hits);   // damages only the breakables among them; enemies are yours as before
+ * The game shell steps the debris every frame by itself (updateBreakables).
+ */
+import * as THREE from 'three';
+
+export interface BreakableOptions {
+  /** Damage it takes to break. Default 30. */
+  health?: number;
+  /** Debris pieces. Default 10 (2–40). */
+  pieces?: number;
+  /** Debris colour; default the object's own first material colour. */
+  color?: number;
+  /** Seconds the debris lies before it shrinks away. Default 2.5. */
+  debrisSeconds?: number;
+  /** Called once, when it breaks (drop loot, score, play a sound). */
+  onBreak?: (object: THREE.Object3D) => void;
+}
+
+export interface BreakableTarget { id: string; position: { x: number; y: number; z: number }; radius: number; object: THREE.Object3D }
+
+interface Entry { health: number; max: number; options: BreakableOptions; broken: boolean }
+interface Piece { mesh: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; floor: number; age: number; life: number; size: number }
+
+const entries = new Map<THREE.Object3D, Entry>();
+/** Broken objects are forgotten from the map (no leak) and remembered here, weakly, for isBreakable / damageBreakable. */
+const brokenSet = new WeakSet<THREE.Object3D>();
+const pieces: Piece[] = [];
+const liveMaterials = new Set<THREE.Material>();
+const GRAVITY = -18;
+const SHRINK = 0.5;
+let seed = 1;
+const rand = (): number => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
+/** Give an object health so the player's attacks can break it. */
+export function makeBreakable(object: THREE.Object3D, options: BreakableOptions = {}): void {
+  const max = Math.max(1, Number.isFinite(options.health) ? (options.health as number) : 30);
+  entries.set(object, { health: max, max, options, broken: false });
+}
+
+export function isBreakable(object: THREE.Object3D): boolean { return entries.has(object); }
+/** Health left, 0..1 (0 when broken or not breakable). */
+export function breakableHealth(object: THREE.Object3D): number { const e = entries.get(object); return e ? e.health / e.max : 0; }
+/** Has it been broken? */
+export function isBroken(object: THREE.Object3D): boolean { return brokenSet.has(object); }
+
+/** The unbroken breakables as weapon targets (position = the middle of the object, radius = half its size). */
+export function breakableTargets(): BreakableTarget[] {
+  const out: BreakableTarget[] = [];
+  const box = new THREE.Box3();
+  for (const object of entries.keys()) {
+    if (!object.parent) continue;
+    box.setFromObject(object);
+    if (box.isEmpty()) continue;
+    const c = box.getCenter(new THREE.Vector3());
+    const s = box.getSize(new THREE.Vector3());
+    out.push({ id: 'breakable:' + object.uuid, position: { x: c.x, y: c.y, z: c.z }, radius: Math.max(s.x, s.y, s.z) / 2, object });
+  }
+  return out;
+}
+
+/** Damage a breakable; it breaks at zero. from = where the hit came from (debris flies away from it). */
+export function damageBreakable(object: THREE.Object3D, amount: number, from?: { x: number; y: number; z: number }): { broken: boolean; health: number } {
+  const e = entries.get(object);
+  if (!e || !Number.isFinite(amount) || amount <= 0) return { broken: brokenSet.has(object), health: e ? e.health / e.max : 0 };
+  e.health = Math.max(0, e.health - amount);
+  if (e.health === 0) breakNow(object, from);
+  return { broken: brokenSet.has(object), health: e.health / e.max };
+}
+
+/**
+ * Hand a weapon's hits back: each hit whose target is a breakable damages it. Returns how many breakables were hit.
+ * Hits on anything else (enemies) are left alone.
+ */
+export function hitBreakables(hits: ReadonlyArray<{ target: unknown; damage: number; point?: { x: number; y: number; z: number } }>, from?: { x: number; y: number; z: number }): number {
+  let n = 0;
+  for (const h of hits ?? []) {
+    const t = h?.target as Partial<BreakableTarget> | undefined;
+    const object = t?.object;
+    if (!object || !entries.has(object)) continue;   // an enemy, or already broken
+    damageBreakable(object, h.damage, from);
+    n += 1;
+  }
+  return n;
+}
+
+function colorOf(object: THREE.Object3D, fallback: number): THREE.Color {
+  let found: THREE.Color | null = null;
+  object.traverse((o: THREE.Object3D) => {
+    if (found) return;
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[] | undefined;
+    const first = Array.isArray(m) ? m[0] : m;
+    if (first && (first as THREE.MeshStandardMaterial).color) found = (first as THREE.MeshStandardMaterial).color.clone();
+  });
+  return found ?? new THREE.Color(fallback);
+}
+
+/** Break it now: out of the scene, debris in its place. */
+export function breakNow(object: THREE.Object3D, from?: { x: number; y: number; z: number }): void {
+  const e = entries.get(object);
+  if (!e || e.broken) return;
+  e.broken = true;
+  e.health = 0;
+  entries.delete(object);
+  brokenSet.add(object);
+  const parent = object.parent;
+  const box = new THREE.Box3().setFromObject(object);
+  if (parent && !box.isEmpty()) {
+    const centre = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const count = Math.max(2, Math.min(40, Math.round(e.options.pieces ?? 10)));
+    const edge = Math.max(0.05, Math.cbrt((size.x * size.y * size.z) / count) * 0.8);
+    const color = typeof e.options.color === 'number' ? new THREE.Color(e.options.color) : colorOf(object, 0x8b5a2b);
+    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
+    liveMaterials.add(material);
+    const push = from ? centre.clone().sub(new THREE.Vector3(from.x, from.y, from.z)).setY(0) : new THREE.Vector3();
+    if (push.lengthSq() > 0) push.normalize().multiplyScalar(3);
+    seed = (seed + parent.children.length * 7919 + count) >>> 0;
+    for (let i = 0; i < count; i++) {
+      const s = edge * (0.6 + rand() * 0.8);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), material);
+      mesh.position.set(
+        box.min.x + rand() * size.x,
+        box.min.y + rand() * size.y,
+        box.min.z + rand() * size.z,
+      );
+      mesh.castShadow = true;
+      const out = mesh.position.clone().sub(centre);
+      out.y = 0;
+      if (out.lengthSq() > 0) out.normalize();
+      const v = out.multiplyScalar(2 + rand() * 3).add(push).setY(2 + rand() * 4);
+      parent.add(mesh);
+      pieces.push({ mesh, v, spin: new THREE.Vector3(rand() * 8 - 4, rand() * 8 - 4, rand() * 8 - 4), floor: box.min.y + s / 2, age: 0, life: e.options.debrisSeconds ?? 2.5, size: s });
+    }
+  }
+  if (parent) parent.remove(object);
+  try { e.options.onBreak?.(object); } catch (err) { console.error('[breakable]', err); }
+}
+
+/** Step the debris: fly, fall, bounce, settle, then shrink away and dispose. The game shell calls this every step. */
+export function updateBreakables(dt: number): void {
+  if (!Number.isFinite(dt) || dt <= 0 || pieces.length === 0) return;
+  for (let i = pieces.length - 1; i >= 0; i--) {
+    const p = pieces[i];
+    p.age += dt;
+    p.v.y += GRAVITY * dt;
+    p.mesh.position.addScaledVector(p.v, dt);
+    p.mesh.rotation.x += p.spin.x * dt; p.mesh.rotation.y += p.spin.y * dt; p.mesh.rotation.z += p.spin.z * dt;
+    if (p.mesh.position.y < p.floor) {
+      p.mesh.position.y = p.floor;
+      p.v.y = Math.abs(p.v.y) > 1 ? -p.v.y * 0.3 : 0;
+      p.v.x *= 0.6; p.v.z *= 0.6;
+      p.spin.multiplyScalar(0.6);
+    }
+    if (p.age > p.life) {
+      const k = Math.max(0, 1 - (p.age - p.life) / SHRINK);
+      p.mesh.scale.setScalar(k);
+      if (k === 0) {
+        p.mesh.parent?.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        pieces.splice(i, 1);
+      }
+    }
+  }
+  // The shared material goes when its last piece does.
+  if (pieces.length === 0) disposeOrphanMaterials();
+}
+
+function disposeOrphanMaterials(): void { for (const m of liveMaterials) m.dispose(); liveMaterials.clear(); }
+
+/** How many debris pieces are alive (for tests and a perf HUD). */
+export function debrisCount(): number { return pieces.length; }
+
+/** Forget every breakable and remove all debris (a new round, a level change, dispose). */
+export function clearBreakables(): void {
+  for (const p of pieces) { p.mesh.parent?.remove(p.mesh); p.mesh.geometry.dispose(); }
+  pieces.length = 0;
+  entries.clear();
+  disposeOrphanMaterials();
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/buildings.ts': GAME_BUILDINGS,
   'src/game/three/renderer.ts': RENDERER,
@@ -6790,10 +7114,16 @@ const FILES: Record<string, string> = {
   'src/game/three/objects.ts': OBJECTS,
   // A sky that lives: the clock, the day-night cycle and the weather, driving the lights above.
   'src/game/three/atmosphere.ts': ATMOSPHERE,
+  // Crates, barrels and walls that break into debris under the player's shots and swings (2026-11-20).
+  'src/game/three/breakable.ts': BREAKABLE,
+  // A grid of city blocks: streets, crossings, pavements, shops, apartments, offices, houses, parks (2026-11-20).
+  'src/game/three/city.ts': GAME_CITY,
+  // Traffic that drives the city's grid: left lane, turns at crossings, obeys the lights (2026-11-20).
+  'src/game/three/citytraffic.ts': GAME_CITY_TRAFFIC,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic',
 ];
 
 /**
@@ -6817,6 +7147,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     // race.ts drives rival cars on the streamed road (objects.ts) — first, so objects' own dependencies follow below.
     if (files['src/game/three/race.ts']) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
+    // City traffic drives the kit's vehicles (objects.ts) on the city's grid (city.ts).
+    if (files['src/game/three/citytraffic.ts']) { files['src/game/three/city.ts'] = FILES['src/game/three/city.ts']; files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts']; }
     if (files['src/game/three/world.ts']) {
       files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
       // The ground is textured in the real tier and reads the detail level, both from surfaces.ts.
@@ -6838,7 +7170,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
-    if (files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
+    if (files['src/game/three/city.ts'] || files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
       files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];
     }
     // atmosphere.ts drives the lights lighting.ts makes (it imports AppliedLighting).
@@ -6859,6 +7191,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
       'Explorable houses: createHouse({ enterable: true }) or createEnterableHouse(). Flat roof, one/two storeys, real doorway and stairs. Legacy createHouse() is solid scenery. Game shell wires E/mobile Use; custom loops must call interactHouseDoor and updateHouseDoors. Supply all NPC occupants. Do not replace interiors with decorative assets.\n' +
+      (files['src/game/three/city.ts'] ? 'City: const city = createCity({ blocksX: 5, blocksZ: 5, style: \'mixed\' }); scene.add(city.root) — streets, crossings, pavements, shops, apartments, offices, houses, parks, street lights, centred on the origin. Put the player at city.spawn facing city.spawnHeading. Driving: pass { ground: city.heightAt } to driveVehicle; driveVehicle already stops a car at the city\'s buildings and poles (they are solid), so nothing more is needed — city.solidAt(x, z, radius) is only for a mover your own code positions by hand. city.route(from, to) gives left-lane waypoints for AI cars, taxis and deliveries; city.lotsOf(\'shop\') and lot.entrance give mission targets; lot.sign is where to write a shop name. Never hand-place a street grid.\n' : '') +
+      (files['src/game/three/citytraffic.ts'] ? 'City traffic: const traffic = createCityTraffic(city, { count: 15 }); scene.add(traffic.root); then traffic.update(dt, [playerObject]) every frame — cars, autos and buses drive the grid in the left lane, turn at crossings, obey the traffic lights (traffic.lightAt), keep their gap and stop for the player. Never animate city traffic by hand.\n' : '') +
       `${kitTypeContract(files)}\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
@@ -7003,6 +7337,11 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "  behind). Never walk a character under a 'chase' rig — it turns with every step the walker takes\n" +
       '  relative to it, so a joystick held a little off-centre walks in circles.\n' +
       '- Call followShadow(key, playerPos) on a large map, or shadows blur out as the player walks away.\n' +
-      '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.',
+      '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.\n' +
+      'BREAKABLE CRATES, BARRELS, WINDOWS, WALLS (three/breakable.ts — never hide a mesh and call it broken):\n' +
+      '- makeBreakable(crate, { health: 40, onBreak: () => loot.roll(\'crate\', crate.position) }) once.\n' +
+      '- The player\'s weapon: gun.update(dt, [...enemyTargets, ...breakableTargets()]) then hitBreakables(hits, playerPos)\n' +
+      '  (a sword: the same with melee.update). At zero health it leaves the scene — it stops blocking — and shatters into\n' +
+      '  debris that the shell steps and disposes by itself.',
   };
 }

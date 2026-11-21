@@ -359,7 +359,7 @@ describe('1d · the route seeds the kit before the first model call, behind ever
   it('remembers every seeded file as ours, hands the builder the kit, and says so in the report', () => {
     expect(block).toContain('preseededGolden.set(kp, kc);');
     expect(block).toContain('kitSeededFiles.set(kp, kc);');
-    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), endlessRaceCourse: endlessRace })}\\n\\n---\\n\\n${buildPrompt}`;');
+    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), request: gameTurnRequest(prompt, milestoneRequest), endlessRaceCourse: endlessRace })}\\n\\n---\\n\\n${buildPrompt}`;');
     // Scope/API ownership is now separate from successful seeding, not removed.
     expect(block).toContain('const gameHandoff = gameTurnHandoff(gameTurnRequest(prompt, milestoneRequest),');
     expect(block).toContain('requestContractRef.contract = gameContract');

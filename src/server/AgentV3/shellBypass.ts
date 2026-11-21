@@ -17,6 +17,7 @@
 // PURE: no I/O.
 
 import { isGameOwnSource } from './actionVisibility';
+import { GAME_STARTER_ALTERNATION } from '../lib/gameStarters';
 
 export interface ShellHalves {
   /** This file creates a renderer of its own. */
@@ -28,7 +29,7 @@ export interface ShellHalves {
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const OWN_RENDERER = /\bnew\s+(?:THREE\s*\.\s*)?WebGLRenderer\s*\(|from\s+['"]@react-three\/fiber['"]/;
-const USES_SHELL = /<\s*(?:GameCanvas|RacingRoadGame)\b|\bnew\s+Game\s*\(|from\s+['"][^'"]*\/(?:GameCanvas|RacingRoadGame)(?:\.tsx?)?['"]/;
+const USES_SHELL = new RegExp(String.raw`<\s*(?:GameCanvas|${GAME_STARTER_ALTERNATION})\b|\bnew\s+Game\s*\(|from\s+['"][^'"]*\/(?:GameCanvas|${GAME_STARTER_ALTERNATION})(?:\.tsx?)?['"]`);
 
 /** One file's contribution; a file that is not the game's own source contributes nothing. */
 export function shellHalves(path: string, content: string): ShellHalves {

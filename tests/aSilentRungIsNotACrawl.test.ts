@@ -174,8 +174,8 @@ describe('4 · the reopen line can be measured', () => {
     const d = new BuildDiagnostics();
     d.setProviderWaste(ledger, 43_839);
     expect(d.report().providerWaste).toEqual({
-      msByKind: { timeout: 0, crawl: 0, silent: 15_000, 'rate-limit': 0, error: 0 },
-      callsByKind: { timeout: 0, crawl: 0, silent: 1, 'rate-limit': 0, error: 0 },
+      msByKind: { timeout: 0, crawl: 0, silent: 15_000, 'rate-limit': 0, error: 0, stalled: 0 },
+      callsByKind: { timeout: 0, crawl: 0, silent: 1, 'rate-limit': 0, error: 0, stalled: 0 },
       msByFamily: { GLM: 15_000 }, buildMs: 43_839,
     });
   });

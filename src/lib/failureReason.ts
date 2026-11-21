@@ -287,7 +287,8 @@ const REASON_PATTERNS: ReadonlyArray<{ key: string; label: string; test: RegExp 
     label: 'No files were produced',
     // routes/agentv3.ts emptyBuildFailureSummary: "The build produced no files."; ProjectSummary.ts on an
     // analysis-only turn: "no files were changed" (a legacy empty build's loudest sentence).
-    test: /no files (were )?(changed|written|produced)|produced (no|zero) files|empty build|nothing was written/i,
+    // An edit that changed nothing (Q-3213): "No change was made to your app this time".
+    test: /no files (were )?(changed|written|produced)|produced (no|zero) files|empty build|nothing was written|no change was made to your app/i,
   },
 ];
 

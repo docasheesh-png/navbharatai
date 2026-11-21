@@ -126,6 +126,11 @@ export async function createSurplusBuildSession(options: {
   // Billing never blocks inference: the failed turn's cost is absorbed, its model is benched for this
   // session, and the next turn moves to another Surplus-internal model (AI2/AI3) — never Weak.
   const benchedModels = new Set<string>();
+  // Q-3019 (failedbr #2478): benching on the FIRST failure moved the next turn to another model with a cold cache —
+  // same-model calls took a median 4.6 s, the first call after a switch 36.7 s, ~7.5 of a 25-minute build. A single
+  // failure is most often transient (a timeout, a dropped socket), so a model is benched only at its SECOND failure in
+  // this session; the retry in between stays on the same model and keeps its warm cache. A policy refusal stays terminal.
+  const failuresByModel = new Map<string, number>();
   let terminalPolicyFailure: PublicBuildEngineError | undefined;
   // Owner 2026-11-16 ("ek bar me ek call wali limit hatao, 100+ call ek saath"): model calls of one build
   // used to be fully serialized here, so a build's agents waited on each other. They now run in parallel up
@@ -267,7 +272,10 @@ export async function createSurplusBuildSession(options: {
             console.warn(`[SURPLUS] failure receipt unavailable (non-fatal, absorbed): ${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`);
           }
           finally { release(permit); }
-          if (!terminalPolicyFailure) {
+          const failures = (failuresByModel.get(permit.model) ?? 0) + 1;
+          failuresByModel.set(permit.model, failures);
+          const bench = !terminalPolicyFailure && failures >= SURPLUS_FAILURES_BEFORE_BENCH;
+          if (bench) {
             benchedModels.add(permit.model);
             if (model === permit.model) {
               const alt = (initialState.snapshot?.offers ?? []).map(o => o.model).find(m => !benchedModels.has(m) && !(options.tier === 'weak' && /claude|sonnet|opus/i.test(m)));
@@ -278,7 +286,7 @@ export async function createSurplusBuildSession(options: {
           // slower "ok" call — the report said no engine wasted any time. It is now said, with codes only.
           attemptNotices++;
           notifyAttemptFailed(callbacks, { model: permit.model, stage: failure?.stage ?? 'dispatch', reason: failure?.reason ?? 'dispatch_failed',
-            attempt: failure?.attempt ?? 1, benched: !terminalPolicyFailure, ...(model !== permit.model ? { nextModel: model } : {}) });
+            attempt: failure?.attempt ?? 1, benched: bench, ...(bench && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure ? { sameModelRetry: true } : {}) });
         },
         onProviderUsed: permit => { model = permit.model; try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
         onTurnComplete(result, used) {
@@ -356,13 +364,19 @@ export interface SurplusAttemptFailure {
   /** The model was taken out of this build's rotation — the next turn starts on another model, with a cold cache. */
   benched?: boolean;
   nextModel?: string;
+  /** First failure of this model in the session: the retry stays on it, cache warm (Q-3019). */
+  sameModelRetry?: boolean;
 }
+
+/** A model leaves this build's rotation only at this many failures (Q-3019: once was a cold-cache switch per blip). */
+export const SURPLUS_FAILURES_BEFORE_BENCH = 2;
 
 /** Plain words for the report: what failed, what it cost, what happens next. PURE. */
 export function describeSurplusAttemptFailure(f: SurplusAttemptFailure): string {
   const parts = [`Surplus attempt ${f.attempt} on ${f.model} failed (${f.stage}: ${f.reason})`];
   if (typeof f.elapsedMs === 'number') parts.push(`after ${Math.round(f.elapsedMs / 100) / 10}s`);
   if (f.benched) parts.push(f.nextModel ? `— ${f.model} is benched for this build; the next turn moves to ${f.nextModel}, whose cache is cold` : `— ${f.model} is benched for this build`);
+  if (f.sameModelRetry) parts.push(`— retried on the same model (its cache stays warm); a second failure benches it`);
   if (typeof f.retryInMs === 'number') parts.push(`— retrying in ${Math.round(f.retryInMs / 1000)}s`);
   return parts.join(' ');
 }

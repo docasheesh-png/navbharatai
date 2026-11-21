@@ -909,17 +909,28 @@ export function diffRemovedPaths(current: string[], toRemove: string[]): { remai
  * number of paths removed from the authoritative list. No-op without Firestore; never throws.
  */
 export async function removeWorkspaceFiles(workspaceId: string, pathsToRemove: string[]): Promise<number> {
-  const db = getDb();
-  if (!db) return 0;
+  return (await removeWorkspaceFilesResult(workspaceId, pathsToRemove)).removed;
+}
+
+/**
+ * The same removal, telling "none of these was stored" (`ok`, nothing to remove) apart from "the store could not be
+ * read or written" (`!ok`). 🔴 failedbr #1808 (2026-11-20): a rollback removed `playwright.config.ts` and
+ * `e2e/smoke.spec.ts` from the sandbox and then reported both as FAILED, because the finishing pass that wrote them had
+ * never saved them durably, so the delete removed 0 and `> 0` read that as a failure. The rollback was called
+ * incomplete when it had done everything there was to do.
+ */
+export async function removeWorkspaceFilesResult(workspaceId: string, pathsToRemove: string[]): Promise<{ removed: number; ok: boolean }> {
   const targets = (pathsToRemove || []).filter((p) => typeof p === 'string' && p);
-  if (targets.length === 0) return 0;
+  if (targets.length === 0) return { removed: 0, ok: true };
+  const db = getDb();
+  if (!db) return { removed: 0, ok: false };
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const meta = await root.get();
-    if (!meta.exists) return 0;
+    if (!meta.exists) return { removed: 0, ok: true };
     const current: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
     const { remaining, removed } = diffRemovedPaths(current, targets);
-    if (removed.length === 0) return 0;
+    if (removed.length === 0) return { removed: 0, ok: true };
     // Update the authoritative path list FIRST — this is what makes the files "gone" for restore.
     await root.set({ paths: remaining, count: remaining.length, savedAt: Date.now() }, { merge: true });
     // Best-effort: delete the now-orphaned content docs (batched).
@@ -929,9 +940,9 @@ export async function removeWorkspaceFiles(workspaceId: string, pathsToRemove: s
       for (const p of removed.slice(i, i + BATCH)) batch.delete(filesCol.doc(fileDocId(p)));
       await batch.commit();
     }
-    return removed.length;
+    return { removed: removed.length, ok: true };
   } catch (e) {
     notePersistenceFailure('workspace_files', 'write', e);
-    return 0;
+    return { removed: 0, ok: false };
   }
 }

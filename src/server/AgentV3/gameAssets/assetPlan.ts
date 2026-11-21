@@ -44,7 +44,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   eagle: ['eagle', 'eagles', 'चील', 'águila'], parrot: ['parrot', 'parrots', 'तोता', 'तोते', 'loro'],
   ship: ['ship', 'ships', 'जहाज', 'जहाज़', 'barco', 'barcos'],
   human: ['human', 'person', 'people', 'humanoid', 'इंसान', 'मानव', 'persona', 'personas'],
-  dog: ['dog', 'dogs', 'कुत्ता', 'कुत्ते', 'perro'], cow: ['cow', 'cows', 'गाय', 'vaca'],
+  dog: ['dog', 'dogs', 'कुत्ता', 'कुत्ते', 'perro'], cow: ['cow', 'cows', 'गाय', 'gaay', 'vaca'],
   horse: ['horse', 'horses', 'घोड़ा', 'घोड़े', 'caballo'], deer: ['deer', 'हिरण', 'ciervo'],
   fox: ['fox', 'foxes', 'लोमड़ी', 'zorro'], tree: ['tree', 'trees', 'पेड़', 'árbol'],
   table: ['table', 'tables', 'मेज', 'मेज़', 'mesa'], chair: ['chair', 'chairs', 'कुर्सी', 'silla'],
@@ -150,6 +150,21 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'round shield': ['round shield'], 'spiked shield': ['spiked shield'], 'magic staff': ['magic staff', 'wizard staff', 'mage staff'],
   'magic wand': ['magic wand', 'wand', 'जादू की छड़ी'], spellbook: ['spellbook', 'spell book', 'magic book'],
   book: ['book', 'books', 'किताब', 'kitab'], mug: ['mug', 'beer mug', 'tankard'], 'smoke bomb': ['smoke bomb', 'smoke grenade'],
+  // 2026-11-20 library batch 9: the Farm Animal Pack — animals that move.
+  'farm cow': ['farm cow', 'dairy cow'], 'farm horse': ['farm horse'], zebra: ['zebra', 'zebras', 'ज़ेबरा', 'जेबरा'],
+  llama: ['llama', 'llamas', 'alpaca'], pig: ['pig', 'pigs', 'piglet', 'सूअर', 'suar'], sheep: ['sheep', 'lamb', 'भेड़', 'bhed'], pug: ['pug', 'pugs'],
+  // 2026-11-20 library batch 10 (Downtown City MegaKit): whole city buildings, city street tiles, sidewalks, street props.
+  'city building': ['city building', 'office building', 'office tower', 'city buildings', 'office buildings'], 'heritage building': ['heritage building', 'old building', 'brick building'],
+  'shop building': ['shop building', 'shops building', 'corner shop'], 'city street': ['city street', 'city road', 'two lane road'],
+  'four lane road': ['four lane road', '4 lane road', 'highway road'], 'city crossroads': ['crossroads', 'city crossroads', 'chauraha', 'चौराहा'],
+  'city t junction': ['t junction', 'city t junction', 'tiraha', 'तिराहा'], 'city street curve': ['city street curve', 'road curve', 'road turn'],
+  'four lane road curve': ['four lane road curve'], sidewalk: ['sidewalk', 'footpath', 'pavement', 'फुटपाथ'], 'sidewalk corner': ['sidewalk corner', 'footpath corner'],
+  'ac unit': ['ac unit', 'air conditioner', 'aircon'], bollard: ['bollard', 'bollards'], manhole: ['manhole', 'manhole cover', 'gutter cover'],
+  planter: ['planter', 'flower pot', 'gamla', 'गमला'], 'street drain': ['street drain', 'drain grate', 'naali'],
+  // 2026-11-21 library batch 11 (Medieval Village MegaKit): two whole village houses assembled from its pieces, and props.
+  'village house': ['village house', 'village houses', 'gaon ka ghar', 'गाँव का घर', 'गांव का घर'], cottage: ['cottage', 'cottages', 'kutiya', 'कुटिया'],
+  wagon: ['wagon', 'wagons', 'cart', 'carts', 'wooden cart'], 'wooden fence': ['wooden fence', 'wood fence', 'lakdi ki baad', 'लकड़ी की बाड़'],
+  'stone stairs': ['stone stairs', 'stone steps', 'outdoor stairs'], chimney: ['chimney', 'chimneys', 'चिमनी'], vine: ['vine', 'vines', 'creeper', 'बेल'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -185,7 +200,9 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car',
         // A named kind of car is that model, not "a car" too (police car → car + police car was the old double).
         'police car', 'police cars', 'sports car', 'sports cars', 'पुलिस कार', 'स्पोर्ट्स कार'],
-      building: ['building a', 'building the'],
+      building: ['building a', 'building the', 'city building', 'city buildings', 'office building', 'office buildings', 'heritage building', 'old building', 'brick building', 'shop building'],
+      wagon: ['food cart', 'food carts', 'shopping cart', 'go cart', 'golf cart', 'cart page', 'add to cart', 'shopping carts'], house: ['village house', 'village houses', 'gaon ka ghar', 'गाँव का घर', 'गांव का घर'], fence: ['wooden fence', 'wood fence'], stairs: ['stone stairs'],
+      sidewalk: ['sidewalk corner', 'footpath corner'], 'city street': ['city street curve'], 'four lane road': ['four lane road curve'],
       rifle: ['assault rifle', 'assault rifles', 'sniper rifle', 'sniper rifles'],
       // A named kind of character is that model, not the generic one too.
       ranger: ['power ranger', 'power rangers', 'female ranger', 'female rangers'], archer: ['female archer', 'female archers', 'woman archer', 'archer girl'],
@@ -195,6 +212,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       bow: ['bow tie', 'take a bow', 'rainbow'], book: ['book a', 'book now', 'book ticket', 'book tickets', 'book appointment', 'spell book', 'magic book'],
       sword: ['great sword', 'two handed sword', 'big sword'], axe: ['battle axe', 'war axe'], shield: ['shield powerup', 'shield power up', 'round shield', 'spiked shield'],
       dagger: ['knife and fork'],
+      pig: ['wild pig', 'wild pigs', 'guinea pig', 'guinea pigs'], cow: ['farm cow', 'dairy cow', 'sea cow'], horse: ['farm horse', 'sea horse', 'seahorse'],
       gun: ['laser gun', 'laser guns', 'ray gun', 'submachine gun', 'submachine guns', 'water gun', 'nail gun', 'glue gun'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
@@ -208,7 +226,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
       : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
-        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer'].includes(subject)
+        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer', 'farm cow', 'farm horse', 'zebra'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

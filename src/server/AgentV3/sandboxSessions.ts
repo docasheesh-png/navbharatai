@@ -60,12 +60,16 @@ export function summarizeSession(s: SandboxSession | null | undefined, now: numb
 }
 
 /** The one line the build report shows. Never names a vendor. */
-export function describeSession(s: SandboxSession | null | undefined, now: number): string {
+export function describeSession(s: SandboxSession | null | undefined, now: number, buildStartedAt?: number): string {
   const sum = summarizeSession(s, now);
   if (!s || !sum) return 'Sandbox session: not measured on this build';
   const m = (ms: number) => (ms / 60_000).toFixed(1);
+  // failedbr #672 / #677 (Q-3222): a sandbox that reconnected mid-build is a NEW session, so a 40-minute build read
+  // "0.0 min up". The numbers are this session's only — say when it began, so they are never read as the build's.
+  const lateBy = Number.isFinite(Number(buildStartedAt)) ? Number(s.startedAt) - Number(buildStartedAt) : 0;
+  const scope = lateBy >= 60_000 ? ` · this sandbox came up ${m(lateBy)} min into the build (it reconnected); time before that is not in these numbers` : '';
   return `Sandbox session: ${m(sum.wallMs)} min up · ${m(sum.busyMs)} min running our operations (${sum.ops}) · `
-    + `${m(sum.idleMs)} min idle (${Math.round(sum.idleShare * 100)}%) · started by ${s.reason} · came up ${s.origin}`;
+    + `${m(sum.idleMs)} min idle (${Math.round(sum.idleShare * 100)}%) · started by ${s.reason} · came up ${s.origin}${scope}`;
 }
 
 export interface MinutesTally {

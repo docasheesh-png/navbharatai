@@ -62,6 +62,12 @@ export function emptyBuildFailureSummary(
    * exactly as a question is. See `turnAnswer.ts`.
    */
   declined = false,
+  /**
+   * Was this turn a change to an app the user already has? (failedbr #689, Q-3213.) "Fix this error and continue"
+   * that changed nothing was told "The build produced no files" — a sentence about a NEW app, which also reads
+   * as if their existing app were gone. The truth for an edit is that their app was left as it was.
+   */
+  editingExistingApp = false,
 ): string | null {
   if (!expectsArtifacts) return null;
   // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
@@ -82,6 +88,7 @@ export function emptyBuildFailureSummary(
   // A WORKING APP IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` on purpose: a dead sandbox
   // can never have rendered anything, so that verdict must still win if the two ever disagree.
   if (appRenders) return null;
+  if (editingExistingApp) return 'No change was made to your app this time — it is exactly as it was. Please try again — you have not been charged.';
   return 'The build produced no files. Please try again — you have not been charged.';
 }
 

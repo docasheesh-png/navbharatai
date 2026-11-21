@@ -56,7 +56,8 @@ describe('a retried Surplus attempt reaches the report', () => {
       expect(r.text).toBe('done');
       expect(dispatches).toBe(2);
       expect(seen).toHaveLength(1);
-      expect(seen[0]).toMatchObject({ model: 'model-a', stage: 'dispatch', reason: 'dispatch_failed', attempt: 1, benched: true });
+      // Q-3019: the first failure keeps the model (warm cache); only a second one benches it.
+      expect(seen[0]).toMatchObject({ model: 'model-a', stage: 'dispatch', reason: 'dispatch_failed', attempt: 1, benched: false, sameModelRetry: true });
     } finally { delete process.env.SURPLUS_TURN_RETRIES; }
   }, 20000);
 
@@ -66,7 +67,7 @@ describe('a retried Surplus attempt reaches the report', () => {
       const { seen } = await failOnceThenAnswer();
       const line = describeSurplusAttemptFailure(seen[0]);
       expect(JSON.stringify(seen) + line).not.toMatch(/socket|10\.0\.0\.7|sk-secret/);
-      expect(line).toBe('Surplus attempt 1 on model-a failed (dispatch: dispatch_failed) — model-a is benched for this build');
+      expect(line).toBe('Surplus attempt 1 on model-a failed (dispatch: dispatch_failed) — retried on the same model (its cache stays warm); a second failure benches it');
     } finally { delete process.env.SURPLUS_TURN_RETRIES; }
   }, 20000);
 
@@ -83,5 +84,24 @@ describe('a retried Surplus attempt reaches the report', () => {
     const runners = route.match(/surplusSession\??\.runner\(\{/g) ?? [];
     expect(runners.length).toBeGreaterThan(0);
     expect(wired.length).toBe(runners.length);
+  });
+});
+
+describe('Q-3019: a model is benched only at its second failure in the build (warm cache, not a cold switch per blip)', () => {
+  it('the first failure retries on the same model; the second benches it — both said in the notice', async () => {
+    process.env.SURPLUS_TURN_RETRIES = '2';
+    try {
+      const { adapter, make } = setup();
+      const ok = (adapter.dispatch as any).getMockImplementation();
+      let n = 0;
+      (adapter.dispatch as any).mockImplementation(async (...a: unknown[]) => { if (n++ < 2) throw new Error('timeout'); return ok(...a); });
+      const session = await make();
+      const seen: SurplusAttemptFailure[] = [];
+      const r = await session.runner({ onAttemptFailed: f => seen.push(f) }).runTurn(params as any);
+      expect(r.text).toBe('done');
+      expect(seen.map(f => [f.benched, f.sameModelRetry ?? false])).toEqual([[false, true], [true, false]]);
+      expect(describeSurplusAttemptFailure(seen[0])).toMatch(/retried on the same model/);
+      expect(describeSurplusAttemptFailure(seen[1])).toMatch(/model-a is benched for this build/);
+    } finally { delete process.env.SURPLUS_TURN_RETRIES; }
   });
 });

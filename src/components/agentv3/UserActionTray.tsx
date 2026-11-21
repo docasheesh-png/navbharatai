@@ -17,9 +17,9 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check, MessageSquare, Ban, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Check, MessageSquare, Ban, ChevronDown, ChevronRight, RotateCcw, Bug } from 'lucide-react';
 import {
-  GROUP_TITLES, closedNote, closedRows, groupedOpen, isLiveOnly, traySummary,
+  GROUP_TITLES, closedNote, closedRows, groupedOpen, isLiveOnly, traySummary, gateExpired, isExpiredBugHunt,
   type UserActionView,
 } from './userActionView';
 
@@ -34,6 +34,11 @@ export function UserActionTray({
   onNotNeeded,
   onAsk,
   onAnswerGate,
+  liveGateCallId,
+  onRestoreVersion,
+  onKeepVersion,
+  onRunBugHunt,
+  note,
 }: {
   actions: readonly UserActionView[];
   /** The row currently being written, so its buttons cannot be double-pressed. */
@@ -51,6 +56,15 @@ export function UserActionTray({
   onNotNeeded: (action: UserActionView) => void;
   onAsk: (action: UserActionView) => void;
   onAnswerGate: (action: UserActionView, approve: boolean) => void;
+  /** The gate the running build is waiting on right now, if any. Every other approve row has expired. */
+  liveGateCallId?: string | null;
+  /** "Go back" on a game made worse by the last change: restores the saved version from before it. */
+  onRestoreVersion?: (action: UserActionView) => void;
+  onKeepVersion?: (action: UserActionView) => void;
+  /** An expired bug-hunt offer: start a new turn that runs the hunt. */
+  onRunBugHunt?: (action: UserActionView) => void;
+  /** A one-line result of the last tap (a restore that failed, say), shown under the list. */
+  note?: string | null;
 }) {
   const [showDone, setShowDone] = useState(false);
   const groups = useMemo(() => groupedOpen(actions), [actions]);
@@ -79,7 +93,34 @@ export function UserActionTray({
               {cta.label}
             </button>
           )}
-          {action.kind === 'approve' ? (
+          {action.restoreVersionId ? (
+            <>
+              <button type="button" disabled={busy} onClick={() => onRestoreVersion?.(action)} className={`${BTN} bg-indigo-600 hover:bg-indigo-500 text-on-accent`}>
+                <RotateCcw className="w-3.5 h-3.5" /> {action.approveLabel ?? 'Go back'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => onKeepVersion?.(action)} className={`${BTN} bg-raised hover:bg-raised-hover text-body`}>
+                {action.denyLabel ?? 'Keep this version'}
+              </button>
+            </>
+          ) : isExpiredBugHunt(action, liveGateCallId) ? (
+            <>
+              {/* The 30-second offer is over: this starts a NEW turn that runs the hunt, never a dead answer. */}
+              <button type="button" disabled={busy} onClick={() => onRunBugHunt?.(action)} className={`${BTN} bg-indigo-600 hover:bg-indigo-500 text-on-accent`}>
+                <Bug className="w-3.5 h-3.5" /> {action.approveLabel}
+              </button>
+              <button type="button" disabled={busy} onClick={() => onNotNeeded(action)} className={`${BTN} bg-raised hover:bg-raised-hover text-body`}>
+                <Ban className="w-3.5 h-3.5" /> {action.denyLabel ?? 'Not now'}
+              </button>
+            </>
+          ) : gateExpired(action, liveGateCallId) ? (
+            <>
+              {/* The build stopped waiting for this answer: Approve would answer nobody, so it is not offered. */}
+              <span className="text-[11px] text-muted">The build carried on without this answer.</span>
+              <button type="button" disabled={busy} onClick={() => onNotNeeded(action)} className={`${BTN} bg-raised hover:bg-raised-hover text-body`}>
+                <Ban className="w-3.5 h-3.5" /> Dismiss
+              </button>
+            </>
+          ) : action.kind === 'approve' ? (
             <>
               {/*
                 A GATE THAT DOES NOT BUILD MUST NOT OFFER TO BUILD (admin 2026-10-13). These two labels
@@ -141,6 +182,8 @@ export function UserActionTray({
 
           {/* An empty tray is reachable only by opening it deliberately — the badge is not rendered at
               zero — so it says so plainly instead of inventing something to show. */}
+          {note && <div className="px-3 py-2 rounded-xl border border-line bg-well text-[12px] text-body" role="status">{note}</div>}
+
           {groups.length === 0 && !secretCard && (
             <div className="px-3 py-6 text-center text-[12px] text-muted">Nothing is waiting on you right now.</div>
           )}

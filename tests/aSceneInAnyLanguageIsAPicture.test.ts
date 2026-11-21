@@ -78,7 +78,7 @@ describe('the route answers it before any offer to build', () => {
     expect(picAt).toBeGreaterThan(0);
     expect(picAt).toBeLessThan(offerAt);
     expect(route).toMatch(/const readerPicture = readerSaysPicture && pictureAnswerEnabled\(\) && !userAppExists && !importingThisTurn;/);
-    expect(route).toMatch(/!answerSpreadsheet && \(readerPicture \|\| shouldAnswerPictureRequest\(/);
+    expect(route).toMatch(/!answerSpreadsheet && \(readerPicture \|\| shouldAnswerDeliverableRequest\(/);
   });
 
   it('an accepted offer or an answered framework question clears the flag — they are not new requests', () => {

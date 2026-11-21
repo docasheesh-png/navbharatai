@@ -84,7 +84,10 @@ describe('tapping a model names that exact model', () => {
 
   it('add_library_models pins an id: other models sharing its subjects are left out of the catalogue it passes', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    const block = src.slice(src.indexOf("case 'add_library_models'"), src.indexOf("case 'add_library_models'") + 6000);
+    // The model half moved out of the switch unchanged (2026-11-21, textures joined the tool): the case delegates to it.
+    const caseBlock = src.slice(src.indexOf("case 'add_library_models'"), src.indexOf("case 'add_library_models'") + 1200);
+    expect(caseBlock).toMatch(/await this\.addLibraryModelsForTool\(input, agent\)/);
+    const block = src.slice(src.indexOf('private async addLibraryModelsForTool('), src.indexOf('private async addLibraryModelsForTool(') + 6000);
     expect(block).toMatch(/REVIEWED_GAME_ASSETS\.find\(\(c\) => c\.id === m\.id\)/);
     expect(block).toMatch(/pins\.includes\(c\) \|\| !c\.subjects\.some/);
     expect(block).toMatch(/addLibraryModels\(\{ requirements, \.\.\.\(catalogue \? \{ catalogue \} : \{\}\)/);

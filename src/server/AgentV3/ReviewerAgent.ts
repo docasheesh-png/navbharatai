@@ -9,6 +9,7 @@
 // (via sub-agent spawn) so it costs no extra credits and its findings are emitted
 // as narration events visible in the chat. Best-effort — never throws.
 
+import { sameAsSeeded } from './appSignature';
 import { isReasoningRungHandoff } from './turnDeadline';
 import type { SubAgentSpawn } from './ToolDispatcher';
 
@@ -716,7 +717,7 @@ export function reviewChangedPaths(
   finishing: ReadonlySet<string>,
   preseeded: ReadonlyMap<string, string> = new Map(),
 ): string[] {
-  return [...written.keys()].filter((p) => !finishing.has(p) && !(preseeded.has(p) && preseeded.get(p) === written.get(p)));
+  return [...written.keys()].filter((p) => !finishing.has(p) && !(preseeded.has(p) && sameAsSeeded(preseeded.get(p), written.get(p))));
 }
 
 /** Changed files first, then the rest, capped at `REVIEW_TREE_CAP` with the remainder counted. Pure. */

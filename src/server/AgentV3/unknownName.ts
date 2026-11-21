@@ -107,6 +107,65 @@ const EDUCATION_TERMS = [
 ];
 for (const t of EDUCATION_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Indian tax and invoice terms: what a billing app prints, never a service to connect to (failedbr #1888, 2026-11-20: a
+ * shop's GST bill asked for "the CGST and SGST split per slab", and the builder was told CGST and SGST were unknown
+ * names it must not build a client for). GST, GSTIN, HSN and TDS were already known; the GST components were not.
+ */
+const TAX_TERMS = [
+  'CGST', 'SGST', 'IGST', 'UTGST', 'SAC', 'TCS', 'GSTR', 'ITC', 'RCM', 'CESS', 'VAT', 'PTEC', 'TAN', 'EWB', 'IRN',
+];
+for (const t of TAX_TERMS) COMMON_ACRONYMS.add(t);
+
+/**
+ * Engineering vocabulary: what an app is built WITH, never a service to connect to (failedbr #1533, #1441, 2026-11-20).
+ * An NCERT study app's spec said "CORS" and the builder was told it was an unknown name ("I read CORS as a typo for
+ * COACT"); a speech-separation request said "15db SNR" and SNR was flagged too. A sweep of everyday engineering
+ * acronyms found 66 more in the same state — security, protocols, architecture, audio/DSP, hardware and growth
+ * metrics — fixed here as one family.
+ */
+const ENGINEERING_TERMS = [
+  'CORS', 'SNR', 'WEBSOCKET', 'WEBSOCKETS', 'SSE', 'CDN', 'TLS', 'CSP', 'XSS', 'CSRF', 'SQLI', 'OAUTH', 'SSO', 'SAML',
+  'MFA', 'TOTP', 'RBAC', 'ACL', 'CLI', 'ORM', 'MVC', 'MVVM', 'SSR', 'SSG', 'WASM', 'SCSS', 'DSP', 'FFT', 'PCM', 'RMS',
+  'DBMS', 'RDBMS', 'NOSQL', 'ETL', 'TSV', 'VAD', 'NER', 'YOLO', 'BLE', 'RFID', 'GNSS', 'LIDAR', 'IMU', 'HDD', 'HDMI',
+  'VPS', 'UDP', 'IMAP', 'SFTP', 'SSH', 'MMS', 'NFT', 'NFTS', 'AML', 'WCAG', 'ARIA', 'SEM', 'CTR', 'CPC', 'CPM', 'MRR',
+  'ARR', 'SLA', 'BOM', 'WMS', 'TMS', 'SNMP', 'UTF', 'UUID', 'UUIDS',
+];
+for (const t of ENGINEERING_TERMS) COMMON_ACRONYMS.add(t);
+
+/**
+ * Game titles and ranks: the game a request wants to resemble, never a service to connect to (failedbr #1384 "GTA",
+ * #1373 "SSS" rank, 2026-11-20). Both were flagged UNKNOWN_NAME_IN_REQUEST; a sweep of the titles Indian requests name
+ * found 14 more. Whether a title is a clone request is the scope analyzer's question, not this one's.
+ */
+const GAME_TITLE_TERMS = [
+  'GTA', 'GTAV', 'GTA5', 'PUBG', 'BGMI', 'NFS', 'FIFA', 'WWE', 'FFMAX', 'CSGO', 'DOTA', 'MLBB', 'COC', 'TEKKEN', 'UNO',
+  'KBC', 'SS', 'SSS',
+];
+for (const t of GAME_TITLE_TERMS) COMMON_ACRONYMS.add(t);
+
+/**
+ * Indian places and public-works vocabulary: where the app is for, or the document it prepares — never a service
+ * (failedbr #1326, 2026-11-20: "DPR OF PONDS … BOQ … DEPARTMENT BIHAR" flagged "DPR", "BOQ", "BIHAR"). Every state and
+ * union territory, the metros, and the terms of a government estimate (DPR, BOQ, SOR, DSR, PWD, RCC…) and its schemes.
+ */
+const INDIAN_PLACE_TERMS = [
+  'ANDHRA', 'PRADESH', 'ARUNACHAL', 'ASSAM', 'BIHAR', 'CHHATTISGARH', 'GOA', 'GUJARAT', 'HARYANA', 'HIMACHAL', 'JHARKHAND',
+  'KARNATAKA', 'KERALA', 'MADHYA', 'MAHARASHTRA', 'MANIPUR', 'MEGHALAYA', 'MIZORAM', 'NAGALAND', 'ODISHA', 'ORISSA', 'PUNJAB',
+  'RAJASTHAN', 'SIKKIM', 'TAMIL', 'NADU', 'TELANGANA', 'TRIPURA', 'UTTAR', 'UTTARAKHAND', 'BENGAL', 'DELHI', 'NCR', 'JAMMU',
+  'KASHMIR', 'LADAKH', 'PUDUCHERRY', 'PONDICHERRY', 'CHANDIGARH', 'LAKSHADWEEP', 'ANDAMAN', 'NICOBAR', 'DAMAN', 'DIU',
+  'DADRA', 'NAGAR', 'HAVELI', 'MUMBAI', 'KOLKATA', 'CHENNAI', 'BENGALURU', 'BANGALORE', 'HYDERABAD', 'PUNE', 'AHMEDABAD',
+  'JAIPUR', 'LUCKNOW', 'PATNA', 'BHOPAL', 'INDORE', 'NAGPUR', 'SURAT', 'KANPUR', 'RANCHI', 'NOIDA', 'GURGAON', 'GURUGRAM',
+  'INDIA', 'BHARAT',
+];
+for (const t of INDIAN_PLACE_TERMS) COMMON_ACRONYMS.add(t);
+const PUBLIC_WORKS_TERMS = [
+  'DPR', 'BOQ', 'BOM', 'SOR', 'DSR', 'PWD', 'CPWD', 'RCC', 'PCC', 'NHAI', 'PMGSY', 'PMAY', 'NREGA', 'MGNREGA', 'MNREGA',
+  'AMRUT', 'JJM', 'MWRD', 'WRD', 'PHED', 'RWD', 'BDO', 'DM', 'SDM', 'NIT', 'EMD', 'GEM', 'CSR', 'MSME', 'GIS', 'DEM',
+  'RL', 'FRL', 'HFL', 'MLA', 'MP', 'ULB', 'GP', 'PRI',
+];
+for (const t of PUBLIC_WORKS_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',
@@ -190,6 +249,8 @@ export function unknownNamesInRequest(prompt: string): string[] {
     const w = m[0];
     if (out.includes(w)) continue;
     if (COMMON_ACRONYMS.has(w) || KNOWN_SERVICES.has(w) || EMPHASIS.has(w)) continue;
+    // A DATE OR TIME FORMAT TOKEN ("DD-MM-YYYY", "HH:MM", "YYYYMMDD") is a format, never a product (failedbr #1046: "YYYY").
+    if (/^[YMDH]{2,10}$/.test(w) && /Y|DD|MM|HH/.test(w)) continue;
     // 🔴 AN ORDINARY ENGLISH WORD IN CAPITALS IS EMPHASIS, NOT A PRODUCT (autopsy 778d7c58: "CALCULATE" in
     // the Panchang chip was reported as an unknown service). EMPHASIS above is a hand-kept list, so every
     // new emphasised word was a new false positive — the class, not the instance. A dictionary of the 10k

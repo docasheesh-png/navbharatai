@@ -126,3 +126,16 @@ export function rankPortCandidates(opts: {
   }
   return out.slice(0, MAX_PORT_CANDIDATES);
 }
+
+/**
+ * 🔴 A PORT WE ARE ONLY GUESSING AT IS NOT THE APP (failedbr #2481, Q-3225, 2026-11-21). When the first port's page does not
+ * render, the flip visits the other candidates in the sandbox browser. Those visits recorded their console like any other:
+ * the app served on 5173, the flip tried 3000, 5000 and 8080, the sandbox answered 502 for each (nothing listens there), and
+ * six lines went into the APP's runtime record — "HTTP 502 from https://3000-…", "Failed to load resource: 502". The builder
+ * read its console, saw "network issues", tried to kill the dev server and re-checked for half a minute on a healthy app.
+ * 🧬 THE CLASS: a fact about OUR probe recorded as a fact about the app. A flip probe never records; only the visit to the
+ * port the app is believed to be on does. If a probe wins, every later visit to it records as usual.
+ */
+export function portVisitBrowseOpts(isFlipProbe: boolean): { recordConsole: boolean } {
+  return { recordConsole: !isFlipProbe };
+}

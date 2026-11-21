@@ -4,7 +4,7 @@ import { completedAppReviewEligible } from '../AgentV3/optionalBugHunt';
 import { readSummaryManifest } from '../AgentV3/ProjectSummary';
 import { compilerNeedsPackageSetup, compilerRepairProven, PACKAGE_SETUP_REQUIRED } from '../AgentV3/compilerSetupBoundary';
 import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
-import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
+import { withReplyLanguage, replyVoiceForRequest, replyLanguageBinding } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
@@ -557,7 +557,7 @@ import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { mistakeLedgerStore, mistakeKey } from '../AgentV3/MistakeLedger';
 import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
-import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from '../AgentV3/PortDiscovery';
+import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates, portVisitBrowseOpts } from '../AgentV3/PortDiscovery';
 import { isSandboxSystemPort } from '../AgentV3/neverAppPorts';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
@@ -6630,12 +6630,12 @@ async function noteBuildOutcome(
         // EARN IT (admin 2026-08-03): a bound port is not the app serving. VISIT the home route and only
         // report "preview restored" when it renders — otherwise Diagnose was greenlighting a server that
         // returns "Cannot GET" on its own client routes (the exact full-stack bug).
-        const visit = async (cand: number): Promise<{ url?: string; served: { rendered: boolean; problems: string[] } }> => {
+        const visit = async (cand: number, flipProbe = false): Promise<{ url?: string; served: { rendered: boolean; problems: string[] } }> => {
           let url: string | undefined;
           try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, cand), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
           // No URL ⇒ keep the pre-flip semantics (port up, page unverifiable, benefit of the doubt).
           if (!url) return { served: { rendered: true, problems: [] } };
-          try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 30_000, 'preview-diagnose-verify')).html) }; }
+          try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url), portVisitBrowseOpts(flipProbe)), 30_000, 'preview-diagnose-verify')).html) }; }
           catch { return { url, served: { rendered: false, problems: [PREVIEW_UNVERIFIED_PROBLEM] } }; }
         };
         let winner = await visit(boundPort);
@@ -6653,7 +6653,7 @@ async function noteBuildOutcome(
           } catch { /* the scan is best-effort — without it the flip simply has no extra candidates */ }
           for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening, framework })) {
             if (cand === winnerPort) continue;
-            const attempt = await visit(cand);
+            const attempt = await visit(cand, true);
             if (attempt.url && attempt.served.rendered) { winner = attempt; winnerPort = cand; break; }
           }
         }
@@ -13068,12 +13068,12 @@ async function noteBuildOutcome(
               // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
               // problem analyzePreviewHtml found, e.g. a full-stack app serving its API but 404-ing its
               // client routes). The URL is still exposed either way so the user can retry from the tab.
-              const visit = async (candidate: number) => {
+              const visit = async (candidate: number, flipProbe = false) => {
                 let url = '';
                 try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, candidate), 10_000, 'import-preview-url')); }
                 catch { /* URL resolution is best-effort — the boot itself already succeeded */ }
                 if (!url) return { url: '', served: { rendered: true, problems: [] as string[] } };
-                try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 30_000, 'import-preview-verify')).html) }; }
+                try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url), portVisitBrowseOpts(flipProbe)), 30_000, 'import-preview-verify')).html) }; }
                 catch { return { url, served: { rendered: false, problems: [PREVIEW_UNVERIFIED_PROBLEM] } }; }
               };
               let winner = await visit(bootPort);
@@ -13093,7 +13093,7 @@ async function noteBuildOutcome(
                 // flip's second tier should rank whatever the app really declares, not just a flag.
                 for (const cand of rankPortCandidates({ parsed: port, scriptPort: declared, expected: bootPort, listening, framework })) {
                   if (cand === bootPort) continue;
-                  const attempt = await visit(cand);
+                  const attempt = await visit(cand, true);
                   if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }
                 }
               }
@@ -16832,7 +16832,7 @@ async function noteBuildOutcome(
         expectsArtifacts: () => expectsArtifacts,
         // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
         // writes the labels and never sees the user's words.
-        languageRule: () => buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing' }),
+        languageRule: () => buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing', briefReplacesRequest: !!milestoneRequest, replyLanguage: replyLanguageBinding(rb.replyVoice ?? voiceOf(originalPrompt)) }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
         // The SAME request notes the architect's prompt opens with (Q-868 gave a writing specialist the classic-phone
@@ -18952,7 +18952,7 @@ async function noteBuildOutcome(
         // Phase 6.1: the instruction states its own CONFIDENCE (a script is proof, a romanized guess
         // says it is a guess). Autopsy 466c260a: a request in Latin letters now says so explicitly and
         // forbids an unrequested switch of script. ONE function — the sub-agents read the same line.
-        buildPrompt = `${buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing' })}\n\n${buildPrompt}`;
+        buildPrompt = `${buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing', briefReplacesRequest: !!milestoneRequest, replyLanguage: replyLanguageBinding(rb.replyVoice ?? voiceOf(originalPrompt)) })}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
 
       // Attachments: prepend the extracted file content/description so the build

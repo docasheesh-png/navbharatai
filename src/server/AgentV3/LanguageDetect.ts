@@ -236,9 +236,36 @@ export function appLanguageInstruction(prompt: string, opts: { editingExistingAp
  * "match the labels the app already uses" — and the app had none yet but our English starter — so a Bengali user got an
  * English UI. On a continuation the request being continued decides, exactly as on the build that began it. PURE.
  */
-export function buildLanguageInstruction(input: { prompt: string; continuedRequest?: string | null; isContinuation: boolean; editingExistingApp: boolean }): string {
+export function buildLanguageInstruction(input: {
+  prompt: string; continuedRequest?: string | null; isContinuation: boolean; editingExistingApp: boolean;
+  /** The text the builder is handed is a planner's brief (a roadmap milestone), not the user's own message. */
+  briefReplacesRequest?: boolean;
+  /** The user's reply language, already decided for this conversation (replyLanguageBinding). */
+  replyLanguage?: string;
+}): string {
   if (input.isContinuation && typeof input.continuedRequest === 'string' && input.continuedRequest.trim() && input.continuedRequest !== input.prompt) {
     return appLanguageInstruction(input.continuedRequest);
   }
-  return appLanguageInstruction(input.prompt, { editingExistingApp: input.editingExistingApp });
+  const line = appLanguageInstruction(input.prompt, { editingExistingApp: input.editingExistingApp });
+  return input.briefReplacesRequest ? `${line}\n${usersOwnWordsLine(input.prompt, input.replyLanguage)}` : line;
+}
+
+/**
+ * 🔴 "THIS REQUEST" MUST BE THE USER'S OWN WORDS (failedbr #2481, Q-3226, 2026-11-21). The language line says "the user wrote
+ * this request in … reply in the language they wrote in" — and on a roadmap build the text under it is the PLANNER'S ENGLISH
+ * brief; the user's own message ("ek real gta jaise game banao …") is nowhere in the turn. The builder did exactly what it
+ * was told: it mirrored the English brief, and a Hinglish user got English narration and an English summary. The system
+ * prompt's reply-language binding (BR1952) already said "an English milestone brief is not a language switch", 119,000
+ * characters away from the brief; a weak builder followed the nearer instruction. 🧬 THE CLASS: a language instruction
+ * pointing at text the user did not write. So wherever a brief replaces the request, the user's own words are quoted right
+ * under the language line and the brief is named as the planner's. PURE.
+ */
+export function usersOwnWordsLine(prompt: string, replyLanguage?: string): string {
+  const own = String(prompt ?? '').replace(/\s+/g, ' ').trim();
+  const quoted = own.length > 400 ? `${own.slice(0, 400)}…` : own;
+  return [
+    `The task text below was written by the planner in English — it is NOT the user's message, and its language is not theirs. The user's own message was: "${quoted}"`,
+    'Their language is the language of THAT message: narrate every step, ask, and write your final summary in it.',
+    replyLanguage ?? '',
+  ].filter(Boolean).join(' ');
 }

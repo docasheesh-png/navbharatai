@@ -95,6 +95,7 @@ import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested
 import { namedNonSmartphone, nonSmartphoneBuildRule } from './deviceTarget';
 import { thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, type OwnAdNetwork } from './thirdPartyLimits';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
+import { BUG_HUNT_TURN_BRIEF } from './optionalBugHunt';
 
 export interface RequestNoteInputs {
   /** The user's words for this turn. */
@@ -121,6 +122,8 @@ export interface RequestNoteInputs {
   thirdPartyOwnAds?: readonly OwnAdNetwork[];
   /** The user answered YES to our offer to build this request (buildConfirmation.ts). */
   offerAccepted?: boolean;
+  /** The user pressed "Find and fix bugs" (optionalBugHunt.ts): the turn's job is a hunt over the whole app. */
+  bugHuntAskedByUser?: boolean;
 }
 
 /**
@@ -204,6 +207,8 @@ export function requestNotesFor(input: RequestNoteInputs): RequestNotesResult {
   });
 
   const notes: ReadonlyArray<{ code: string; text: string }> = [
+    // First: on a hunt it is the turn's whole job, so every lane reads it before anything else (Q-3238).
+    { code: 'bug-hunt', text: input.bugHuntAskedByUser === true ? BUG_HUNT_TURN_BRIEF : '' },
     { code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, input.framework) : '' },
     { code: 'script-request', text: scriptRequestNote },
     { code: 'unknown-name', text: unknownNameNote },

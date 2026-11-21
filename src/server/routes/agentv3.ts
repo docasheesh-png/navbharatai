@@ -81,7 +81,7 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
-import { offerBugHunt, bugHuntWaitMs, withBugHuntBrief, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
+import { offerBugHunt, bugHuntWaitMs, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
 import { isKitFile as isGameKitFile } from '../AgentV3/growthGuard';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
@@ -17843,6 +17843,7 @@ async function noteBuildOutcome(
         thirdPartyPlayers: thirdPartyAdFactsAtStart.players,
         thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,
         offerAccepted,
+        bugHuntAskedByUser,
       });
       const requestNotesText = requestNoteSet.text;
       // The facts each note was derived from, kept under their old names so every report line and
@@ -18407,7 +18408,7 @@ async function noteBuildOutcome(
 
       // A corrected starter chip's OLD text (an old phone bundle still sends it) reaches the builder as the
       // chip's current text — autopsy 303e8a6f: the old AI-image chip told the builder the pictures need no key.
-      let buildPrompt = withBugHuntBrief(prompt, bugHuntAskedByUser);
+      let buildPrompt = prompt;
       // Cache-prefix mode (see above): the volatile context blocks that were split out of the system
       // prompt ride the user turn instead, so the model still receives every one — just not in the
       // cached system prefix. '' (flag off) leaves buildPrompt exactly as today.
@@ -26568,7 +26569,9 @@ async function noteBuildOutcome(
           const reviewAbort = passAbort(abort.signal);
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
-          const reviewChanged = bugHuntReviewScope({ askedByUser: bugHuntAskedByUser, allFiles: rFiles, changed: () => reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden), isKitFile: isGameKitFile });
+          const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
+          // A user-pressed hunt reads the whole app, not just this turn's edits (optionalBugHunt.ts, Q-3238).
+          const reviewScope = bugHuntReviewScope({ askedByUser: bugHuntAskedByUser, allFiles: rFiles, changed: () => reviewChanged, isKitFile: isGameKitFile });
           // A stylesheet that carries our design kit is handed as the APP's part only (autopsy 0473628e): the
           // 897-line kit made index.css too big to inline, so the review lost its one-call mode and timed out.
           const reviewInline = reviewPlan.mode === 'suggest'
@@ -26646,7 +26649,7 @@ async function noteBuildOutcome(
               // …and not the files the platform's own finishing passes wrote (skeletons, PWA files,
               // the architecture note): reviewing NavBharatAI's scaffolding spends the user's money and
               // can send a repair pass after our own files.
-              changedFiles: reviewChanged,
+              changedFiles: reviewScope,
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');

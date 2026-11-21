@@ -289,10 +289,6 @@ export const BUG_HUNT_TURN_BRIEF = [
   '   checked and found working. If you found no real bug, say so plainly — never invent one, and never claim a fix you did not make.',
 ].join('\n');
 
-/** The builder's prompt for this turn: the hunting brief first when the user pressed the button; unchanged otherwise. PURE. */
-export function withBugHuntBrief(prompt: string, askedByUser: boolean): string {
-  return askedByUser ? `${BUG_HUNT_TURN_BRIEF}\n\n---\n\n${prompt}` : prompt;
-}
 
 /** At most this many files are handed to the whole-app review (the reviewer reads the rest from the tree it is given). */
 export const BUG_HUNT_REVIEW_MAX_FILES = 80;

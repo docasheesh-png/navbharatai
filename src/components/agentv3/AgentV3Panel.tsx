@@ -35,7 +35,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
+import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, Maximize2, Minimize2, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -91,7 +91,6 @@ import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, stageAttachmentFiles } from '../../lib/attachmentLimits';
 import { deployBlockedReason } from '../../lib/deployGuard';
-import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { acceptZipPick, notZipMessage, isHtmlPagePick, shouldImportAttachedPage } from '../../lib/zipPicker';
@@ -105,6 +104,8 @@ import { shouldRunNextQueued } from './queueExecutor';
 import { claimCurrentQueueItem, reconcileCurrentQueue, QueueSessionScope, type QueueSessionSnapshot } from './queueSessionScope';
 import { awaitQueuedContinuation, queuedContinuationStartOptions } from './queuedContinuationClient';
 import { buildChatBlocks } from './activityTimeline';
+import { currentBuildProof, proofsForTimeline } from './buildProof';
+import { BuildProofCard } from './BuildProofCard';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS, MESSAGE_ACTION_ROW_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS } from '../chat/conversation';
 import { Greeting } from '../chat/Greeting';
@@ -113,13 +114,12 @@ import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chat
 import { ActionGroupRow } from './ActivityTimelineRow';
 import { AppMemoryCard } from './AppMemoryCard';
 import { AppAiSettingsCard, fetchAppAiSettings } from './AppAiSettingsCard';
-import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import SheetFileCard from './SheetFileCard';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
-import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus, SheetFileRef } from './agentV3Types';
+import type { ActivityEntry, AgentCard, GitCheckpoint, TodoItem, TodoStatus, SheetFileRef } from './agentV3Types';
 import {
   EMPTY_LIVE_SYNC_QUEUE, LIVE_SYNC_BATCH_MAX, LIVE_SYNC_WINDOW_MS,
   applyLiveDelete, applyLiveFiles, diffFileEntries, noteChangedPath, requeueFailedBatch, settleSyncBatch, takeSyncBatch,
@@ -1285,6 +1285,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     visibleConvo,
     chatMode === 'build' ? [...state.activityLog, ...state.activity] : [],
     chatMode === 'build' ? state.diffs : {},
+    // Each finished build's proof, placed at the end of its own turn (admin 2026-11-21: the latest
+    // response is always last — an older build's check card never sits below a newer reply).
+    chatMode === 'build' ? proofsForTimeline(state.proofLog, currentBuildProof(state)) : [],
   );
 
   // All checkpoints across the session (prior turns + the live build), deduped by
@@ -5119,6 +5122,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {chatBlocks.map((b) => {
+              if (b.kind === 'proof') return <BuildProofCard key={b.key} proof={b.proof} />;
               if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} />;
               const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
               return <Bubble key={b.key} msg={b.msg}
@@ -5192,38 +5196,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 onWatchLive={offerWatchLive({ running, entryWrittenAt: state.entryWrittenAt, previewOpen: showWorkspace && tab === 'preview' }) ? () => openSurfaceFromFooter('preview') : undefined}
               />
             )}
-            {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
-                NavBharatAI drives a real browser through the app's own forms — fills them in,
-                submits, RELOADS, and confirms the entry survived. That reload is the only thing
-                separating an app that really saves data from one that looks like it does, and it is
-                the most valuable check the platform performs.
-
-                The user was never told any of it: the result went into the ADMIN diagnostics report,
-                which they cannot open, while the chat said "your app is ready" in exactly the same
-                words it uses when nothing was verified at all. Showing the work is the whole of
-                Antigravity's pitch, and we were doing the harder half of it in private.
-
-                A FAILURE IS AS VISIBLE AS A PASS, in the same card and the same place — the wording
-                comes from the server (journeyUserSummary) so it cannot be softened here, and a check
-                that could not run says so rather than being rounded up. */}
-            {state.verification && state.verification.steps.length > 0 && (
-              <div className={`mx-auto my-3 max-w-[92%] rounded-xl border px-3 py-2.5 text-sm ${
-                state.verification.ok
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-success'
-                  : 'border-amber-500/40 bg-amber-500/10 text-warn'}`}>
-                <div className="flex items-start gap-2">
-                  <span className="mt-0.5 shrink-0" aria-hidden="true">{state.verification.ok ? '✅' : '⚠️'}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium">{state.verification.headline}</div>
-                    <ul className="mt-1 space-y-0.5 text-xs opacity-90">
-                      {state.verification.steps.map((line, i) => (
-                        <li key={i} className="flex gap-1.5"><span aria-hidden="true">•</span><span className="flex-1">{line}</span></li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* The browser-check card, build health and feedback are no longer pinned here: each build's
+                proof is a block in the timeline above, at the end of its own turn (buildProof.ts). */}
 
             {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
@@ -5592,9 +5566,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 {typeof state.walletTokenBalance === 'number' ? ` · ${state.walletTokenBalance.toLocaleString()} left` : ''}
               </div>
             )}
-            {state.done && state.buildHealth && <BuildHealthCard health={state.buildHealth} />}
-            {/* P-UX.6 — lightweight CSAT: thumbs feedback on a finished build (once per workspace). */}
-            {state.done && state.ok && state.workspaceId && <BuildFeedback workspaceId={state.workspaceId} />}
           </div>
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom).
@@ -7590,100 +7561,6 @@ function todoStatusIcon(status: TodoStatus) {
     case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-danger shrink-0" />;
     default: return <Circle className="w-3.5 h-3.5 text-faint shrink-0" />; // pending
   }
-}
-
-/**
- * R2 §4.6 — Build-health card. Shows the OBJECTIVE readiness verdict from the mandatory quality
- * gate (real `evaluate` scan): a 0–100 score, READY / NOT READY, and the exact blockers/warnings.
- * Honest by construction — the same gate that decides whether a build is reported as a success.
- */
-/**
- * P-UX.6 — CSAT feedback on a finished build. Fires trackEvent('feedback', …) and remembers (per
- * workspace, in localStorage) so the user is asked at most once per build. Dependency-free.
- */
-function BuildFeedback({ workspaceId }: { workspaceId: string }) {
-  const key = `nbai:feedback:${workspaceId}`;
-  const [rated, setRated] = useState<null | 'up' | 'down'>(() => {
-    try { const v = localStorage.getItem(key); return v === 'up' || v === 'down' ? v : null; } catch { return null; }
-  });
-  const rate = (score: 'up' | 'down') => {
-    if (rated) return;
-    setRated(score);
-    try { localStorage.setItem(key, score); } catch { /* ignore */ }
-    try { trackEvent('feedback', { score: score === 'up' ? 1 : -1, surface: 'agentv3_build', workspaceId }); } catch { /* best-effort */ }
-  };
-  if (rated) {
-    return <div className="mt-1 text-[11px] text-faint">Thanks for the feedback{rated === 'down' ? ' — we’ll keep improving.' : '!'}</div>;
-  }
-  return (
-    <div className="mt-1 flex items-center gap-2 text-[11px] text-faint">
-      <span>Was this build helpful?</span>
-      <button onClick={() => rate('up')} aria-label="Helpful" className="p-1 rounded hover:bg-raised hover:text-success transition-colors">
-        <ThumbsUp className="w-3.5 h-3.5" />
-      </button>
-      <button onClick={() => rate('down')} aria-label="Not helpful" className="p-1 rounded hover:bg-raised hover:text-danger transition-colors">
-        <ThumbsDown className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
-}
-
-/**
- * The user-facing build-health card. The readiness engine's lines are deliberately FORENSIC
- * ("hardcoded-secret @ server/index.js:24 — …") because the repair loop and the admin Report need
- * file:line precision. But the CARD is a user surface, so it renders SHORT plain-language lines via
- * simplifyHealthLines — de-duplicated and capped (admin 2026-08-02: "itna bada aur complex likhne ki
- * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
- */
-function BuildHealthCard({ health }: { health: BuildHealth }) {
-  if (health.unassessed) {
-    return (
-      <div className="mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] border-amber-800/60 bg-amber-500/10">
-        <div className="flex items-center gap-1.5 font-semibold">
-          <AlertCircle className="w-3.5 h-3.5 text-warn shrink-0" />
-          <span className="text-warn">Build health: Not checked — the readiness check timed out</span>
-        </div>
-      </div>
-    );
-  }
-  const ready = health.ready;
-  const blockers = simplifyHealthLines(health.blockers, 3);
-  const warnings = simplifyHealthLines(health.warnings, 2);
-  const more = blockers.more + warnings.more;
-  return (
-    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-500/10' : 'border-amber-800/60 bg-amber-500/10'}`}>
-      <div className="flex items-center gap-1.5 font-semibold">
-        {ready
-          ? <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
-          : <AlertCircle className="w-3.5 h-3.5 text-warn shrink-0" />}
-        {/* "READY" alone overstated an app nobody had seen run (admin screenshot 2026-08-22: the card
-            said READY · 100/100 directly above the build's own "critical build-breaking issues"). The
-            server now reports whether the app was actually seen running; when it was not, the label
-            says so rather than implying proof. `undefined` (older payload) keeps today's wording. */}
-        <span className={ready ? 'text-success' : 'text-warn'}>
-          Build health: {ready ? (health.provenRunning === false ? 'READY (not verified)' : 'READY') : 'NOT READY'}
-        </span>
-        <span className="text-faint">· {health.score}/100</span>
-      </div>
-      {blockers.lines.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-warn">
-          {blockers.lines.map((b, i) => (
-            <li key={`b${i}`} className="flex gap-1"><span className="text-warn">✗</span><span>{b}</span></li>
-          ))}
-        </ul>
-      )}
-      {warnings.lines.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-muted">
-          {warnings.lines.map((w, i) => (
-            <li key={`w${i}`} className="flex gap-1"><span className="text-faint">•</span><span>{w}</span></li>
-          ))}
-        </ul>
-      )}
-      {more > 0 && (
-        <div className="mt-1 text-[10px] text-faint">+{more} more · see Report for details</div>
-      )}
-    </div>
-  );
 }
 
 /**

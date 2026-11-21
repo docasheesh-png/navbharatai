@@ -120,8 +120,15 @@ export function groundingProvenance(r: BudgetResult): string {
  */
 export const DOMINANT_BLOCK_RATIO = 0.6;
 
+/**
+ * A dominant block costs something only when the preamble itself is a real share of its budget (failedbr #1343, 2026-11-20:
+ * "grounding: 2 files, ~45 tokens (budget 4000) — One file is most of the preamble: package.json" was a WARNING).
+ */
+export const DOMINANT_BLOCK_MIN_SHARE = 0.25;
+
 export function dominantGroundingBlock(r: BudgetResult): string | null {
   if (r.kept.length < 2 || r.keptTokens <= 0) return null;
+  if (r.budget > 0 && r.keptTokens < r.budget * DOMINANT_BLOCK_MIN_SHARE) return null;
   for (const b of r.kept) {
     if (estimateTokens(b.text) / r.keptTokens >= DOMINANT_BLOCK_RATIO) return b.path;
   }

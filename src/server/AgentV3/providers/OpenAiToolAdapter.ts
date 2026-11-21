@@ -261,6 +261,17 @@ function parseArgs(args: string | undefined, salvage = false): Record<string, un
 }
 
 /**
+ * The answer with a reasoning model's think-tags removed (failedbr #1153, 2026-11-20: "Ab type errors fix kar raha
+ * hoon.</think>" reached the user as a progress line). A whole `<think>…</think>` block is reasoning and goes; a stray
+ * opening or closing tag is removed and the words around it kept. Every OpenAI-compatible answer passes here, streamed
+ * or not. PURE.
+ */
+export function withoutThinkTags(text: string): string {
+  if (!/<\/?think\s*>/i.test(text)) return text;
+  return text.replace(/<think\s*>[\s\S]*?<\/think\s*>/gi, '').replace(/<\/?think\s*>/gi, '').replace(/^\s+$/, '');
+}
+
+/**
  * Translate an OpenAI chat completion BACK into an Anthropic-shaped TurnResult. The
  * `rawContent` is emitted as Anthropic content blocks (text + tool_use) so appending it
  * keeps the canonical transcript Anthropic-shaped for the next turn (Claude or otherwise).
@@ -268,7 +279,7 @@ function parseArgs(args: string | undefined, salvage = false): Record<string, un
 export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnResult {
   const choice = completion?.choices?.[0];
   const message = choice?.message ?? { role: 'assistant', content: null };
-  const text = typeof message.content === 'string' ? message.content : '';
+  const text = withoutThinkTags(typeof message.content === 'string' ? message.content : '');
   // Reasoning is NOT the answer and is never appended to the transcript — it is read only to tell
   // "spent its budget thinking" apart from "returned nothing". See TurnResult.reasoningOnly.
   const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';

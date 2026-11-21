@@ -244,7 +244,8 @@ export function userModelsFromFiles(files: ReadonlyMap<string, Uint8Array>, take
       if (/\.glb$/i.test(from)) glb = raw;
       else if (/\.gltf$/i.test(from)) glb = gltfToGlb(files, from, raw, warnings);
       else if (/\.obj$/i.test(from)) glb = objToGlb(files, from, raw);
-      else throw new UserModelError('FBX files cannot be loaded by the game directly — open it in Blender and use File → Export → glTF 2.0 (.glb), then attach the .glb');
+      // An .fbx reaches here only when it was not converted first (convertFbxFiles runs before this in planUserModels).
+      else throw new UserModelError('this FBX was not converted — open it in Blender and use File → Export → glTF 2.0 (.glb), then attach the .glb');
       const checked = validateGlb(glb, USER_MODEL_LIMITS, USER_MODEL_EXTENSIONS);
       let subject = userModelSubject(from);
       for (let i = 2; used.has(subject); i++) subject = `${userModelSubject(from)}-${i}`;
@@ -447,8 +448,10 @@ export async function planUserModels<T extends { name?: unknown; base64?: unknow
   const split = await splitUserModelAttachments(atts);
   if (!split.models.length) return { rest: split.rest, attached: false, models: [], refused: [], pendingNote: '' };
   const files = await userModelFilesFromAttachments(split.models);
-  const plan = userModelsFromFiles(files.files);
-  const refused = [...files.refused, ...plan.refused];
+  const fbx = await convertFbxFiles(files.files);
+  const plan = userModelsFromFiles(fbx.files);
+  for (const m of plan.models) { const w = fbx.warnings.get(m.from); if (w) { m.warnings.push(...w); m.from = m.from.replace(/\.glb$/i, '.fbx'); } }
+  const refused = [...files.refused, ...fbx.refused, ...plan.refused];
   // Until they are really in the project, the note says only that they were attached (a chat answer writes nothing).
   const pendingNote = `[USER MODELS ATTACHED] ${plan.models.length} 3D model(s) the user attached (${plan.models.map(m => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
     + (refused.length ? ` Not usable: ${refused.slice(0, 8).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : '');
@@ -491,4 +494,88 @@ export async function landPlannedUserModels(
   } catch { /* observation only */ }
   const real = userModelNote(landing.landed, notAdded);
   return plan.pendingNote && context.includes(plan.pendingNote) ? context.replace(plan.pendingNote, real) : [context, real].filter(Boolean).join('\n\n');
+}
+
+// ───────────────────────────── FBX → GLB (server, no browser, no native code) ─────────────────────────────
+// Admin 2026-11-20: "FBX file seedha lena … ok banao". three.js's own FBXLoader parses FBX (binary and ASCII) in Node;
+// its GLTFExporter writes the GLB with skin and animations. Two defects found converting real packs are fixed here too:
+// FBXLoader reads some packs' TransparencyFactor as fully transparent (the model exported invisible), and FBX keeps one
+// group per polygon run (a cow became 106 primitives, over the validator's 64). Node cannot decode pictures, so an FBX's
+// textures are not carried over — the model keeps its colours and the user is told, with the .glb route for the full look.
+const FBX_MAX_BYTES = 25 * 1024 * 1024;
+
+/** GLTFExporter reads its own Blob through FileReader, which Node does not have. Only what it calls, installed once. */
+function ensureFileReader(): void {
+  const g = globalThis as unknown as { FileReader?: unknown };
+  if (g.FileReader) return;
+  g.FileReader = class {
+    result: ArrayBuffer | string | null = null;
+    onloadend: ((this: unknown) => void) | null = null;
+    onerror: ((e: unknown) => void) | null = null;
+    readAsArrayBuffer(blob: Blob) { blob.arrayBuffer().then(b => { this.result = b; this.onloadend?.call(this); }, e => this.onerror?.(e)); }
+    readAsDataURL(blob: Blob) { blob.arrayBuffer().then(b => { this.result = `data:${blob.type || 'application/octet-stream'};base64,${Buffer.from(b).toString('base64')}`; this.onloadend?.call(this); }, e => this.onerror?.(e)); }
+  };
+}
+
+/** One FBX → GLB bytes, or a plain refusal. Warnings say what did not come across. */
+export async function fbxToGlb(bytes: Uint8Array, warnings: string[]): Promise<Uint8Array> {
+  if (bytes.byteLength > FBX_MAX_BYTES) throw new UserModelError(`this FBX is larger than ${FBX_MAX_BYTES / 1024 / 1024} MB — export it as .glb (Blender: File → Export → glTF 2.0) and attach that`);
+  ensureFileReader();
+  const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
+  const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js');
+  type Node3 = { geometry?: { index: { array: ArrayLike<number> } | null; attributes: { position: { count: number } }; groups: { start: number; count: number; materialIndex?: number }[]; setIndex(i: number[]): void; clearGroups(): void; addGroup(s: number, c: number, m: number): void };
+    material?: unknown; traverse(cb: (n: Node3) => void): void };
+  // FBXLoader decodes texture pictures with browser APIs (`document`), which Node lacks: a textured FBX failed to parse.
+  // A loading manager whose handler only hands back an empty Texture lets it parse; the slots are cleared below anyway.
+  // (three by a variable specifier: a typed `declare module 'three'` here would shadow the client's own three imports.)
+  const threeSpecifier = 'three';
+  const THREE = await import(threeSpecifier) as { LoadingManager: new () => { addHandler(re: RegExp, loader: unknown): void }; Texture: new () => object };
+  const manager = new THREE.LoadingManager();
+  const noPictures = { path: '', setPath(p: string) { this.path = p; return this; }, load: () => new THREE.Texture() };
+  manager.addHandler(/./, noPictures);
+  let root: Node3 & { animations: { name: string }[] };
+  try {
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    root = new FBXLoader(manager).parse(ab, '') as unknown as typeof root;
+  } catch { throw new UserModelError('this FBX file could not be read — export it as .glb (Blender: File → Export → glTF 2.0) and attach that'); }
+  const TEXTURE_SLOTS = ['map', 'normalMap', 'specularMap', 'emissiveMap', 'alphaMap', 'aoMap', 'bumpMap', 'lightMap', 'displacementMap', 'roughnessMap', 'metalnessMap'];
+  let texturesDropped = false;
+  root.traverse((n) => {
+    for (const m of ([] as Record<string, unknown>[]).concat((n.material as Record<string, unknown>) ?? [])) {
+      m.transparent = false; m.opacity = 1;
+      for (const slot of TEXTURE_SLOTS) if (m[slot]) { m[slot] = null; texturesDropped = true; }
+    }
+    const g = n.geometry;
+    if (!g || !Array.isArray(n.material) || !g.groups.length) return;
+    const src = g.index ? Array.from(g.index.array) : Array.from({ length: g.attributes.position.count }, (_, i) => i);
+    const byMaterial = new Map<number, number[]>();
+    for (const grp of g.groups) { const list = byMaterial.get(grp.materialIndex ?? 0) ?? []; for (let i = grp.start; i < grp.start + grp.count; i++) list.push(src[i]); byMaterial.set(grp.materialIndex ?? 0, list); }
+    const out: number[] = []; g.clearGroups();
+    for (const [mi, list] of [...byMaterial].sort((a, b) => a[0] - b[0])) { g.addGroup(out.length, list.length, mi); for (const v of list) out.push(v); }
+    g.setIndex(out);
+  });
+  for (const clip of root.animations) clip.name = clip.name.replace(/^.*\|/, '');
+  // FBX stores its own axis and unit settings, which do not always survive conversion: say so once, with the exact way out.
+  warnings.push('it was converted from FBX — if it looks turned on its side or the wrong size, ask to turn or resize it, or export it as .glb for the exact look');
+  if (texturesDropped) warnings.push('its textures could not be carried over from FBX, so it shows its plain colours — for the full look, export it as .glb (Blender: File → Export → glTF 2.0) and attach that');
+  try {
+    const glb = await new GLTFExporter().parseAsync(root as never, { binary: true, animations: root.animations as never, onlyVisible: true });
+    return new Uint8Array(glb as ArrayBuffer);
+  } catch { throw new UserModelError('this FBX could not be converted — export it as .glb (Blender: File → Export → glTF 2.0) and attach that'); }
+}
+
+/** Every .fbx in the files becomes a .glb beside it (same name) before the models are checked; failures are refusals. */
+export async function convertFbxFiles(files: ReadonlyMap<string, Uint8Array>): Promise<{ files: Map<string, Uint8Array>; warnings: Map<string, string[]>; refused: UserModelRefusal[] }> {
+  const out = new Map(files); const warnings = new Map<string, string[]>(); const refused: UserModelRefusal[] = [];
+  for (const [path, bytes] of files) {
+    if (!/\.fbx$/i.test(path)) continue;
+    out.delete(path);
+    const w: string[] = [];
+    try {
+      const glbPath = path.replace(/\.fbx$/i, '.glb');
+      out.set(glbPath, await fbxToGlb(bytes, w));
+      warnings.set(glbPath, w);
+    } catch (error) { refused.push({ from: path, reason: userModelRefusalReason(error, bytes.byteLength) }); }
+  }
+  return { files: out, warnings, refused };
 }

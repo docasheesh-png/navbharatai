@@ -127,7 +127,14 @@ const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|int
 // 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
 // playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
 // link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
-const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open))\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
+// 🔴 "YOUTUBE DEKH RAHA THA" IS WATCHING YOUTUBE (failedbr #1879, 2026-11-20). "YouTube dekh raha tha aur mujhe tera
+// ad mila…" — I was watching YouTube and saw your ad — was classed *"LARGE — clone of YouTube"* and the planner
+// handed the builder a six-step video-platform roadmap. English "watch YouTube" was already the product being used
+// (TOOL_BEFORE); its Hinglish word order puts the verb AFTER the name (dekh-, sun-, scroll-, "use kar-") and the
+// channel postposition after it too ("YouTube pe / par / mein"). Both are added to the same list.
+// "WhatsApp-ready", "Instagram-friendly", "YouTube-style thumbnail" describe OUTPUT for that app, never a clone of it
+// (failedbr #1046: "a polite WhatsApp-ready text statement" made a pharmacy ledger "LARGE — clone of WhatsApp").
+const TOOL_AFTER = /^[\s/]*-?\s*(?:ready|friendly|compatible|formatted|optimi[sz]ed)\b|^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open)|dekh\w*|dekha|dekhi|dekhe|sun\w*|scroll\w*|use\s+kar\w*|pe|par|pr|per|mein|me|mai)\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
 
 // 🔴 A PRODUCT A COMMAND OPENS IS NOT THE PRODUCT (autopsy 042e472f + dfd24058, 2026-10-01). A voice
 // assistant's command list — "Open YouTube", `"open YouTube"` — was classed "LARGE — clone of YouTube" in
@@ -153,6 +160,11 @@ const PROHIBITED_BEFORE = /\b(?:do\s+not|don'?t|dont|never|avoid|must\s+not)\b(?
 // the name always wins. "for" before the name ("an app for Free Fire players") is the same audience shape.
 const AUDIENCE_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:tournaments?|turnaments?|players?|gamers?|fans?|lovers|community|communities|e-?sports|scrims?|squads?|guilds?|clans?|uids?|ids?|room\s+ids?|custom\s+rooms?|leaderboards?|diamonds?|top[\s-]?ups?|redeem\s+codes?|rank(?:s|ing|ings)?|tips|tricks|guides?|news|stats|wiki|creators?|influencers?|followers)\b/i;
 const AUDIENCE_BEFORE = /\bfor\s+(?:the\s+|all\s+|our\s+|my\s+)?$/i;
+// 🔴 "FREE FIRE KE LIYE" IS "FOR FREE FIRE" (failedbr #1620, 2026-11-20). "Muje free fire app ke lia panel app bana kar do"
+// — a panel app FOR Free Fire players — was "LARGE — clone of Free Fire", and the planner gave it a six-step battle-royale
+// roadmap. English "for" before the name was already the audience shape (AUDIENCE_BEFORE); Hindi puts its postposition
+// AFTER the name ("X ke liye", typed liye / lie / lia / liya / lye), optionally with "app" / "game" in between.
+const HINDI_FOR_AFTER = /^[\s/-]*(?:(?:app|apps|game|games|ka\s+app)\s+)?(?:ke|ki|ka)\s+(?:liye|lie|lia|liya|lye|liay)\b/i;
 const LIKENESS_AFTER = /^[^.,;:!?\n]{0,40}\b(?:jaisa|jaise|jaisi|clone|replica|copy\s+(?:of|bana\w*))\b/i;
 const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar\s+to|inspired\s+by|copy\s+of|replica\s+of|version\s+of)\s+(?:the\s+|a\s+)?$/i;
 
@@ -221,7 +233,7 @@ export function namesAsProduct(text: string, re: RegExp, opts: ProductMentionOpt
     const listHead = before.replace(/(?:[\w.-]+\s*\/\s*)+$/, '');
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
     const after40 = noise(text.slice(at + m[0].length, at + m[0].length + 48));
-    if (!hasLikeness(before, after, after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
+    if (!hasLikeness(before, after, after40) && (AUDIENCE_AFTER.test(after) || HINDI_FOR_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
     if (!hasLikeness(before, after, after40) && TOOL_FOR_AFTER.test(after)) continue;
     if (opts.needsIntent && !hasLikeness(before, after, after40)
       && !(opts.subject && new RegExp(re.source, re.flags.replace('g', '')).test(opts.subject))) continue;

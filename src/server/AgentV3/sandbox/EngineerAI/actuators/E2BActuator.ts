@@ -17,7 +17,7 @@ import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult, EnsureWorkspaceOptions } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, devCommandForcesRestart, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
 import { fullstackDevPort } from '../../../devServerLaunchPlan';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
@@ -2531,7 +2531,7 @@ export class E2BActuator implements IEngineerActuator {
             await sandbox.commands.run(`rm -rf ${VITE_PREBUNDLE_DIR}`, { cwd: WORKSPACE_ROOT, timeoutMs: 15_000 }).catch(() => null);
             console.log('[E2B] a dependency changed after the dev server pre-bundled its packages — relaunching it');
           }
-          if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale)) {
+          if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale, devCommandForcesRestart(command))) {
             const boundPort = port;
             // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
             // more, since nobody in this process has been watching it so far.

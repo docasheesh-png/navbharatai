@@ -107,7 +107,7 @@ describe('the route wiring — the CODE of the build handler, comments stripped'
     const at = code.indexOf("if (abortCauseOf(abort.signal) === 'user-stop' && !buildWasStopped(buildDiag.report().issues)) {");
     expect(at).toBeGreaterThan(-1);
     const body = code.slice(at, at + 900);
-    expect(body).toContain("code: 'USER_STOPPED_BUILD'");
+    expect(body).toContain("code: platformComposed ? ENGINE_STOP_CODE : 'USER_STOPPED_BUILD'"); // failedbr #1334: the engine's stop has its own code
     // The platform-composed test travels with it, so the record never blames the user for our prompt.
     expect(body).toContain('isPlatformFixRequest(prompt)');
     expect(body).toContain('not by the user.');

@@ -91,15 +91,16 @@ describe('never twice in a row', () => {
     expect(p).toContain('ek game banao');
     expect(p).toContain('koi bhi');
     expect(p).toMatch(/Do not ask again/);
-    expect(p).toMatch(/saying what you assumed/);
+    expect(p).toMatch(/saying what you are about to build and why/); // failedbr #1188: present tense, never "already built"
   });
   it('wired: the route records a clarify turn, skips both gates after it, and emits the chips', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(route).toContain("lastRequestTurn.lane === 'clarify'");
     expect(route).toContain('const askWhatToBuild = !askedClarifyLastTurn && namesNothingToBuild');
-    expect(route).toContain('prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);');
+    expect(route).toContain('prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt, mentionsBuildNoun(typedPrompt.toLowerCase()));'); // failedbr #1357
     expect(route).toContain("if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }");
     expect(route).toContain("chatEvents.emit({ type: 'quick_replies', chips: clarifyChips");
-    expect(route).toContain("if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }");
+    // failedbr #1896: the decision moved into clarityDecision (which also writes its report line).
+    expect(route).toContain("if (decided.vagueCategory) { clarity = { category: decided.vagueCategory }; intent = 'chat'; }");
   });
 });

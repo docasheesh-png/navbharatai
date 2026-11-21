@@ -19,7 +19,10 @@
 // Pure: an accumulator with no I/O, created per build and thrown away with it.
 
 /** `silent` (autopsy 303e8a6f): given up on before the provider produced a single byte — not a slow answer (`crawl`). */
-export type WasteKind = 'timeout' | 'crawl' | 'silent' | 'rate-limit' | 'error';
+/** `stalled` (failedbr #696, Q-3209): a call that ANSWERED, after a long wall clock, with essentially no output
+ *  (`isStalledTurn`). It is the engine's slowness, not the request's — six 255–352 s calls of 24–1360 tokens filled a
+ *  29-minute cap and the user was told their build "was not converging". */
+export type WasteKind = 'timeout' | 'crawl' | 'silent' | 'rate-limit' | 'error' | 'stalled';
 
 export interface WasteLedger {
   /** Milliseconds spent inside attempts that returned nothing, by kind. */
@@ -32,8 +35,8 @@ export interface WasteLedger {
 
 export function emptyWasteLedger(): WasteLedger {
   return {
-    msByKind: { timeout: 0, crawl: 0, silent: 0, 'rate-limit': 0, error: 0 },
-    callsByKind: { timeout: 0, crawl: 0, silent: 0, 'rate-limit': 0, error: 0 },
+    msByKind: { timeout: 0, crawl: 0, silent: 0, 'rate-limit': 0, error: 0, stalled: 0 },
+    callsByKind: { timeout: 0, crawl: 0, silent: 0, 'rate-limit': 0, error: 0, stalled: 0 },
     msByFamily: {},
   };
 }

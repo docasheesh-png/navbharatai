@@ -65,10 +65,10 @@ describe('§1 a picture request is answered, not built (pictureRequest.ts)', () 
 
   it('WIRING: the route answers it on the chat lane with the steer and a deterministic fallback', () => {
     const src = strip(ROUTE);
-    expect(src).toMatch(/const answerPictureRequest = [^;]*shouldAnswerPictureRequest\(/);
+    expect(src).toMatch(/const answerPictureRequest = [^;]*shouldAnswerDeliverableRequest\(/); // pictures and decks share the lane (Q-3212)
     expect(src).toMatch(/if \(answerPictureRequest\) \{[^}]*intent = 'chat';/);
-    expect(src).toMatch(/answerPictureRequest \? PICTURE_REQUEST_STEER/);
-    expect(src).toMatch(/answerPictureRequest\s*\?\s*pictureRequestFallback\(\)/);
+    expect(src).toMatch(/answerPictureRequest \? deliverableSteer\(/);
+    expect(src).toMatch(/answerPictureRequest\s*\?\s*deliverableFallback\(/);
     expect(src).toMatch(/if \(answerProjectElsewhere \|\| answerPictureRequest\) return null;/);
   });
 });

@@ -8,8 +8,11 @@
 //
 // PURE, no imports.
 
-/** A royale-style game, by genre or by a named royale title (Hindi spellings included). */
-export const BATTLE_ROYALE_REFERENCE = /बैटल\s*रॉयल|पबजी|फ्री\s*फायर|battle\s*royale|\bpubg\b|\bbgmi\b|free\s*fire|firefree|fortnite|battlefield|apex\s+legends|last\s+man\s+standing|\bbr\s+game\b/i;
+/**
+ * A royale-style game, by genre or by a named royale title (Hindi spellings included). "FF" is Free Fire only when a game
+ * word or a comparison follows it (failedbr #1349: "Muje ek game banani hai / Ff india jisa" got a 2D-only kit).
+ */
+export const BATTLE_ROYALE_REFERENCE = /बैटल\s*रॉयल|पबजी|फ्री\s*फायर|battle\s*royale|\bpubg\b|\bbgmi\b|free\s*fire|firefree|\bff\s*-?\s*(?:india|max|maxx|game|jaisa|jaise|jaisi|jisa|jise|jaesa|wala|wali)\b|\bffmax\b|fortnite|battlefield|apex\s+legends|last\s+man\s+standing|\bbr\s+game\b/i;
 
 /** A GTA title, spaced or glued ("gta 5", "gta5", "gtav", "gta vice city") — BR1966 found the glued form missed. */
 export const GTA_TITLE = /\bgta(?:\s*[-_]?\s*(?:[5v]|vice\s*city|san\s*andreas))?\b/i;

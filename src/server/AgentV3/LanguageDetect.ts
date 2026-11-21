@@ -229,3 +229,16 @@ export function appLanguageInstruction(prompt: string, opts: { editingExistingAp
   if (requestNamesAppLanguage(prompt)) return GENERIC_LANGUAGE_LINE;
   return /[A-Za-z]/.test(String(prompt ?? '')) ? LATIN_REQUEST_LANGUAGE_LINE : GENERIC_LANGUAGE_LINE;
 }
+
+/**
+ * A "keep going" turn builds the SAME app, so its language comes from the request it continues (failedbr #1181, 2026-11-20).
+ * A Bengali game ("Fight 1") was continued with our English "Continue from where you left off…" chip; the edit line said
+ * "match the labels the app already uses" — and the app had none yet but our English starter — so a Bengali user got an
+ * English UI. On a continuation the request being continued decides, exactly as on the build that began it. PURE.
+ */
+export function buildLanguageInstruction(input: { prompt: string; continuedRequest?: string | null; isContinuation: boolean; editingExistingApp: boolean }): string {
+  if (input.isContinuation && typeof input.continuedRequest === 'string' && input.continuedRequest.trim() && input.continuedRequest !== input.prompt) {
+    return appLanguageInstruction(input.continuedRequest);
+  }
+  return appLanguageInstruction(input.prompt, { editingExistingApp: input.editingExistingApp });
+}

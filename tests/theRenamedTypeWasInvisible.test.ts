@@ -382,7 +382,7 @@ describe('6 · CENSUS — a door that renames forwards the renames to every read
     // writers joined it — and the helper it goes through is the rename heal itself.
     const heal = body.indexOf('await this.typeRenameHealForRun(run, errors, tsPaths, sources)');
     expect(heal).toBeGreaterThan(0);
-    expect(heal).toBeLessThan(body.indexOf('return healedNote + writeTypecheckNote(errors, tsPaths, sources);'));
+    expect(heal).toBeLessThan(body.indexOf('return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);'));
     expect(body).toContain('errors = typeRenames.errors;');
     expect(body).toContain('sources = { ...sources, ...typeRenames.added };');
     expect(body).toContain('this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources).then(');

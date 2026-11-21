@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { REVIEWED_LIBRARY_BATCH_12 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch12';
 import { REVIEWED_GAME_ASSETS, validateCatalogue, catalogueStorageBytes, CATALOGUE_STORAGE_BUDGET_BYTES } from '../src/server/AgentV3/gameAssets/providers';
-import { gameAssetRequirements } from '../src/server/AgentV3/gameAssets/assetPlan';
+import { gameAssetRequirements, vocabularyFor } from '../src/server/AgentV3/gameAssets/assetPlan';
 
 type Proof = { id: string; verdict: string; sha256: string; bytes: number; proofs: { animated: boolean; animation: string | null }[] };
 const admitted = new Map((JSON.parse(readFileSync('docs/game-engine/asset-candidates/library-batch-12-admission.json', 'utf8')) as { results: Proof[] }).results.map(r => [r.id, r]));
@@ -70,5 +70,15 @@ describe('library batch 12 — kinds for big worlds', () => {
     expect(req('a walking cactus')).toEqual([{ subject: 'cactus' }]);
     // Every subject a library model animates moves, without being typed into a list.
     for (const c of REVIEWED_GAME_ASSETS) if (c.animationRoles?.run && c.animations.includes(c.animationRoles.run)) expect(req(`a running ${c.subjects[0]}`)[0], c.id).toMatchObject({ animation: 'run' });
+  });
+
+  it('the name index is built once per catalogue, not on every prompt (a per-call build made every prompt 12–17x slower)', () => {
+    expect(vocabularyFor(REVIEWED_GAME_ASSETS)).toBe(vocabularyFor(REVIEWED_GAME_ASSETS));
+    expect(vocabularyFor([])).toBe(vocabularyFor([]));
+    expect(vocabularyFor(REVIEWED_GAME_ASSETS).longerThan('truck')).toContain('pickup truck');
+    gameAssetRequirements('warm up', REVIEWED_GAME_ASSETS);
+    const t = performance.now();
+    for (let i = 0; i < 20; i++) gameAssetRequirements('a 3D train game with a train, trees, buildings, a dog and a cow', REVIEWED_GAME_ASSETS);
+    expect((performance.now() - t) / 20).toBeLessThan(40); // ~5 ms here; the per-call build was ~90 ms
   });
 });

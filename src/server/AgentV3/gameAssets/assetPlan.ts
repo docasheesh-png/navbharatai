@@ -180,25 +180,44 @@ function normalized(text: string): string {
 function mentioned(text: string, phrase: string): boolean {
   return (` ${text} `).includes(` ${normalized(phrase)} `);
 }
+/**
+ * THE LONGEST NAME WINS (2026-11-21, library batch 12). "a pickup truck" also matched "truck", "a small house" also
+ * "house", "a young woman" also "woman": every new compound subject needed a hand-written exclusion on its generic subject
+ * (the table in gameAssetRequirements), and batch 12 added 40 subjects the table did not know. Now a word that sits inside
+ * a LONGER known name in the same clause is not matched on its own — "pickup truck" is the pickup truck, not a truck too.
+ * Built ONCE per catalogue (a first version rebuilt it on every call and made every prompt 12–17x slower — caught by
+ * sixModelsAreNotProvedOneByOne in CI), from each name's own contiguous word runs, so it never compares names pairwise.
+ */
+interface Vocabulary { subjects: string[]; wordsOf(subject: string): readonly string[]; longerThan(word: string): readonly string[] }
+const vocabularies = new WeakMap<readonly ReviewedAsset[], Vocabulary>();
+let emptyVocabulary: Vocabulary | undefined;
+export function vocabularyFor(catalogue: readonly ReviewedAsset[]): Vocabulary {
+  const hit = catalogue.length ? vocabularies.get(catalogue) : emptyVocabulary;
+  if (hit) return hit;
+  const served = catalogue.slice(0, CATALOGUE_MAX_ENTRIES);
+  const subjects = [...new Set([...Object.keys(ALIASES), ...served.flatMap(c => c.subjects.slice(0, 16))])];
+  const words = new Map(subjects.map(s => [s, (ALIASES[s] ?? [s]).map(normalized)]));
+  const phrases = new Set([...words.values()].flat());
+  const longer = new Map<string, string[]>();
+  for (const p of phrases) {
+    const parts = p.split(' ');
+    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j <= parts.length; j++) {
+      const run = parts.slice(i, j).join(' ');
+      if (run !== p && phrases.has(run)) longer.set(run, [...(longer.get(run) ?? []), p]);
+    }
+  }
+  const vocabulary: Vocabulary = { subjects, wordsOf: s => words.get(s) ?? [normalized(s)], longerThan: w => longer.get(w) ?? [] };
+  if (catalogue.length) vocabularies.set(catalogue, vocabulary); else emptyVocabulary = vocabulary;
+  return vocabulary;
+}
+
 /** Bounded deterministic vocabulary, with conservative clause rejection rather than guessed negation scope. */
 export function gameAssetRequirements(prompt: string, catalogue: readonly ReviewedAsset[]): AssetRequirement[] {
   const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
     .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
   const served = catalogue.slice(0, CATALOGUE_MAX_ENTRIES);
-  const subjects = [...new Set([...Object.keys(ALIASES), ...served.flatMap(c => c.subjects.slice(0, 16))])];
-  const wordsOf = (subject: string) => (ALIASES[subject] ?? [subject]).map(normalized);
-  // THE LONGEST NAME WINS (2026-11-21, library batch 12). "a pickup truck" also matched "truck", "a small house" also
-  // "house", "a young woman" also "woman": every new compound subject needed a hand-written exclusion on its generic
-  // subject (the table below), and batch 12 added 40 subjects the table did not know. Now a word that sits inside a
-  // LONGER known name in the same clause is not matched on its own — "pickup truck" is the pickup truck, not a truck too.
-  const phrases = [...new Set(subjects.flatMap(wordsOf))];
-  const longer = new Map<string, string[]>();
-  const longerThan = (word: string) => {
-    let hit = longer.get(word);
-    if (!hit) { hit = phrases.filter(p => p !== word && p.length > word.length && ` ${p} `.includes(` ${word} `)); longer.set(word, hit); }
-    return hit;
-  };
+  const { subjects, wordsOf, longerThan } = vocabularyFor(catalogue);
   const matching = (subject: string, clause: string) => {
     let scoped = ` ${clause} `;
     const excludedPhrases: Record<string, readonly string[]> = {
@@ -235,10 +254,11 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
 
     if (subject === 'train') for (const station of ALIASES['railway station']) scoped = scoped.replaceAll(` ${normalized(station)} `, ' ');
     if (subject === 'bird' && ['eagle', 'parrot'].some(s => ALIASES[s].some(w => mentioned(clause, w)))) return false;
-    const own = new Set(wordsOf(subject));
-    return [...own].some(word => {
+    const own = wordsOf(subject);
+    return own.some(word => {
+      if (!mentioned(scoped.trim(), word)) return false; // the cheap test first: most words are simply absent
       let text = scoped;
-      for (const p of longerThan(word)) if (!own.has(p)) text = text.replaceAll(` ${p} `, ' ');
+      for (const p of longerThan(word)) if (!own.includes(p)) text = text.replaceAll(` ${p} `, ' ');
       return mentioned(text.trim(), word);
     });
   };

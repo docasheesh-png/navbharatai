@@ -349,7 +349,13 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' and never edit or remove the regions already there. "Yeh shehar bada karo", "zyada traffic / log" → edit ONLY that region\'s own'
   + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }). A different land (desert,'
   + ' islands, mountains) → WORLD.style / seed. Up to 12 regions: at 12, say so and offer to make one of them bigger instead. Never'
-  + ' build a place by hand beside the list, and never replace the map to make it bigger.';
+  + ' build a place by hand beside the list, and never replace the map to make it bigger.'
+  // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
+  // "Jungle" and "Mountain" and the summary called them that. A name is not a land: say what the map can and cannot do.
+  + ' A region is ONLY a city, a town or a village — there is no desert, jungle, mountain, beach or snow region yet. If the user asks'
+  + ' for one, do NOT add a town and call it "Desert"/"Jungle"/"Mountain": add the places that ARE asked for and possible, and tell'
+  + ' the user plainly that a separate desert / jungle / mountain land cannot be added yet (the whole map\'s land can be changed'
+  + ' with WORLD.style instead) — then ask whether they want that.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

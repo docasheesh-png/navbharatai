@@ -17,3 +17,12 @@ describe('the levels reader', () => {
     for (const p of ['a platformer with 10 levels', 'add more stages', 'a game with 5 worlds', 'unlock world 2 after world 1']) expect(buildGameContract(p).requiredFeatures, p).toContain('levels');
   });
 });
+
+describe('a name is not a land (failedbr #2488: three towns called "Desert", "Jungle" and "Mountain")', () => {
+  it('the map rule says regions are only city / town / village, and tells the builder to say so and ask', async () => {
+    const { GAME_WORLD_RULE } = await import('../src/server/AgentV3/gameKitSeed');
+    expect(GAME_WORLD_RULE).toMatch(/A region is ONLY a city, a town or a village/);
+    expect(GAME_WORLD_RULE).toMatch(/do NOT add a town and call it "Desert"/);
+    expect(GAME_WORLD_RULE).toMatch(/then ask whether they want that/);
+  });
+});

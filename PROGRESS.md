@@ -103591,3 +103591,18 @@ untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only
   - Test: `theBuilderPicksByMeaningNotWords`.
 - **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
 - **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.
+
+## 2026-11-21 — #4406 merged; FBX from Sketchfab / Mixamo / avatar creators now converts
+- #4406 merged: the character customizer on request, and the intent map.
+- The admin added 3 Indian-clothing models to Drive: a man in a dhoti, a man in a kurta, a woman in a saree. Their FBX exports exposed two class bugs in the server FBX import:
+  - **Embedded pictures:** FBXLoader calls `window.URL.createObjectURL`, so all 3 failed to parse in Node. `withLentWindow` now lends a window for the synchronous parse only, captures the pictures (they now go into the GLB), then removes it.
+  - **Face shape keys:** 126 morph targets were 42 MB of a 55 MB GLB. `dropMorphTargets` removes them and the user is told.
+  - Test: `anFbxBecomesAModelInTheGame` (+2).
+- **NOT in the library — licences unverified.** None of the 3 zips carries a licence file, and sketchfab.com is unreachable from this session.
+  - The dhoti model looks like Sketchfab's "Indian Man In Dhoti" (earlier search: CC-BY).
+  - The kurta and saree went through Mixamo (a "mixamo.com" clip, an avatar-creator body), and their licence is unknown.
+  - Also too heavy for the 8 MB user path (13 MB / 23 MB after the fix; 65k / 118k triangles).
+  - Waiting on the admin for each model's licence (a page screenshot).
+- **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
+  - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
+  - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.

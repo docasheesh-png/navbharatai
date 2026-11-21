@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readPreviewAiAsk, readPreviewAiImageAsk, readPreviewAiImageReadyAsk } from '../../lib/previewAiProtocol';
 import { answerPreviewAiAsk, answerPreviewAiImage, answerPreviewAiImageReady } from './previewAiRelay';
-import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
+import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon, SlidersHorizontal } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
@@ -36,6 +36,8 @@ import { previewRequest } from './previewRequest';
 import { readAnswer, isRecord } from '../../lib/serverAnswer';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
+import { TuningPanel } from './TuningPanel';
+import { readTuneList, tuneSetMessage, tuningValuesFile, TUNING_VALUES_PATH, type TuneItem } from '../../lib/gameTuning';
 import { choosePreviewSource, modeForSource, previewSourceLabel, previewSourceTitle, previewToolsFor, type PreviewChoice } from './previewSource';
 import {
   appendConsoleEntry, consoleErrorCount as countConsoleErrors, consoleRowFixable,
@@ -204,6 +206,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // server). `source` is the rule's answer; `mode` is which of the two frames this file owns renders
   // it — the copy rides the in-browser branch, so every older `mode` check keeps its meaning.
   const [choice, setChoice] = useState<PreviewChoice>('auto');
+  // THE TUNE PANEL (admin 2026-11-21): the numbers the game declared adjustable (kit core/tuning.ts), announced by the frame.
+  const [tuneItems, setTuneItems] = useState<TuneItem[] | null>(null);
+  const [tuneOpen, setTuneOpen] = useState(false);
   /** The saved copy to frame while a FINISHED app's machine is deliberately left asleep, and its note. */
   const [idleSnapshotUrl, setIdleSnapshotUrl] = useState('');
   const [idleSnapshotNote, setIdleSnapshotNote] = useState('');
@@ -1205,6 +1210,18 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     window.addEventListener('message', onAiAsk);
     return () => window.removeEventListener('message', onAiAsk);
   }, [workspaceId]);
+  // The game announces its sliders (and again after each change); only our own preview frames are listened to.
+  useEffect(() => {
+    const onTune = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
+      const list = readTuneList(e.data);
+      if (list) setTuneItems(list.length ? list : null);
+    };
+    window.addEventListener('message', onTune);
+    return () => window.removeEventListener('message', onTune);
+  }, []);
+  // A new address is a new app: its sliders are announced afresh.
+  useEffect(() => { setTuneItems(null); setTuneOpen(false); }, [url]);
   /** Post to whichever preview is actually on screen — they are different frames. */
   const postToPreview = useCallback((msg: Record<string, unknown>) => {
     const frame = mode === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
@@ -1800,6 +1817,11 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             </button>
           )}
           {consoleButton}
+          {tuneItems && tuneItems.length > 0 && (
+            <button type="button" onClick={() => setTuneOpen((o) => !o)} className="shrink-0 flex items-center gap-1 hover:text-body" title="Tune the game: sliders for the numbers it made adjustable" aria-pressed={tuneOpen}>
+              <SlidersHorizontal className="w-3.5 h-3.5" /> Tune
+            </button>
+          )}
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-body" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
               Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
@@ -1962,6 +1984,31 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             The door normally prevents this from ever being reached, but it only takes over once the
             server has minted a link — and this is the one moment the raw address would otherwise be
             framed. Belt and braces, on the path that has burned the user three times. */}
+        {tuneOpen && tuneItems && tuneItems.length > 0 && (
+          <div className="border-b border-line px-3 py-2">
+            <TuningPanel
+              key={tuneItems.map((i) => i.key).join(',')}
+              items={tuneItems}
+              onClose={() => setTuneOpen(false)}
+              onChange={(key, value) => postToPreview(tuneSetMessage(key, value))}
+              onSave={async (values) => {
+                if (!workspaceId) return 'Open this app from your projects to save its values.';
+                const content = tuningValuesFile(values);
+                try {
+                  const res = await fetch('/api/agentv3/import-files', {
+                    method: 'POST', headers: await authJsonHeaders(),
+                    body: JSON.stringify({ workspaceId, userId, email, files: { [TUNING_VALUES_PATH]: content } }),
+                  });
+                  if (!res.ok) return 'Could not save the values — nothing was changed. Please try again.';
+                  onFileEdited?.(TUNING_VALUES_PATH, content);
+                  return 'Saved. Your game now starts with these values.';
+                } catch {
+                  return 'Could not reach the server — nothing was saved. Please try again.';
+                }
+              }}
+            />
+          </div>
+        )}
         {shouldShowNotServingSurface({ unreachable, portDown, diagnosing, hasDoorUrl: !!doorUrl, hasSnapshotUrl: !!idleSnapshotUrl, framingUnchecked }) ? (
           /**
            * THE URL IS NOT ANSWERING — so we do NOT frame it (admin report 2026-08-13, mitrify).

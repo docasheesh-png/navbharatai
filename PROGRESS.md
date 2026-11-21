@@ -103331,3 +103331,19 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — Tune a game with sliders in the preview (admin plan: "a tuning panel … without prompting again")
+
+- **Kit `core/tuning.ts`:** `tunable(key, default, { label, min, max, step })` returns a live handle; saved values come from
+  `src/game/tuning.values.ts` (a declared DATA file — `GAME_RUNTIME_DATA_FILES` — kept by the kit once edited) and win over
+  the default; every value is clamped. Inside a frame it announces its sliders to the parent (`{ nbTuneList }`) and accepts
+  `{ nbTuneSet }` ONLY from `window.parent`.
+- **Preview:** `src/lib/gameTuning.ts` validates the frame's list (≤ 30, plain keys, finite numbers, min < max) and writes the
+  file byte-for-byte as the kit's `tuningFile()` does; `TuningPanel.tsx` (sliders, Save, Reset); `PreviewSurface` listens only
+  to its own frames, shows a Tune button in the toolbar, sends each change with `postToPreview`, and Save writes the file
+  through the owner-verified `/api/agentv3/import-files` (live sandbox + durable store) and `onFileEdited`.
+- **Games declare tunables:** the runner starter's Game speed slider; `TUNING_RULE` in the kit handoff tells the builder to
+  declare speed, gravity, enemy count, difficulty… with `tunable()`.
+- **Proof:** `tests/theGameCanBeTunedInThePreview.test.ts` (9; four reversions each failed — any window setting a value,
+  saved values ignored, no range, the runner slider doing nothing). Module census, runtime pack, kit history and strict kit
+  compile updated for the declared data file.

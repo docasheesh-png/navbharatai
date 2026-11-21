@@ -74,6 +74,7 @@ import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
 import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
+import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
@@ -462,7 +463,7 @@ import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, turnIsGame, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { forgeAssignment, forgeMissingHandoff } from '../AgentV3/forgeForMissing';
 import { objectForgeEnabled } from '../lib/objectForge/ObjectForgeGenerator';
 import { REVIEWED_GAME_ASSETS } from '../AgentV3/gameAssets/providers';
@@ -15617,7 +15618,7 @@ async function noteBuildOutcome(
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = runInBillingPhase(PHASE_PLANNER, () => makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
-              system: `${megaRoadmapSystemPrompt()}\nSelected workspace architecture: ${framework}. Keep every step compatible with it. Do not invent a single-HTML constraint unless the user explicitly asked for it.\n${gamePlannerCapability(prompt, framework)}`,
+              system: `${megaRoadmapSystemPrompt()}\nSelected workspace architecture: ${framework}. Keep every step compatible with it. Do not invent a single-HTML constraint unless the user explicitly asked for it.\n${gamePlannerCapability(prompt, framework)}\n${platformCapabilityDigest()}`,
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
               tools: [],
               maxTokens: 4000,
@@ -15652,7 +15653,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ planner: true, model: answeringModel({ answered: rmT.model, planned: claudeRungModelId(rmProvider) ?? null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
+              buildDiag.recordLlmCall({ planner: true, model: answeringModel({ answered: rmT.model, planned: claudeRungModelId(rmProvider) ?? null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + platformCapabilityDigest().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -15667,7 +15668,7 @@ async function noteBuildOutcome(
             void runInBillingPhase(PHASE_PLANNER, async () => captureTurnUsage(rmProvider, { ...rmT.usage }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0)); // a planner slice (failedbr #1200)
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
-            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt });
+            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt, gameKit: gameKitOwnsTheBuild(originalPrompt, framework), game3D: gameKitPlan(originalPrompt, framework).includes('generate_game_3d') });
             // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
             // sentence alone). A cut-off reply and a malformed one need different fixes.
             if (!rmParsed) {
@@ -18999,7 +19000,7 @@ async function noteBuildOutcome(
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too
           model: planGrok ? sonnetModel() : requestModel, // every rung pins its own model; this is the Claude default only
-          system: planSystemPrompt(),
+          system: `${planSystemPrompt()}\n\n${platformCapabilityDigest()}`,
           tools: catalogForTools(['update_todo']),
           onlyOpus,
           powerLevel: powerLevelReqEffective,
@@ -19165,7 +19166,7 @@ async function noteBuildOutcome(
             // 042e472f, 2026-10-01). The plan's goal carries them, so every module turn reads them again. ONE list
             // (`requestNotes`, Q-991): until 9c612cdb the planner read three of the five notes the architect did.
             const plannerGoal = withRequestNotes(prompt, requestNotesText);
-            const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
+            const modules = parsePlannedModules(await ppGenerate(`${projectPlanSystemPrompt(framework)}\n\n${platformCapabilityDigest()}`, projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
               // Q-1017: the REQUEST and the notes go in apart, so the goal's cap is the request's alone.
               pPlan = createProjectPlan(prompt, framework, modules, Date.now(), requestNotesText);
@@ -19208,7 +19209,7 @@ async function noteBuildOutcome(
               if (act.kind === 'needs-llm-replan') {
                 const stuck = pPlan.modules.find((m) => m.status !== 'done' && (m.attempts ?? 0) >= LLM_REPLAN_THRESHOLD);
                 if (stuck) {
-                  const revised = parsePlannedModules(await ppGenerate(replanSystemPrompt(framework), replanUserPrompt(pPlan, stuck.id)));
+                  const revised = parsePlannedModules(await ppGenerate(`${replanSystemPrompt(framework)}\n\n${platformCapabilityDigest()}`, replanUserPrompt(pPlan, stuck.id)));
                   const replanned = applyReplan(pPlan, revised);
                   if (replanned !== pPlan) {
                     pPlan = replanned;
@@ -24796,7 +24797,7 @@ async function noteBuildOutcome(
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
           && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
-          && isCanvasGameProject(playtestFiles)
+          && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
           && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
@@ -24858,7 +24859,7 @@ async function noteBuildOutcome(
             const why = playtestSkipReason({
               enabled: gamePlaytestEnabled(),
               buildOk: result?.ok === true,
-              isCanvasGame: isCanvasGameProject(playtestFiles),
+              isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }),
               isImportTurn,
               aborted: abort.signal.aborted,
               hasRunCommand: !!actuator.runCommand,

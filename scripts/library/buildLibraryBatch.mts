@@ -17,7 +17,7 @@ import { bundleGlbResources } from '../../src/server/AgentV3/gameAssets/glbResou
 import { compactGlb } from '../../src/server/AgentV3/gameAssets/assetOptimize';
 import { selectGlbAnimations } from '../../src/server/AgentV3/gameAssets/assetAnimationSelection';
 import { validateGlb, ASSET_LIMITS } from '../../src/server/AgentV3/gameAssets/assetPolicy';
-import type { ReviewedAsset } from '../../src/server/AgentV3/gameAssets/providers';
+import { REVIEWED_GAME_ASSETS, type ReviewedAsset } from '../../src/server/AgentV3/gameAssets/providers';
 import type { Pack, Row } from './packs.mts';
 
 
@@ -72,6 +72,10 @@ for (const row of ROWS) {
     ...(resources.length ? { resources: resources.map(({ path, url, sha256 }) => ({ path, url, sha256 })) } : {}),
     libraryCategory: row.category,
   };
+  // A model already in the library under another name is not a new kind (batch 12 first listed three people batch 4
+  // already had, as "young woman", "woman in jacket" and "road worker"). Refuse it here, before it reaches the catalogue.
+  const twin = REVIEWED_GAME_ASSETS.find(c => c.sha256 === entry.sha256 && c.id !== entry.id) ?? entries.find(c => c.sha256 === entry.sha256);
+  assert.ok(!twin, `${row.id} is the same model as ${twin?.id} — choose a model the library does not have`);
   entries.push(entry);
   evidence.push({ id: row.id, file: basename(path), sourceBytes: source.byteLength, bytes: derived.byteLength, triangles: stats.triangles, animations: stats.animations.length, licenseFileSha256: sha(license), license: p.spdx });
   console.log(row.id, derived.byteLength, stats.triangles);

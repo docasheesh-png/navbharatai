@@ -1,0 +1,1030 @@
+{
+  "checkedAt": "2026-11-21",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "lib12-terraced-houses",
+      "sha256": "f4818d24e7e13ff3cced2b2a2eef6a0caf0d605ed22886bb5c3c40eb25423f62",
+      "bytes": 78368,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1184,
+          "changedPixels": 3449,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1184,
+          "changedPixels": 3449,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-shop-house",
+      "sha256": "94635290260a6857bd6bbfc46a6c083bc9be701e83b92a89e3eb15ac50ec2519",
+      "bytes": 77160,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1252,
+          "changedPixels": 3639,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1252,
+          "changedPixels": 3639,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-house-with-yard",
+      "sha256": "dfe1a5598be1cd4866ae2af472668da25beed72e404f6a9306be578c85701f3f",
+      "bytes": 74708,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1052,
+          "changedPixels": 2827,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1052,
+          "changedPixels": 2827,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-porch-house",
+      "sha256": "607a9ef9a640bd87dc51d1f3f99e181b09bf5fcea867596e14d45ca7a5903e28",
+      "bytes": 63972,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 984,
+          "changedPixels": 2913,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 984,
+          "changedPixels": 2913,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-townhouse",
+      "sha256": "9618111f7008b31d412ac7b39d8d475b3041e04eccb70bb765df5efb3c9ef40a",
+      "bytes": 80020,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1284,
+          "changedPixels": 2987,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1284,
+          "changedPixels": 2987,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-small-house",
+      "sha256": "907f07b05284b07dfee2f03571fd112a8f71326b5864ba70160a3cd6bd1c8477",
+      "bytes": 50376,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 704,
+          "changedPixels": 2885,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 704,
+          "changedPixels": 2885,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-bungalow",
+      "sha256": "9bd10829e94c1783654381d3f3f83b59c4ccf04baf370375b3d446350c45f186",
+      "bytes": 67228,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1048,
+          "changedPixels": 2885,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1048,
+          "changedPixels": 2885,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-two-storey-house",
+      "sha256": "278df243ff6ab65c636a8a7e99c51f3e6d042c1b07b5875374dd9f0727eed228",
+      "bytes": 61752,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 932,
+          "changedPixels": 3115,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 932,
+          "changedPixels": 3115,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-flat-roof-house",
+      "sha256": "6b1c4a5532c0e54dae4afefca6fcf34bf0a262fd412b77b5c041ad71a79abe7e",
+      "bytes": 73360,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1100,
+          "changedPixels": 2649,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1100,
+          "changedPixels": 2649,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-office-tower",
+      "sha256": "28f6677b672da5c1859666a81095e9e1e3907d23fb0ce70cf03f093f220e1352",
+      "bytes": 65156,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 984,
+          "changedPixels": 2359,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 984,
+          "changedPixels": 2359,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-workshop",
+      "sha256": "ff330679d4b1329de847a3d090c830ccae6be951b5edcb4f437a9e55a3743964",
+      "bytes": 76644,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1344,
+          "changedPixels": 2381,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1344,
+          "changedPixels": 2381,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-water-tower",
+      "sha256": "ffc40083527121d7bd25c6bc8f92569ca8e9a6bd086e6790c7d8019b09f14a20",
+      "bytes": 73312,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1300,
+          "changedPixels": 1584,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1300,
+          "changedPixels": 1584,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-silo",
+      "sha256": "8bf8d85b0d5dcd82bcbb615fd343ebcca352a080a588adcafb7f7d5279e08a2b",
+      "bytes": 69268,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1236,
+          "changedPixels": 2310,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1236,
+          "changedPixels": 2310,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-shed",
+      "sha256": "7cc8bbd960996e7656db59a1c49bdbd1bc42508e54aed734b239d173fe50956b",
+      "bytes": 47836,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 804,
+          "changedPixels": 3024,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 804,
+          "changedPixels": 3024,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-research-centre",
+      "sha256": "6981ee741ada64decc4caf9a670eca4a680778bba1e405acbc7265696d377c6f",
+      "bytes": 85152,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1344,
+          "changedPixels": 1980,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1344,
+          "changedPixels": 1980,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-beach-umbrella",
+      "sha256": "9497f89fc9303bb3122ba7d13626387e4cb05fbe08e6e95489ce2a6997512390",
+      "bytes": 12008,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 174,
+          "changedPixels": 1700,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 174,
+          "changedPixels": 1700,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-small-tree",
+      "sha256": "513f4466806494b71f80a01dc1567348c7e03f16d59cd6d53be2f53fc894f79c",
+      "bytes": 11376,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 116,
+          "changedPixels": 1386,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 116,
+          "changedPixels": 1386,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-flowering-tree",
+      "sha256": "523116f74ffbcae9a40690fad988f5d72ba683284f19a89a8c379d290eadc337",
+      "bytes": 28400,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 388,
+          "changedPixels": 1293,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 388,
+          "changedPixels": 1293,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-araucaria",
+      "sha256": "255bd77db457274f362b6a0c9210193747386826797a7f0bbbd3d6ad08d1b57e",
+      "bytes": 31832,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 548,
+          "changedPixels": 805,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 548,
+          "changedPixels": 805,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-fan-palm",
+      "sha256": "8ff94a6b8309c57c228756e5dd33618c4ff963cff9598928677345bcff3eacab",
+      "bytes": 38764,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 636,
+          "changedPixels": 889,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 636,
+          "changedPixels": 889,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-pickup-truck",
+      "sha256": "b2cf735a2e88fc62892576cb0de1c85d83576e42045404df087924eb1bbfadc7",
+      "bytes": 160880,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3142,
+          "changedPixels": 1215,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3142,
+          "changedPixels": 1215,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-delivery-van",
+      "sha256": "8363be253b4512d49f5fb9203d7ba984f2aa60ff1f9e043684fe01dfb9e07041",
+      "bytes": 161536,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3058,
+          "changedPixels": 1561,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3058,
+          "changedPixels": 1561,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-minivan",
+      "sha256": "e90930842c94593f1d57c23dd0f3a8c25be5fc1fdbb6140cf8a8af83cb1a14e0",
+      "bytes": 155952,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3008,
+          "changedPixels": 1291,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3008,
+          "changedPixels": 1291,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-convertible",
+      "sha256": "a346a7390c792d9b7dce37ceb5021f31904f0dac6083c44b1a50e7c3c9b46dae",
+      "bytes": 149272,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 2790,
+          "changedPixels": 1367,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 2790,
+          "changedPixels": 1367,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-jeep",
+      "sha256": "f93076e73f4e919c0f276b64405ad1f130cf702be8b040c0bb8c627d70749f58",
+      "bytes": 196892,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3544,
+          "changedPixels": 1401,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3544,
+          "changedPixels": 1401,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-rally-car",
+      "sha256": "99bf90f634caa978b7059a330e723976775c68bf3ee57fa9db1537cd5c13296b",
+      "bytes": 152352,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3074,
+          "changedPixels": 1179,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3074,
+          "changedPixels": 1179,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-muscle-car",
+      "sha256": "ba2c42d3d27600a197052d528cc4d3b7fc5a02987172fa388eb0a31c17675ef5",
+      "bytes": 161708,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3140,
+          "changedPixels": 1172,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3140,
+          "changedPixels": 1172,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-compact-sedan",
+      "sha256": "ed0c7b8fe77651999b8ca5d4990b0267910868a663e20168e6a8f3f388cf2108",
+      "bytes": 169708,
+      "liveDownload": true,
+      "cacheRestores": 2,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3184,
+          "changedPixels": 1154,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3184,
+          "changedPixels": 1154,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-young-man",
+      "sha256": "b6aaebea40ce502b392c61bdff53d15f5943a0ceaae98184b7299553f7972d69",
+      "bytes": 263148,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1306,
+          "changedPixels": 800,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1306,
+          "changedPixels": 800,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1306,
+          "changedPixels": 761,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1306,
+          "changedPixels": 761,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-young-woman",
+      "sha256": "4a2195d77df9810b1fae19d30146dcffb5b7dd2b021eea1c0b80c8ab0b189768",
+      "bytes": 315144,
+      "liveDownload": true,
+      "cacheRestores": 3,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1630,
+          "changedPixels": 828,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1630,
+          "changedPixels": 828,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1630,
+          "changedPixels": 791,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1630,
+          "changedPixels": 791,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-bearded-man",
+      "sha256": "cadfa9cb2a70a7870737587bbd138924ffe8ef1c3ae93e75bfdbd98970e8226a",
+      "bytes": 233684,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1166,
+          "changedPixels": 851,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1166,
+          "changedPixels": 851,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1166,
+          "changedPixels": 817,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1166,
+          "changedPixels": 817,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-bald-man",
+      "sha256": "c60ce0e549f4c6ac38cf086f419bc76064108151031931de22efca6af1969012",
+      "bytes": 243604,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1190,
+          "changedPixels": 836,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1190,
+          "changedPixels": 836,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1190,
+          "changedPixels": 797,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1190,
+          "changedPixels": 797,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-road-worker",
+      "sha256": "10afb7598d11a13201173fd34fc39a63606b389d89d63f791a580aa143d3a93e",
+      "bytes": 239948,
+      "liveDownload": true,
+      "cacheRestores": 3,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1286,
+          "changedPixels": 825,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1286,
+          "changedPixels": 825,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1286,
+          "changedPixels": 781,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1286,
+          "changedPixels": 781,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-grey-haired-woman",
+      "sha256": "f70afd2d7ff1634d0e2340885c2ae3adaa8ca696c9926cb12b26ff42da9429d5",
+      "bytes": 349796,
+      "liveDownload": true,
+      "cacheRestores": 3,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1750,
+          "changedPixels": 824,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1750,
+          "changedPixels": 824,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1750,
+          "changedPixels": 795,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1750,
+          "changedPixels": 795,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-coach",
+      "sha256": "921c2cb9c60a603c58591060a533c0dd801369dcd886bfabd8405aecba6a43ee",
+      "bytes": 311912,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1614,
+          "changedPixels": 818,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1614,
+          "changedPixels": 818,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1614,
+          "changedPixels": 783,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1614,
+          "changedPixels": 783,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-radio-host",
+      "sha256": "ca9600c83b1a7bca33210fce4056c686b6e6be7350fbd944ad24e6ec1d800598",
+      "bytes": 325408,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1726,
+          "changedPixels": 836,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1726,
+          "changedPixels": 836,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1726,
+          "changedPixels": 789,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1726,
+          "changedPixels": 789,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-boss-woman",
+      "sha256": "45913f4d4dc8a2b33fb392febeb8dd0f6080758bc0e81dcd3c1b6bbc301e875c",
+      "bytes": 313768,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1606,
+          "changedPixels": 818,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1606,
+          "changedPixels": 818,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1606,
+          "changedPixels": 782,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1606,
+          "changedPixels": 782,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-rich-man",
+      "sha256": "3635f128ea8df1375cf4be3eb20cc470522fb2d9b4f9d6418d8e24163e7d6fd3",
+      "bytes": 314168,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1570,
+          "changedPixels": 827,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1570,
+          "changedPixels": 827,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1570,
+          "changedPixels": 788,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1570,
+          "changedPixels": 788,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-female-racing-driver",
+      "sha256": "3239cb6b8ef6f5f942fc6678dc4e8bb6176fd98a2a8e9635401d60ff9e475cca",
+      "bytes": 308112,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1606,
+          "changedPixels": 829,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1606,
+          "changedPixels": 829,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1606,
+          "changedPixels": 799,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1606,
+          "changedPixels": 799,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib12-co-driver",
+      "sha256": "cfb37905183229a30dd572aa44a91c058455a938cf8c57de0bce55463beb3889",
+      "bytes": 321964,
+      "liveDownload": true,
+      "cacheRestores": 4,
+      "proofs": [
+        {
+          "animation": "andar",
+          "triangles": 1690,
+          "changedPixels": 828,
+          "animated": true
+        },
+        {
+          "animation": "andar",
+          "triangles": 1690,
+          "changedPixels": 828,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1690,
+          "changedPixels": 789,
+          "animated": true
+        },
+        {
+          "animation": "correr",
+          "triangles": 1690,
+          "changedPixels": 789,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

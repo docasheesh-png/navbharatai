@@ -103501,6 +103501,21 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
 
+## 2026-11-21 — People in the city; cars wait behind the zebra (admin plan: "people walking in the city")
+
+- **Kit file `src/game/three/citypeople.ts`** (`GameCityPeopleGenerator.ts`): people walk the pavement loop around each
+  block and, at corners, sometimes cross to the next block — only on the zebra, kerb to kerb, briskly (≥ 1.4 m/s), only
+  when the cars on that street have red for the WHOLE crossing (sampled every 0.5 s) and no car is near; they stop for the
+  player; `people.bodies` passed to `traffic.update` makes cars stop for them. The crowd is two instanced meshes (body and
+  head) — two draw calls for up to 150 people, for budget phones.
+- **Found by the test, fixed:** the first light check sampled only "now" and "at the far kerb" — a light red at both and
+  green in between let people start across just before green (8,823 frames on the road off red). The whole window is now
+  checked, and the crossing is kerb to kerb so it fits inside one red.
+- **Sibling found while designing it, fixed:** traffic's stop line sat 1 m past the crossing's edge — a waiting car's
+  bumper was ON the zebra stripes. `CITY_ZEBRA` is now the one source of the zebra's size; the stop line (`stopBack`) is
+  1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
+- **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
+  new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.
 ## 2026-11-21 — Games stay smooth on budget phones (admin plan: "smooth on cheap Android phones")
 
 - **Found first:** the kit already adapts at run time (perf governor: steps quality down after ~3 s of stutter), and the
@@ -103625,6 +103640,33 @@ untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only
 - **Proposed, not built (needs the admin's yes):** step 2 — replace the deterministic word checks that build reports show misfiring with one cheap model call, evidence first.
 - **Process note:** a second time this session, I wrote in the main checkout during a running gate. That gate was stopped; #4403 was merged on CI green for its exact commit.
 
+## 2026-11-21 — Big worlds stream; library batch 12 (variety); the longest name wins
+
+The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans … kya navbharatai pura alag world bana dega?" They then approved: "ok models streaming banao, phir library variety badhao".
+
+- **Model streaming.** `GameWorldStreamingGenerator.ts` writes `src/game/three/worldStreaming.ts` into every game that gets library models. It is written once; a later turn keeps the game's copy.
+  - **What was there:** every model loaded at game start and stayed until the end. Each copy had its own draw calls. `dressWorld` capped a world at 120 copies over 120 m. Only the terrain streamed.
+  - **What it does now:**
+    - The world is split into cells, and only the cells near the camera exist, with one ring of slack.
+    - Each model loads once.
+    - All copies of a static model in a cell are drawn as one InstancedMesh per part.
+    - Far cells swap to the reduced mesh (the existing LOD level 1) without a rebuild.
+    - Animated copies get their own handle each, capped per device: phone 12, mid 24, desktop 48.
+    - Unused models are freed past the device budget.
+    - Collision marks are copied onto the instanced parts. The kit's collision already tests every instance (`shapesFor`).
+  - **How the builder is told:** in the asset handoff, in `add_library_models`, and through a new `big-world` outcome in the intent map.
+  - **Checks:** the generated module typechecks under strict mode with @types/three 0.180. Test: `aBigWorldStreamsModels` runs the emitted code with real three.js. Reversion proven three times: the cache, freeing far cells, and the actor cap.
+  - **Not proven yet:** a frame-rate measurement in a real game on a phone. Watch the first big-world build for that.
+- **Library batch 12:** 40 CC0 models from kayquer kits, live-admitted 40/40, with thumbnails.
+  - 9 kinds of home, plus 6 town buildings and a beach umbrella.
+  - 4 trees.
+  - 8 vehicle bodies.
+  - 12 people with walk and run.
+  - Subjects that are everyday game words were refused: boss, pickup, manager, navigator, coach.
+- **Root cause, matcher class:** a word inside a longer known name was also matched on its own ("pickup truck" → truck + pickup truck). Each earlier batch patched one hand-written exclusion at a time. Now the longest known name in a clause wins; the old exclusion table stays for non-subject senses (rock music, log in).
+- **Root cause, moving subjects:** walk and run were asked for only for a hand-typed list of subjects, which the new people were not on. Now the list also includes every subject a library model animates. The role stays the game's need: "walking dog" still asks for walk, so the code-built dog walks.
+- **Root cause, duplicate models:** batch 12 first listed three people that batch 4 already had. `buildLibraryBatch.mts` now refuses a model already in the library (reversion proven), and a test asserts that no model is in the catalogue twice.
+- **Library menu:** subjects with the same roles now share one line. It went from 11558 to about 10700 chars, under the 11000 cap.
 ## 2026-11-21 — #4406 merged; FBX from Sketchfab / Mixamo / avatar creators now converts
 - #4406 merged: the character customizer on request, and the intent map.
 - The admin added 3 Indian-clothing models to Drive: a man in a dhoti, a man in a kurta, a woman in a saree. Their FBX exports exposed two class bugs in the server FBX import:
@@ -103661,3 +103703,39 @@ Admin report: `server_logs` was scanned in full about every 5 minutes (8,160 run
   `gcloud firestore fields ttls update expireAt --collection-group=server_logs --enable-ttl --database='(default)' --project=gen-lang-client-0866594388`
   Use the `--database` value that matches the server's `FIRESTORE_DATABASE_ID`. Until this runs, the opt-in daily purge (`DATA_RETENTION_PURGE_ENABLED`) is the only deletion path.
 - **Not changed, on purpose:** `/api/admin/users`, `/api/admin/purchases` and `/api/admin/audience` still read every wallet and payment when the admin opens them. Their substring search and sort run over the full set, and paging the read would quietly turn "search all users" into "search this page". The real fix is a search index or a denormalised summary, which is a separate decision.
+## 2026-11-21 — failedbr #2481: a big game on a roadmap build gets its kit and its big map
+
+- **Report:** "ek real gta jaise game banao, bahut bade map par, user apne charecter ko joystik se control kare" → a cube on a flat plane. The build said "The game kit was NOT laid down (this request is not a game the kit serves)", and the big-app planner told the user a large map "needs dedicated backend infrastructure".
+- **Root cause 1 (kit skipped):** the request read LARGE, so the mega roadmap wrote step 1 ("a flat terrain (like a square plane) … a cube or capsule"). `gameTurnRequest` marked it as a game's milestone, but `gameKitPlan`, `wantsSceneDetail` and `gameTurnHandoff` each re-read the domain from the whole turn text, and the step's words outvoted the game ("real-estate"). **Class:** a turn's domain decided from the planner's words instead of the user's request. **Fix:** one reader, `turnIsGame` (gameKitSeed.ts), trusts the `GAME_MILESTONE_LINE` that `gameTurnRequest` writes only when the user's own request is a game; every turn reader uses it. Census test: `analyzeRequirementGaps(` appears once in the seed (inside `requestIsGame`).
+- **Root cause 2 (planner unaware of the kit):** `gamePlannerCapability` said only "plan a limited playable slice", so the planner called a big map infrastructure and planned @react-three/fiber + a cube. **Fix:** the capability is built from the same plan the seed runs and tells the whole kit (big library map, city, traffic, people, physics, joystick), that a big map is never an infrastructure ceiling, and that step 1 is playable on the map. `roadmapGuardrail` refuses a roadmap that brings a second 3D engine to a kit game (same class as the native-stack refusal), unless the user named it.
+- **Tests:** `tests/aBigGameGetsItsKitAndMap.test.ts` (8, uses the real #2481 request and step 1). Reversions proven: marker check removed → 3 failed; guardrail disabled → 1 failed. `br1958Prevention` capability assertion updated to the new wording.
+- **Watch on the next big game build:** `FAST_LANE_SKIPPED_GAME` must not appear with "not a game the kit serves"; the kit seed line should list `generate_athree_map`; the roadmap note must not call the map infrastructure.
+
+## 2026-11-21 — every planner is told what the platform's builder has (admin: "Planner ko … sab batao")
+
+- **Class (from failedbr #2481):** a planner decides an app's steps and what is "beyond a normal build" without knowing what is ready. The game half was fixed above; this covers apps and games together.
+- **Built:** `src/server/AgentV3/plannerCapabilities.ts` — `platformCapabilityDigest()`, generated from the tool catalog itself (167 recipes, one line each from the recipe's own description; docs/ignore-file housekeeping left out; AI product names scrubbed). ~22 KB, computed once.
+- **Wired into all four scope-deciding planner calls** in `routes/agentv3.ts`: the mega-app roadmap, plan mode, the Software Project Mode planner and its replan. The roadmap call's recorded prompt size counts it.
+- **Tests:** `tests/thePlannerKnowsWhatThePlatformHas.test.ts` (7): catalog census (a new recipe reaches the planner by itself), apps + games coverage, White-Label guard, size cap, and a route census (no planner system prompt used without the digest). Reversions proven: digest removed from the project planner → 2 failed; vendor scrub removed → 1 failed.
+- **Honest cost:** about 5–6 thousand extra input tokens on each planner call (one call per big build, plus plan mode when the user asks for a plan). Watch the next big build's roadmap for slower or lower-quality planning on the weak tier; if seen, the digest can be narrowed to the request's domain.
+## 2026-11-21 — Autopsy failedbr #2481: a GTA request delivered as a purple box (Q-3224)
+
+Admin: *"gta jaisa bada game bnane ko bola, to yeh ghumne wala dabba bana diya!"* Report #2481 ("succeeded", 4.1 min, Weak/Surplus):
+- The mega-roadmap split the request; step 1's brief was "a flat terrain (like a square plane) … a simple player character (can be a
+  cube or capsule). Use OrbitControls". `gameKitPlan` and `gameTurnHandoff` re-read the DOMAIN of the milestone text — REAL ESTATE —
+  though `gameTurnRequest` had marked it as a game's. FAST_LANE_SKIPPED_GAME: "not a game the kit serves". Fix: `isAGameTurn`.
+- The planner called a big map, traffic and pedestrians "backend infrastructure … browser mein nahi ho sakti". Fix: planner rule 9,
+  `GAME_KIT_CLAUSE` on every game step, a game's own needsInfra is not a ceiling (only multiplayer), the false note dropped.
+- "Succeeded" with no playtest: the R3F scene (`@react-three/fiber`, `<Canvas>`, `useFrame`) matched neither half of
+  `isCanvasGameProject`. Fix: R3F counts when the user asked for a game; the skip reason reads the same condition.
+- Seen, not fixed here: the console check probed ports 3000/5000/8080 the app does not use and reported 502s (~30 s of struggle);
+  the summary came in English for a Hinglish prompt.
+Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 2026-11-21: open the PR, do not merge.
+
+## 2026-11-21 — #4414 and #4415 combined into one (admin: "dono ko milakar ek kar do")
+
+- Two sessions fixed failedbr #2481 in parallel (8 minutes apart). #4415's branch is merged into #4414's; one implementation of each thing is kept.
+- **One game-turn reader:** `turnIsGame` / `GAME_MILESTONE_LINE` (#4415's `isAGameTurn` / `GAME_MILESTONE_MARKER` renamed onto it; its three readers plus `wantsSceneDetail`, the sibling #4415 had not reached).
+- **Kept from #4415:** the R3F game is playtested when the user asked for a game (the "succeeded with nothing played" root cause, which #4414 had missed); a game's own `needsInfra` is not a ceiling; the false "needs backend" note is dropped; planner rule 9; queue rows Q-3224/3225/3226.
+- **Reconciled:** #4414 refused a whole roadmap that named a second 3D engine; #4415 kept the roadmap and appended a kit clause that did not mention the engine (two opposite instructions in one step). Now the roadmap is kept and the clause itself overrules the engine. The clause is said only for a 3D kit game (`game3D`, from the caller's kit plan) — #4415 said "big map, follow camera" to every game, a Ludo board included — and never when the user named the engine. `megaRoadmap.ts` no longer reads the domain itself; the caller's kit decision is the one answer.
+- Q-3225 and Q-3226 stay OPEN in the queue.

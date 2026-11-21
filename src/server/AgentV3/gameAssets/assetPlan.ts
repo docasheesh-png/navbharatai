@@ -166,6 +166,9 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   wagon: ['wagon', 'wagons', 'cart', 'carts', 'wooden cart'], 'wooden fence': ['wooden fence', 'wood fence', 'lakdi ki baad', 'लकड़ी की बाड़'],
   'stone stairs': ['stone stairs', 'stone steps', 'outdoor stairs'], chimney: ['chimney', 'chimneys', 'चिमनी'], vine: ['vine', 'vines', 'creeper', 'बेल'],
 };
+/** The kit's own moving subjects (it builds them walking/running in code). Library-animated subjects are added per catalogue. */
+const MOVING_SUBJECTS: readonly string[] = ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
+  'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer', 'farm cow', 'farm horse', 'zebra'];
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
   walk: ['walk', 'walking', 'चलता', 'चलती', 'चलते', 'चलना', 'चलने', 'caminando'],
@@ -177,12 +180,44 @@ function normalized(text: string): string {
 function mentioned(text: string, phrase: string): boolean {
   return (` ${text} `).includes(` ${normalized(phrase)} `);
 }
+/**
+ * THE LONGEST NAME WINS (2026-11-21, library batch 12). "a pickup truck" also matched "truck", "a small house" also
+ * "house", "a young woman" also "woman": every new compound subject needed a hand-written exclusion on its generic subject
+ * (the table in gameAssetRequirements), and batch 12 added 40 subjects the table did not know. Now a word that sits inside
+ * a LONGER known name in the same clause is not matched on its own — "pickup truck" is the pickup truck, not a truck too.
+ * Built ONCE per catalogue (a first version rebuilt it on every call and made every prompt 12–17x slower — caught by
+ * sixModelsAreNotProvedOneByOne in CI), from each name's own contiguous word runs, so it never compares names pairwise.
+ */
+interface Vocabulary { subjects: string[]; wordsOf(subject: string): readonly string[]; longerThan(word: string): readonly string[] }
+const vocabularies = new WeakMap<readonly ReviewedAsset[], Vocabulary>();
+let emptyVocabulary: Vocabulary | undefined;
+export function vocabularyFor(catalogue: readonly ReviewedAsset[]): Vocabulary {
+  const hit = catalogue.length ? vocabularies.get(catalogue) : emptyVocabulary;
+  if (hit) return hit;
+  const served = catalogue.slice(0, CATALOGUE_MAX_ENTRIES);
+  const subjects = [...new Set([...Object.keys(ALIASES), ...served.flatMap(c => c.subjects.slice(0, 16))])];
+  const words = new Map(subjects.map(s => [s, (ALIASES[s] ?? [s]).map(normalized)]));
+  const phrases = new Set([...words.values()].flat());
+  const longer = new Map<string, string[]>();
+  for (const p of phrases) {
+    const parts = p.split(' ');
+    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j <= parts.length; j++) {
+      const run = parts.slice(i, j).join(' ');
+      if (run !== p && phrases.has(run)) longer.set(run, [...(longer.get(run) ?? []), p]);
+    }
+  }
+  const vocabulary: Vocabulary = { subjects, wordsOf: s => words.get(s) ?? [normalized(s)], longerThan: w => longer.get(w) ?? [] };
+  if (catalogue.length) vocabularies.set(catalogue, vocabulary); else emptyVocabulary = vocabulary;
+  return vocabulary;
+}
+
 /** Bounded deterministic vocabulary, with conservative clause rejection rather than guessed negation scope. */
 export function gameAssetRequirements(prompt: string, catalogue: readonly ReviewedAsset[]): AssetRequirement[] {
   const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
     .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
-  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, CATALOGUE_MAX_ENTRIES).flatMap(c => c.subjects.slice(0, 16))])];
+  const served = catalogue.slice(0, CATALOGUE_MAX_ENTRIES);
+  const { subjects, wordsOf, longerThan } = vocabularyFor(catalogue);
   const matching = (subject: string, clause: string) => {
     let scoped = ` ${clause} `;
     const excludedPhrases: Record<string, readonly string[]> = {
@@ -219,15 +254,25 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
 
     if (subject === 'train') for (const station of ALIASES['railway station']) scoped = scoped.replaceAll(` ${normalized(station)} `, ' ');
     if (subject === 'bird' && ['eagle', 'parrot'].some(s => ALIASES[s].some(w => mentioned(clause, w)))) return false;
-    return (ALIASES[subject] ?? [subject]).some(word => mentioned(scoped.trim(), word));
+    const own = wordsOf(subject);
+    return own.some(word => {
+      if (!mentioned(scoped.trim(), word)) return false; // the cheap test first: most words are simply absent
+      let text = scoped;
+      for (const p of longerThan(word)) if (!own.includes(p)) text = text.replaceAll(` ${p} `, ' ');
+      return mentioned(text.trim(), word);
+    });
   };
+  // Which subjects MOVE. The role is the GAME's need, not the library's stock: "a walking dog" asks for walk even though the
+  // library dog stands still, so no static dog is used and the code-built dog walks (assetIntegration.test). The hand list
+  // is the kit's own moving subjects; every subject a library model animates joins it from the catalogue — the 12 people
+  // of batch 12 were missing from the hand list, so "a running teenager" asked for no run at all.
+  const plays = (subject: string, role: string) => served.some(c => c.subjects.includes(subject) && c.animations.includes(c.animationRoles?.[role] ?? role));
+  const flies = (subject: string) => ['bird', 'eagle', 'parrot'].includes(subject) || plays(subject, 'fly');
+  const moves = (subject: string) => MOVING_SUBJECTS.includes(subject) || plays(subject, 'walk') || plays(subject, 'run');
   return subjects.filter(subject => clauses.some(c => matching(subject, c))).slice(0, 6).map(subject => {
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
-    const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
-        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer', 'farm cow', 'farm horse', 'zebra'].includes(subject)
-        ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
+    const animation = flies(subject) && motion('fly') ? 'fly' : moves(subject) ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });
 }

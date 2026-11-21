@@ -161,6 +161,43 @@ export function stripUndefined<T extends Record<string, unknown>>(obj: T): Parti
   return out;
 }
 
+/**
+ * Query `server_logs`, newest first. Returns at most `limit` rows (default LOG_DEFAULT_LIMIT).
+ *
+ * Unfiltered: `orderBy('ts', 'desc').limit(n)` — exactly `n` reads. Filtered: the newest lines are read
+ * a page at a time and matched in memory, stopping at `n` matches or LOG_FILTER_SCAN_BUDGET reads.
+ * Equality filters are NOT sent to Firestore with the `orderBy`, because that pair needs a composite
+ * index this project does not have — the 2026-08 version of this method threw on it and showed "no logs
+ * match" for every filtered search. See the header for why the old index-free helper was replaced.
+ * Exported (with the db as a parameter) so the read count is tested against a fake. Never throws.
+ */
+export async function queryServerLogs(
+  db: Pick<admin.firestore.Firestore, 'collection'>,
+  { level, event, workspaceId, since, limit }: LogQuery = {},
+): Promise<LogPage> {
+  const want = logLimit(limit);
+  try {
+    const col = db.collection('server_logs');
+    const base = (typeof since === 'number' && Number.isFinite(since) ? col.where('ts', '>=', since) : col)
+      .orderBy('ts', 'desc');
+    const filtered = !!(level || event || workspaceId);
+    if (!filtered) {
+      const snap = await base.limit(want).get();
+      return { entries: snap.docs.map((d) => toLogEntry(d.data())), scanned: snap.docs.length, complete: true };
+    }
+    const fetchPage: LogPageFetcher<admin.firestore.QueryDocumentSnapshot> = async (size, after) => {
+      const snap = await (after ? base.startAfter(after) : base).limit(size).get();
+      return { rows: snap.docs.map((d) => toLogEntry(d.data())), next: snap.docs.length ? snap.docs[snap.docs.length - 1] : null };
+    };
+    const r = await collectNewestMatching(fetchPage, (row) => logMatches(row, { level, event, workspaceId }), want, LOG_FILTER_SCAN_BUDGET);
+    return { entries: r.rows as LogEntry[], scanned: r.scanned, complete: r.complete };
+  } catch (e) {
+    // Logged, not swallowed: an empty list from a failed read is exactly what hid the 2026-08 index bug.
+    console.warn('[logStore] query failed:', String((e as Error)?.message ?? e).slice(0, 200));
+    return { entries: [], scanned: 0, complete: false };
+  }
+}
+
 class LogStore {
   private db: admin.firestore.Firestore | null = null;
 
@@ -200,39 +237,11 @@ class LogStore {
     }
   }
 
-  /**
-   * Query the durable log, newest first. Returns at most `limit` rows (default LOG_DEFAULT_LIMIT).
-   *
-   * Unfiltered: `orderBy('ts', 'desc').limit(n)` — exactly `n` reads. Filtered: the newest lines are read
-   * a page at a time and matched in memory, stopping at `n` matches or LOG_FILTER_SCAN_BUDGET reads.
-   * Equality filters are NOT sent to Firestore with the `orderBy`, because that pair needs a composite
-   * index this project does not have — the 2026-08 version of this method threw on it and showed "no logs
-   * match" for every filtered search. See the header for why the old index-free helper was replaced.
-   */
-  async queryPage({ level, event, workspaceId, since, limit }: LogQuery = {}): Promise<LogPage> {
+  /** Query the durable log, newest first — see `queryServerLogs`. Never throws. */
+  async queryPage(q: LogQuery = {}): Promise<LogPage> {
     const db = this.getDb();
     if (!db) return { entries: [], scanned: 0, complete: true };
-    const want = logLimit(limit);
-    try {
-      const col = db.collection('server_logs');
-      const base = (typeof since === 'number' && Number.isFinite(since) ? col.where('ts', '>=', since) : col)
-        .orderBy('ts', 'desc');
-      const filtered = !!(level || event || workspaceId);
-      if (!filtered) {
-        const snap = await base.limit(want).get();
-        return { entries: snap.docs.map((d) => toLogEntry(d.data())), scanned: snap.docs.length, complete: true };
-      }
-      const fetchPage: LogPageFetcher<admin.firestore.QueryDocumentSnapshot> = async (size, after) => {
-        const snap = await (after ? base.startAfter(after) : base).limit(size).get();
-        return { rows: snap.docs.map((d) => toLogEntry(d.data())), next: snap.docs.length ? snap.docs[snap.docs.length - 1] : null };
-      };
-      const r = await collectNewestMatching(fetchPage, (row) => logMatches(row, { level, event, workspaceId }), want, LOG_FILTER_SCAN_BUDGET);
-      return { entries: r.rows as LogEntry[], scanned: r.scanned, complete: r.complete };
-    } catch (e) {
-      // Logged, not swallowed: an empty list from a failed read is exactly what hid the 2026-08 index bug.
-      console.warn('[logStore] query failed:', String((e as Error)?.message ?? e).slice(0, 200));
-      return { entries: [], scanned: 0, complete: false };
-    }
+    return queryServerLogs(db, q);
   }
 
   /** `queryPage` without the read accounting — the rows only. */

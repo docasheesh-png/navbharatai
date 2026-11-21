@@ -87,7 +87,7 @@ import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, dele
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentBuildReports } from '../AgentV3/DiagnosticsStore';
 import { buildCostRow, summarizeCosts, costTrend, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../lib/buildCostLedger';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
-import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt, walletsCreatedOn } from '../lib/adminUserActivity';
+import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
 import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
 import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
@@ -120,7 +120,7 @@ import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
 import { summariseUsage, marginInr, NOT_A_PROVIDER } from '../lib/usageLedger';
-import { platformMarginWindow } from '../lib/platformMargin';
+import { platformMarginWindow, windowStartDate } from '../lib/platformMargin';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
@@ -287,6 +287,10 @@ import {
 
 /** The window the Business panel's platform margin covers (Q-114). */
 const PLATFORM_MARGIN_DAYS = 30;
+/** The analytics page's chat-usage and purchase window — the platform margin's window, so the tiles agree. */
+const ANALYTICS_WINDOW_DAYS = PLATFORM_MARGIN_DAYS;
+/** The most chat usage rows one analytics load reads; past it the payload says `usageCapped`. */
+const ANALYTICS_USAGE_ROW_CAP = 20_000;
 
 // ── P-SEC.3 — Admin TOTP MFA ───────────────────────────────────────────────
 // Second factor for admin-panel access. The active secret resolves from either an
@@ -1827,25 +1831,46 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/analytics', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      // Only the fields this page reads (adminReadFields.ts): a wallet carries a 500-entry ledger, and
-      // reading every one in full moved hundreds of KB per user through this instance (audit 2026-10-11).
-      const walletSnap = await db.collection('user_token_wallets').select(...WALLET_SUMMARY_FIELDS).get();
-      const wallets = walletSnap.docs.map((d: any) => d.data());
-
-      const logsSnap = await db.collection('ai_usage_logs').select(...USAGE_LOG_FIELDS).get();
+      // 🔴 NO WHOLE-COLLECTION READ ON THIS PAGE (Firestore bill audit, 2026-11-21). Every load used to read
+      // every wallet (3,556), every chat usage log ever written (14,835) and every payment (1,790) — ~20,000
+      // documents to draw a dozen tiles, growing with every user and every chat turn. Now:
+      //   • totals that span all time are AGGREGATIONS (count / sum), billed per 1,000 index entries;
+      //   • the top-10 wallets are an ordered `limit(10)`;
+      //   • chat usage and purchases are read for the last ANALYTICS_WINDOW_DAYS only (the window the
+      //     platform margin already used), capped, and the payload says so (`window`).
+      // `tests/adminAnalyticsReadBudget.test.ts` fails if a whole-collection read comes back.
+      const nowMs = Date.now();
+      const today2 = new Date(nowMs).toISOString().slice(0, 10);
+      // Midnight UTC of the window's first day — the SAME first day platformMarginWindow filters on.
+      const windowStartMs = Date.parse(`${windowStartDate(nowMs, ANALYTICS_WINDOW_DAYS)}T00:00:00.000Z`);
+      const windowStartIso = new Date(windowStartMs).toISOString();
+      const wallets = db.collection('user_token_wallets');
+      const txCol = db.collection('payment_transactions');
+      const [userCountAgg, newTodayAgg, topWalletSnap, logsSnap, revenueAgg, txIsoSnap, txMsSnap] = await Promise.all([
+        wallets.count().get(),
+        // `walletsCreatedOn` counts ISO `createdAt` strings that start with today's date — this range is
+        // exactly that set, counted by the index instead of by reading every wallet.
+        wallets.where('createdAt', '>=', today2).where('createdAt', '<', `${today2}\uffff`).count().get(),
+        // Only the fields this page reads (adminReadFields.ts), never the 500-entry ledgers.
+        wallets.orderBy('totalTokensUsed', 'desc').limit(10).select(...WALLET_SUMMARY_FIELDS).get(),
+        // Every writer stores `createdAt` as an ISO string, so a string range is the whole window.
+        db.collection('ai_usage_logs').where('createdAt', '>=', windowStartIso)
+          .orderBy('createdAt', 'desc').limit(ANALYTICS_USAGE_ROW_CAP).select(...USAGE_LOG_FIELDS).get(),
+        txCol.where('paymentStatus', '==', 'SUCCESS').aggregate({ total: AggregateField.sum('amountPaid') }).get(),
+        // Orders carry `createdAt` as an ISO string OR epoch ms (both exist — see revenueToday), and a range
+        // filter matches one type only, so the window is read in both spellings.
+        txCol.where('createdAt', '>=', windowStartIso).get(),
+        txCol.where('createdAt', '>=', windowStartMs).get(),
+      ]);
       const logs = logsSnap.docs.map((d: any) => d.data());
+      const transactions = [...txIsoSnap.docs, ...txMsSnap.docs].map((d: any) => d.data());
+      const usageRowsCapped = logsSnap.docs.length >= ANALYTICS_USAGE_ROW_CAP;
 
-      const txRef = collection(db, 'payment_transactions');
-      const txSnap = await getDocs(txRef);
-      const transactions = txSnap.docs.map((d: any) => d.data());
-
-      const totalUsers = wallets.length;
-      let totalRevenue = 0;
-      transactions.forEach((tx: any) => {
-        if (tx.paymentStatus === 'SUCCESS') {
-          totalRevenue += tx.amountPaid || 0;
-        }
-      });
+      const totalUsers = Number(userCountAgg.data().count) || 0;
+      // All-time, the same rule as before (SUCCESS rows, `amountPaid`), now summed by the index.
+      const totalRevenue = Number(revenueAgg.data().total) || 0;
+      // Revenue in the SAME window as the cost below, so the profit is not all-time money minus 30 days of cost.
+      const windowRevenue = transactions.reduce((sum: number, tx: any) => sum + (tx.paymentStatus === 'SUCCESS' ? Number(tx.amountPaid) || 0 : 0), 0);
 
       // WHAT THE AI REALLY COST (2026-09-12). This used to be
       // `totalProviderCost += log.estimated_provider_cost || 0`, and the ONE line in the codebase that
@@ -1866,7 +1891,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         assistantSpendStore.summary(PLATFORM_MARGIN_DAYS + 1),
       ]);
       const platformMargin = platformMarginWindow({
-        nowMs: Date.now(), days: PLATFORM_MARGIN_DAYS, transactions, chatLogs: logs,
+        nowMs, days: PLATFORM_MARGIN_DAYS, transactions, chatLogs: logs,
         priceUsage: (provider, model, u) => usageCostUsd(u, realRateFor(provider, model)),
         buildDays: buildCostDays, assistantDays: assistantSpend.days, usdToInr,
       });
@@ -1908,7 +1933,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // `total_output_tokens_used` / `total_money_spent` — fields written once, as 0, at wallet
       // creation and never incremented. The live figures are `totalTokensUsed` / `totalMoneySpent`,
       // so every user showed 0 tokens and ₹0 here. One reader, both spellings.
-      const expensiveUsers = [...wallets]
+      // The ten highest `totalTokensUsed`, ordered by Firestore. The legacy spelling is written once as 0 and
+      // never incremented (above), so it cannot outrank the live field; `lifetimeTokensUsed` still reads both.
+      const expensiveUsers = topWalletSnap.docs.map((d: any) => d.data())
         .sort((a: any, b: any) => lifetimeTokensUsed(b) - lifetimeTokensUsed(a))
         .slice(0, 10)
         .map((w: any) => ({
@@ -1922,7 +1949,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         }));
 
       // New stats additions
-      const today2 = new Date().toISOString().slice(0, 10);
       const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const todayHits = serverStats.dailyHits.get(today2) || 0;
       // null when this process did not run all of yesterday — never a zero it never counted (wholeDayHits).
@@ -1930,7 +1956,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
       // New users today (wallets created today)
       // By creation only — a wallet written today is not a person who joined today (walletsCreatedOn).
-      const newUsersToday = walletsCreatedOn(wallets as Array<{ createdAt?: unknown }>, today2);
+      const newUsersToday = Number(newTodayAgg.data().count) || 0;
 
       // Active users last 24h (from usage logs)
       const cutoff24h = new Date(Date.now() - 86400000).toISOString();
@@ -2007,7 +2033,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         measuredCalls: usage.measuredCalls,
         pricedCalls: usage.pricedCalls,
         unpricedCalls: usage.unpricedCalls,
-        estimatedProfit: marginInr(totalRevenue, totalProviderCost, usage.complete).valueInr,
+        estimatedProfit: marginInr(windowRevenue, totalProviderCost, usage.complete).valueInr,
+        // WHAT THE WINDOWED NUMBERS COVER. Chat usage (tokens, cost, rankings, cost/request), token purchases,
+        // recent purchases and the profit above are the last `days`; totalUsers / totalRevenue are all-time.
+        // `usageCapped` ⇒ more than `usageRowCap` chat turns fell in the window and only the newest were read.
+        window: { days: ANALYTICS_WINDOW_DAYS, usageRows: logs.length, usageRowCap: ANALYTICS_USAGE_ROW_CAP, usageCapped: usageRowsCapped },
         failedRequests: serverStats.failedLogins,
         expensiveUsers, modelWise, providerWise, cashfreeStatus, burnRate: totalProviderCost / Math.max(1, logs.length),
         // New fields

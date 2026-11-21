@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { GAME_3D_MODULES, generateGame3D } from '../src/server/lib/Game3DGenerator';
-import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
+import { generateGameRuntime, GAME_RUNTIME_DATA_FILES } from '../src/server/lib/GameRuntimeGenerator';
 import { generateGameController } from '../src/server/lib/GameControllerGenerator';
 import { generateGameSystems } from '../src/server/lib/GameSystemsGenerator';
 import { generateGameVfxAudio } from '../src/server/lib/GameVfxAudioGenerator';
@@ -51,6 +51,8 @@ function emittedModules(files: Record<string, string>): string[] {
     // A test rides with the module it tests and is never chosen through `include` on its own (Q-843: the game
     // shell's controls test comes with Game.ts), so it is not a module this census counts.
     .filter((f) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f))
+    // A declared DATA file (the Tune panel's saved values) rides with its module too — never an include choice.
+    .filter((f) => !GAME_RUNTIME_DATA_FILES.includes(f))
     .map((f) => (f.split('/').pop() ?? '').replace(/\.[^.]+$/, '').toLowerCase())
     .filter(Boolean)
     .sort();

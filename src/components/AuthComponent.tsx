@@ -47,6 +47,7 @@ import { userFacingAuthError, logAuthErrorDetail, type AuthErrorContext } from '
 import { otpFailureCategory, otpUserMessage } from '../lib/otpFailure';
 import { otpFailureReport, otpSurface, sendOtpReport, type OtpStage } from '../lib/otpReport';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy, authErrorDetail, shouldOfferAppleSignIn } from './socialSignInPolicy';
+import { fetchOtpLoginOffered, OTP_LOGIN_SUSPENDED_CODE } from '../lib/signInOptions';
 
 /**
  * Force-logout the old session BEFORE a new login — WEB ONLY, and never let it block the sign-in.
@@ -208,6 +209,18 @@ function captureGithubToken(result: UserCredential): void {
 
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  // Is mobile-OTP SIGN-IN offered right now? The server decides (otpLoginSwitch.ts, admin 2026-11-21) and
+  // the tab is hidden until it says yes — so a suspended method is never offered, not even for a moment.
+  const [otpLoginOffered, setOtpLoginOffered] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void fetchOtpLoginOffered(fetch).then((offered) => {
+      if (!live) return;
+      setOtpLoginOffered(offered);
+      if (!offered) setAuthMethod('email');
+    });
+    return () => { live = false; };
+  }, []);
   // The one-time referral box. `offerReferralBox` is decided ONCE on mount and then marked as
   // offered, so it cannot reappear on a re-render, a failed sign-in attempt or the next launch.
   const [referralCodeInput, setReferralCodeInput] = useState('');
@@ -383,6 +396,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       });
 
       const data = await res.json();
+      if (data?.code === OTP_LOGIN_SUSPENDED_CODE) {
+        // Suspended after this screen opened: stop offering it, and say which ways in still work.
+        setOtpLoginOffered(false);
+        setAuthMethod('email');
+      }
       if (!res.ok || !data.success) {
         // Our OWN server's sentence (a cooldown, an hourly cap, "this number already has an account") —
         // written for the person, so it is shown as-is rather than replaced by the generic line below.
@@ -1031,7 +1049,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             </p>
           </div>
 
-          {isLogin && (
+          {isLogin && otpLoginOffered && (
             <div className="flex bg-surface p-1 rounded-2xl border border-line">
               <button
                 type="button"

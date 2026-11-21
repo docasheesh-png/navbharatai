@@ -68,6 +68,7 @@ import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { OtpHealthCard } from './admin/OtpHealthCard';
+import { OtpLoginSwitchCard } from './admin/OtpLoginSwitchCard';
 import { AppCheckCard } from './admin/AppCheckCard';
 import { PlatformRatingsCard } from './admin/PlatformRatingsCard';
 import { AdminAuditLogPanel } from './admin/AdminAuditLogPanel';
@@ -5721,6 +5722,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               {/* MOBILE OTP HEALTH (admin 2026-09-26): where a failed OTP's real reason can be read. */}
+              <OtpLoginSwitchCard adminToken={adminToken} />
               <OtpHealthCard adminToken={adminToken} />
               {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
                   at every link — which one is broken, and a real test send to prove the chain. */}

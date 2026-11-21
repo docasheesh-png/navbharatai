@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { registerAuthRoutes } from '../src/server/routes/auth';
+import { otpLoginSwitch } from '../src/server/lib/otpLoginSwitch';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 // SEC (input validation, 2026-07-19) — the send-OTP gateway used to check `phone` for truthiness
@@ -14,6 +15,10 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 describe('auth /api/auth/send-otp — input type validation', () => {
   const routes = captureRoutes(registerAuthRoutes);
   const handler = () => routes.get('POST /api/auth/send-otp')!;
+  // Validation of the sign-in OTP, which runs whenever OTP sign-in is ON; it is suspended by default since
+  // 2026-11-21 (otpLoginSwitch.ts), so the switch is on here explicitly.
+  beforeEach(() => { vi.spyOn(otpLoginSwitch, 'read').mockResolvedValue({ suspended: false, updatedAt: null }); });
+  afterEach(() => { vi.restoreAllMocks(); });
 
   it('registers the endpoint', () => {
     expect(routes.has('POST /api/auth/send-otp')).toBe(true);

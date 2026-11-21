@@ -27,6 +27,7 @@ import { Capacitor } from '@capacitor/core';
 import { RecaptchaVerifier, linkWithCredential, type Auth } from 'firebase/auth';
 import { linkWithPhoneNumber, PhoneAuthProvider } from '../lib/firebaseAuthRuntime';
 import { normalizePhone } from '../lib/phoneNumber';
+import { fetchOtpLoginOffered } from '../lib/signInOptions';
 import { authJsonHeaders } from '../lib/authHeaders';
 import { otpFailureCategory, otpUserMessage } from '../lib/otpFailure';
 import { otpFailureReport, otpSurface, sendOtpReport, type OtpStage } from '../lib/otpReport';
@@ -70,6 +71,14 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [stage, setStage] = useState<Stage>('enter');
+  // Asked only when the number turns out to be taken: is "sign in with this number" a real way in right now?
+  const [otpLoginOffered, setOtpLoginOffered] = useState(false);
+  useEffect(() => {
+    if (stage !== 'taken') return;
+    let live = true;
+    void fetchOtpLoginOffered(fetch).then((offered) => { if (live) setOtpLoginOffered(offered); });
+    return () => { live = false; };
+  }, [stage]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const recaptchaRef = useRef<HTMLDivElement | null>(null);
@@ -218,13 +227,14 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
         {stage === 'taken' ? (
           <div className="space-y-3">
             <p className="text-[12px] text-warn leading-relaxed">{error}</p>
-            {/* The door, not a dead end — this is the whole reason the refusal is worth showing. */}
-            <button
+            {/* The door, not a dead end — this is the whole reason the refusal is worth showing. Offered only
+                while mobile-OTP sign-in is on (otpLoginSwitch.ts); while it is suspended that door is shut. */}
+            {otpLoginOffered && <button
               onClick={() => { onSignInInstead(normalizePhone(phone) ?? phone); onClose(); }}
               className="w-full text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-success hover:text-ink hover:bg-emerald-600/30"
             >
               Sign in with this number instead
-            </button>
+            </button>}
             <button onClick={() => { setStage('enter'); setError(''); }} className="w-full text-[11px] text-faint hover:text-muted">
               Use a different number
             </button>

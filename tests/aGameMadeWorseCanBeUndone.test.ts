@@ -11,7 +11,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { gameMeasureFromIssues, gameGotWorse, versionBeforeTurn, gameUndoMessage, UNPLAYABLE } from '../src/server/AgentV3/gameRegression';
 import { HARD_DEFECTS, gameAutoRepairEnabled } from '../src/server/AgentV3/gameRepair';
 import { buildFindingSuggestions, APP_FINDINGS_WITHOUT_AN_OFFER } from '../src/server/AgentV3/buildFindingSuggestions';
-import { GameUndoCard, gameUndoOffer } from '../src/components/agentv3/GameUndoCard';
+import { gameUndoOffer } from '../src/components/agentv3/gameUndo';
+import { UserActionTray } from '../src/components/agentv3/UserActionTray';
+import { mergeLiveActions, GAME_UNDO_TITLE } from '../src/components/agentv3/userActionView';
 
 const report = (score: number | null, defects: string[] = [], code = 'GAME_PLAYTEST_ISSUES') => [
   { code, message: score === null ? 'The game was played.' : `Game Quality Score ${score}/100 (Runs 100 · Controls 80) — played in a real browser.` },
@@ -75,20 +77,24 @@ describe('🎮 the one-tap Go back', () => {
     expect(gameUndoOffer(undefined)).toBeNull();
   });
 
-  it('shows the sentence, a Go back button and a way to keep the new version', () => {
-    const html = renderToStaticMarkup(createElement(GameUndoCard, {
-      offer: { versionId: 'v_1_abcde', message: 'This change made your game worse: the game screen is blank.' },
-      workspaceId: 'ws1', onRestored: () => undefined, onDismiss: () => undefined,
+  it('it is a row in the ❗️ list (no card of its own): the sentence, Go back, and Keep this version', () => {
+    const actions = mergeLiveActions([], { gameUndo: { key: 'b1', versionId: 'v_1_abcde', message: 'This change made your game worse: the game screen is blank.' } }, 1);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ title: GAME_UNDO_TITLE, restoreVersionId: 'v_1_abcde', status: 'open', blocking: false });
+    const html = renderToStaticMarkup(createElement(UserActionTray, {
+      actions, busyId: null, onClose: () => undefined, onDone: () => undefined, onNotNeeded: () => undefined,
+      onAsk: () => undefined, onAnswerGate: () => undefined, onRestoreVersion: () => undefined, onKeepVersion: () => undefined,
     }));
     expect(html).toMatch(/This change made your game worse: the game screen is blank\./);
     expect(html).toMatch(/Go back/);
     expect(html).toMatch(/Keep this version/);
+    expect(html).not.toMatch(/Approve/);
   });
 
   it('it restores through the Time Machine\'s own route, which saves the current app first', () => {
-    const card = readFileSync(join(__dirname, '../src/components/agentv3/GameUndoCard.tsx'), 'utf8');
-    expect(card).toMatch(/fetch\('\/api\/agentv3\/restore-version'/);
-    expect(card).toMatch(/versionId: offer\.versionId/);
+    const helper = readFileSync(join(__dirname, '../src/components/agentv3/gameUndo.ts'), 'utf8');
+    expect(helper).toMatch(/fetch\('\/api\/agentv3\/restore-version'/);
+    expect(helper).toMatch(/versionId: input\.versionId/);
     const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
     expect(route).toMatch(/savedBefore = await buildHistoryStore\.save\(historyKey/);   // the existing "save current first"
   });
@@ -110,13 +116,15 @@ describe('🎮 the build route and the screen', () => {
     expect(route).toMatch(/code: 'GAME_GOT_WORSE', message: gameUndoMessage\(worse\), detail: versionId, autoResolved: false/);
   });
 
-  it('the panel shows the card for a finished build carrying the offer', () => {
+  it('the panel puts a finished build\'s offer into the ❗️ list and wires Go back to the restore', () => {
     const panel = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
     expect(panel).toMatch(/gameUndoOffer\(state\.diagnostics/);
-    expect(panel).toMatch(/<GameUndoCard/);
+    expect(panel).toMatch(/const liveAsks = useMemo<LiveAsks>\(\(\) => \(\{\n\s*gameUndo,/);
+    expect(panel).toMatch(/onRestoreVersion=\{\(action\) => \{[\s\S]{0,400}restoreGameVersion\(\{ workspaceId: state\.workspaceId, versionId, userId, email \}\)/);
+    expect(panel).not.toMatch(/GameUndoCard/);   // no separate card (admin: "alag se card dikhaoge, to user paresan ho jayega")
   });
 
-  it('the finding has its home (answered by the card, never a prompt), and the hidden automatic repair stays off', () => {
+  it('the finding has its home (answered by the ❗️ row, never a prompt), and the hidden automatic repair stays off', () => {
     expect(APP_FINDINGS_WITHOUT_AN_OFFER.has('GAME_GOT_WORSE')).toBe(true);
     expect(buildFindingSuggestions([{ code: 'GAME_GOT_WORSE', severity: 'warning', message: 'x' }])).toEqual([]);
     expect(gameAutoRepairEnabled({ AGENTV3_GAME_AUTO_REPAIR: 'on' } as NodeJS.ProcessEnv)).toBe(false);

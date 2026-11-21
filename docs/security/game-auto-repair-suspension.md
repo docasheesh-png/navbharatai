@@ -43,7 +43,7 @@ built WITHOUT re-enabling this path — `gameAutoRepairEnabled()` still returns 
   `BuildHistoryStore` (the Time Machine), and `/api/agentv3/restore-version` saves the current app before restoring.
 - **Every turn on a measured game is compared with the game as it was measured before it** (`gameRegression.ts`). A turn
   that made it worse — a new unplayable defect, or a big score drop below the playable line — records `GAME_GOT_WORSE`
-  with the saved version from just before the turn, and the chat shows a one-tap "Go back" (`GameUndoCard`). Nothing is
+  with the saved version from just before the turn, and the ❗️ button carries a one-tap "Go back" (a row in the ❗️ "What you need to do" list, `gameUndo.ts`). Nothing is
   restored until the user taps.
 
 None of the risks above apply: no repair runs unasked, and no rollback is made from an incomplete snapshot.

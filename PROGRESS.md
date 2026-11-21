@@ -103511,3 +103511,23 @@ its final head and the merge with `main` (#4397) was checked clean. The 122 rows
 IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`; their ledgers stay in the entries above. Rows still open after it:
 the admin-decision rows (Q-3137, Q-3139, Q-3142, Q-3148, Q-3157, Q-3161, Q-3164, Q-3180, Q-3198 and the older ones) and the
 untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only new reports are autopsied).
+
+## 2026-11-21 — The ❗️ button: game "Go back" moves into it, and "Find and fix bugs" finally does something
+
+- **Admin:** "alag se card dikhaoge, to user paresan ho jayega! koi new button nahi, existing ❗️ button ko hi update
+  kar do" — and "❗️ me 'bug fix' popup … us par click karo, kuch bhi nahi hota hai, builder chalta hi nahi hai".
+- **Go back lives in the ❗️ list.** The separate GameUndoCard is gone. A finished build's GAME_GOT_WORSE finding becomes
+  a row in "What you need to do" (`userActionView.mergeLiveActions`, `gameUndo.ts`) with "Go back" (the Time Machine
+  restore, current app saved first) and "Keep this version".
+- **Root cause of the dead bug-fix button:** the build offers the optional deep bug hunt as a gate and waits 30 s,
+  then carries on. `releaseGate` keeps the row open (rightly), but it still offered "Find and fix bugs", which answered
+  a gate nobody was waiting on. The tap did nothing and the row was marked done.
+  **Class:** an approve row whose gate expired offering an answer button.
+- **Fix (the class):** `gateExpired(action, liveGateCallId)`. A row is live only while the running build holds that
+  exact gate.
+  - An expired bug-hunt row's "Find and fix bugs" starts a NEW turn ("Find and fix the bugs in my app.") with
+    `bugHunt: true`. The route passes `preApproved` to `offerBugHunt`, which runs the review without asking again. On
+    an app that did not finish, it says why and charges nothing for it.
+  - Every other expired gate shows no Approve: "The build carried on without this answer" + Dismiss.
+- **Proof:** `tests/theAlertListActuallyDoesIt.test.ts` (9) + the reworked `tests/aGameMadeWorseCanBeUndone.test.ts`.
+  Reversions failed: `gateExpired` always false (2 failed), and the pre-approved branch removed (1 failed).

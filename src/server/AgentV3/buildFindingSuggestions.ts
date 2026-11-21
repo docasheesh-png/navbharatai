@@ -563,7 +563,7 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
   // gameRegression.ts (admin 2026-11-21): this turn made the game worse. Its answer is not a prompt to send but the one-tap
-  // "Go back" card (GameUndoCard) that restores the saved version from just before the turn — a new prompt would build
+  // "Go back" card (the ❗️ list row, gameUndo.ts) that restores the saved version from just before the turn — a new prompt would build
   // on top of the broken game.
   'GAME_GOT_WORSE',
   // userModels.ts: a model the user attached was not added. The message names each file and its exact fix (export as

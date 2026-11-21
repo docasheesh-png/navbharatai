@@ -30,7 +30,8 @@ const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/Preview
 function wakeSuccessBranch(): string {
   const at = surface.indexOf("if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {");
   expect(at, 'the diagnose success branch must exist').toBeGreaterThan(-1);
-  return surface.slice(at, at + 2600);
+  // Bounded by the branch's own `return true;`, not a fixed window that grows stale on every insertion.
+  return surface.slice(at, surface.indexOf('return true;', at) + 12);
 }
 
 describe('a successful wake publishes what it just proved', () => {

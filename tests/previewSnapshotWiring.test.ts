@@ -120,11 +120,11 @@ describe('4. the user is told WHICH version they are looking at', () => {
 
   it('the surface shows it', () => {
     expect(surface).toContain('health?.snapshotServing === true');
-    expect(surface).toContain('{snapshotNote}');
+    expect(surface).toContain('{snapshotNoteAfterWakeFailures(snapshotNote, wakeFailures)}');
   });
 
   it('it is NOT styled as an error — nothing is wrong with their app', () => {
-    const i = surface.indexOf('{snapshotNote}');
+    const i = surface.indexOf('{snapshotNoteAfterWakeFailures(snapshotNote, wakeFailures)}');
     const block = surface.slice(i - 500, i + 100);
     expect(block).not.toContain('text-red');
     expect(block).not.toContain('border-red');

@@ -6,6 +6,7 @@
  * middle of every preview load — each one is a way the class could sneak back.
  */
 import { describe, it, expect } from 'vitest';
+import { chooseLiveFrameSrc } from '../src/components/agentv3/previewWakeIntent';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { shouldShowNotServingSurface, type FramingState } from '../src/components/agentv3/previewFraming';
@@ -136,9 +137,12 @@ describe('the client side of the door', () => {
     // rather than the src expression's exact text. It has since gained a higher-precedence term (the
     // saved copy served while a finished app's machine is deliberately asleep) which changes nothing
     // about the door-vs-stored-url ordering this guards.
-    const src = surface.match(/src=\{[^}]*doorUrl[^}]*\}/)!;
-    expect(src, 'the live iframe must still resolve through the door').not.toBeNull();
-    expect(src[0].indexOf('doorUrl')).toBeLessThan(src[0].indexOf('effectiveUrl'));
+    // Since 2026-11-21 the src is chosen by one pure rule (previewWakeIntent.ts) — executed here, so the
+    // precedence is proven rather than read off an expression's text.
+    expect(surface).toContain("doorHref: doorUrl ? resolveApiHref(doorUrl, window as never) : ''");
+    expect(chooseLiveFrameSrc({ snapshotUrl: '', doorHref: '/door', effectiveUrl: 'https://machine', liveWanted: false }).src).toBe('/door');
+    expect(chooseLiveFrameSrc({ snapshotUrl: '', doorHref: '/door', effectiveUrl: 'https://machine', liveWanted: true }).src).toBe('/door');
+    expect(chooseLiveFrameSrc({ snapshotUrl: '', doorHref: '', effectiveUrl: 'https://machine', liveWanted: false }).src).toBe('https://machine');
   });
 
   it('NATIVE SHELL: the src goes through resolveApiHref — an iframe is a navigation the fetch patch never sees', () => {

@@ -21,6 +21,8 @@ export type PreviewStatus =
   | 'sleeping'        // files exist + a live backend exists, but the sandbox is cold/idle-recycled —
                       //   EXPECTED (E2B pauses when idle); the preview can be rebooted on demand
   | 'crashed'         // a URL was published and the port then went DOWN with an error — should heal
+  | 'idle_snapshot'   // the port was deliberately NOT checked because a current saved copy is being
+                      //   shown (so the idle sweep may pause the machine). NOT "asleep": nobody looked.
   | 'inbrowser_only'  // no live backend configured (E2B off) — the in-browser preview is the truth
   | 'empty';          // no files persisted yet — there is nothing to preview
 
@@ -52,6 +54,11 @@ export interface PreviewHealthSignals {
   lastError: string | null;
   /** True while a boot/heal is actively running right now. */
   booting: boolean;
+  /**
+   * The port check was SKIPPED on purpose because a current saved copy of the finished app is being
+   * shown instead (planPreviewHealthProbe). "Not checked" is not "down": see classifyPreviewHealth.
+   */
+  portSkippedForSavedCopy?: boolean;
 }
 
 export interface PreviewHealth {
@@ -90,6 +97,22 @@ export function classifyPreviewHealth(s: PreviewHealthSignals): PreviewHealth {
       };
     }
     return { status: 'live', canReboot, summary: 'The live preview is up and running.' };
+  }
+  /**
+   * 🔒 NOT CHECKED IS NOT ASLEEP (admin 2026-11-21: "Wake up dabane par kuch second loading, phir
+   * sandbox jagta hi nahi"). When a current saved copy is shown, the route skips the port check on
+   * purpose so the idle sweep can pause an unused machine. This branch used to fall through to
+   * 'sleeping' — so the health check straight after a SUCCESSFUL wake said "sleeping" again, the sleep
+   * banner came back, the frame stayed on the copy, and the watchdog re-woke the machine every three
+   * minutes. We did not look, so we say exactly that: the saved copy is showing and the live server
+   * was not checked.
+   */
+  if (s.livePortUp === null && s.portSkippedForSavedCopy && !s.lastError) {
+    return {
+      status: 'idle_snapshot',
+      canReboot,
+      summary: 'Your finished app is showing from its saved copy. The live server was not checked, so it is not billed while nobody needs it — it comes back when you wake it or send a change.',
+    };
   }
   // Port is down (false) or was never probed (null) — decide sleeping vs crashed.
   // A real error signal means it went down BADLY (crash) → heal. Otherwise it is simply cold/idle-
@@ -144,8 +167,41 @@ export function previewHealthContextLine(health: PreviewHealth): string {
     booting: 'STARTING UP',
     sleeping: 'ASLEEP (saved; reboots on demand)',
     crashed: 'DOWN (needs a reboot/heal)',
+    idle_snapshot: 'SHOWN FROM ITS SAVED COPY (live server resting, not checked)',
     inbrowser_only: 'IN-BROWSER ONLY (no live server here)',
     empty: 'none',
   };
   return `\n\n[Live preview status for this project: ${label[health.status]}. ${health.summary} When asked whether the preview/app is running, answer with THIS real state — never guess.]`;
+}
+
+/**
+ * WHAT THE HEALTH CHECK MAY DO FOR THIS REQUEST (admin 2026-11-21: one Wake up press must truly wake
+ * the preview). PURE.
+ *
+ * Two goals pull against each other, and this is the one place they are reconciled:
+ *  - a finished app with a current saved copy should NOT be probed, because every probe is a command
+ *    inside the sandbox that refreshes its idle clock and keeps a machine billed for nobody;
+ *  - a person who has just pressed Wake up has explicitly asked for the LIVE app. Serving them the copy
+ *    and skipping the check is how a successful wake read as "sleeping" on the very next poll.
+ *
+ * `wantLive` is the client saying the person asked for live. Then the port is checked for real, the
+ * copy is not offered, and the "takes over by itself" stand-in is allowed only where something may
+ * genuinely be starting.
+ */
+export function planPreviewHealthProbe(i: {
+  /** A live backend (E2B) is configured on this deployment. */
+  liveBackend: boolean;
+  /** A saved copy proven CURRENT for this workspace exists (currentSnapshotFor). */
+  hasCurrentCopy: boolean;
+  /** The person explicitly asked for the live app (pressed Wake up / Diagnose and it succeeded). */
+  wantLive: boolean;
+}): { probePort: boolean; offerIdleCopy: boolean; standInAllowed: boolean } {
+  const offerIdleCopy = i.hasCurrentCopy && !i.wantLive;
+  return {
+    probePort: i.liveBackend && !offerIdleCopy,
+    offerIdleCopy,
+    // While the copy is deliberately shown, nothing is starting — the "starting up, takes over by
+    // itself" note would be a promise nobody is keeping. The idle note says what is really happening.
+    standInAllowed: !offerIdleCopy,
+  };
 }

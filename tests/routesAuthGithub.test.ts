@@ -4,8 +4,9 @@
  * Auth routes: OTP cooldown logic (pure in-memory, no Firestore).
  * GitHub routes: 401 when Authorization header is missing.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
+import { otpLoginSwitch } from '../src/server/lib/otpLoginSwitch';
 
 process.env.VITEST = 'true';
 
@@ -17,6 +18,12 @@ async function importAuthRoutes() {
 }
 
 describe('Auth routes — /api/auth/send-otp', () => {
+  // These cases test the sign-in OTP's validation and rate limits, which apply whenever OTP sign-in is ON.
+  // Since 2026-11-21 it is suspended by default (otpLoginSwitch.ts, tested in otpLoginSwitch.test.ts), so
+  // the switch is turned on here explicitly — the limits still have to hold the day it is resumed.
+  beforeEach(() => { vi.spyOn(otpLoginSwitch, 'read').mockResolvedValue({ suspended: false, updatedAt: null }); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it('returns 400 when phone is missing', async () => {
     const register = await importAuthRoutes();
     const routes = captureRoutes(register);

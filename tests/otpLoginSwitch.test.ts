@@ -12,6 +12,8 @@ import {
   OTP_LOGIN_SUSPENDED_CODE as SERVER_CODE, OTP_LOGIN_SUSPENDED_MESSAGE, PHONE_TAKEN_WHILE_SUSPENDED_MESSAGE,
 } from '../src/server/lib/otpLoginSwitch';
 import { fetchOtpLoginOffered, OTP_LOGIN_SUSPENDED_CODE as CLIENT_CODE } from '../src/lib/signInOptions';
+import { registerAuthRoutes } from '../src/server/routes/auth';
+import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
@@ -98,5 +100,20 @@ describe('every door to an OTP sign-in follows the server', () => {
     expect(admin).toMatch(/app\.post\('\/api\/admin\/otp-login', verifyAdminToken/);
     expect(admin).toMatch(/audit\('ADMIN_OTP_LOGIN_SWITCH'/);
     expect(read('src/components/AdminDashboard.tsx')).toMatch(/<OtpLoginSwitchCard adminToken=\{adminToken\} \/>/);
+  });
+});
+
+describe('the real route, with no saved setting (as on deploy)', () => {
+  const routes = captureRoutes(registerAuthRoutes);
+  it('a sign-in OTP is refused with the neutral message; nothing is sent', async () => {
+    const res = mockRes();
+    await routes.get('POST /api/auth/send-otp')!(mockReq({ body: { phone: '+919876500001' }, ip: '10.9.9.1' }), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ success: false, code: SERVER_CODE, message: OTP_LOGIN_SUSPENDED_MESSAGE });
+  });
+  it('the sign-in screen is told OTP sign-in is not offered', async () => {
+    const res = mockRes();
+    await routes.get('GET /api/auth/sign-in-options')!(mockReq({}), res);
+    expect(res.body).toEqual({ otpLogin: false });
   });
 });

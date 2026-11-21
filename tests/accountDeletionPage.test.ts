@@ -98,6 +98,7 @@ describe('the page and the deletion code do not drift apart', () => {
       users: /account record and profile/i,
       user_profiles: /account record and profile/i,
       user_sessions: /saved sessions and preferences/i,
+      email_preferences: /notification emails you unsubscribed from/i,
       user_token_wallets: /wallet, token balance/i,
       user_costs: /usage records/i,
       user_build_history: /build history/i,

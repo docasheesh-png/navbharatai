@@ -42,6 +42,7 @@ import { spaHeadFor, readSpaShell } from './src/server/lib/spaHead';
 import { siteOrigin } from './src/server/lib/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
+import { registerEmailUnsubscribeRoutes } from './src/server/routes/emailUnsubscribe';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
 import { verifyFirebaseToken as verifyFirebaseTokenForIntegrations } from './src/server/lib/authMiddleware';
 import { registerNavigateRoutes } from './src/server/routes/navigate';
@@ -806,6 +807,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // can never be whitelisted. Declared in spaFallback.ts, or the catch-all would swallow it.
   registerCheckoutHandoffRoute(app);
   registerBuildAnalyticsRoutes(app);
+  // Unsubscribe link in notification emails (emailUnsubscribe.ts) — public, verified by an HMAC in the link.
+  registerEmailUnsubscribeRoutes(app);
   // ROADMAP #1 Phase 1 — one-click database (connect the user's OWN Supabase account).
   registerSupabaseIntegrationRoutes(app, verifyFirebaseTokenForIntegrations);
   registerNavigateRoutes(app);

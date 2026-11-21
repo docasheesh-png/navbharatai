@@ -140,6 +140,8 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_profiles', key: 'docId' },
   { collection: 'user_sessions', key: 'docId' },
   { collection: 'user_token_wallets', key: 'docId' },
+  // Which notification emails a person stopped (emailUnsubscribe.ts); doc id = uid, leaves with the account.
+  { collection: 'email_preferences', key: 'docId' },
   { collection: 'user_costs', key: { field: 'userId' } },
   { collection: 'user_build_history', key: { field: 'userId' } },
   // Minimal request replay tombstones: remove with the verified owner, never on a timer that could

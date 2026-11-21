@@ -153,6 +153,7 @@ export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
   { path: '/api/failedbr/oauth/register', limit: '16kb', why: 'bounded OAuth client name and at most five redirect URLs' },
   { path: '/api/failedbr/oauth/token', limit: '16kb', why: 'OAuth code/verifier or refresh token, no report data', form: { parameterLimit: 20 } },
   { path: '/api/failedbr/oauth/revoke', limit: '16kb', why: 'one OAuth token and client authentication', form: { parameterLimit: 20 } },
+  { path: '/api/email/unsubscribe', limit: '2kb', why: 'the unsubscribe page button (action) or a mail client\'s RFC 8058 one-click body (List-Unsubscribe=One-Click); the link itself is in the query', form: { parameterLimit: 5 } },
   { path: '/api/app-ai/ask', limit: '16kb', why: 'public gateway for published apps: one question and a short history (appAi.ts)' },
   { path: '/api/app-ai/image', limit: '16kb', why: 'public gateway for published apps: one picture prompt (appAi.ts)' },
   { path: '/api/app-ai/preview-ask', limit: '16kb', why: 'the owner\'s preview of the same gateway (appAiOwner.ts)' },

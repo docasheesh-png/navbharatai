@@ -103331,3 +103331,19 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — People in the city; cars wait behind the zebra (admin plan: "people walking in the city")
+
+- **Kit file `src/game/three/citypeople.ts`** (`GameCityPeopleGenerator.ts`): people walk the pavement loop around each
+  block and, at corners, sometimes cross to the next block — only on the zebra, kerb to kerb, briskly (≥ 1.4 m/s), only
+  when the cars on that street have red for the WHOLE crossing (sampled every 0.5 s) and no car is near; they stop for the
+  player; `people.bodies` passed to `traffic.update` makes cars stop for them. The crowd is two instanced meshes (body and
+  head) — two draw calls for up to 150 people, for budget phones.
+- **Found by the test, fixed:** the first light check sampled only "now" and "at the far kerb" — a light red at both and
+  green in between let people start across just before green (8,823 frames on the road off red). The whole window is now
+  checked, and the crossing is kerb to kerb so it fits inside one red.
+- **Sibling found while designing it, fixed:** traffic's stop line sat 1 m past the crossing's edge — a waiting car's
+  bumper was ON the zebra stripes. `CITY_ZEBRA` is now the one source of the zebra's size; the stop line (`stopBack`) is
+  1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
+- **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
+  new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.

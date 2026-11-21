@@ -77,7 +77,7 @@ describe('🚦 city traffic', () => {
         // Red light: a vehicle that was before its stop line on amber/red must not be past it now.
         const b = before[k];
         const len = T.edgeLength(plan, c.from, c.to);
-        const stopAt = len - plan.road / 2 - 1 - c.length / 2;
+        const stopAt = len - T.stopBack(plan) - c.length / 2;
         if (b.from === c.from.join() && b.to === c.to.join() && b.along <= stopAt + 0.01 && c.along > stopAt + 0.05 && b.light !== 'green') ranRed++;
       });
       // Never two vehicles inside one crossing (paths would cross).
@@ -148,6 +148,24 @@ describe('🚦 city traffic', () => {
     }
     expect(traffic.cars.some((c: any) => c.from.join() === '1,1' && c.to.join() === '2,1')).toBe(true);   // a queue did form
     expect(blockedBox).toBe(0);
+  });
+
+  it('a car waiting at a crossing waits BEHIND the zebra crossing, never on its stripes', () => {
+    const { traffic, plan } = setup({ count: 25, seed: 13 });
+    let onZebra = 0, waited = 0;
+    for (let f = 0; f < 90 * 30; f++) {
+      traffic.update(1 / 30);
+      for (const c of traffic.cars) {
+        if (c.speed > 0.05) continue;
+        const len = T.edgeLength(plan, c.from, c.to);
+        const front = c.along + c.length / 2;
+        const toNode = len - front;                     // metres from the bumper to the crossing's centre ahead
+        if (toNode > plan.road / 2 && toNode < plan.road / 2 + C.CITY_ZEBRA.gap + C.CITY_ZEBRA.depth) onZebra++;
+        if (toNode < 20) waited++;
+      }
+    }
+    expect(waited).toBeGreaterThan(0);   // cars did wait at lights
+    expect(onZebra).toBe(0);
   });
 
   it('stops for the player standing in its lane, and drives on when the player steps away', () => {

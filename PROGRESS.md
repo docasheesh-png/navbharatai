@@ -103639,3 +103639,25 @@ untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only
 - **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
   - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
   - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.
+
+## 2026-11-21 — Firestore read bill: no whole-collection reads on the polled paths (branch `claude/firestore-read-budget`)
+
+Admin report: `server_logs` was scanned in full about every 5 minutes (8,160 runs and about 4.5 crore reads in 30 days, 71% of the Firestore bill), plus large repeated reads of `ai_usage_logs`, `user_token_wallets`, `payment_transactions`, `admin_notifications` and `provider_cooldowns`.
+
+- **Root cause (server_logs):** `logStore.query()` with no filter went through `listEqNewestFirst(…, [], 'ts', 500, 500)`. On a collection this large the first `.limit(500)` page is always full, and a full page makes that helper read every match in document-id order, up to its 5,000 ceiling. That is about 5,500 reads per call (4.5 crore ÷ 8,160 = 5,514).
+  - Callers: Cloud Scheduler `navbharat-keep-warm` (`*/5`) → `GET /api/warm` → step `firestore:logStore` (`limit: 1`), and the admin Monitor log panel (`/api/admin/logs?limit=40`, every 30 s while it is open).
+  - **Class:** an index-free "newest N" helper built for per-user filters, used on a collection that grows per event.
+  - **Fix:** `queryServerLogs` uses `orderBy('ts','desc').limit(n)` (single-field index, no composite needed). Filtered searches read the newest pages under a 2,000-read budget and return `complete:false` when they stop at it. Default page size is 50.
+  - Test: `tests/serverLogsReadBudget.test.ts`. A fake Firestore counts reads; the warm call now costs 1 read. A reversion test shows the old path costs more than 5,000.
+- **Cleanup:** every log line now carries `expireAt` (a Timestamp) for a Firestore TTL policy. The existing daily purge already reads only expired lines (`where ts < cutoff`), so it is not a full scan.
+- **`/api/admin/analytics`:** it read every wallet, every chat log and every payment on each load. Now:
+  - `count()` for total users, and a ranged `count()` for new users today.
+  - `orderBy(totalTokensUsed).limit(10)` for the top users.
+  - `sum()` for all-time revenue.
+  - A 30-day window (capped at 20,000 rows) for chat usage and purchases. The payload carries `window`, and the windowed tiles say "last 30 days".
+- **provider_cooldowns:** the sync now reads only cooldowns still in force (`where until > now`). It runs every 60 s instead of 20 s, and only while this instance is routing AI calls.
+- **admin_notifications:** the shared newest-50 list is cached per instance for 5 minutes and cleared on save. Per-user read/dismiss state is never cached. The client bell polls every 3 minutes, only while the tab is visible.
+- **OPEN (admin action, rule 6):** the TTL policy is a database setting, and no Claude session can make it. From a gcloud-authenticated terminal:
+  `gcloud firestore fields ttls update expireAt --collection-group=server_logs --enable-ttl --database='(default)' --project=gen-lang-client-0866594388`
+  Use the `--database` value that matches the server's `FIRESTORE_DATABASE_ID`. Until this runs, the opt-in daily purge (`DATA_RETENTION_PURGE_ENABLED`) is the only deletion path.
+- **Not changed, on purpose:** `/api/admin/users`, `/api/admin/purchases` and `/api/admin/audience` still read every wallet and payment when the admin opens them. Their substring search and sort run over the full set, and paging the read would quietly turn "search all users" into "search this page". The real fix is a search index or a denormalised summary, which is a separate decision.

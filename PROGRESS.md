@@ -103681,3 +103681,40 @@ The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans �
 - **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
   - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
   - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.
+
+## 2026-11-21 — failedbr #2481: a big game on a roadmap build gets its kit and its big map
+
+- **Report:** "ek real gta jaise game banao, bahut bade map par, user apne charecter ko joystik se control kare" → a cube on a flat plane. The build said "The game kit was NOT laid down (this request is not a game the kit serves)", and the big-app planner told the user a large map "needs dedicated backend infrastructure".
+- **Root cause 1 (kit skipped):** the request read LARGE, so the mega roadmap wrote step 1 ("a flat terrain (like a square plane) … a cube or capsule"). `gameTurnRequest` marked it as a game's milestone, but `gameKitPlan`, `wantsSceneDetail` and `gameTurnHandoff` each re-read the domain from the whole turn text, and the step's words outvoted the game ("real-estate"). **Class:** a turn's domain decided from the planner's words instead of the user's request. **Fix:** one reader, `turnIsGame` (gameKitSeed.ts), trusts the `GAME_MILESTONE_LINE` that `gameTurnRequest` writes only when the user's own request is a game; every turn reader uses it. Census test: `analyzeRequirementGaps(` appears once in the seed (inside `requestIsGame`).
+- **Root cause 2 (planner unaware of the kit):** `gamePlannerCapability` said only "plan a limited playable slice", so the planner called a big map infrastructure and planned @react-three/fiber + a cube. **Fix:** the capability is built from the same plan the seed runs and tells the whole kit (big library map, city, traffic, people, physics, joystick), that a big map is never an infrastructure ceiling, and that step 1 is playable on the map. `roadmapGuardrail` refuses a roadmap that brings a second 3D engine to a kit game (same class as the native-stack refusal), unless the user named it.
+- **Tests:** `tests/aBigGameGetsItsKitAndMap.test.ts` (8, uses the real #2481 request and step 1). Reversions proven: marker check removed → 3 failed; guardrail disabled → 1 failed. `br1958Prevention` capability assertion updated to the new wording.
+- **Watch on the next big game build:** `FAST_LANE_SKIPPED_GAME` must not appear with "not a game the kit serves"; the kit seed line should list `generate_athree_map`; the roadmap note must not call the map infrastructure.
+
+## 2026-11-21 — every planner is told what the platform's builder has (admin: "Planner ko … sab batao")
+
+- **Class (from failedbr #2481):** a planner decides an app's steps and what is "beyond a normal build" without knowing what is ready. The game half was fixed above; this covers apps and games together.
+- **Built:** `src/server/AgentV3/plannerCapabilities.ts` — `platformCapabilityDigest()`, generated from the tool catalog itself (167 recipes, one line each from the recipe's own description; docs/ignore-file housekeeping left out; AI product names scrubbed). ~22 KB, computed once.
+- **Wired into all four scope-deciding planner calls** in `routes/agentv3.ts`: the mega-app roadmap, plan mode, the Software Project Mode planner and its replan. The roadmap call's recorded prompt size counts it.
+- **Tests:** `tests/thePlannerKnowsWhatThePlatformHas.test.ts` (7): catalog census (a new recipe reaches the planner by itself), apps + games coverage, White-Label guard, size cap, and a route census (no planner system prompt used without the digest). Reversions proven: digest removed from the project planner → 2 failed; vendor scrub removed → 1 failed.
+- **Honest cost:** about 5–6 thousand extra input tokens on each planner call (one call per big build, plus plan mode when the user asks for a plan). Watch the next big build's roadmap for slower or lower-quality planning on the weak tier; if seen, the digest can be narrowed to the request's domain.
+## 2026-11-21 — Autopsy failedbr #2481: a GTA request delivered as a purple box (Q-3224)
+
+Admin: *"gta jaisa bada game bnane ko bola, to yeh ghumne wala dabba bana diya!"* Report #2481 ("succeeded", 4.1 min, Weak/Surplus):
+- The mega-roadmap split the request; step 1's brief was "a flat terrain (like a square plane) … a simple player character (can be a
+  cube or capsule). Use OrbitControls". `gameKitPlan` and `gameTurnHandoff` re-read the DOMAIN of the milestone text — REAL ESTATE —
+  though `gameTurnRequest` had marked it as a game's. FAST_LANE_SKIPPED_GAME: "not a game the kit serves". Fix: `isAGameTurn`.
+- The planner called a big map, traffic and pedestrians "backend infrastructure … browser mein nahi ho sakti". Fix: planner rule 9,
+  `GAME_KIT_CLAUSE` on every game step, a game's own needsInfra is not a ceiling (only multiplayer), the false note dropped.
+- "Succeeded" with no playtest: the R3F scene (`@react-three/fiber`, `<Canvas>`, `useFrame`) matched neither half of
+  `isCanvasGameProject`. Fix: R3F counts when the user asked for a game; the skip reason reads the same condition.
+- Seen, not fixed here: the console check probed ports 3000/5000/8080 the app does not use and reported 502s (~30 s of struggle);
+  the summary came in English for a Hinglish prompt.
+Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 2026-11-21: open the PR, do not merge.
+
+## 2026-11-21 — #4414 and #4415 combined into one (admin: "dono ko milakar ek kar do")
+
+- Two sessions fixed failedbr #2481 in parallel (8 minutes apart). #4415's branch is merged into #4414's; one implementation of each thing is kept.
+- **One game-turn reader:** `turnIsGame` / `GAME_MILESTONE_LINE` (#4415's `isAGameTurn` / `GAME_MILESTONE_MARKER` renamed onto it; its three readers plus `wantsSceneDetail`, the sibling #4415 had not reached).
+- **Kept from #4415:** the R3F game is playtested when the user asked for a game (the "succeeded with nothing played" root cause, which #4414 had missed); a game's own `needsInfra` is not a ceiling; the false "needs backend" note is dropped; planner rule 9; queue rows Q-3224/3225/3226.
+- **Reconciled:** #4414 refused a whole roadmap that named a second 3D engine; #4415 kept the roadmap and appended a kit clause that did not mention the engine (two opposite instructions in one step). Now the roadmap is kept and the clause itself overrules the engine. The clause is said only for a 3D kit game (`game3D`, from the caller's kit plan) — #4415 said "big map, follow camera" to every game, a Ludo board included — and never when the user named the engine. `megaRoadmap.ts` no longer reads the domain itself; the caller's kit decision is the one answer.
+- Q-3225 and Q-3226 stay OPEN in the queue.

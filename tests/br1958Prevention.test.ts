@@ -105,7 +105,7 @@ describe('BR1958 F3: the active game milestone and available capabilities own pr
     expect(gameKitPlan(gameTurnRequest('Build a car game for Nokia c 2-01', 'Create a driving game'))).not.toContain('generate_game_3d');
   });
   it('planner is told capability is available, not falsely unavailable or already seeded; static/non-games get no React claim', () => {
-    expect(gamePlannerCapability(original, 'vite-react')).toContain('optional Three.js 3D shell');
+    expect(gamePlannerCapability(original, 'vite-react')).toContain('a three.js renderer and camera'); // failedbr #2481: the planner hears the whole kit
     expect(gamePlannerCapability(original, 'vite-react')).not.toContain('already');
     expect(gamePlannerCapability(original, 'static')).toBe(''); expect(gamePlannerCapability('Build a todo app', 'vite-react')).toBe('');
   });

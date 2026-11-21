@@ -79,6 +79,15 @@ export function megaRoadmapSystemPrompt(): string {
     '   absent (or visibly disabled with an honest label) until its own step builds it.',
     '8. The user\'s explicit constraints (a required stack, a forbidden stack, "one single file", "no',
     '   fake responses") bind EVERY step, not just step 1. Repeat each one inside every buildPrompt.',
+    // failedbr #2481 (Q-3224): "ek real gta jaise game banao, bahut bade map par" got step 1 = "a simple player character
+    // (can be a cube or capsule). Use OrbitControls", and a note that a large map, traffic and pedestrians "need dedicated
+    // backend infrastructure … browser mein nahi ho sakti" — false. The user was delivered a purple box.
+    '9. A GAME is built on the platform\'s own game kit, which already provides a real animated character (walk, run,',
+    '   jump), a big map / open city, touch joystick + keyboard controls, a follow camera, vehicles, sound and a HUD.',
+    '   So step 1 of a game must already be PLAYABLE: the player\'s character on the big map, moving with the joystick',
+    '   and keys, the camera following it. Never plan a cube, capsule or box as the player, never OrbitControls as the',
+    '   way to play, and never a "basic environment setup" step. Big maps, traffic, pedestrians, NPCs, vehicles and',
+    '   missions all run in the browser — they are NOT infrastructure; only ONLINE MULTIPLAYER needs a server.',
     '2. Every step must be a CONCRETE, buildable feature — never vague ("polish", "add more", "etc",',
     '   "finish the app"). Each step adds something the user can SEE and USE.',
     '3. Order steps so each builds on the previous. Keep it to at most 6 checkpoints.',
@@ -306,6 +315,14 @@ export function asksForSimulation(buildPrompt: string): boolean {
 }
 
 /** What replaces a simulated step's promise: the honest not-available state, said in the instruction itself. */
+/**
+ * A 3D kit game's step is built on the kit, never on a placeholder player or a second 3D engine (failedbr #2481, Q-3224).
+ * Said after the step's own words, so it wins where the planner wrote "a cube or capsule … use @react-three/fiber": the
+ * roadmap is kept (a big game still needs its steps) and the contradiction is settled in the instruction itself.
+ */
+export const GAME_KIT_CLAUSE = 'This is a game built on the platform\'s game kit: the player is the kit\'s real animated character on the big map, moved by the touch joystick and keys, with the kit\'s follow camera. Never a cube, capsule or box as the player, and never OrbitControls as the way to play. Build on the kit\'s own three.js modules: never @react-three/fiber, @react-three/drei or another 3D engine, even where this step says so above.';
+const PLACEHOLDER_PLAYER = /\b(?:cube|capsule|box)\b[^.\n]{0,40}\b(?:player|character|hero)\b|\b(?:player|character|hero)\b[^.\n]{0,60}\b(?:cube|capsule|box)\b|\bOrbitControls\b/i;
+
 export const NO_SIMULATION_CLAUSE = 'Do NOT simulate or animate work that nothing is doing: no fake progress bar, no staged "generating…/rendering…" messages. Where the real service is not connected, show one honest, clearly labelled "not available yet" state that says what it needs.';
 
 const INFRA_RE = /\b(multiplayer|real-?time\s+(?:chat|messag\w*|sync\w*|collaborat\w*|co-?editing|location|tracking|multiplayer|notifications?|updates?\s+(?:between|across|for all|to (?:all|other))|feed)|websocket|game server|matchmaking|video call|voice call|webrtc|live stream|push notification server|train (?:a|an|our|my) (?:ai|ml|model)|foundation model|blockchain|peer-?to-?peer|p2p)\b/i;
@@ -324,12 +341,14 @@ const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, 
  * Pure; never throws.
  */
 /** A native mobile stack named in a step: React Native, Expo, Flutter, SwiftUI, Jetpack Compose, Kotlin, Ionic. */
+/** A second 3D engine beside the game kit's own three.js — the planner's choice unless the user named it (failedbr #2481). */
+export const SECOND_3D_STACK = /@react-three\/(?:fiber|drei)|\breact[-\s]three[-\s]fiber\b|\bbabylon(?:\.js|js)?\b|\bplaycanvas\b/i;
 const NATIVE_STACK = /\breact[- ]?native\b|\bexpo\b|\bflutter\b|\bswift\s?ui\b|\bjetpack\s+compose\b|\bkotlin\b|\bionic\b/i;
 
 export function roadmapGuardrail(
   parsed: { userMessage?: string; achievableSummary: string; note: string | null; steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }> } | null,
   famousApp: string | null,
-  architecture?: { framework: string; originalRequest: string },
+  architecture?: { framework: string; originalRequest: string; gameKit?: boolean; game3D?: boolean },
 ): { roadmap: MegaRoadmap | null; rejected: string[] } {
   const rejected: string[] = [];
   if (!parsed) return { roadmap: null, rejected: ['no parseable roadmap'] };
@@ -358,6 +377,10 @@ export function roadmapGuardrail(
     return { roadmap: null, rejected: ['roadmap dimension conflicts with an explicit user constraint; keep the user constraint rather than seed a contradictory game'] };
   }
 
+  // The caller's own kit decision (gameKitOwnsTheBuild / the plan's 3D layer) — never a second domain read here.
+  const game = architecture?.gameKit === true;
+  const game3D = game && architecture?.game3D === true;
+  const userNamedStack = !!architecture && SECOND_3D_STACK.test(architecture.originalRequest);
   const seen = new Set<string>();
   const kept: RoadmapStep[] = [];
   for (const s of parsed.steps) {
@@ -376,8 +399,14 @@ export function roadmapGuardrail(
     seen.add(key);
     const simulated = asksForSimulation(bp);
     if (simulated) rejected.push(`step "${s.title}" asked for work to be simulated — rewritten to an honest not-available state`);
-    const infraCeiling = simulated || !!s.needsInfra || INFRA_RE.test(`${s.title} ${s.goal} ${s.buildPrompt} ${s.needsInfra || ''}`);
-    kept.push({ n: kept.length + 1, title: s.title, goal: s.goal, buildPrompt: simulated ? `${bp} ${NO_SIMULATION_CLAUSE}` : bp, infraCeiling });
+    // A game's own "needsInfra" (a car, a big map, traffic) is not a ceiling: everything but online multiplayer runs in
+    // the browser, so for a game only the guardrail's own INFRA_RE (multiplayer, game server …) can set it (Q-3224).
+    const infraCeiling = simulated || (!game && !!s.needsInfra) || INFRA_RE.test(`${s.title} ${s.goal} ${s.buildPrompt} ${game ? '' : s.needsInfra || ''}`);
+    const kitClause = game3D && !userNamedStack;
+    if (kitClause && PLACEHOLDER_PLAYER.test(bp)) rejected.push(`step "${s.title}" planned a placeholder player for a game — told to use the kit's character, map, joystick and camera`);
+    if (kitClause && SECOND_3D_STACK.test(bp)) rejected.push(`step "${s.title}" planned a second 3D engine beside the game kit — told to build on the kit's own three.js modules`);
+    const withClauses = [bp, simulated ? NO_SIMULATION_CLAUSE : '', kitClause ? GAME_KIT_CLAUSE : ''].filter(Boolean).join(' ');
+    kept.push({ n: kept.length + 1, title: s.title, goal: s.goal, buildPrompt: withClauses, infraCeiling });
   }
 
   if (kept.length < MIN_ROADMAP_STEPS) {
@@ -388,6 +417,8 @@ export function roadmapGuardrail(
   // If any kept step hit a ceiling but the model gave no note, synthesise an honest one so the truth is
   // never silent (rule 6). Kept short and vendor-free; the reply layer localises/keeps as-is.
   let note = parsed.note;
+  // A game whose steps carry no real ceiling must not be told a big map or traffic "needs backend infrastructure" (Q-3224).
+  if (game && note && !kept.some((k) => k.infraCeiling) && /\b(?:backend|infrastructure|server)\b|browser\s+(?:mein|me|main)\s+nahi/i.test(note)) note = null;
   if (!note && kept.some((k) => k.infraCeiling)) {
     note = 'Some parts (like real-time or server-heavy features) need extra infrastructure and will be built as honest, separate steps.';
   }

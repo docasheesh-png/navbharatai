@@ -69,7 +69,16 @@ const CODE_FILE = /\.(tsx?|jsx?|mjs|html?|vue|svelte)$/i;
  * Phaser, a <canvas>: `GAME_SIGNAL` with the frame left out) AND a LOOP that redraws it. The two may sit in
  * different files, as a hand-written game's scene.ts and loop.ts do (46e2d74b's own layout).
  */
-export function isCanvasGameProject(files: Record<string, string>): boolean {
+/**
+ * A react-three-fiber scene: `<Canvas>` from @react-three/fiber, redrawn by `useFrame` (failedbr #2481, Q-3224). The user
+ * asked for GTA and got a purple cube on a green plane drawn this way — and because neither half matched the signals above
+ * (`from 'three'`, `<canvas>`, requestAnimationFrame), no playtest ran and the build "succeeded". Counted ONLY when the
+ * user asked for a game: a 3D product viewer is drawn the same way and is not a game to be played.
+ */
+const R3F_SURFACE = /from\s+['"]@react-three\/fiber['"]|<Canvas\b/;
+const R3F_LOOP = /\buseFrame\s*\(/;
+
+export function isCanvasGameProject(files: Record<string, string>, opts: { gameRequested?: boolean } = {}): boolean {
   let surface = false;
   let loop = false;
   for (const [path, content] of Object.entries(files || {})) {
@@ -83,8 +92,8 @@ export function isCanvasGameProject(files: Record<string, string>): boolean {
     // The kit's 3D layer and shell DO draw (a WebGL canvas), so a project carrying them is a canvas game.
     if (/(^|\/)src\/game\/(?:three\/|ui\/|Game\.ts$|GameCanvas\.tsx$)/.test(path)) return true;
     const kitEngineOnly = /(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path);
-    if (!surface && !kitEngineOnly && GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, ''))) surface = true;
-    if (!loop && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) loop = true;
+    if (!surface && !kitEngineOnly && (GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, '')) || (opts.gameRequested === true && R3F_SURFACE.test(content)))) surface = true;
+    if (!loop && (/requestAnimationFrame|GameLoop|setAnimationLoop/.test(content) || (opts.gameRequested === true && R3F_LOOP.test(content)))) loop = true;
     if (surface && loop) return true;
   }
   return false;

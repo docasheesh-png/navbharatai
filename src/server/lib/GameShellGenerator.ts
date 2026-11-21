@@ -43,7 +43,7 @@ import { events } from './core/events';
 import { state, setStatus, resetRun, save as saveState, load as loadState, hasSave, clearSave } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
-import { createPerfGovernor, steppedQuality } from './core/perf';
+import { createPerfGovernor, steppedQuality, budgetDevice } from './core/perf';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { showHint } from './core/levels';
 import { dialogue } from './core/dialogue';
@@ -310,7 +310,8 @@ export class Game {
   /** The pixel ratio the renderer chose for this device; quality scales DOWN from it, never up. */
   private basePixelRatio = 1;
   /** Watches the frame rate and steps the picture down when the device cannot keep up (core/perf.ts). */
-  private readonly perf = createPerfGovernor();
+  // A budget phone starts one picture level lower (core/perf budgetDevice) instead of stuttering for its first seconds.
+  private readonly perf = createPerfGovernor({ startDrop: budgetDevice() ? 1 : 0 });
   private chosenQuality: GameSettings['quality'] = 'high';
   private autoQuality = true;
   private reduceMotion = false;
@@ -474,7 +475,10 @@ export class Game {
     this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
     // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
     // Read-only except endRound, which only does what losing does — harmless in a single-player game.
-    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
+    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
+      // How much the last frame asked of the GPU — what decides whether a cheap phone keeps up (the playtest's budget check).
+      load: () => { const i = this.renderer.info; return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures }; },
+      endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
     if (typeof window !== 'undefined') {
       (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
       this.disposers.push(() => {

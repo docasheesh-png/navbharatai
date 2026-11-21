@@ -103516,6 +103516,21 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   1 m behind it, and a test proves no waiting car is on the stripes (fails with the old line).
 - **Proof:** `tests/cityPeopleWalkSafely.test.ts` (5; four reversions each failed, including the original bug) and the
   new zebra test in `tests/cityTrafficObeysTheRoad.test.ts`.
+## 2026-11-21 — Games stay smooth on budget phones (admin plan: "smooth on cheap Android phones")
+
+- **Found first:** the kit already adapts at run time (perf governor: steps quality down after ~3 s of stutter), and the
+  playtest scores frame rate — but in the sandbox's SOFTWARE renderer, which says little about a phone GPU. Two gaps:
+  1. every game STARTED at the highest picture, so a cheap phone's first impression was 3–6 s of stutter;
+  2. nothing measured how much each frame asks of the GPU, so a game too heavy for budget phones passed unnoticed.
+- **Fix:** `core/perf` `budgetDevice()` (deviceMemory ≤ 3 GB, or — when memory is not reported — ≤ 2 cores; cores alone
+  are not trusted: cheap phones have 8, iPhones report 4) and `createPerfGovernor({ startDrop })`; the shell starts a
+  budget phone one level down, never above the player's choice, climbing back after a smooth run. The playtest hook
+  reports the last frame's draw calls / triangles / geometries / textures (`window.__nbKit.load`, from renderer.info);
+  the playtest reads it after a round; over `BUDGET_PHONE` (300 calls, 600k triangles) → `GAME_DEFECT_TOO_HEAVY` and a
+  `GAME_TOO_HEAVY` finding with a one-tap "Make it smooth on budget phones" fix (merge, instance, lite detail, reuse).
+  A game that does not report its load is never accused.
+- **Proof:** `tests/aGameStaysSmoothOnABudgetPhone.test.ts` (6; four reversions each failed); census, playtest, repair and
+  perf suites green (32 files, 477 tests).
 ## 2026-11-21 — Real physics for 3D games: things fall, roll, topple, and ragdoll
 
 - **Why:** the admin's plan item "real physics: objects that fall over, roll and ragdoll". The kit had none: a crate

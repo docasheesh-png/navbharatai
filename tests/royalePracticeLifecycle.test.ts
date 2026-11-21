@@ -7,7 +7,12 @@ import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 function load(source:string,modules:Record<string,unknown>) {
   const exports:Record<string,any>={};
   const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
-  new Function('require','exports',js)((name:string)=>{if(!(name in modules))throw Error(name);return modules[name];},exports);return exports;
+  // A stand-in module lists what THIS test relies on. An export it does not list (a new kit helper Game.ts started to
+  // import — budgetDevice, onVehicleCrash, loadKeyBindings each broke this test in turn) is a harmless no-op that
+  // returns itself, so it also works as an unsubscribe. An unknown MODULE still fails loudly.
+  const noop: any = () => noop;
+  const lenient = (m: unknown) => (m && typeof m === 'object' ? new Proxy(m as Record<string, unknown>, { get: (t, k) => (k in t || typeof k === 'symbol' || k === 'then' || String(k).startsWith('__') ? t[k as string] : noop) }) : m);
+  new Function('require','exports',js)((name:string)=>{if(!(name in modules))throw Error(name);return lenient(modules[name]);},exports);return exports;
 }
 function bus(){const listeners=new Map<string,Set<()=>void>>();return {
   on(name:string,fn:()=>void){let set=listeners.get(name);if(!set)listeners.set(name,set=new Set());set.add(fn);return ()=>set!.delete(fn);},

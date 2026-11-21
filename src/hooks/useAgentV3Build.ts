@@ -7,6 +7,7 @@ import { clockKeptOnReattach, clockFromAttach } from '../components/agentv3/buil
 import { agentV3Reducer, adoptWorkspace as adoptWorkspaceState } from '../components/agentv3/agentV3Reducer';
 import { createRevealPacer } from '../components/agentv3/revealPacer';
 import { carryOverActivity } from '../components/agentv3/activityTimeline';
+import { archiveBuildProof, currentBuildProof } from '../components/agentv3/buildProof';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
@@ -1022,6 +1023,9 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
         previewUrl: prev.previewUrl,
         checkpoints: prev.checkpoints,
         activityLog: prev.activityLog,
+        // A finished build's proof stays at its own turn; the replay re-emits a live build's own
+        // proof, which then replaces its archived copy (same key) rather than doubling it.
+        proofLog: archiveBuildProof(prev.proofLog, currentBuildProof(prev)),
         diffs: prev.diffs,
         todos: prev.todos,
         // ⏱️ The build clock survives a reconnect (autopsy 303e8a6f, adversarial review): a build this device
@@ -1416,6 +1420,10 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
         files: prev.files,
         diffs: prev.diffs,
         activityLog: carryOverActivity(prev.activityLog, prev.activity),
+        //  • the settled build's PROOF (check card + build health + feedback) → archived into proofLog,
+        //    so it stays at its own turn instead of vanishing and reappearing pinned at the bottom
+        //    (admin 2026-11-21, phone screenshot).
+        proofLog: archiveBuildProof(prev.proofLog, currentBuildProof(prev)),
         todos: prev.todos,
         workspaceId: prev.workspaceId,
         previewUrl: prev.previewUrl,

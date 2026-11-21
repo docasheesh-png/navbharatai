@@ -245,6 +245,12 @@ export interface AgentV3ClientState {
    *  vanished from the chat. The hook archives the settled turn's entries here (deactivated,
    *  capped) so the chat timeline keeps decorating past prose forever within the session. */
   activityLog: ActivityEntry[];
+  /** PRIOR builds' proof (admin 2026-11-21, phone screenshot): the "NavBharatAI checked your app" card,
+   *  the build-health row and the feedback prompt used to live in single slots rendered BELOW the whole
+   *  chat, so a newer reply appeared ABOVE an older build's proof and the next send wiped it. The hook
+   *  archives the settled build's proof here (like `activityLog`) and the timeline renders each one at
+   *  its own turn. See buildProof.ts. */
+  proofLog: BuildProof[];
   /** File explorer surface — current change set. */
   files: FileChange[];
   /** Todo surface (editable in P4). */
@@ -290,7 +296,7 @@ export interface AgentV3ClientState {
   /** The clarity gate's chips for the question just asked; tapping one sends its text. `ts` identifies the set. */
   quickReplies?: { chips: Array<{ label: string; send: string }>; ts: number };
   /** What NavBharatAI actually tested in the finished app, shown to the user as proof rather than a claim. */
-  verification?: { ok: boolean; headline: string; steps: string[] };
+  verification?: { ok: boolean; headline: string; steps: string[]; ts?: number };
   /** The running build's cost so far in rupees (`cost_so_far`). Cleared when a new build begins. */
   costSoFarInr?: number;
   /** When THIS build first wrote the app's entry (earlyPreviewCue.ts) — the app is on screen from here. Cleared when a new build begins. */
@@ -364,6 +370,25 @@ export interface AgentV3ClientState {
 }
 
 /** R2 §4.6 — readiness verdict shown as a build-health card after a build. */
+/**
+ * One finished build's proof, as the chat timeline renders it under that build's own turn: the
+ * browser-check card, the build-health row and the feedback prompt. Built from the live state by
+ * `currentBuildProof` and archived into `proofLog` when the next build starts.
+ */
+export interface BuildProof {
+  /** Stable identity: the build id, or (older servers without one) the proof's own timestamp. Keys
+   *  the Dismiss memory and the feedback memory, so both belong to THIS build, not the workspace. */
+  key: string;
+  buildId?: string;
+  /** Where the proof sits in the timeline: the last moment of its turn. */
+  anchorTs: number;
+  verification?: { ok: boolean; headline: string; steps: string[] };
+  buildHealth?: BuildHealth;
+  /** True when the build finished OK in a known workspace — the only case the feedback prompt shows. */
+  feedback: boolean;
+  workspaceId?: string;
+}
+
 export interface BuildHealth {
   score: number;
   ready: boolean;
@@ -386,6 +411,7 @@ export function initialAgentV3State(): AgentV3ClientState {
     narration: [],
     activity: [],
     activityLog: [],
+    proofLog: [],
     files: [],
     todos: [],
     diffs: {},

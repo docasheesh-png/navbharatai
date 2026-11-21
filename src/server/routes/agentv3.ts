@@ -19579,7 +19579,7 @@ async function noteBuildOutcome(
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'RACE_COURSE_ENDLESS', autoResolved: true,
                     message: 'The request is a race and says nothing about its course, so the builder is instructed to use NavBharatAI\'s editable endless road library (twelve 10–100 km maps by default). Actual use is checked separately.' });
                 }
-                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), endlessRaceCourse: endlessRace })}\n\n---\n\n${buildPrompt}`;
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), request: gameTurnRequest(prompt, milestoneRequest), endlessRaceCourse: endlessRace })}\n\n---\n\n${buildPrompt}`;
                 // 🧩 The objects the user named that neither the library nor the kit provides go to the Object Forge, said per
                 // object, and checked after the build (forgeForMissing.ts, admin 2026-11-20). Only a 3D kit, only with the Forge on.
                 const missingObjects = forgeAssignment(gameTurnRequest(prompt, milestoneRequest), REVIEWED_GAME_ASSETS, { kit3D: gameKitSeeded.includes('generate_game_3d'), forgeOn: objectForgeEnabled() });

@@ -88,6 +88,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['enterable house', 'door', 'interior', 'stairs', 'game house'],
   },
   {
+    id: 'game_city_blocks',
+    name: 'City blocks for 3D games (streets, crossings, shops, apartments, offices, parks)',
+    path: 'NavBharatAI Pro → chat → ask for a 3D city game (for example "3D city driving game banao", "shehar mein taxi game", "open city game with shops")',
+    description: 'A 3D game that needs a city gets a whole grid of city blocks from the game kit (2026-11-20), not hand-placed boxes: streets that meet at crossings with centre lines and zebra crossings, raised pavements with a kerb, and buildings on every block — shops with an awning and a signboard (with a spot for the shop name), apartment blocks with balconies and the black water tank on the roof, glass office towers in the middle of the city, houses with a front yard and a compound wall, parks with trees, paths, benches and a fountain, and street lights at the corners. Choose how many blocks, how big, how tall the tallest building is, and the style: a town (shops and houses), downtown (towers in the middle) or mixed. Every building stands on its own lot facing a street and never in the road; the player starts on a street in the left lane; a car stops at walls; and routes along the streets keep to the left lane, for AI cars, taxi rides and deliveries to a shop\'s door. The same seed gives the same city. CITY TRAFFIC (2026-11-20): cars, autos and buses drive the streets in the left lane, turn at crossings, stop at red traffic lights (one street green at a time, with amber), keep a safe gap, never stop inside a crossing, take turns through it, and stop for the player. Not built yet: people walking on the pavements.',
+    howToUse: 'Ask for a city game and say what kind of city — a small town, a big city with towers, how many streets. Ask for missions in the city ("deliver to the shops", "taxi game") and the routes come from the city itself.',
+    relatedFeatures: ['game_enterable_house_kit', 'game_menus_settings'],
+    keywords: ['city game', 'city', 'shehar', 'sheher', 'town', 'street', 'streets', 'road grid', 'crossing', 'chauraha', 'zebra crossing', 'buildings', 'imarat', 'skyscraper', 'tower', 'apartment', 'flats', 'shops', 'dukaan', 'market street', 'park', 'street light', 'open city', 'taxi game', 'delivery game', 'gta jaisa', 'city driving'],
+  },
+  {
     id: 'game_asset_librarian',
     name: 'Game asset library and compatibility search',
     path: 'NavBharatAI Pro → describe a game or ask about available game objects',
@@ -778,6 +787,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['race', 'racing game', 'countdown', '3 2 1', 'rival cars', 'dusri gaadiyan', 'opponent', 'position', 'lap time', 'timer', 'finish line', 'results', 'crosshair', 'ammo', 'goliyan', 'damage number', 'health bar', 'boss', 'fire animation', 'goli chalate hue dikhe', 'character hilta nahi', 'action dikhta nahi', 'attack animation', 'punch', 'kick', 'sword swing', 'talwar', 'jump animation', 'recoil', 'drift', 'drift button', 'handbrake', 'tyre smoke', 'button kaam nahi karta', 'fire button', 'shooting game', 'pubg jaisa', 'fight game', 'action button', 'grenade', 'bomb fenko', 'blast', 'aim assist', 'auto aim', 'nishana'],
   },
   {
+    id: 'game_vehicle_crashes',
+    name: 'Cars crash into walls and into each other',
+    path: 'NavBharatAI Pro → chat → ask for any driving game (racing, city driving, traffic, bike game); it works by itself',
+    description: 'In every driving game NavBharatAI builds, vehicles are solid (2026-11-20): a car stops at a parked car, a bus, a truck, an auto-rickshaw, a tractor, a bike or a rival instead of driving through it, as well as at walls, buildings, trees and rocks. A car that hits a wall at an angle slides along it and keeps some of its speed instead of sticking to it; a head-on hit stops it. A real crash is felt: sparks at the bumper, a crunch, the camera jolts and the phone buzzes (a gentle nudge is not a crash, and Reduce motion keeps the camera still). Two cars that end up overlapping can always drive apart. Not built yet: cars that get pushed or dented by a hit, and damage that slows a car down.',
+    howToUse: 'Nothing to switch on. To change it, ask in your own words (for example "takkar hone par car ka health kam ho", "crash pe zor ki awaaz aaye").',
+    relatedFeatures: ['game_actions_visible', 'game_menus_settings'],
+    keywords: ['crash', 'car crash', 'takkar', 'gaadi takrayi', 'car takrati nahi', 'car ke aar paar', 'car goes through car', 'collision', 'car diwar me', 'wall se takkar', 'bumper', 'sparks', 'car fas jati hai', 'car chipak jati hai', 'stuck on wall', 'traffic se takkar'],
+  },
+  {
     id: 'india_board_games',
     name: 'Ludo, Snakes & Ladders, chess, carrom, cricket, Business, match-3, Teen Patti and rummy with the real rules',
     path: 'NavBharatAI Pro → chat → ask for the game (for example "Ludo game banao 4 players", "saanp seedhi game banao computer ke saath")',
@@ -803,6 +821,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     howToUse: 'Ask for a 2D game and say you want a big map in your own words (bada map, badi duniya, kahin bhi ghoom sakun, map bahut chhota hai). The builder adds the 2D world (src/game/world2d/) and builds the game on it. Ask for a small or fixed map if you want one instead.',
     relatedFeatures: ['athree_map', 'game_2d_kit'],
     keywords: ['2d map', '2d world', 'bada map', '2d game bada map', 'top down map', 'top-down game', 'rpg map', 'tile map', 'endless map', 'map chhota hai', 'kahin bhi ghoom', 'badi duniya', 'map khatam na ho', 'open world 2d', '2d open world', 'gaon', 'jungle map', 'registan map', 'jheel', 'minimap', 'naksha'],
+  },
+  {
+    id: 'game_languages',
+    name: 'Game menus in 11 Indian languages',
+    path: 'NavBharatAI Pro → chat → ask for the game in your language (for example "Tamil mein racing game banao", "make a ludo game in Telugu", or type the request in Bangla, Kannada or any Indian script); in the game itself: Settings → Language',
+    description: 'The screens and buttons of a game NavBharatAI builds — start screen, pause menu, settings, game over, shop, controls, touch buttons and captions — are written in English, Hindi, Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada, Malayalam, Punjabi and Odia (2026-11-20). The game speaks the language the request names ("Tamil mein", "in Telugu", "Bangla version") or the script the request is written in, and its own text (title, levels, dialogue) is written in that language too. Players pick their own language in the game under Settings → Language; the choice is saved on their phone. Any single word can be changed by asking. The nine newer languages were written without a native speaker reviewing every word, so a word may read differently from what a native speaker would choose — ask and it is changed.',
+    howToUse: 'Say the language in your request, or simply write the request in your language. To change one word, ask ("Tamil mein Play ki jagah X likho"). Players change the language from Settings → Language inside the game.',
+    relatedFeatures: ['game_menus_settings', 'game_2d_kit'],
+    keywords: ['language', 'bhasha', 'tamil game', 'telugu game', 'bangla game', 'bengali game', 'marathi game', 'gujarati game', 'kannada game', 'malayalam game', 'punjabi game', 'odia game', 'hindi game', 'game in tamil', 'tamil mein game', 'apni bhasha', 'regional language', 'menu language', 'language setting', 'bhasha badlo'],
   },
   {
     id: 'athree_map',
@@ -2077,6 +2104,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
   },
 
   // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
+  {
+    id: 'game_runner_starter',
+    name: 'Endless runner games that work from the first build',
+    path: 'NavBharatAI Pro → chat → ask for an endless runner (for example "Subway Surfers jaisa game banao", "temple run type game", "endless runner with coins")',
+    description: 'An endless runner NavBharatAI builds starts from a complete, working runner game (2026-11-20) instead of being wired from parts: three lanes, obstacles to dodge, low hurdles to jump and bars to slide under (every row always has a way through), coins on the track, speed that rises as you go, and the score. Swipe on a phone (left / right to change lanes, up to jump, down to slide) or use the arrow keys, A / D, Space or W and S. It comes with the start screen, pause, game over with Play again, settings and the language menu of every NavBharatAI game. The game is then made yours: its name, colours, number of lanes, speed, characters and theme. Racing games likewise start from the ready racing game. Not built yet: characters to unlock, power-ups on the track (magnet, jetpack) and missions — they can be asked for and are added on top.',
+    howToUse: 'Ask for an endless runner and describe your theme (for example "Mumbai local train ke upar daudne wala game", "jungle me daudne wala runner"). To change how it plays, ask ("speed dheere badhao", "4 lanes karo").',
+    relatedFeatures: ['game_2d_kit', 'game_menus_settings'],
+    keywords: ['endless runner', 'runner game', 'subway surfers', 'subway surfer jaisa', 'temple run', 'daudne wala game', 'running game', 'lane change', 'jump and slide', 'swipe game', 'coin collect game', 'infinite runner'],
+  },
   {
     id: 'games_ai',
     name: 'Games, Puzzles & Family-Fun AI',

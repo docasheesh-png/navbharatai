@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -16,9 +16,20 @@ it('the real history command resolves imported contracts and registers the curre
     const script = readFileSync('scripts/gameKitHistory.mjs', 'utf8');
     const listed = [...(/const GENERATORS = \[([\s\S]*?)\]/.exec(script)?.[1] ?? '').matchAll(/'([A-Za-z0-9]+)'/g)].map((m) => m[1]);   // top-level names; folder generators are copied below
     expect(listed).toContain('GameShellGenerator');
-    for (const name of new Set([...listed, 'GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRoyaleFoundationGenerator', 'kitTypeContract', 'gameKitHistory'])) {
-      copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
+    // Plus every helper those generators import, FOLLOWED from their own import lines (2026-11-20: a hand list of helpers
+    // broke on the next new one — a strings table, a city module — the same way the generator list once did).
+    const toCopy = new Set<string>([...listed, 'gameKitHistory']);
+    const queue = [...toCopy];
+    while (queue.length) {
+      const name = queue.pop()!;
+      const source = readFileSync(`src/server/lib/${name}.ts`, 'utf8');
+      for (const m of source.matchAll(/\b(?:import|export)\s[^;'"`]*?from\s+'\.\/([A-Za-z0-9_]+)(?:\.ts)?'/g)) {
+        // Only real server files: the kit's own template text has import lines too ('./match3'), and those are not.
+        if (!toCopy.has(m[1]) && existsSync(`src/server/lib/${m[1]}.ts`)) { toCopy.add(m[1]); queue.push(m[1]); }
+      }
     }
+    for (const name of ['GameBuildingGenerator', 'kitTypeContract']) expect(toCopy, name).toContain(name);
+    for (const name of toCopy) copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
     // Generators that live in their own folder (the Athree map and the Object Forge, with their source modules) travel with the command.
     for (const folder of ['athreeMap', 'world2d', 'objectForge']) {
       mkdirSync(join(root, `src/server/lib/${folder}`), { recursive: true });

@@ -76,6 +76,8 @@ describe('the proof reaches the user, not just the admin report', () => {
       ok: true,
       headline: 'NavBharatAI tested your app in a real browser',
       steps: ['Filled in the form on the /items page, saved it, reloaded — and it was still there.'],
+      // Kept so the proof sits at its own turn in the chat timeline (buildProof.ts, admin 2026-11-21).
+      ts: 1,
     });
   });
 
@@ -98,10 +100,13 @@ describe('the proof reaches the user, not just the admin report', () => {
     expect(route).toContain('if (proof.headline)');
   });
 
-  it('the panel shows a failure in the same place as a pass', () => {
-    const panel = read('src/components/agentv3/AgentV3Panel.tsx');
-    expect(panel).toContain('state.verification');
-    expect(panel).toContain('state.verification.ok');
-    expect(panel).toContain('border-amber-500/40');
+  it('the chat shows a failure in the same place as a pass', () => {
+    // Since 2026-11-21 the card is a block in the timeline at its own build's turn (BuildProofCard),
+    // not a slot pinned under the chat — and it is coloured from theme tokens, not amber literals.
+    const card = read('src/components/agentv3/BuildProofCard.tsx');
+    expect(card).toContain('verification.ok');
+    expect(card).toContain('border-warn/40');
+    expect(card).toContain('border-success/40');
+    expect(read('src/components/agentv3/AgentV3Panel.tsx')).toContain('<BuildProofCard');
   });
 });

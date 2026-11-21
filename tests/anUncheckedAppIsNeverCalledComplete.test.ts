@@ -96,7 +96,8 @@ describe('a readiness check that does not finish is not called complete (TD-2)',
   });
 
   it('the health card says the check timed out and does not print a score there', () => {
-    const panel = readFileSync(join(process.cwd(), 'src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
+    // The card moved with the rest of a build's proof into the timeline (BuildProofCard, 2026-11-21).
+    const panel = readFileSync(join(process.cwd(), 'src/components/agentv3/BuildProofCard.tsx'), 'utf8');
     const at = panel.indexOf('if (health.unassessed)');
     expect(at).toBeGreaterThan(-1);
     const branch = panel.slice(at, panel.indexOf('const ready = health.ready', at));

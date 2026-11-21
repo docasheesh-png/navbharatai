@@ -320,7 +320,8 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       // The proof that the finished app was actually driven in a real browser. Recorded verbatim —
       // the wording is decided on the server by journeyUserSummary precisely so it cannot be softened
       // here, and a failure must be exactly as visible as a pass.
-      return { ...state, verification: { ok: event.ok, headline: event.headline, steps: event.steps } };
+      // `ts` is kept so the proof can be placed at its own turn in the chat timeline (buildProof.ts).
+      return { ...state, verification: { ok: event.ok, headline: event.headline, steps: event.steps, ts: event.ts } };
 
     case 'cost_so_far':
       // Recorded verbatim: the server priced it with the final bill's own function, so nothing here

@@ -141,6 +141,8 @@ export const PLATFORM_SUGGESTED_REPLIES: readonly PlatformSuggestedReply[] = [
   { phrase: ADD_MISSING_FEATURE_REPLY_MANY, intent: 'edit_existing', composedBy: 'missingFeatureNotice.ts' },
   { phrase: ADD_TO_THIS_APP_REPLY, intent: 'edit_existing', composedBy: 'unrelatedRequest.ts' },
   ...phrasesInTails().map((phrase) => ({ phrase, intent: 'edit_existing' as const, composedBy: 'fakeFeatureScan.ts' })),
+  // The character swap's reply (characterSetHandoff): the default person back — GAME_PLAYER_RULE sets PLAYER.model to null.
+  { phrase: 'wapas purana character', intent: 'edit_existing', composedBy: 'characterSwap.ts' },
 ];
 
 /**

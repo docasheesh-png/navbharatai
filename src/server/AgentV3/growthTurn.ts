@@ -147,3 +147,12 @@ export async function setLibraryCharacterAtTurnStart(io: {
     return characterSetHandoff(name, subject);
   } catch (error) { return refuse(`an unexpected error (${error instanceof Error ? error.message : String(error)})`); }
 }
+
+/**
+ * The two library actions the platform does itself at the start of a turn — a map place, a character — behind ONE call and
+ * ONE write port, so the build route carries one line for both (Q-3237: the handler only shrinks). Never throws.
+ */
+export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibraryCharacterAtTurnStart>[0]): Promise<string> {
+  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io)].filter(Boolean);
+  return handoffs.join('\n\n---\n\n');
+}

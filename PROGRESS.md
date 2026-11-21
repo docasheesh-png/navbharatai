@@ -103331,3 +103331,19 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — Games stay smooth on budget phones (admin plan: "smooth on cheap Android phones")
+
+- **Found first:** the kit already adapts at run time (perf governor: steps quality down after ~3 s of stutter), and the
+  playtest scores frame rate — but in the sandbox's SOFTWARE renderer, which says little about a phone GPU. Two gaps:
+  1. every game STARTED at the highest picture, so a cheap phone's first impression was 3–6 s of stutter;
+  2. nothing measured how much each frame asks of the GPU, so a game too heavy for budget phones passed unnoticed.
+- **Fix:** `core/perf` `budgetDevice()` (deviceMemory ≤ 3 GB, or — when memory is not reported — ≤ 2 cores; cores alone
+  are not trusted: cheap phones have 8, iPhones report 4) and `createPerfGovernor({ startDrop })`; the shell starts a
+  budget phone one level down, never above the player's choice, climbing back after a smooth run. The playtest hook
+  reports the last frame's draw calls / triangles / geometries / textures (`window.__nbKit.load`, from renderer.info);
+  the playtest reads it after a round; over `BUDGET_PHONE` (300 calls, 600k triangles) → `GAME_DEFECT_TOO_HEAVY` and a
+  `GAME_TOO_HEAVY` finding with a one-tap "Make it smooth on budget phones" fix (merge, instance, lite detail, reuse).
+  A game that does not report its load is never accused.
+- **Proof:** `tests/aGameStaysSmoothOnABudgetPhone.test.ts` (6; four reversions each failed); census, playtest, repair and
+  perf suites green (32 files, 477 tests).

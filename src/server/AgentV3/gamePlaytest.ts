@@ -970,6 +970,8 @@ try {
   out.stage = 'checking the score, the sound and play again';
   try {
     out.sounds = await page.evaluate(() => (typeof window.__nbSounds === 'number' ? window.__nbSounds : null));
+    // What the last frame asked of the GPU, read from the kit game's own renderer after a round of play (budget check).
+    out.load = await page.evaluate(() => (window.__nbKit && window.__nbKit.load ? window.__nbKit.load() : null)).catch(() => null);
     const kit = await page.evaluate(() => (window.__nbKit ? { status: window.__nbKit.status(), score: window.__nbKit.score() } : null));
     if (kit) {
       out.kitScoreEnd = kit.score;
@@ -1225,6 +1227,8 @@ export interface PlaytestRun {
   /** The kit game's own score before the controls were touched and at the end (window.__nbKit). */
   kitScoreStart?: number | null;
   kitScoreEnd?: number | null;
+  /** What the kit game's last frame asked of the GPU (window.__nbKit.load) — null for a game that does not report it. */
+  load?: { calls: number; triangles: number; geometries: number; textures: number } | null;
   /** The play-again probe: the status after the round was ended, the control pressed (null: none found), the status after. */
   restartCheck?: { ended?: string; pressed?: string | null; after?: string; error?: string };
   errors?: string[];
@@ -1775,7 +1779,8 @@ export type GameDefectCode =
   | 'GAME_DEFECT_MISSING_LAYER'   // autopsy 6a55d939: imports a kit layer that is not on disk
   | 'GAME_DEFECT_RESTART_BROKEN'  // 2026-11-19: after the round ended, no play-again control, or pressing it did not restart
   | 'GAME_DEFECT_SILENT'          // 2026-11-19: the game's code plays sound, and a whole playthrough played none
-  | 'GAME_DEFECT_TOUCH_SCROLLS';  // 2026-11-20 (failedbr #2477): a touch handler's preventDefault was ignored (passive listener)
+  | 'GAME_DEFECT_TOUCH_SCROLLS'   // 2026-11-20 (failedbr #2477): a touch handler's preventDefault was ignored (passive listener)
+  | 'GAME_DEFECT_TOO_HEAVY';      // 2026-11-21: a frame asks more of the GPU than a budget phone can draw smoothly
 export interface GameDefect { code: GameDefectCode; evidence: string }
 
 export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = [], replay?: GameCodeFacts | null): GameDefect[] {
@@ -1800,8 +1805,27 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
   // Only a real zero from a run that counted (null = an older script or no Web Audio at all) and only for a game whose code plays sound.
   if (run && replay?.sound === true && run.sounds === 0) out.push({ code: 'GAME_DEFECT_SILENT', evidence: 'the game\'s code plays sound, and the whole desktop playthrough played none' });
   if (run?.interventions?.some((t) => /passive event listener/i.test(t))) out.push({ code: 'GAME_DEFECT_TOUCH_SCROLLS', evidence: 'a touch handler called preventDefault on a passive listener, so the browser ignored it — the page can scroll or zoom under the player\'s thumb; add the listener with { passive: false } or give the game area touch-action: none' });
+  const heavy = run ? tooHeavyForBudgetPhones(run.load) : null;
+  if (heavy) out.push({ code: 'GAME_DEFECT_TOO_HEAVY', evidence: heavy });
   if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
   return out;
+}
+
+/**
+ * WHAT A BUDGET PHONE DRAWS SMOOTHLY (2026-11-21, admin plan: "smooth on cheap Android phones"). The playtest's own frame
+ * rate is measured in the sandbox's SOFTWARE renderer, which says little about a phone's GPU. What does carry over is how
+ * much each frame asks for: separate draws (each one a fixed cost on a phone's driver) and triangles. A cheap Android GPU
+ * holds about this much at 30+ frames a second; past it the game stutters on the phones most players in India hold.
+ */
+export const BUDGET_PHONE = { calls: 300, triangles: 600_000 } as const;
+
+/** The evidence when a measured frame is over the budget-phone limit, else null (null load: not measured). PURE. */
+export function tooHeavyForBudgetPhones(load: PlaytestRun['load']): string | null {
+  if (!load || !Number.isFinite(load.calls) || !Number.isFinite(load.triangles)) return null;
+  const over: string[] = [];
+  if (load.calls > BUDGET_PHONE.calls) over.push(`${load.calls} draw calls a frame (a budget phone keeps up with about ${BUDGET_PHONE.calls})`);
+  if (load.triangles > BUDGET_PHONE.triangles) over.push(`${Math.round(load.triangles / 1000)}k triangles a frame (about ${BUDGET_PHONE.triangles / 1000}k)`);
+  return over.length ? over.join(' and ') : null;
 }
 
 /** The admin line for GAME_DEFECTS ('' when none). PURE. */

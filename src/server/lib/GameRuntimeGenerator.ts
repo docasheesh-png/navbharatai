@@ -1083,6 +1083,24 @@ export interface PerfOptions {
   warmup?: number;
   /** The most levels it may drop. */
   maxDrop?: number;
+  /** Levels below the player's choice to START at (a budget phone starts at 1) — it steps back up after a smooth run. */
+  startDrop?: number;
+}
+
+/**
+ * A BUDGET PHONE (2026-11-21, admin plan: "smooth on cheap Android phones"). Every game started at the highest picture
+ * and only stepped down after 3 seconds of stutter — and again after 3 more — so a cheap phone's first impression was a
+ * stutter. A phone that says it has 3 GB of memory or less (Chrome's deviceMemory), or — when it does not say — two cores
+ * or fewer, starts one level lower instead. Cores alone are not enough: many cheap phones have eight, and iPhones report
+ * four. PURE given its input.
+ */
+export function budgetDevice(nav?: { deviceMemory?: number; hardwareConcurrency?: number } | null): boolean {
+  const n = nav === undefined ? (typeof navigator !== 'undefined' ? (navigator as unknown as { deviceMemory?: number; hardwareConcurrency?: number }) : null) : nav;
+  if (!n) return false;
+  const mem = typeof n.deviceMemory === 'number' && n.deviceMemory > 0 ? n.deviceMemory : null;
+  const cores = typeof n.hardwareConcurrency === 'number' && n.hardwareConcurrency > 0 ? n.hardwareConcurrency : null;
+  if (mem !== null) return mem <= 3;
+  return cores !== null && cores <= 2;
 }
 
 export interface PerfGovernor { feed(frameSeconds: number): boolean; readonly fps: number; readonly drop: number; reset(): void }
@@ -1090,7 +1108,8 @@ export interface PerfGovernor { feed(frameSeconds: number): boolean; readonly fp
 export function createPerfGovernor(o: PerfOptions = {}): PerfGovernor {
   const low = o.low ?? 40, high = o.high ?? 56, downAfter = o.downAfter ?? 3, upAfter = o.upAfter ?? 12;
   const warmup = o.warmup ?? 2, maxDrop = Math.max(0, Math.floor(o.maxDrop ?? 2));
-  let fps = 60, drop = 0, elapsed = 0, slow = 0, fast = 0;
+  const startDrop = Math.min(maxDrop, Math.max(0, Math.floor(o.startDrop ?? 0)));
+  let fps = 60, drop = startDrop, elapsed = 0, slow = 0, fast = 0;
   return {
     feed(dt: number): boolean {
       // A hitch is not the device's pace: a tab switch or a long load would otherwise drop quality for nothing.
@@ -1105,7 +1124,7 @@ export function createPerfGovernor(o: PerfOptions = {}): PerfGovernor {
     },
     get fps(): number { return fps; },
     get drop(): number { return drop; },
-    reset(): void { fps = 60; drop = 0; elapsed = 0; slow = 0; fast = 0; },
+    reset(): void { fps = 60; drop = startDrop; elapsed = 0; slow = 0; fast = 0; },
   };
 }
 

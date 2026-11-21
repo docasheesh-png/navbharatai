@@ -256,3 +256,65 @@ export function completedAppReviewEligible(input: { ok: boolean; headroom: boole
   deferred: boolean; runProven: boolean; stopped: boolean }): boolean {
   return input.ok && input.headroom && input.allowed && !input.deferred && input.runProven && !input.stopped;
 }
+
+/**
+ * 🐞 "FIND AND FIX BUGS" IS A HUNT, NOT A SIDE REMARK (admin 2026-11-21: "find and fix the bugs par click karne se sach me
+ * bugs dhund ke fix kiye jaye!").
+ *
+ * 🧬 THE CLASS: the button sent one sentence, "Find and fix the bugs in my app.", and ran the ordinary post-build review —
+ * which by design reads only the files THIS turn changed, is suggest-only on a working app, and does not run at all when the
+ * turn wrote nothing. So a turn whose whole job was to hunt read almost nothing and fixed almost nothing. Three things change
+ * when the USER pressed the button (`bugHunt: true`), and only then:
+ *   1. the builder is handed a real hunting method (this brief) — it reads the WHOLE app, checks it, fixes each real bug;
+ *   2. the review afterwards reads the whole app, not just this turn's edits (`bugHuntReviewScope`), and runs even when the
+ *      builder found nothing to change;
+ *   3. the review runs at full strength, and its functional findings go to the verified repair (re-checked in a real
+ *      browser, undone if the app stops rendering) — never a silent rewrite of a working app.
+ * An ordinary build is byte-identical.
+ */
+export const BUG_HUNT_TURN_BRIEF = [
+  '[BUG HUNT — the user pressed "Find and fix bugs". Your whole job this turn is to FIND real bugs in the app that is here and FIX them.]',
+  'Method — do every step:',
+  '1. List the project files and READ every source file of the app (src/**, the server if there is one). Do not stop at the files you',
+  '   changed before, and do not judge a file you have not opened.',
+  '2. Run the typecheck/build and read the preview\'s console and network errors. Every error is a bug.',
+  '3. Look for real defects: a button or control that does nothing, a handler that is never wired, state that never updates, data that is',
+  '   never saved or loaded, a crash path (undefined access, missing import, wrong prop), a broken route, a loop that never ends, a',
+  '   control that cannot be reached on a phone. In a game also: input that does not move the player, a camera that does not follow,',
+  '   a feature listed in src/game/features/index.ts that never runs.',
+  '4. Fix each real bug with the smallest change that fixes it, then re-check that it is fixed. Change NOTHING that is not a bug: no new',
+  '   features, no restyling, no renaming, no "improvements". Never change a file of the game kit (the engine) — if the bug is there,',
+  '   report it instead.',
+  '5. Finish with an honest list in the user\'s language: each bug you found (file, what was wrong, what you changed), and what you',
+  '   checked and found working. If you found no real bug, say so plainly — never invent one, and never claim a fix you did not make.',
+].join('\n');
+
+/** The builder's prompt for this turn: the hunting brief first when the user pressed the button; unchanged otherwise. PURE. */
+export function withBugHuntBrief(prompt: string, askedByUser: boolean): string {
+  return askedByUser ? `${BUG_HUNT_TURN_BRIEF}\n\n---\n\n${prompt}` : prompt;
+}
+
+/** At most this many files are handed to the whole-app review (the reviewer reads the rest from the tree it is given). */
+export const BUG_HUNT_REVIEW_MAX_FILES = 80;
+
+/**
+ * What the review reads: on a user-pressed hunt, the whole app's own source (never dependencies, build output, lockfiles or
+ * the game kit's engine files); otherwise exactly the files this turn changed. PURE.
+ */
+export function bugHuntReviewScope(input: {
+  askedByUser: boolean;
+  allFiles: readonly string[];
+  changed: () => string[];
+  isKitFile?: (path: string) => boolean;
+}): string[] {
+  if (!input.askedByUser) return input.changed();
+  const own = input.allFiles.filter((p) => typeof p === 'string'
+    && /\.(?:tsx?|jsx?|mjs|cjs|vue|svelte|py|css|html)$/i.test(p)
+    && !/(^|\/)(?:node_modules|dist|build|\.next|coverage|\.git)\//.test(p)
+    && !/\.(?:test|spec)\.[tj]sx?$/i.test(p)
+    && !/\.d\.ts$/i.test(p)
+    && !(input.isKitFile?.(p) ?? false));
+  const changed = input.changed();
+  // This turn's own edits first (the builder just touched them), then the rest of the app.
+  return [...new Set([...changed.filter((p) => own.includes(p)), ...own])].slice(0, BUG_HUNT_REVIEW_MAX_FILES);
+}

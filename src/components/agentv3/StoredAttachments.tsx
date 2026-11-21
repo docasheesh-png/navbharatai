@@ -50,7 +50,10 @@ export function StoredAttachments({ sessionId, userId, refresh, headers }: {
     finally { setBusy(''); }
   };
   const visibleFiles = visiblePrivateAttachments(files, sessionId, onlyThisChat);
-  if (!userId || available !== true) return null;
+  // Nothing saved and nothing wrong: the panel has nothing to offer, so it does not take a row of the chat (admin
+  // screenshot 2026-11-21: "Private attached files · all my chats (0)" under every chat). It appears with the first
+  // saved file, or when the list could not be read — an error is never hidden.
+  if (!userId || available !== true || (files.length === 0 && !error)) return null;
   return <details className="mx-3 mt-2 rounded border border-line bg-card text-xs">
     <summary className="cursor-pointer px-3 py-2">Private attached files · all my chats ({files.length})</summary>
     <div className="px-3 pb-3 space-y-2">

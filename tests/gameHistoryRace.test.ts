@@ -11,7 +11,7 @@ vi.mock('react', () => ({
   },
 }));
 vi.mock('../src/lib/firebase', () => ({ auth: { currentUser: null } }));
-vi.mock('../src/lib/authHeaders', () => ({ authedHeaders: async () => ({}) }));
+vi.mock('../src/lib/authHeaders', () => ({ authedHeaders: async () => ({}), authJsonHeaders: async () => ({ 'Content-Type': 'application/json' }), signInRefusalMessage: (m: string) => m }));
 import { useAgentV3Build } from '../src/hooks/useAgentV3Build';
 const render = (owner = 'alice') => { hooks.at = 0; return useAgentV3Build(owner); };
 const deferred = () => { let resolve!: (value: any) => void; const promise = new Promise<any>(r => { resolve = r; }); return { resolve, promise }; };

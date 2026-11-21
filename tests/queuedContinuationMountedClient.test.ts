@@ -29,7 +29,9 @@ beforeAll(async () => {
       plugin.onResolve({ filter: /(?:^|\/)authHeaders$/ }, () => ({ path: 'authHeaders', namespace: 'fixture' }));
       plugin.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'firebase'
         ? 'export const auth = { get currentUser() { return globalThis.__auth; } };'
-        : 'export async function authedHeaders() { return { Authorization: "Bearer " + await globalThis.__auth.getIdToken(false) }; }', loader: 'js' }));
+        : 'export async function authedHeaders() { return { Authorization: "Bearer " + await globalThis.__auth.getIdToken(false) }; }'
+          + ' export async function authJsonHeaders(force = false) { const h = { "Content-Type": "application/json" }; const u = globalThis.__auth; if (u) { try { const t = await u.getIdToken(force); if (t) h.Authorization = "Bearer " + t; } catch {} } return h; }'
+          + ' export function signInRefusalMessage(m) { return m; }', loader: 'js' }));
     } }],
   });
   bundle = result.outputFiles[0].text;

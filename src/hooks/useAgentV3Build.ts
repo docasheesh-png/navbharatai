@@ -13,7 +13,7 @@ import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, ty
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../lib/firebase';
-import { authedHeaders } from '../lib/authHeaders';
+import { authedHeaders, authJsonHeaders, signInRefusalMessage } from '../lib/authHeaders';
 import { writeFailure } from '../lib/serverAnswer';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
 // reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
@@ -24,22 +24,8 @@ import { writeFailure } from '../lib/serverAnswer';
 // the cadence here; set minIntervalMs to 0 to disable pacing (instant, pre-2026-07-21 behavior).
 const FILE_REVEAL_PACER_OPTS = { minIntervalMs: 6000, maxQueue: 60 } as const;
 
-/**
- * Build JSON headers carrying the signed-in user's Firebase ID token when available.
- * The server derives identity from the VERIFIED token; a missing/unverifiable token degrades to an
- * anonymous build server-side (it never grants the body userId, and never hard-blocks the chat).
- * Pass `forceRefresh` on the critical /chat path to mint a fresh token so a stale/expired cached one
- * self-heals instead of arriving unverifiable.
- */
-async function authJsonHeaders(forceRefresh = false): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const tok = await auth.currentUser?.getIdToken(forceRefresh);
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server degrades to an anonymous build (never hard-blocks) */ }
-  return headers;
-}
-
+// The build's headers come from the ONE token path (lib/authHeaders `currentIdToken`): this file used to keep a private
+// copy whose forced refresh dropped a working token on a single failed network call (admin screenshot 2026-11-21).
 /**
  * useAgentV3Build — drives a v5.0 build and keeps the live client state that all
  * merged surfaces render from (§3.2). It POSTs the prompt to /api/agentv3/chat,
@@ -1511,9 +1497,16 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
           if (signal.aborted || isStale(gen)) throw new DOMException('Build request cancelled', 'AbortError');
           return fetch('/api/agentv3/chat', { method: 'POST', headers, body: JSON.stringify({ ...executionBody, requestId }), signal });
         };
-        const res = opts?.queueContinuationNonce
+        let res = opts?.queueContinuationNonce
           ? await fetchQueuedContinuationAdmission({ send: sendBuild, signal: controller.signal, current: () => !isStale(gen) })
           : await sendBuild(controller.signal);
+        // A signed-in user refused as signed-out: the refusal happens before any build starts (a clean 401, no stream),
+        // so ONE retry with a freshly minted token is safe and self-heals a token that went stale on this device.
+        if (res.status === 401 && auth.currentUser && !opts?.queueContinuationNonce && !isStale(gen)) {
+          let code: unknown;
+          try { code = ((await res.clone().json()) as { code?: unknown } | null)?.code; } catch { /* not JSON */ }
+          if (code === 'signin') res = await sendBuild(controller.signal);
+        }
         if (isStale(gen)) { try { await res.body?.cancel(); } catch { /* abandoned response */ } return; }
 
         if (!res.ok || !res.body) {
@@ -1524,6 +1517,7 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
             const j = await res.json();
             if (j && typeof j === 'object') body = j as Record<string, unknown>;
             if (typeof body.error === 'string') msg = body.error;
+            if (res.status === 401 && body.code === 'signin') msg = signInRefusalMessage(msg, !!auth.currentUser);
             resumable = body.resumable === true;
           } catch {
             /* non-JSON error body */

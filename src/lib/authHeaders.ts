@@ -17,12 +17,29 @@ import { GUEST_ID_HEADER, guestId } from './guestId';
  * token fetch failure just omits the header, and the server degrades to an anonymous (non-billed,
  * non-secret) path rather than hard-blocking. `forceRefresh` re-mints a possibly-stale token.
  */
+/**
+ * 🔴 A FAILED REFRESH MUST NOT THROW AWAY A WORKING TOKEN (admin screenshot 2026-11-21: signed in, avatar shown, the Pro
+ * build answered "Please sign in to build with NavBharatAI Pro"). The build asks for a FRESH token (`forceRefresh`), which is
+ * a network call to the token service. When that one call failed, the catch below dropped the token altogether and the
+ * build went out with no identity at all — while every other request on the same screen, sent with the cached token, was
+ * verified (the private-files list loaded at that very moment). 🧬 THE CLASS: a transient refresh failure turned into
+ * "not signed in". A forced refresh that fails now falls back to the cached token; the server still verifies whatever is
+ * sent, so a token that is really expired or revoked is still refused there — honestly, with its own reason. PURE of
+ * policy: one place, every helper in this module.
+ */
+export async function currentIdToken(forceRefresh = false): Promise<string | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  if (forceRefresh) {
+    try { const fresh = await user.getIdToken(true); if (fresh) return fresh; } catch { /* fall back to the cached token */ }
+  }
+  try { return (await user.getIdToken(false)) || null; } catch { return null; }
+}
+
 export async function authJsonHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const tok = await auth.currentUser?.getIdToken(forceRefresh);
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server degrades to an anonymous path (never hard-blocks) */ }
+  const tok = await currentIdToken(forceRefresh);
+  if (tok) headers.Authorization = `Bearer ${tok}`;
   // A signed-out visitor is counted by this device's guest id (guestId.ts), never by account.
   if (!headers.Authorization) headers[GUEST_ID_HEADER] = guestId();
   return headers;
@@ -39,12 +56,8 @@ export async function authJsonHeaders(forceRefresh = false): Promise<Record<stri
  * what actually stops the next copy.
  */
 export async function authHeader(forceRefresh = false): Promise<Record<string, string>> {
-  try {
-    const tok = await auth.currentUser?.getIdToken(forceRefresh);
-    return tok ? { Authorization: `Bearer ${tok}` } : { [GUEST_ID_HEADER]: guestId() };
-  } catch {
-    return { [GUEST_ID_HEADER]: guestId() }; // signed out / Firebase not ready — counted as a guest
-  }
+  const tok = await currentIdToken(forceRefresh);
+  return tok ? { Authorization: `Bearer ${tok}` } : { [GUEST_ID_HEADER]: guestId() }; // signed out / not ready — a guest
 }
 
 /**
@@ -62,10 +75,18 @@ export async function authHeader(forceRefresh = false): Promise<Record<string, s
  */
 export async function authedHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
   const headers: Record<string, string> = { ...(extra || {}) };
-  try {
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* token unavailable — header omitted */ }
+  const tok = await currentIdToken(false);
+  if (tok) headers.Authorization = `Bearer ${tok}`;
   if (!headers.Authorization) headers[GUEST_ID_HEADER] = guestId();
   return headers;
+}
+
+/**
+ * What to tell a user the server refused as signed-out. A visitor with no account really should sign in; a user whose app
+ * shows them signed in must never read "please sign in" — their sign-in could not be confirmed, and the honest step is to
+ * sign in again. PURE.
+ */
+export const SIGN_IN_NOT_CONFIRMED = 'Your sign-in could not be confirmed on this device. Please sign out and sign in again, then send your message.';
+export function signInRefusalMessage(serverMessage: string, signedInHere: boolean): string {
+  return signedInHere ? SIGN_IN_NOT_CONFIRMED : serverMessage;
 }

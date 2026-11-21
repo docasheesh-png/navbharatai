@@ -330,7 +330,9 @@ describe('the rest of the review, locked at the source', () => {
     // Through one helper since autopsy 8257ca59, which also leaves out untouched pre-seeded template files.
     expect(src).toContain('const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);');
     expect(reviewChangedPaths(new Map([['a.tsx', 'x'], ['public/sw.js', 'sw']]), new Set(['public/sw.js']))).toEqual(['a.tsx']);
-    expect(src).toContain('changedFiles: reviewChanged,');
+    // Since Q-3238 the review's scope is reviewChanged on every turn except a user-pressed bug hunt (the whole app).
+    expect(src).toContain('changedFiles: reviewScope,');
+    expect(src).toContain('changed: () => reviewChanged,');
   });
 });
 

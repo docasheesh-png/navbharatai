@@ -136,7 +136,9 @@ export function namedGameReference(text: string | null | undefined): NamedGameRe
 
 const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['score', /\b(score|points?|high ?score)\b/i],
-  ['levels', /\b(levels?|stages?|worlds?)\b/i],
+  // "Worlds" are levels only when COUNTED ("5 worlds", "world 2"). "Open world", "big world", "game world" name the setting,
+  // never levels (failedbr #2487: a GTA open-world request was given the required feature "levels" and checked for it).
+  ['levels', /\b(levels?|stages?)\b|\b\d+\s+worlds\b|\bworlds?\s+\d+\b/i],
   ['lives', /\blives\b|\b\d+\s*li(fe|ves)\b/i],
   ['timer', /\b(timer|countdown|time limit|stopwatch)\b/i],
   ['enemies', /\b(enem(y|ies)|monsters?|zombies?|aliens?|bosse?s?)\b/i],

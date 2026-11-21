@@ -81,7 +81,8 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
-import { offerBugHunt, bugHuntWaitMs } from '../AgentV3/optionalBugHunt';
+import { offerBugHunt, bugHuntWaitMs, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
+import { isKitFile as isGameKitFile } from '../AgentV3/growthGuard';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -17847,6 +17848,7 @@ async function noteBuildOutcome(
         thirdPartyPlayers: thirdPartyAdFactsAtStart.players,
         thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,
         offerAccepted,
+        bugHuntAskedByUser,
       });
       const requestNotesText = requestNoteSet.text;
       // The facts each note was derived from, kept under their old names so every report line and
@@ -26484,10 +26486,11 @@ async function noteBuildOutcome(
       // ZERO user code was written. Gate on `!isImportTurn` too (the real signal, in scope here and used at
       // 8558/8564) so a "do not change" survey can never trigger the reviewer or its file-modifying heal.
       const reviewerAllowed = reviewerShouldRun({
-        wroteFiles: writtenFiles.size > 0,
+        // A user-pressed bug hunt reviews the app even when the builder found nothing to change (optionalBugHunt.ts).
+        wroteFiles: writtenFiles.size > 0 || bugHuntAskedByUser,
         isImportTurn,
         fastLaneGated,
-        reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE'),
+        reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE') || bugHuntAskedByUser,
         startTierSonnet: analysis?.startTier === 'sonnet',
         templateDelivered: verbatimTemplate.deliver,
       });
@@ -26557,7 +26560,7 @@ async function noteBuildOutcome(
           // `reviewerShouldWrite` uses, so it can never disagree with the write decision below: when
           // the review can only suggest, it is also lean (a hard step cap, a 45 s budget, and an
           // instruction that says so). Not-green / proven-broken / failed build: byte-identical.
-          const reviewPlan = greenReviewPlan({ previewGreen, previewProvenBroken, buildOk: result.ok });
+          const reviewPlan = greenReviewPlan({ previewGreen, previewProvenBroken, buildOk: result.ok, userAskedToFix: bugHuntAskedByUser });
           // 🔴 A REVIEWER WE WALKED AWAY FROM MUST STOP, NOT MERELY STOP BEING WAITED FOR (autopsy
           // 3a0a8f7f). `raceTimeout` below only ends OUR wait: that build conceded REVIEW_INCOMPLETE and
           // the reviewer went on making model calls for five more seconds, on the user's bill, for an
@@ -26572,6 +26575,8 @@ async function noteBuildOutcome(
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
           const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
+          // A user-pressed hunt reads the whole app, not just this turn's edits (optionalBugHunt.ts, Q-3238).
+          const reviewScope = bugHuntReviewScope({ askedByUser: bugHuntAskedByUser, allFiles: rFiles, changed: () => reviewChanged, isKitFile: isGameKitFile });
           // A stylesheet that carries our design kit is handed as the APP's part only (autopsy 0473628e): the
           // 897-line kit made index.css too big to inline, so the review lost its one-call mode and timed out.
           const reviewInline = reviewPlan.mode === 'suggest'
@@ -26649,7 +26654,7 @@ async function noteBuildOutcome(
               // …and not the files the platform's own finishing passes wrote (skeletons, PWA files,
               // the architecture note): reviewing NavBharatAI's scaffolding spends the user's money and
               // can send a repair pass after our own files.
-              changedFiles: reviewChanged,
+              changedFiles: reviewScope,
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');

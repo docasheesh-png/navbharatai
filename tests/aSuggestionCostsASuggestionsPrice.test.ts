@@ -137,7 +137,8 @@ describe('the reviewer is TOLD it is suggest-only, and how to spend', () => {
 describe('the wiring in routes/agentv3.ts', () => {
   const src = readFileSync(new URL('../src/server/routes/agentv3.ts', import.meta.url), 'utf8');
   it('the plan is asked with previewGreen, previewProvenBroken and result.ok', () => {
-    expect(src).toMatch(/const reviewPlan = greenReviewPlan\(\{ previewGreen, previewProvenBroken, buildOk: result\.ok \}\);/);
+    // + userAskedToFix since Q-3238: a user-pressed bug hunt is the turn's job, never lean (tests/findAndFixBugsReallyHunts.test.ts).
+    expect(src).toMatch(/const reviewPlan = greenReviewPlan\(\{ previewGreen, previewProvenBroken, buildOk: result\.ok, userAskedToFix: bugHuntAskedByUser \}\);/);
   });
   it('the lean spawn is the SAME deps with only the step cap, its own stop signal and (when all code is inline) no tools changed', () => {
     // The review has carried its own abort signal since autopsy 3a0a8f7f — see

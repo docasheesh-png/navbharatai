@@ -123,9 +123,12 @@ export function greenReviewPlan(input: {
   previewGreen: boolean;
   previewProvenBroken?: boolean;
   buildOk?: boolean;
+  /** The user pressed "Find and fix bugs" (optionalBugHunt.ts): the review is the point of the turn, never a lean aside. */
+  userAskedToFix?: boolean;
   env?: NodeJS.ProcessEnv;
 }): GreenReviewPlan {
   const env = input.env ?? process.env;
+  if (input.userAskedToFix === true) return { mode: 'full', maxSteps: undefined };
   const suggestOnly = !reviewerShouldWrite({
     previewGreen: input.previewGreen,
     previewProvenBroken: input.previewProvenBroken,

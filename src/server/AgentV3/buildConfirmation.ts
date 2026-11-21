@@ -28,6 +28,8 @@
  */
 
 import { isSourcePathOnly } from '../lib/sourcePathPrompt';
+import { isCodeWithoutInstruction } from '../lib/pastedSource';
+export { isCodeWithoutInstruction };
 import {
   classifyIntentWithConfidence,
   firstNewBuildOrder,
@@ -46,6 +48,84 @@ import { namesNoObject } from './buildableInput';
  */
 const PRODUCT_NOUN =
   /\b(?:apps?|application|website|web\s?site|site|webpage|web\s?page|portal|software|program|game|bot|tool|dashboard|landing\s+page|blog|store|shop|crm|erp|calculator|tracker|system|platform|extension|plugin)\b|ऐप|एप|वेबसाइट|सॉफ्टवेयर|गेम/i;
+/**
+ * 🔴 A SENTENCE ABOUT WHAT NAVBHARATAI DOES NOT MAKE IS NOT AN ORDER (failedbr #1879, 2026-11-20). "YouTube dekh raha
+ * tha aur mujhe tera ad mila… tu to game banate hi nahin hai" — I saw your ad; you don't even make games — confirmed
+ * a build on the word "game" alone, and a YouTube-clone roadmap with a game kit was built for a remark. The verb was
+ * there, but negated and habitual ("banate … nahin", "don't make", "can't build"): a statement about the product,
+ * not a request. On the uncertain branch such a message is answered in chat (whose reply offers the build); an
+ * imperative beside it ("… nahin banate, ek bana do") still confirms through `firstNewBuildOrder`.
+ */
+const NEGATED_BUILD_STATEMENT = new RegExp([
+  String.raw`\b(?:bana|bna|banaa)(?:te|ta|ti|tey)\b[^.?!।]{0,24}\b(?:nahi|nahin|nhi|nai)\b`,
+  String.raw`\b(?:nahi|nahin|nhi|nai)\b[^.?!।]{0,12}\b(?:bana|bna|banaa)(?:te|ta|ti|tey|ega|egi|oge|sakte|sakta)\b`,
+  String.raw`\b(?:bana|bna)\s+(?:nahi|nahin|nhi)\s+(?:sakte|sakta|sakti|paate|pata|pati)\b`,
+  String.raw`\b(?:nahi|nahin|nhi)\s+(?:bana|bna)\s+(?:sakte|sakta|sakti|paate|pata|pati)\b`,
+  String.raw`\b(?:you|u|it|navbharat\w*)\s+(?:guys\s+|people\s+)?(?:don'?t|doesn'?t|dont|doesnt|can'?t|cannot|never|won'?t|couldn'?t)\s+(?:even\s+)?(?:make|build|create)\b`,
+  'बना(?:ते|ता|ती)[^।?!]{0,24}नहीं',
+  'नहीं[^।?!]{0,12}बना(?:ते|ता|ती|एगा|एगी|ओगे)',
+].join('|'), 'i');
+
+/**
+ * 🔴 A DOCUMENT IS AN ANSWER, NOT AN APP (failedbr #1420, #1430, 2026-11-20). "Create a comprehensive game design document
+ * (GDD) for a mobile 3D cricket game…" was built as an app (the starter was still showing at the end), and "Design a
+ * complete progression loop for a Player Career Mode… Outline the journey… Detail XP/skill trees…" ran as a build whose
+ * model answered with the design document — the right answer — and was then told to "act now". The deliverable in both
+ * is a DOCUMENT: written in chat, with the build offered after.
+ *
+ * Two shapes, both precision-first: the order's object is a document noun (a GDD, design document, PRD, specification,
+ * business plan, pitch deck, essay, report, proposal — never "a document management app"), or the message is written
+ * in document imperatives (two or more sentences opening with Outline / Detail / Describe / Explain / Summarize). "Design a login page" is neither, and still builds.
+ */
+const DOCUMENT_ORDER = /^\s*(?:please\s+)?(?:create|write|make|draft|prepare|generate|give\s+me|design)\s+(?:me\s+)?(?:a|an|the|my)?\s*(?:(?:complete|comprehensive|detailed|full|short|brief|professional|one-page)\s+)*(?:(?:game|product|technical|software|app)\s+)?(?:design\s+doc(?:ument)?|gdd|prd|spec(?:ification)?\s+doc(?:ument)?|business\s+plan|pitch\s+deck|essay|report|proposal|white\s?paper)\b(?!\s+(?:[\w-]+\s+)?(?:app|apps|application|website|tool|generator|maker|builder|system|platform|software|manager|tracker)\b)/i;
+const DOCUMENT_IMPERATIVE = /(?:^|[.!?]\s+|\n\s*)(?:outline|detail|describe|explain|summari[sz]e)\s+[A-Za-z\u0900-\u097F]/gi;
+export function requestsADocument(message: string): boolean {
+  const text = String(message ?? '');
+  if (DOCUMENT_ORDER.test(text)) return true;
+  return (text.match(DOCUMENT_IMPERATIVE) ?? []).length >= 2;
+}
+
+/**
+ * 🔴 "NHI BANAO" IS "DON'T BUILD" (failedbr #1270, 2026-11-20). The whole message was "Nhi banao" — do not make it — and
+ * the keyword ladder read "banao" as an unmistakable order (`explicit-order`, high confidence); "mat banao" / "na banao" /
+ * "abhi mat banao" confirmed too. A negation word IMMEDIATELY BEFORE the build verb is a refusal: "na" after the verb
+ * ("bana do na") is the polite tag and stays an order. The order is still found anywhere else in the message, so
+ * "ads mat banao, game banao" builds.
+ */
+const NEGATED_ORDER = /(?:^|[\s,.!?।])(?:mat|mt|nahi|nahin|nhi|nai|na|no)\s+(?:abhi\s+)?(?:banao|bnao|banaao|banaiye|banaye|banado|bana\s+do|bnado|banana|bana|karo|kro|kar\s+do|build|make|create)\b|(?:मत|नहीं|ना)\s+बना(?:ओ|इए|ना|\s+दो)?|\b(?:don'?t|do\s+not|dont|never)\s+(?:build|make|create)\s+(?:it|this|that|anything|an?\s+app|the\s+app)?\b/gi;
+export function declinesTheBuild(message: string): boolean {
+  const text = String(message ?? '');
+  if (!new RegExp(NEGATED_ORDER.source, 'i').test(text)) return false;
+  const rest = text.replace(NEGATED_ORDER, ' ');
+  return !firstNewBuildOrder(rest.toLowerCase()) && !/\b(?:banao|bnao|banado|bana\s+do|banaiye|build|make|create)\b/i.test(rest);
+}
+
+
+/**
+ * A PROMPT TEMPLATE WITH ITS BLANK STILL IN IT NAMES NO APP (failedbr #1020, 2026-11-20). A Hindi template —
+ * "तुम एक एक्सपर्ट मोबाइल ऐप डेवलपर हो … मेरी ऐप का टॉपिक यह है: [यहाँ लिखिए आपको कौन सी ऐप बनानी है, जैसे: …]" — was pasted
+ * with the topic never filled in. The role line became the app's name, the placeholder's EXAMPLES set the domain, and the
+ * model was nudged into a To-Do app. A bracketed fill-in instruction ("[यहाँ लिखिए …]", "[write your app idea here]",
+ * "<insert topic>") is the one part that names the app, still blank — so the turn is answered and asks for it. PURE.
+ */
+const UNFILLED_PLACEHOLDER = new RegExp([
+  String.raw`[\[<{(]\s*(?:यहाँ|यहां|यहा)\s*(?:लिखि?ए|लिखें|लिखो|डालें)[^\]>})]{0,200}[\]>})]`,
+  String.raw`[\[<{]\s*(?:write|type|enter|insert|add|put|fill(?:\s+in)?|describe|your)\b[^\]>}]{0,80}\b(?:here|topic|idea|app(?:\s+name)?|name|details?|description)\b[^\]>}]{0,80}[\]>}]`,
+  String.raw`[\[<{]\s*(?:yaha|yahan)\s+(?:likhe|likhiye|likho)[^\]>}]{0,200}[\]>}]`,
+].join('|'), 'i');
+export function hasUnfilledPlaceholder(message: string): boolean {
+  return UNFILLED_PLACEHOLDER.test(String(message ?? ''));
+}
+
+/**
+ * Does this turn ask whether the message itself confirms a build? A new build always; an edit only when no earlier request
+ * left an app — or when the message is code with no words, which is no instruction on any app (failedbr #1278). PURE.
+ */
+export function buildConfirmationApplies(intent: string, earlierRequestLeftAnApp: boolean, message: string): boolean {
+  if (intent === 'new_build') return true;
+  return intent === 'edit_existing' && (!earlierRequestLeftAnApp || isCodeWithoutInstruction(message));
+}
+
 /** The Devanagari `बना-` family ("बनाओ", "बना दो") — the order no Roman list can see. */
 const DEVANAGARI_BUILD_VERB = /बन(?:ा|वा)/;
 
@@ -56,6 +136,10 @@ export type BuildConfirmationReason =
   | 'fresh-start'
   | 'pasted-source'
   | 'names-something-to-build'
+  | 'asks-for-a-document'
+  | 'declines-the-build'
+  | 'code-without-instruction'
+  | 'unfilled-template'
   | 'question'
   | 'names-nothing-to-build';
 
@@ -75,6 +159,12 @@ export function buildConfirmation(message: string): BuildConfirmation {
   // Defense in depth: a bare file location is not a build order, even if another classifier changes.
   if (isSourcePathOnly(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
   const lower = text.toLowerCase();
+  // failedbr #1270: "nhi banao" / "mat banao" refuses the build; it never confirms one.
+  if (text && declinesTheBuild(text)) return { confirmed: false, reason: 'declines-the-build' };
+  if (text && isCodeWithoutInstruction(text)) return { confirmed: false, reason: 'code-without-instruction' };
+  if (text && hasUnfilledPlaceholder(text)) return { confirmed: false, reason: 'unfilled-template' };
+  // failedbr #1420 / #1430: a document is written in chat (its reply offers the build), even after "create" / "design".
+  if (text && requestsADocument(text)) return { confirmed: false, reason: 'asks-for-a-document' };
   if (text && isExplicitCompleteBuild(text)) return { confirmed: true, reason: 'complete-build' };
   if (text && wantsFreshStart(text)) return { confirmed: true, reason: 'fresh-start' };
   const kw = classifyIntentWithConfidence(text);
@@ -98,6 +188,10 @@ export function buildConfirmation(message: string): BuildConfirmation {
   // unchanged — "make an app" / "app banao" stay explicit-order (the ask-what-to-build gate still
   // asks about them) and "add it to this app" stays an explicit edit.
   if (text && namesNoObject(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
+  // The order is looked for OUTSIDE the negated span, so "you don't even make games" is not read as "make games".
+  if (NEGATED_BUILD_STATEMENT.test(text) && !firstNewBuildOrder(lower.replace(new RegExp(NEGATED_BUILD_STATEMENT.source, 'gi'), ' '))) {
+    return { confirmed: false, reason: 'names-nothing-to-build' };
+  }
   if (firstNewBuildOrder(lower) || DEVANAGARI_BUILD_VERB.test(text) || PRODUCT_NOUN.test(text)) {
     return { confirmed: true, reason: 'names-something-to-build' };
   }
@@ -137,6 +231,12 @@ export function isOfferAcceptance(message: string): boolean {
     .map((w) => w.trim())
     .filter(Boolean);
   if (words.length === 0 || words.length > 8) return false;
+  // failedbr #1270: "na banao" (don't build) was a YES because "na" is a filler — as the tag AFTER a verb it is ("bana do
+  // na"); BEFORE one it is the refusal. Any refusal is never an acceptance.
+  if (declinesTheBuild(String(message ?? ''))) return false;
+  // failedbr #1171: a thumbs-up IS the reply to "say yes to start" — the most common one on a phone. Only a message made of
+  // nothing but approving emoji counts; an emoji beside words is judged by the words.
+  if (/^(?:\s*(?:👍(?:[\u{1F3FB}-\u{1F3FF}])?|👌(?:[\u{1F3FB}-\u{1F3FF}])?|✅|✔️?|🆗|💯)\s*)+$/u.test(String(message ?? ''))) return true;
   let decisive = false;
   for (const w of words) {
     if (YES_WORDS.has(w) || DO_IT_WORDS.has(w)) { decisive = true; continue; }

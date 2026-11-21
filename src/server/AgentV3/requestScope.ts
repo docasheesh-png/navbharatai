@@ -55,6 +55,11 @@ const ASKS_FOR_SIGN_IN = new RegExp([
   String.raw`\busers?\s+(?:can|could|should|will|must)\b`, String.raw`\bmembers?\b`, String.raw`\bsubscri\w*\b`,
   String.raw`\bfirebase\b`, String.raw`\bsupabase\b`, String.raw`\bclerk\b`,
   'लॉग\\s?इन', 'साइन\\s?इन', 'पासवर्ड', 'अकाउंट', 'खाता', 'लॉगिन',
+  // The rest of the Latin list, as Hindi writes it (failedbr #1005, 2026-11-20: "एडमिन पैनल होना चाहिए" — an admin panel —
+  // was read as "asks for no sign-in" and the builder was told to add no access control).
+  // Bounded on both sides: `\\b` cannot see a Devanagari letter, so a bare 'पिन' matched पिनकोड (pincode) and 'लॉक' ब्लॉक.
+  ...['एडमिन', 'ओटीपी', 'प्रोफ़ाइल', 'प्रोफाइल', 'यूज़रनेम', 'यूजरनेम', 'पिन', 'लॉक', 'प्राइवेट', 'सुरक्षित', 'पासकोड', 'मेंबर', 'सदस्य']
+    .map((w) => `(?<![\\u0900-\\u097F])${w}(?![\\u0900-\\u097F])`),
 ].join('|'), 'i');
 
 /**

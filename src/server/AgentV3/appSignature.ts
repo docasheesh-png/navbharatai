@@ -145,6 +145,21 @@ export function withoutAppSignature(html: string): string {
 }
 
 /**
+ * Is `now` still the seeded file — byte for byte, or differing only by OUR badge? (failedbr #1276, 2026-11-20.) The badge is
+ * written into index.html by update_preview, inside a model tool call, so an untouched template came out as "1 file(s)"
+ * changed — and the same count told the stop bill the user was holding a file of their own. Our markup is never the user's
+ * work. Whitespace runs are collapsed because the badge brings its own newline; that can only ever read MORE as unchanged,
+ * so a bill built on it can only be generous. PURE.
+ */
+export function sameAsSeeded(seeded: string | undefined, now: string | undefined): boolean {
+  if (typeof seeded !== 'string' || typeof now !== 'string') return false;
+  if (now === seeded) return true;
+  if (!now.includes(APP_SIGNATURE_MARKER)) return false;
+  const flat = (t: string) => withoutAppSignature(t).replace(/\s+/g, ' ').trim();
+  return flat(now) === flat(seeded);
+}
+
+/**
  * Where our badge sits in a document, as `[start, end)` offsets — the same two patterns
  * `withoutAppSignature` removes, for a reader that must keep every other offset where it is (the spacing
  * snap matches on a blanked copy and writes into the original at the same offsets; autopsy 9c612cdb).

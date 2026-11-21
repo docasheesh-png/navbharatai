@@ -14,6 +14,7 @@
 // esbuild is already a dependency. Never throws; safe on any file map.
 
 import { transform } from 'esbuild';
+import { firstConflictMarkerLine } from './conflictMarkerGuard';
 
 export interface SyntaxErrorInfo {
   path: string;
@@ -168,6 +169,8 @@ export function parseGuardDecision(
   errOld: SyntaxErrorInfo | null,
   errNew: SyntaxErrorInfo | null,
   enabled = true,
+  /** The content that failed — read only to name a marker-shaped cause (failedbr #1820). */
+  newContent?: string,
 ): string | null {
   if (!enabled || !errNew) return null;   // guard off, or the result parses clean → allow
   if (errOld) {
@@ -190,6 +193,19 @@ export function parseGuardDecision(
     return head + `The file looks cut off or unbalanced. Write the WHOLE file again in one write, ending cleanly ` +
       `(every "{" closed${JSON_FILE.test(path) ? ', valid JSON with no trailing text' : ''}).`;
   }
+  // 🔴 MARKERS IN A WHOLE-FILE WRITE (failedbr #1820, 2026-11-20). Three fast-lane repair files were refused with
+  // `Unexpected "<<"` / `Unexpected ">>>"` at column 0 and the duplicate-declaration hint below. A line that starts
+  // with seven '<' or '>' is a merge-conflict or SEARCH/REPLACE marker, and a `<<<FILE` / `<<<ENDFILE` line is the
+  // lane's own wrapper: neither is a duplicate, and the hint now says which it is.
+  const marker = typeof newContent === 'string' ? markerLineIn(newContent) : null;
+  if (marker) {
+    return head + (marker.kind === 'wrapper'
+      ? `Line ${marker.line} is a file-wrapper line ("${marker.text}"), not code: a file's content ends before its ` +
+        `<<<ENDFILE>>> marker. Write the WHOLE file again with no wrapper lines inside it.`
+      : `Line ${marker.line} is a merge-conflict or diff marker ("${marker.text}"). A write is the whole file as it ` +
+        `should be — never a SEARCH/REPLACE block or an unresolved conflict. Apply the change yourself and write ` +
+        `the result, with no marker lines.`);
+  }
   if (isJsxStructureError(errNew) && !isDuplicateDeclarationError(errNew)) {
     return head +
       `An edit that wraps, moves or adds JSX left a tag or a brace unbalanced. Patching fragments of a ` +
@@ -211,4 +227,20 @@ export function isJsxStructureError(info: SyntaxErrorInfo | null | undefined): b
     || /Unterminated JSX/i.test(m)
     || /Adjacent JSX elements must be wrapped/i.test(m)
     || /Unexpected closing .* tag does not match/i.test(m);
+}
+
+/**
+ * The first line of `content` that is a conflict / diff marker (seven '<' or '>' at the start, or a lone `=======`)
+ * or a `<<<FILE` / `<<<ENDFILE` wrapper line, with its text cut to 40 characters. `null` when there is none. PURE.
+ */
+export function markerLineIn(content: string): { line: number; kind: 'conflict' | 'wrapper'; text: string } | null {
+  const lines = String(content ?? '').split(/\r?\n/);
+  const conflictAt = firstConflictMarkerLine(content);
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const isWrapper = /^\s*<<<\s*\/?\s*(?:END\s*FILE|FILE)\b/i.test(l);
+    const isConflict = (conflictAt === i + 1) || /^={7}\s*$/.test(l);
+    if (isWrapper || isConflict) return { line: i + 1, kind: isWrapper ? 'wrapper' : 'conflict', text: l.trim().slice(0, 40) };
+  }
+  return null;
 }

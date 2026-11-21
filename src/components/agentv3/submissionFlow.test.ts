@@ -21,7 +21,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const setter = (key: string) => (value: any) => { observed[key] = typeof value === 'function' ? value(observed[key]) : value; };
   const deps: Record<string, any> = {
     prompt: 'Build a notes app', files: [], running: false, isBusy: () => false, listening: false, importUrl: '',
-    sessionSwitchRef: { current: false }, queueClaimInFlightRef: { current: null }, queueContinuationAbortRef: { current: null }, weakForceContinueRef: { current: false },
+    sessionSwitchRef: { current: false }, queueClaimInFlightRef: { current: null }, queueContinuationAbortRef: { current: null }, weakForceContinueRef: { current: false }, bugHuntRequestedRef: { current: false },
     localSubmissionMessagesRef: { current: new Set<number>() }, submissionRef: { current: new SubmissionScope() }, sessionIdRef: { current: 'original' },
     state: { narration: [], checkpoints: [], activity: [], activityLog: [] }, userMsgs: [], agentHistory: [],
     autoContinueRef: {}, planContinuesRef: {}, lastPlanRemainingRef: {}, noProgressRef: {}, lastFilesWrittenRef: {},
@@ -50,6 +50,16 @@ function harness(overrides: Record<string, unknown> = {}) {
 const plan = { show: true, domain: 'notes', named: ['Notes'], suggested: ['Search'] };
 
 describe('real Pro send preflight', () => {
+  it('a ❗️ "Find and fix bugs" turn sends the bug-hunt yes to the build exactly once, then the flag is spent', async () => {
+    const h = harness({ prompt: '' });
+    h.deps.bugHuntRequestedRef.current = true;
+    await h.send({ text: 'Find and fix the bugs in my app.', importUrl: '' });
+    expect(h.deps.start).toHaveBeenCalledTimes(1);
+    expect(h.deps.start.mock.calls[0][1]).toMatchObject({ bugHunt: true });
+    expect(h.deps.bugHuntRequestedRef.current).toBe(false);
+    await h.send({ text: 'Add a dark mode', importUrl: '' });
+    expect(h.deps.start.mock.calls[1][1].bugHunt).toBeUndefined();   // an ordinary turn never carries it
+  });
   it('inserts user text before delayed attachment conversion and blocks a same-render duplicate', async () => {
     const conversion = deferred<object>();
     const h = harness({ files: [{ name: 'photo.png' }], fileToAttachment: () => conversion.promise });

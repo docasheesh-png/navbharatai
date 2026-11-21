@@ -122,6 +122,18 @@ export function starterAppBlocker(entryContent: string | null | undefined): stri
   );
 }
 
+/**
+ * The sentence `update_preview` adds when the page it just published is still the starter (failedbr #1275, 2026-11-20).
+ * The block game's logic files were written and typechecked clean, but App.tsx was never wired to them: the platform saw
+ * RENDERED_ONLY_THE_STARTER, the model saw "Live preview published (port 5173 verified UP)" — 22 times in a row, 3 minutes —
+ * and never learned the one fact the build turned on. '' when the entry is not the starter. PURE.
+ */
+export function starterPreviewNote(entryIsStarter: boolean): string {
+  if (!entryIsStarter) return '';
+  return ' NOTE: the page this preview shows is still the starter template we seeded — the entry point (src/App.tsx) does '
+    + 'not mount anything you wrote yet. Publishing again will not change that: wire the entry to your app first.';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // 🔴 THE SIBLING THAT WAS NEVER HUNTED (autopsy 3ab93068, 2026-09-23).
 //

@@ -131,3 +131,19 @@ describe('what the user is told instead of "App tayyar hai! 🎉"', () => {
     expect(s).not.toMatch(/\b(glm|claude|anthropic|openai|gemini|grok|sonnet|opus)\b/i);
   });
 });
+
+// failedbr #677 (queue Q-3220): "Your app is built and saved, but 2 things are still broken" on a build that wrote nothing.
+describe('Q-3220 — a build that wrote nothing is not "built and saved"', () => {
+  it('says nothing was built, and still says it is not ready and not charged', () => {
+    const s = releaseGateFailureSummary(2, 'Release gate: RED', false);
+    expect(s).not.toMatch(/built and saved/);
+    expect(s).toMatch(/Nothing was built this time/);
+    expect(s).toMatch(/NOT ready/);
+    expect(s).toMatch(/NOT been charged/);
+    expect(releaseGateFailureSummary(2, 'x')).toMatch(/Your app is built and saved/);
+  });
+  it('wired: the route passes whether the builder wrote anything', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('releaseGateFailureSummary(gateBlockers, releaseGateSummary(gate), builderWroteCount() > 0)');
+  });
+});

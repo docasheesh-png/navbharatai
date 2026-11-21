@@ -1,0 +1,160 @@
+{
+  "checkedAt": "2026-11-21",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "q11-village-house",
+      "sha256": "2dd183f36c8438958fef43fbaceeedee854ec5da721ab7c85b17cb64c097ea0c",
+      "bytes": 1891292,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 4657,
+          "changedPixels": 2800,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 4657,
+          "changedPixels": 2800,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q11-cottage",
+      "sha256": "863396e36ddc7d8663299c727b50a7d7c0d15596c6ec9786c7a36aac00a107c1",
+      "bytes": 1607384,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3954,
+          "changedPixels": 2961,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3954,
+          "changedPixels": 2961,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q11-wagon",
+      "sha256": "0f1309376669c4f29b44fa8e6f16a3a494458f9418f81b205849aa1e9f37e334",
+      "bytes": 389248,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1672,
+          "changedPixels": 1569,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1672,
+          "changedPixels": 1569,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q11-wooden-fence",
+      "sha256": "6c8c71660396f750ac955e6787947aa50b078f9c6236debf361e39aa5fe33a00",
+      "bytes": 307424,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 40,
+          "changedPixels": 1244,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 40,
+          "changedPixels": 1244,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q11-stone-stairs",
+      "sha256": "6c2394ba0b8d3b1a4c1544718695e2dcbcf5b835d258ae56fb4ec73da186077e",
+      "bytes": 644700,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 62,
+          "changedPixels": 3178,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 62,
+          "changedPixels": 3178,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q11-chimney",
+      "sha256": "b8279ab8f53851d12bb89e75a4ef9e4fee58b859782028ee766e4286e82c342c",
+      "bytes": 661060,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 618,
+          "changedPixels": 2091,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 618,
+          "changedPixels": 2091,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q11-vine",
+      "sha256": "14221542262484bdb35ceb87a7b8088d11cfb5b346c85b5ac45e04fc8b6e2d5b",
+      "bytes": 90904,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 31,
+          "changedPixels": 496,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 31,
+          "changedPixels": 496,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

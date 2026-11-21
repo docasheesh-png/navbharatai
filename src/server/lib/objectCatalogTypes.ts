@@ -54,7 +54,9 @@ export interface CatalogEntry {
  * above; adding one would silently disable every Hindi alternative in the catalogue.
  */
 export function compileMatch(e: Pick<CatalogEntry, 'words' | 'hi'>): RegExp {
-  const ascii = '\\b(?:' + e.words + ')\\b';
+  // A plural names the same thing (failedbr #1261's sibling: "a racing game with checkpoints" matched no marker while "a
+  // checkpoint" did). An optional trailing `s` only — never `es`, which would read "cares" as a car.
+  const ascii = '\\b(?:' + e.words + ')s?\\b';
   return new RegExp(e.hi ? ascii + '|(?:' + e.hi + ')' : ascii, 'i');
 }
 

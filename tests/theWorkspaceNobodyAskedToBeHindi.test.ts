@@ -58,8 +58,8 @@ describe('1 · a request in Latin letters is built in Latin letters', () => {
   it('the architect and every sub-agent read the SAME line', () => {
     const route = read('src/server/routes/agentv3.ts');
     // Both read the SAME function with the SAME arguments (an edit flag added by autopsy 4d538ca3).
-    expect(route).toContain("buildPrompt = `${appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' })}\\n\\n${buildPrompt}`;");
-    expect(route).toContain("languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),");
+    expect(route).toContain("buildPrompt = `${buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing' })}\\n\\n${buildPrompt}`;"); // failedbr #1181
+    expect(route).toContain("languageRule: () => buildLanguageInstruction({ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage(prompt), editingExistingApp: intent === 'edit_existing' }),"); // failedbr #1181
     const sub = read('src/server/AgentV3/SubAgent.ts');
     const at = sub.indexOf('const contextBlocks = [');
     expect(sub.slice(at, sub.indexOf('].filter(Boolean);', at))).toContain('deps.languageRule?.()');

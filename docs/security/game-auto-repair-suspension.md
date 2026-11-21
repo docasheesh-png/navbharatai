@@ -31,3 +31,19 @@ complete inventory evidence, metadata and binary handling, atomic/fenced restore
 verified successful recovery, no races with active writers, quota/failure tests,
 and the full exact-tree CI. Prefix inventories or a zero skipped count are not
 substitutes. Existing unrelated repair paths are outside this narrow mitigation.
+
+## 2026-11-21 — what replaced it (the suspension itself still stands)
+
+The owner asked for game repair back "carefully": optional, asked of the user, and undoable in one prompt. That is
+built WITHOUT re-enabling this path — `gameAutoRepairEnabled()` still returns false and `runGameRepair` is still a stub:
+
+- **Fixing is the user's choice.** The playtest's problems are offered as the one-tap "Make the game playable" fix
+  (`buildFindingSuggestions`, `GAME_PLAYTEST_ISSUES`); it runs only when the user taps it, as a normal turn.
+- **A normal turn is versioned by the real version system,** not a private snapshot: every good build is saved whole in
+  `BuildHistoryStore` (the Time Machine), and `/api/agentv3/restore-version` saves the current app before restoring.
+- **Every turn on a measured game is compared with the game as it was measured before it** (`gameRegression.ts`). A turn
+  that made it worse — a new unplayable defect, or a big score drop below the playable line — records `GAME_GOT_WORSE`
+  with the saved version from just before the turn, and the ❗️ button carries a one-tap "Go back" (a row in the ❗️ "What you need to do" list, `gameUndo.ts`). Nothing is
+  restored until the user taps.
+
+None of the risks above apply: no repair runs unasked, and no rollback is made from an incomplete snapshot.

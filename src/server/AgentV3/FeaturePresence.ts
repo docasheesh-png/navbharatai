@@ -120,6 +120,15 @@ function matchedAControl(m: PresenceEvidence | false): boolean {
 }
 
 /**
+ * THE PRODUCT ITSELF IS THE ORDER TO BUILD, NEVER AN ADD CONTROL (failedbr #1341, 2026-11-20). ". Create game" became
+ * REQ-001 "Add / create", the requirement was carried into #1343, and that turn built a file-creation feature instead of the
+ * game. "create a block game", "create an app for notes" name what to build. At most two words may sit before the noun, so
+ * "add a task to the game" is still an Add. Defined before FEATURES reads it.
+ */
+const THE_PRODUCT_ITSELF =
+  '(?:(?:a|an|the|my|our|one|ek|new)\\s+)?(?:[\\w-]+\\s+){0,2}(?:games?|apps?|application|website|web\\s*site|webpage|landing\\s+page|clone|software)\\b';
+
+/**
  * What follows "add" when it is an INSTRUCTION TO THE BUILDER rather than a request for an Add control.
  *
  * 🔴 WHY (autopsy `ad1596fc`, 2026-09-21). The prompt was *"**Add** pagination or infinite scroll to the
@@ -230,7 +239,7 @@ const FEATURES: FeatureDef[] = [
     feature: 'add', label: 'Add / create',
     // See BUILDER_INSTRUCTION_OBJECT above: `add a task` is a control, `add pagination` is an order.
     requested: new RegExp(
-      `\\b(?:add|create|insert)\\b(?!\\s+(?:${BUILDER_INSTRUCTION_OBJECT}))` +
+      `\\b(?:add|create|insert)\\b(?!\\s+(?:${BUILDER_INSTRUCTION_OBJECT}))(?!\\s+${THE_PRODUCT_ITSELF})` +
       '|\\bnew\\s+(?:task|item|note|todo|entry|record)\\b',
     ),
     // Needs an input to type into AND a control to submit it (button text or a form).

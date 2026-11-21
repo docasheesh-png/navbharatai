@@ -1,15 +1,21 @@
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
+import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
-import { addLibraryModels } from './gameAssets/assetSeed';
+import { addLibraryModels, workspaceGameAssetPersistence } from './gameAssets/assetSeed';
 import { externalGameAssetsEnabled, libraryRequirement } from './gameAssets/assetPlan';
+import { ownModelGuide } from './gameAssets/modelSourcesGuide';
+import { addLibraryTextures, textureResultNote } from './gameAssets/textureLibrary';
+import { generateCharacterCustomizer } from '../lib/CharacterCustomizerGenerator';
 import { REVIEWED_GAME_ASSETS } from './gameAssets/providers';
 import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
+import { systemPackageInstallRefusal } from './systemPackageInstall';
+import { startsExpressServer, spaFallbackWriteNote } from './SpaFallbackAnalysis';
 import { PARTIAL_CONTENT_KEY, PendingWrites, resumeTruncatedEnabled, truncatedWriteNotice } from './reliability/resumeWrite';
 import { recordingActuator } from './recordedWrites';
 import { markPreviewGaveUp, previewGaveUp } from './previewGiveUp';
@@ -62,6 +68,7 @@ import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import { defaultToolCatalog, isRecipeName, recipeListing } from './ToolCatalog';
+import { withStructuredArguments } from './toolArgumentShape';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
@@ -91,7 +98,7 @@ import { assessFullRewrite } from './rewriteRisk';
 import { isOurStarterFile, starterTemplates } from './starterFragment';
 import { applyStrictTrial } from './strictTrial';
 import { analyzeToolchain } from './toolchainPins';
-import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
+import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE, viteAppOnDisk } from './appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
@@ -147,10 +154,10 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
-  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome,
-} from './writeTimeTypecheck';
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
+import { hollowFeatureWriteNote } from './hollowFeature';
 import { browserAiKeyWriteNote } from './browserAiKeyScan';
 import { mixedSvgImportWriteNote } from './svgImportShape';
 import { uploadStorageWriteNote } from './browserFileStore';
@@ -228,16 +235,16 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker, starterPreviewNote } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
-import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
+import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, keepAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
 import { entryAutoWireEnabled, isAutoWiredEntry, isScreenPath, zeroPropExport, childrenOnlyProvider, autoWiredEntry, autoWiredNote, type WiredExport } from './entryAutoWire';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
 import { importsOfDeletedFiles, danglingImportNote, deletedImportNoteEnabled, orderImportCandidates, readSourcesWithinBudget, withoutDeletedImportNote } from './deletedImportNote';
-import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
+import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote, foldersOutsideTheApp, inFolderOutsideTheApp } from './outsideTheApp';
 import { userFileGuardEnabled, unaskedUserFileRemovals, userFileRemovalMessage } from './userFileGuard';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
@@ -390,6 +397,7 @@ import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { generateWorld2D, world2dEnabled, WORLD2D_DIR } from '../lib/world2d/World2DGenerator';
 import { world2dIntent } from './world2dIntent';
 import { gameKitWants3D, gameTurnRequest } from './gameKitSeed';
+import { forgeNotUsedFor, forgeNotUsedWarning, type MissingObject } from './forgeForMissing';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
@@ -502,7 +510,7 @@ import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { isNotFoundError } from './fsErrors';
 import { SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
-import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
+import { withoutPreviewBridge, bridgeShellNote, bridgeLineRanges, withoutBridgeGrepMatches } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
@@ -1223,6 +1231,9 @@ export class ToolDispatcher {
 
   /** This build is a race whose course the request did not describe: check its code streams the endless track. */
   requireEndlessRaceCourse(): void { this._endlessRaceCourse = true; }
+  /** The objects the library and kit lack, which the builder was told to make with the Forge (forgeForMissing.ts). */
+  private _forgeSubjects: MissingObject[] = [];
+  requireForgeSubjects(missing: readonly MissingObject[]): void { this._forgeSubjects = [...missing]; }
 
   /**
    * Files the USER put in the workspace, and the request this build answers — so a shell delete of one
@@ -1544,7 +1555,7 @@ export class ToolDispatcher {
    * final save persists. The freeze held in the sandbox and was bypassed in the saved app, which is why
    * that report's saved copy no longer matched the snapshot. Nothing after a refused write may pretend.
    */
-  private async landHealWrite(file: string, content: string, before: string | undefined): Promise<boolean> {
+  private async landHealWrite(file: string, content: string, before: string | undefined, by: string): Promise<boolean> {
     let wrote: { content: string };
     try {
       // NAMED, so a refusal says who asked (autopsy e725e002: the reviewer's evaluate tried to add a
@@ -1556,7 +1567,7 @@ export class ToolDispatcher {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }
     try { getWorkspaceMemory(this.workspaceId).indexFile(file, wrote.content); } catch { /* best-effort */ }
-    try { noteHeal(this.workspaceId, file, wrote.content, before); } catch { /* best-effort */ }
+    try { noteHeal(this.workspaceId, file, wrote.content, before, by); } catch { /* best-effort */ }
     return true;
   }
 
@@ -2305,7 +2316,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report))));
+        return await this._warnIfForgeSkipped(await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report)))));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2368,6 +2379,24 @@ export class ToolDispatcher {
    * A 3D game that builds its own renderer and never mounts the kit's shell (shellBypass.ts) — it loses the touch controls,
    * menus, HUD and music. A WARNING: the game may still run on a desktop. Fail-open on its own trouble.
    */
+  /** Advisory: an object the builder was asked to make with the Forge has no Forge object (forgeForMissing.ts). Never blocks. */
+  private async _warnIfForgeSkipped(report: ReadinessReport): Promise<ReadinessReport> {
+    if (this._forgeSubjects.length === 0) return report;
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'forge-used-list');
+      const objects = listed.map((p) => p.replace(/^\.?\//, '')).filter((p) => p.startsWith(OBJECTS_DIR) && /\.[tj]sx?$/.test(p));
+      if (objects.length > RACE_SCAN_MAX_FILES) return report;
+      const files = new Map<string, string>();
+      for (const p of objects) {
+        try { files.set(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'forge-used-read')); }
+        catch { return report; } // an unreadable file is not evidence the Forge was skipped
+      }
+      const skipped = forgeNotUsedFor(this._forgeSubjects, files);
+      if (skipped.length) return { ...report, warnings: [...report.warnings, forgeNotUsedWarning(skipped)] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
+
   private async _warnIfShellSkipped(report: ReadinessReport): Promise<ReadinessReport> {
     try {
       const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'shell-bypass-list');
@@ -2781,7 +2810,7 @@ export class ToolDispatcher {
       const errNew = await firstSyntaxError(path, newContent);
       if (!errNew) return this.previewDuplicateRejection(path, oldContent, newContent);
       const errOld = await firstSyntaxError(path, oldContent);
-      const rejection = parseGuardDecision(path, errOld, errNew, true);
+      const rejection = parseGuardDecision(path, errOld, errNew, true, newContent);
       if (rejection) {
         try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-SYNTAX] refused write that would break ${path}: ${errNew.message}`); } catch { /* audit best-effort */ }
       }
@@ -3011,7 +3040,7 @@ export class ToolDispatcher {
     }
   }
 
-  private async readEvalSnapshot(): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
+  private async readEvalSnapshot(planSkip?: (files: string[]) => Promise<(path: string) => boolean>): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
     const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|py|rb|java|php|go)$/i;
     const SKIP_DIR = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)/i;
     let files: string[] = [];
@@ -3019,7 +3048,11 @@ export class ToolDispatcher {
     try {
       // Bound the listing (15s) so a stalled sandbox can't hang the gate before any read starts.
       files = await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles');
-      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p)).slice(0, 300);
+      // A folder the app does not build is decided BEFORE the 300-file cap (Q-3201): ~480 vendored reference files
+      // used to crowd the real app out of the snapshot.
+      let skip: (path: string) => boolean = () => false;
+      if (planSkip) { try { skip = await planSkip(files); } catch { skip = () => false; } }
+      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p) && !skip(p)).slice(0, 300);
       // PARALLEL + per-file timeout (audit P0-C): 300 sequential reads after the app is already
       // built was the #1 "fully-built app dies at the readiness gate" cause. Read in bounded batches,
       // each capped at 5s; a slow/unreadable file is dropped, never breaks evaluate.
@@ -3384,6 +3417,12 @@ export class ToolDispatcher {
             // not an npm dependency — skip it here.
             continue;
           }
+          // 🔴 A BARE IMPORT THAT IS A PROJECT FILE IS NOT A PACKAGE (failedbr #1615, 2026-11-20). With the starter's
+          // `baseUrl: "src"` (mirrored into Vite), `import … from 'types'` IS `src/types.ts` — tsc and Vite both resolve
+          // it — yet it was sent to the package check and became the readiness BLOCKER "2 package(s) the app loads are
+          // not installed: types, lib". `resolveLocalImport` accepts a bare specifier only when a real project file
+          // matches, so `react` / `lodash` stay external exactly as before (ArchitectureAnalysis f04421ef).
+          if (resolveLocalImport(file, spec, files)) continue;
           external.add(spec);
         }
       }
@@ -3568,6 +3607,8 @@ export class ToolDispatcher {
    * only records it. Never throws: a guard failure writes the model's content exactly as sent.
    */
   private keepDesignKit(path: string, content: string, existingContent: string): { content: string; note: string } {
+    // Q-2316: a rewrite of the Vite mount that drops the style floor's import keeps it (both write doors pass here).
+    try { content = keepAutoStyleImport(path, existingContent, content) ?? content; } catch { /* keep best-effort */ }
     try {
       const keep = keepKitOnRewrite(path, existingContent, content);
       if (!keep) return { content, note: '' };
@@ -4077,6 +4118,66 @@ export class ToolDispatcher {
    * when the new code imports names it lacks the note says which. Returns the note for the tool result.
    * Best-effort: a failure leaves the recipe's own result exactly as it was.
    */
+  /** add_library_models' model half (moved out of the dispatch switch unchanged, 2026-11-21, when textures joined it). */
+  private async addLibraryModelsForTool(input: unknown, agent: AgentRole): Promise<string> {
+    // THE LIBRARY IN AN EXISTING GAME (2026-11-19). The seed adds library models only to NEW games; "add a cow to my
+    // game" had no way to fetch the library cow. Same gate, downloads, proofs and durable saves as the seed,
+    // merged into the game's current loader/manifest/credits; the user's customization file is never replaced.
+    const alRec = (input as Record<string, unknown>) || {};
+    const raw = Array.isArray(alRec.models) ? alRec.models : [];
+    const asked = raw.map((m) => (typeof m === 'string' ? { subject: m } : m && typeof m === 'object' ? m as Record<string, unknown> : null))
+      .filter((m): m is Record<string, unknown> => !!m && ((typeof m.subject === 'string' && m.subject.trim() !== '') || typeof m.id === 'string')).slice(0, 6);
+    // An exact library id (what the in-app Game library sends) pins THAT model: other models serving its subjects
+    // are left out of this call's catalogue, so "the brown cow I tapped" never arrives as a different cow.
+    const pinned = asked.map((m) => typeof m.id === 'string' ? REVIEWED_GAME_ASSETS.find((c) => c.id === m.id) : undefined);
+    asked.forEach((m, i) => { const pin = pinned[i]; if (pin) m.subject = pin.subjects[0]; else if (typeof m.subject !== 'string') m.subject = String(m.id); });
+    const pins = pinned.filter((c): c is NonNullable<typeof c> => !!c);
+    const pinnedSubjects = new Set(pins.flatMap((c) => c.subjects));
+    const catalogue = pins.length ? REVIEWED_GAME_ASSETS.filter((c) => pins.includes(c) || !c.subjects.some((s2) => pinnedSubjects.has(s2))) : undefined;
+    if (!asked.length) return 'Name the library models to add, for example: add_library_models({ models: [{ subject: "cow" }, { subject: "farmer", animation: "walk" }] }). Find names with object_spec({ library_query: "…" }).';
+    if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) {
+      return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
+    }
+    if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library model was added. Build these objects with the existing recipes instead.';
+    const requirements: AssetRequirement[] = []; const unknown: string[] = []; const unplayable: string[] = [];
+    for (const m of asked) {
+      const asked1 = libraryRequirement(String(m.subject), m.animation, REVIEWED_GAME_ASSETS);
+      if (!asked1) { unknown.push(String(m.subject)); continue; }
+      if (asked1.droppedRole) unplayable.push(`${asked1.requirement.subject} (${asked1.droppedRole})`);
+      if (!requirements.some((r) => r.subject === asked1.requirement.subject)) requirements.push(asked1.requirement);
+    }
+    if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.\n${ownModelGuide(unknown)}`;
+    const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
+    const existing = {
+      assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
+      attribution: await read('public/game-assets/ATTRIBUTION.txt'), customizations: await read('src/game/three/assetCustomizations.ts'),
+      runtime: await read('src/game/three/externalAssets.ts'),
+    };
+    const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
+    const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
+    const ready = result.outcomes.filter((o) => o.outcome.kind === 'model').map((o) => o.subject);
+    const missed = result.outcomes.filter((o) => o.outcome.kind !== 'model').map((o) => o.subject);
+    if (result.status !== 'prepared' || !ready.length) return `No library model could be added this time (${missed.join(', ') || 'none ready'}); build ${[...missed, ...unknown].join(', ') || 'these objects'} with the existing recipes instead. Nothing in the game was changed.`;
+    // The runtime imports the kit's core modules (events, loading): pull in any the game is missing.
+    const layers = await this.addMissingRecipeLayers(result.files, agent);
+    this.scheduleCheckpoint('library models');
+    return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
+      + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
+      + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.\n${ownModelGuide(unknown)}\n` : '')
+      + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
+      + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
+  }
+
+  /** add_library_models' texture half: packaged CC0 textures into the game, durably first (textureLibrary.ts). */
+  private async addLibraryTexturesForTool(asked: readonly unknown[]): Promise<string> {
+    if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) return 'The NavBharatAI library is not switched on for this account, so no texture was added.';
+    if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library texture was added.';
+    const writeBinary = this.actuator.writeBinaryFile.bind(this.actuator);
+    const result = await addLibraryTextures(asked, this.workspaceId, { writeBinaryFile: (id, p, b) => writeBinary(id, p, b) }, workspaceGameAssetPersistence(this.libraryOwnerUid ?? undefined));
+    if (result.added.length) this.scheduleCheckpoint('library textures');
+    return textureResultNote(result);
+  }
+
   private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
     let layersNote = '';
     const all: Record<string, string> = { ...written };
@@ -4241,6 +4342,8 @@ export class ToolDispatcher {
     }
   }
 
+  /** The previous whole-project write-time error count (failedbr #1248) — null until the first run. */
+  private _lastWriteTscErrors: number | null = null;
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -4350,6 +4453,9 @@ export class ToolDispatcher {
         return '';
       }
       if (run.neverRan) return '';
+      // failedbr #1248: a whole-project run that jumped by ≥3 errors since the last one says so first.
+      const trendNote = writeErrorTrendNote(this._lastWriteTscErrors, errors.length);
+      this._lastWriteTscErrors = errors.length;
       // A type-only import of a value is a string edit with one correct form — done here, not asked of the
       // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote. ONCE per run:
       // every writer that joined it shares the one heal (autopsy 9c612cdb).
@@ -4396,8 +4502,8 @@ export class ToolDispatcher {
       }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
-      return healedNote + writeTypecheckNote(errors, tsPaths, sources);
+      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
+      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
@@ -4464,7 +4570,7 @@ export class ToolDispatcher {
         const after = fix.files[file];
         if (typeof after !== 'string' || after === before[file]) continue;
         if (healWouldOscillate(this.workspaceId, file, after)) continue;
-        if (await this.landHealWrite(file, after, before[file])) { healed.set(file, names); files[file] = after; }
+        if (await this.landHealWrite(file, after, before[file], 'type-only-value-import')) { healed.set(file, names); files[file] = after; }
       }
       return { healed, files };
     } catch {
@@ -4515,7 +4621,7 @@ export class ToolDispatcher {
         const after = fix.files[file];
         if (typeof after !== 'string' || after === before[file]) continue;
         if (healWouldOscillate(this.workspaceId, file, after)) continue;
-        if (await this.landHealWrite(file, after, before[file])) { landed.add(file); files[file] = after; }
+        if (await this.landHealWrite(file, after, before[file], 'recorded-type-rename')) { landed.add(file); files[file] = after; }
       }
       if (landed.size === 0) return withContract;
       return {
@@ -4531,6 +4637,9 @@ export class ToolDispatcher {
   async dispatch(call: ToolUse, agent: AgentRole = 'architect', opts?: { signal?: AbortSignal }): Promise<ToolResult> {
     assertCanaryLegacyAllowed('builder-function-tools');
     if (opts?.signal) return runWithToolSignal(opts.signal, () => this.dispatch(call, agent));
+    // An array or object argument an engine sent as JSON text is read as what it says (toolArgumentShape.ts).
+    const shaped = withStructuredArguments(call.input, catalogDef(call.name));
+    if (shaped !== call.input) call = { ...call, input: shaped as ToolUse['input'] };
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value
     // or a connection-string password must be masked BEFORE it is shown. We redact ONLY the
@@ -4950,6 +5059,7 @@ export class ToolDispatcher {
     try { storeLoop = storeEffectLoopNote(files); } catch { /* a note is best-effort */ }
     // A `this`-reading method handed out uncalled (autopsy 6cd698cc — the theme button). See detachedMethod.ts.
     try { storeLoop += detachedMethodNote(files); } catch { /* a note is best-effort */ }
+    try { storeLoop += deadStoreSubscriptionNote(files); } catch { /* a note is best-effort */ } // failedbr #1179
     // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
     // is open, instead of by the end-of-build check inside a four-minute heal.
     const invented = await this.inventedKitClassNotes(files);
@@ -4965,6 +5075,8 @@ export class ToolDispatcher {
       // A login / payment / OTP / email that only pretends (admin 2026-10-04, NO FAKE BUTTON) — said while
       // the file is open, where the real provider is cheapest to wire. Kill switch AGENTV3_NO_FAKE_FEATURES=off.
       try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A page that returns null / a hook that returns {} to quiet tsc (failedbr #745, Q-3204) — while the file is open.
+      try { if (noFakeFeaturesEnabled()) security += hollowFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An AI provider called from the page with a key the page must hold (autopsy e52cebbf, Q-730).
       try { security += browserAiKeyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An SVG imported in two plugins' styles at once (Q-2766, BR2001) — the exact one-line fix, file still open.
@@ -5060,7 +5172,7 @@ export class ToolDispatcher {
         }
       } catch { /* a note is best-effort */ }
     }
-    const style = await this.styleWriteNotes(files);
+    const style = (await this.styleWriteNotes(files)) + (await this.spaFallbackWriteNoteFor(files));
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
     // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
     // The platform wires those screens itself FIRST (autopsy ca99778e): the note alone lost three times, and a
@@ -5317,6 +5429,28 @@ export class ToolDispatcher {
    * that touches a stylesheet or a page pays for the read; anything unreadable is simply left out, so the worst case
    * is a note that says less, never one that says something false about a file it did not see.
    */
+  /** failedbr #1803 / #1801: a server written without the SPA catch-all is told so at the write (SpaFallbackAnalysis). */
+  private async spaFallbackWriteNoteFor(files: Record<string, string>): Promise<string> {
+    try {
+      if (!Object.entries(files).some(([p, c]) => startsExpressServer(p, c))) return '';
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'spa-note-listing'); }
+      catch { return ''; }
+      const wanted = listing
+        .map((p) => String(p).replace(/^\.?\/+/, ''))
+        .filter((p) => !(p in files) && /^src\/.*\.(tsx|jsx|ts|js)$/.test(p) && !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p))
+        .slice(0, ToolDispatcher.STYLE_NOTE_MAX_READS);
+      const project: Record<string, string> = {};
+      await Promise.all(wanted.map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'spa-note-read');
+          if (typeof raw === 'string') project[p] = raw;
+        } catch { /* unreadable — left out */ }
+      }));
+      return spaFallbackWriteNote(files, project);
+    } catch { return ''; }
+  }
+
   private async styleWriteNotes(files: Record<string, string>): Promise<string> {
     try {
       if (!writeQualityEnabled()) return '';
@@ -5407,6 +5541,8 @@ export class ToolDispatcher {
   /** Screen → its classes no real stylesheet defines, as last measured (autoStyleFloor.ts). */
   private readonly _floorMissing = new Map<string, string[]>();
   private _floorSheet = '';
+  /** Q-2316: whether this turn has checked that an existing floor sheet is still imported. */
+  private _floorWiringChecked = false;
   /**
    * 🔴 SCREENS SHOWN AS RAW HTML FOR A WHOLE BUILD (autopsy ca99778e). Lays the platform's style floor for the
    * classes still undefined: a plain sheet imported first from the Vite mount, rewritten as the set changes. It is
@@ -5423,7 +5559,11 @@ export class ToolDispatcher {
       const all = new Set<string>();
       for (const m of this._floorMissing.values()) for (const c of m) all.add(c);
       const sheet = autoStyleSheet(all);
-      if (sheet === this._floorSheet || (!sheet && !this._floorSheet)) return;
+      // Q-2316: once per turn, a floor sheet already on disk (an earlier turn's) is re-imported if the mount lost it,
+      // even when this turn's sheet is unchanged — that orphan is what #1822 continued from.
+      const firstThisTurn = !this._floorWiringChecked;
+      this._floorWiringChecked = true;
+      if (!firstThisTurn && (sheet === this._floorSheet || (!sheet && !this._floorSheet))) return;
       let mountPath = '';
       let mount: string | null = null;
       for (const p of ['src/main.tsx', 'src/main.jsx']) {
@@ -5433,6 +5573,16 @@ export class ToolDispatcher {
         } catch { /* try the next */ }
       }
       if (!mountPath || typeof mount !== 'string') return;
+      if (firstThisTurn && (sheet === this._floorSheet || (!sheet && !this._floorSheet))) {
+        // Nothing to rewrite: only re-wire an existing sheet whose import the mount has lost.
+        const onDisk = await withTimeout(this.actuator.readFile(this.workspaceId, AUTO_STYLE_PATH), 5_000, 'style-floor-sheet').catch(() => null);
+        const rewired = typeof onDisk === 'string' ? withAutoStyleImport(mount) : null;
+        if (rewired) {
+          await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, mountPath, rewired));
+          try { this.onFileWrite?.(mountPath, rewired); } catch { /* durable mirror is best-effort */ }
+        }
+        return;
+      }
       const body = sheet || '/* navbharatai:auto-style-floor — every class has a real rule now. */\n';
       await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, AUTO_STYLE_PATH, body));
       this._floorSheet = sheet;
@@ -6220,6 +6370,9 @@ export class ToolDispatcher {
           const refusal = bannedInstallRefusal(rawCommand);
           if (refusal) throw new Error(refusal);
         }
+        // failedbr #1803: apt/yum/apk/brew need root this sandbox does not have — answered before they fail.
+        const systemInstall = systemPackageInstallRefusal(rawCommand);
+        if (systemInstall) throw new Error(systemInstall);
         const typoFix = fixNodeModulesTypo(rawCommand);
         const cdFix = fixSandboxWorkspaceCd(typoFix.command);
         const command = sharedBareTypecheckCommand(cdFix.command, this.tsBuildInfoId);
@@ -6904,7 +7057,9 @@ export class ToolDispatcher {
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
         const reading = readGrepOutput(stdout, pattern);
         if (reading.failed) throw new Error(redactSecrets(reading.text));
-        return redactSecrets(reading.text);
+        // Our preview bridge lives in the sandbox's index.html; its lines are not the app's (failedbr #672, Q-3219).
+        const shown = await withoutBridgeGrepMatches(reading.text, async (p) => bridgeLineRanges(await this.actuator.readFile(this.workspaceId, p)));
+        return redactSecrets(shown);
       }
 
       case 'glob': {
@@ -6941,17 +7096,28 @@ export class ToolDispatcher {
         // Read the source tree ONCE and share it across every file-scanning dimension
         // (was ~7 directory listings + each file read ~5×). `snap.files` is the full
         // name-only list for hygiene/secret-leak; `snap.sources` carries content.
-        const fullSnap = await this.readEvalSnapshot();
         let pkgForRun: string | null = null;
         try {
           pkgForRun = await this.actuator.readFile(this.workspaceId, 'package.json');
         } catch {
           pkgForRun = null; // no manifest — runnability is simply "not assessable"
         }
+        // A WHOLE FOLDER THE APP DOES NOT BUILD (failedbr #728, Q-3201, outsideTheApp.ts) — decided from the project's
+        // own tsconfig / scripts / bundler config / index.html, before the snapshot's file cap is spent.
+        let outsideFolders = new Set<string>();
+        const fullSnap = await this.readEvalSnapshot(async (files) => {
+          const roots = files.filter((p) => /^(?:tsconfig(?:\.[\w-]+)?\.json|index\.html|(?:vite|webpack|rollup|astro|next|nuxt|svelte|rsbuild|rspack)\.config\.[cm]?[jt]s)$/.test(p.replace(/^\.\//, '')));
+          const projectSources = (await Promise.all(roots.slice(0, 12).map(async (p) => {
+            try { return { path: p.replace(/^\.\//, ''), content: await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile') }; } catch { return null; }
+          }))).filter((x): x is { path: string; content: string } => x !== null);
+          outsideFolders = foldersOutsideTheApp(files, pkgForRun, projectSources);
+          return inFolderOutsideTheApp(outsideFolders);
+        });
         // A DOCUMENT THE USER BROUGHT IN IS NOT THE APP (autopsy 4d538ca3, see outsideTheApp.ts): a
         // reference page the bundle never ships scored this app 0/100, and the model deleted the
         // user's file to clear it. Such files are set aside from every scan and named in the result.
-        const outsideApp = filesOutsideTheApp(fullSnap.files, pkgForRun, fullSnap.sources);
+        const inOutsideFolder = inFolderOutsideTheApp(outsideFolders);
+        const outsideApp = new Set([...filesOutsideTheApp(fullSnap.files, pkgForRun, fullSnap.sources), ...fullSnap.files.filter(inOutsideFolder)]);
         try { mem.setOutsideTheApp(outsideApp); } catch { /* the shared record is best-effort */ }
         const isOutsideApp = outsideAppMatcher(outsideApp);
         const snap = outsideApp.size === 0
@@ -7266,7 +7432,7 @@ export class ToolDispatcher {
                 // file; if two disagree about a symbol it goes X → Y → X for as many passes as the
                 // build allows, costing a write and a step every round and converging on nothing.
                 if (healWouldOscillate(this.workspaceId, fx.file, content)) continue;
-                if (await this.landHealWrite(fx.file, content, before)) { astFiles[fx.file] = content; landed += 1; }
+                if (await this.landHealWrite(fx.file, content, before, 'import-export-reconcile')) { astFiles[fx.file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.importKind', { count: landed });
             }
@@ -7291,7 +7457,7 @@ export class ToolDispatcher {
                 // This heal was MISSING from the ledger, and it is the one the 2026-08-09 report showed
                 // repeating first ("Added 2 missing import(s)" at t=126s/216s/313s) — so the very
                 // evidence the ledger exists to capture was being dropped for it.
-                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+                if (await this.landHealWrite(file, content, before, 'add-missing-import')) { astFiles[file] = content; landed += 1; }
               }
               // Counted per IMPORT, as before — but only for files whose write actually landed.
               if (landed > 0) this.narrate('fix.missingImports', { count: addRes.added.filter((a) => astFiles[a.file] === addRes.files[a.file]).length });
@@ -7312,7 +7478,7 @@ export class ToolDispatcher {
                 // Same oscillation guard as the reconcile above — every heal site, or the loop survives
                 // through whichever one was left out.
                 if (healWouldOscillate(this.workspaceId, file, content)) continue;
-                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+                if (await this.landHealWrite(file, content, before, 'wrong-source-import')) { astFiles[file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.repointedImports', { count: wrongRes.fixes.filter((f) => astFiles[f.file] === wrongRes.files[f.file]).length });
             }
@@ -7329,7 +7495,7 @@ export class ToolDispatcher {
                 if (typeof content !== 'string') continue;
                 const before = astFiles[file];
                 if (healWouldOscillate(this.workspaceId, file, content)) continue;
-                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+                if (await this.landHealWrite(file, content, before, 'type-only-value-import')) { astFiles[file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.typeOnlyValueImports', { count: tov.fixes.filter((f) => astFiles[f.file] === tov.files[f.file]).length });
             }
@@ -7351,7 +7517,7 @@ export class ToolDispatcher {
               if (deduped !== content && !healWouldOscillate(this.workspaceId, file, deduped)) {
                 // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
                 // This one already holds both halves: `content` is what it read, `deduped` what it wrote.
-                if (await this.landHealWrite(file, deduped, content)) {
+                if (await this.landHealWrite(file, deduped, content, 'dedupe-same-module-import')) {
                   astFiles[file] = deduped;
                   this.narrate('fix.duplicateImport', { file });
                 }
@@ -7380,7 +7546,7 @@ export class ToolDispatcher {
                   // Said only when it LANDED (autopsy SignBridge, 2026-09-26): on a verified-working app
                   // Green Freeze refuses this write, and the user was told twice that two packages had
                   // been added while package.json never changed.
-                  if (await this.landHealWrite('package.json', newPkg, pkgJson)) {
+                  if (await this.landHealWrite('package.json', newPkg, pkgJson, 'add-missing-dependency')) {
                     this.narrate('fix.missingDeps', { count: depRes.added.length, packages: depRes.added.map((d) => d.package).join(', ') });
                   }
                 }
@@ -7810,14 +7976,7 @@ export class ToolDispatcher {
         }
         // A Vite app ships only public/, so the standalone files go there or the production build drops
         // them — the rule the post-build pass has followed since 2026-08-03 and this tool never did.
-        let viteApp = false;
-        for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts', 'vite.config.cjs', 'vite.config.cts']) {
-          if (await this.actuator.readFile(this.workspaceId, cfg).then(() => true).catch(() => false)) { viteApp = true; break; }
-        }
-        if (!viteApp) {
-          const pkg = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => '');
-          viteApp = /"vite"\s*:/.test(pkg);
-        }
+        const viteApp = await viteAppOnDisk((path) => this.actuator.readFile(this.workspaceId, path));
         // Write standalone files only when absent (never clobber a real manifest/robots the app already has),
         // except our own old cache-first service worker, which is replaced (see appDefaults.ts).
         for (const [rel, content] of Object.entries(plan.files)) {
@@ -10430,52 +10589,13 @@ export class ToolDispatcher {
       }
 
       case 'add_library_models': {
-        // THE LIBRARY IN AN EXISTING GAME (2026-11-19). The seed adds library models only to NEW games; "add a cow to my
-        // game" had no way to fetch the library cow. Same gate, downloads, proofs and durable saves as the seed,
-        // merged into the game's current loader/manifest/credits; the user's customization file is never replaced.
-        const alRec = (input as Record<string, unknown>) || {};
-        const raw = Array.isArray(alRec.models) ? alRec.models : [];
-        const asked = raw.map((m) => (typeof m === 'string' ? { subject: m } : m && typeof m === 'object' ? m as Record<string, unknown> : null))
-          .filter((m): m is Record<string, unknown> => !!m && ((typeof m.subject === 'string' && m.subject.trim() !== '') || typeof m.id === 'string')).slice(0, 6);
-        // An exact library id (what the in-app Game library sends) pins THAT model: other models serving its subjects
-        // are left out of this call's catalogue, so "the brown cow I tapped" never arrives as a different cow.
-        const pinned = asked.map((m) => typeof m.id === 'string' ? REVIEWED_GAME_ASSETS.find((c) => c.id === m.id) : undefined);
-        asked.forEach((m, i) => { const pin = pinned[i]; if (pin) m.subject = pin.subjects[0]; else if (typeof m.subject !== 'string') m.subject = String(m.id); });
-        const pins = pinned.filter((c): c is NonNullable<typeof c> => !!c);
-        const pinnedSubjects = new Set(pins.flatMap((c) => c.subjects));
-        const catalogue = pins.length ? REVIEWED_GAME_ASSETS.filter((c) => pins.includes(c) || !c.subjects.some((s2) => pinnedSubjects.has(s2))) : undefined;
-        if (!asked.length) return 'Name the library models to add, for example: add_library_models({ models: [{ subject: "cow" }, { subject: "farmer", animation: "walk" }] }). Find names with object_spec({ library_query: "…" }).';
-        if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) {
-          return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
-        }
-        if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library model was added. Build these objects with the existing recipes instead.';
-        const requirements: AssetRequirement[] = []; const unknown: string[] = []; const unplayable: string[] = [];
-        for (const m of asked) {
-          const asked1 = libraryRequirement(String(m.subject), m.animation, REVIEWED_GAME_ASSETS);
-          if (!asked1) { unknown.push(String(m.subject)); continue; }
-          if (asked1.droppedRole) unplayable.push(`${asked1.requirement.subject} (${asked1.droppedRole})`);
-          if (!requirements.some((r) => r.subject === asked1.requirement.subject)) requirements.push(asked1.requirement);
-        }
-        if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.`;
-        const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
-        const existing = {
-          assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
-          attribution: await read('public/game-assets/ATTRIBUTION.txt'), customizations: await read('src/game/three/assetCustomizations.ts'),
-          runtime: await read('src/game/three/externalAssets.ts'),
-        };
-        const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
-        const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
-        const ready = result.outcomes.filter((o) => o.outcome.kind === 'model').map((o) => o.subject);
-        const missed = result.outcomes.filter((o) => o.outcome.kind !== 'model').map((o) => o.subject);
-        if (result.status !== 'prepared' || !ready.length) return `No library model could be added this time (${missed.join(', ') || 'none ready'}); build ${[...missed, ...unknown].join(', ') || 'these objects'} with the existing recipes instead. Nothing in the game was changed.`;
-        // The runtime imports the kit's core modules (events, loading): pull in any the game is missing.
-        const layers = await this.addMissingRecipeLayers(result.files, agent);
-        this.scheduleCheckpoint('library models');
-        return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
-          + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
-          + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.` : '')
-          + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
-          + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
+        // Library TEXTURES (2026-11-21) ride the same tool: { textures: [{ surface, variant }] } alone, or with models.
+        const alIn = (input as Record<string, unknown>) || {};
+        const textureAsk = Array.isArray(alIn.textures) ? alIn.textures : [];
+        const textureNote = textureAsk.length ? await this.addLibraryTexturesForTool(textureAsk) : '';
+        if (textureNote && !(Array.isArray(alIn.models) && alIn.models.length)) return textureNote;
+        const modelsNote = await this.addLibraryModelsForTool(input, agent);
+        return textureNote ? `${textureNote}\n${modelsNote}` : modelsNote;
       }
 
       case 'generate_game_3d': {
@@ -10513,6 +10633,14 @@ export class ToolDispatcher {
         const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');
         return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}${grLayers}`;
+      }
+
+      case 'generate_character_customizer': {
+        // Only when the user asks (admin 2026-11-21): a customization panel for any loaded model (CharacterCustomizerGenerator.ts).
+        const cc = generateCharacterCustomizer();
+        const ccWritten = await this.writeRecipeFiles(cc.files, agent);
+        this.scheduleCheckpoint('character customizer');
+        return `Wired the character customizer:\n${ccWritten.join('\n')}\n\n${cc.instructions}`;
       }
 
       case 'generate_animation': {
@@ -12586,7 +12714,16 @@ export class ToolDispatcher {
             + ` its web page is served on port ${appPortMap.preview}. A person opening the preview should see the web page,`
             + ` so once that server is up, call update_preview with port=${appPortMap.preview}.`
           : '';
-        return `Live preview published (port ${port} verified UP).${secondary} Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
+        // A preview of the untouched starter is UP, and that is not the same fact as "your app is up" (failedbr #1275).
+        let starterNote = '';
+        if (!this._starterExpected) {
+          try {
+            starterNote = starterPreviewNote(await entryIsStillTheStarter(
+              (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'preview-starter-read'),
+            ));
+          } catch { starterNote = ''; }
+        }
+        return `Live preview published (port ${port} verified UP).${secondary}${starterNote} Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {
@@ -13091,6 +13228,12 @@ function titleOf(obj: Record<string, unknown>, item: unknown, id: string, known:
   if (typeof item === 'string' && item.trim()) return item.trim(); // `todos: ["do x", "do y"]`
   if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
   return known.get(id) ?? ''; // the id we already have a title for — the reported case
+}
+
+let catalogByName: Map<string, ReturnType<typeof defaultToolCatalog>[number]> | null = null;
+function catalogDef(name: string): ReturnType<typeof defaultToolCatalog>[number] | undefined {
+  catalogByName ??= new Map(defaultToolCatalog().map((t) => [t.name, t] as const));
+  return catalogByName.get(name);
 }
 
 function parseTodos(input: Record<string, unknown>, existing: readonly TodoItem[] = []): TodoItem[] {

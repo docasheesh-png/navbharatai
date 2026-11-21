@@ -155,6 +155,12 @@ export function bugHuntNotRunLine(answer: ApprovalOutcome): string {
     + 'Ask for it any time and it will run on the app as it stands.';
 }
 
+/** Said when the user asked for the hunt but this turn's app never got to a state it can review. */
+export function bugHuntCouldNotRunLine(): string {
+  return 'You asked for the deep bug hunt, but it could not run this time: the app has to finish building and run '
+    + 'first. Nothing was charged for it. Fix what stopped the build, then ask again.';
+}
+
 /** The gate's own words, as the `permission_request` event carries them. */
 export interface BugHuntGateEvent {
   action: string;
@@ -197,7 +203,19 @@ export async function offerBugHunt(io: {
   say: (text: string) => void;
   record: (message: string) => void;
   env?: NodeJS.ProcessEnv;
+  /**
+   * The user already said yes, from the ❗️ list, by starting THIS turn as a bug hunt (admin 2026-11-21: "click
+   * karo, kuch bhi nahi hota"). The 30-second offer of an earlier build had expired, so its button answered a gate
+   * nobody was waiting on. A yes given up front is not asked again; an ineligible app is told why it did not run.
+   */
+  preApproved?: boolean;
 }): Promise<BugHuntResult> {
+  if (io.preApproved) {
+    if (io.eligible) return { runReview: true, answer: 'approved' };
+    io.say(bugHuntCouldNotRunLine());
+    io.record('The user asked for the deep bug hunt, and it could not run: the app did not finish building and running this turn.');
+    return { runReview: false, answer: 'approved' };
+  }
   const offer = bugHuntOfferDecision({
     hasUser: io.hasUser,
     askEnabled: bugHuntAskEnabled(io.env ?? process.env),

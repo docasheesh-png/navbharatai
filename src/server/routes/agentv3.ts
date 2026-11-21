@@ -454,7 +454,7 @@ import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gameAssets/assetSeed';
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
-import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
+import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff, withLibraryMenuForExistingGame } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
@@ -19395,6 +19395,9 @@ async function noteBuildOutcome(
         }
       }
 
+      // An EXISTING 3D game sees the library menu on every later turn too (gameLibrarySelection.ts) — one call, no branch here,
+      // and OUTSIDE the new-build seed block below (it never runs on a new build).
+      buildPrompt = await withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid });
       // ── GAME KIT SEED (admin 2026-10-11, build 46e2d74b: "racing game me car ulti chal rahi hai") ──
       // The player's car showed its headlights and LEFT turned it right. The kit had the correct camera and
       // steering since 2026-10-05; that build never ran a single recipe and hand-wrote its own engine, so

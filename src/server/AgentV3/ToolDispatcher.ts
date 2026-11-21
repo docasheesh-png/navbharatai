@@ -8,6 +8,7 @@ import { addLibraryModels, workspaceGameAssetPersistence } from './gameAssets/as
 import { externalGameAssetsEnabled, libraryRequirement } from './gameAssets/assetPlan';
 import { ownModelGuide } from './gameAssets/modelSourcesGuide';
 import { addLibraryTextures, textureResultNote } from './gameAssets/textureLibrary';
+import { generateCharacterCustomizer } from '../lib/CharacterCustomizerGenerator';
 import { REVIEWED_GAME_ASSETS } from './gameAssets/providers';
 import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
@@ -10632,6 +10633,14 @@ export class ToolDispatcher {
         const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');
         return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}${grLayers}`;
+      }
+
+      case 'generate_character_customizer': {
+        // Only when the user asks (admin 2026-11-21): a customization panel for any loaded model (CharacterCustomizerGenerator.ts).
+        const cc = generateCharacterCustomizer();
+        const ccWritten = await this.writeRecipeFiles(cc.files, agent);
+        this.scheduleCheckpoint('character customizer');
+        return `Wired the character customizer:\n${ccWritten.join('\n')}\n\n${cc.instructions}`;
       }
 
       case 'generate_animation': {

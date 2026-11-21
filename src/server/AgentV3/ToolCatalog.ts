@@ -2669,6 +2669,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_character_customizer',
+      description:
+        'Add a CHARACTER CUSTOMIZATION panel to the user\'s game — ONLY when the user asks for one ("character customize karne ki screen", '
+        + '"character creator", "let players change their outfit/colour"). Writes src/game/three/characterCustomizer.ts: it works on ANY loaded model '
+        + '(library, the user\'s own .glb, or code-built) by discovering the model\'s named materials (colour pickers with presets) and mesh parts '
+        + '(show/hide), plus size, a pose picker when roles exist, reset, and the look saved per character and re-applied. Labels take the user\'s '
+        + 'language. Anything the panel lacks that the user asks for is added to the same module.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_animation',
       description:
         'Add a dependency-free MOTION pack so the app feels alive instead of assembled: a motion.css of '
@@ -3987,6 +3997,8 @@ export const RECIPE_TOOLS = [
   'generate_file_upload',
   // 🔴 AUTOPSY f496c75b (2026-09-30): the prompt's step 2 for every 3D game, and it was on neither list.
   // The census that guards this read tool names as `[a-z]+(?:_[a-z]+)+`, so the digit in `3d` hid it.
+  // A character customization panel for ANY loaded model, written into the user's game only when they ask (2026-11-21).
+  'generate_character_customizer',
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',

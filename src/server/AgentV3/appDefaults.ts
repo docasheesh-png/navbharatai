@@ -242,6 +242,21 @@ export function defaultAssetPath(rel: string, framework: string | null | undefin
 }
 
 /**
+ * Is the project ON DISK a Vite app — a `vite.config.*` or a `vite` dependency? The ONE answer for where the standalone
+ * defaults go (failedbr #1343, 2026-11-20). The post-build pass asked the framework the REQUEST named, which defaults to
+ * `vite-react`, so a pasted static HTML site served by http-server got its manifest, icon, sw.js and nbai-native.css in
+ * `public/` — linked from `/`, served from nowhere: four 404s, one of which failed the render check. The tool path had
+ * always read the disk; the two now share this. Unreadable files ⇒ false (a static site's root is served either way).
+ */
+export async function viteAppOnDisk(read: (path: string) => Promise<string>): Promise<boolean> {
+  for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts', 'vite.config.cjs', 'vite.config.cts']) {
+    if (await read(cfg).then(() => true).catch(() => false)) return true;
+  }
+  const pkg = await read('package.json').catch(() => '');
+  return /"vite"\s*:/.test(pkg);
+}
+
+/**
  * Plan the app-scaffold defaults. Pure + idempotent. `indexHtml` may be null (no index.html found):
  * then only the standalone files (manifest, robots) are returned and `indexHtml` stays null.
  */

@@ -250,6 +250,20 @@ function globRegex(glob: string): RegExp {
   return new RegExp(`^${body}$`);
 }
 
+/**
+ * The paths a shell removal is checked against: this build's writes FIRST (so the probe cap reaches them before
+ * anything else), then every path the saved project held when the build started.
+ *
+ * failedbr #741 / #755 (queue Q-3202): files removed with the shell came back minutes later. Q-246 checked a
+ * removal against THIS build's writes only, so a folder or glob taking out files an EARLIER build had saved
+ * named none of them, the durable store was never told, and the next restore put them back. A file the saved
+ * project holds is just as much the app's as one written this turn. Each one is still confirmed gone in the
+ * sandbox before anything is forgotten. PURE.
+ */
+export function pathsAShellRemovalIsCheckedAgainst(written: Iterable<string>, savedAtStart: readonly string[] | null | undefined): string[] {
+  return [...new Set([...written, ...(savedAtStart ?? [])].filter((p): p is string => typeof p === 'string' && p.length > 0))];
+}
+
 /** At most this many recorded paths are checked against the sandbox after one command. */
 export const MAX_REMOVAL_PROBES = 200;
 

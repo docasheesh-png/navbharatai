@@ -132,7 +132,8 @@ describe('the E2E decision judges the project, not this turn\'s writes', () => {
     // arguably right; the REASON was false, which is worse, because it tells the user something untrue
     // about their own app.
     expect(routes).toContain('const projectFiles = await loadWorkspaceFiles(workspaceId)');
-    expect(routes).toContain('{ ...projectFiles, ...Object.fromEntries(writtenFiles) }');
+    // Q-3221 (failedbr #669): the sandbox's entry files too, so an untouched scaffold is still an interface.
+    expect(routes).toContain('{ ...projectFiles, ...wholeProjectFiles, ...Object.fromEntries(writtenFiles) }');
   });
 });
 

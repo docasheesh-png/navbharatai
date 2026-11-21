@@ -29,7 +29,8 @@ describe('an edit keeps the language the app already uses', () => {
 
   it('both the architect and every sub-agent are told it is an edit', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route.match(/appLanguageInstruction\(prompt, \{ editingExistingApp: intent === 'edit_existing' \}\)/g)?.length).toBe(2);
+    // failedbr #1181: both sites go through buildLanguageInstruction, which keeps the edit rule for an ordinary edit.
+    expect(route.match(/buildLanguageInstruction\(\{ prompt, continuedRequest: checksRequest, isContinuation: isContinuationMessage\(prompt\), editingExistingApp: intent === 'edit_existing' \}\)/g)?.length).toBe(2);
     expect(route).not.toMatch(/appLanguageInstruction\(prompt\)/);
   });
 });

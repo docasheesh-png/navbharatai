@@ -193,7 +193,7 @@ describe('6 · a refused heal write is never recorded, saved or announced', () =
     expect(td.split('await this.landHealWrite(').length - 1).toBeGreaterThanOrEqual(5);
   });
   it('the missing-dependency sentence is inside the landed branch', () => {
-    expect(td).toMatch(/if \(await this\.landHealWrite\('package\.json', newPkg, pkgJson\)\) \{\s*this\.narrate\('fix\.missingDeps'/);
+    expect(td).toMatch(/if \(await this\.landHealWrite\('package\.json', newPkg, pkgJson, 'add-missing-dependency'\)\) \{\s*this\.narrate\('fix\.missingDeps'/);
   });
   it('landHealWrite returns false on a refused write BEFORE recording anything', () => {
     const body = td.slice(td.indexOf('private async landHealWrite('), td.indexOf('private narrate<'));

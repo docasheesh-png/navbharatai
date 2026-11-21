@@ -149,17 +149,17 @@ describe('Q-284 · every platform start brings the backend up first', () => {
   });
 
   it('our own preview start and both in-build restarts boot it before `npm run dev`', () => {
-    for (const site of ["'platform-preview-start'", "'preview-server-revive'", "'runtime-server-revive'"]) {
+    for (const site of ["'platform-preview-start'", "'preview-server-revive'", "'runtime-server-revive'", "'stale-module-restart'"]) {
       const at = ROUTE.indexOf(site);
       expect(at, site).toBeGreaterThan(-1);
       expect(ROUTE.slice(at - 250, at), site).toContain('await startPythonBackendFirst(');
     }
-    // Census: the two in-build revives still hard-code `npm run dev`. The platform
+    // Census: the two in-build revives and the stale-module restart (Q-2732) still hard-code `npm run dev`. The platform
     // preview start uses the launch plan (Node keeps npm; Spring Boot / Go use the
     // registry command) and falls back to npm. Every one of those starts is preceded
     // by the backend boot.
     const starts = [...ROUTE.matchAll(/actuator\.runCommand\(workspaceId, 'npm run dev'\)/g)];
-    expect(starts.length).toBe(2);
+    expect(starts.length).toBe(3);
     for (const m of starts) expect(ROUTE.slice((m.index ?? 0) - 250, m.index)).toContain('startPythonBackendFirst(');
     const planned = [...ROUTE.matchAll(/actuator\.runCommand\(workspaceId, platformLaunch\.startCommand \?\? 'npm run dev'\)/g)];
     expect(planned.length).toBe(1);

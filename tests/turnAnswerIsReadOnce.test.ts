@@ -130,7 +130,7 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
     expect(route).toContain('deliveryRefused: modelAnswer.declined,');
     expect(route).toContain('modelAnsweredTheUser: answeredWithoutBuilding(modelAnswer),');
     // PIN UPDATED (Q-1019): the settle flip honours the fourth kind of answer too.
-    expect(route).toMatch(/modelAnswer\.asked \|\| modelAnswer\.pointed \|\| modelAnswer\.notOurs,\s*modelAnswer\.declined,\s*\)/);
+    expect(route).toMatch(/modelAnswer\.asked \|\| modelAnswer\.pointed \|\| modelAnswer\.notOurs,\s*modelAnswer\.declined,\s*isEditMode,[^\n]*\n\s*\)/);
     expect(route).toContain('const refused = !stopped && modelAnswer.declined;');
   });
 

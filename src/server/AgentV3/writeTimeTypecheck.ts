@@ -796,3 +796,16 @@ export function typeOnlyHealNote(healed: ReadonlyMap<string, ReadonlySet<string>
   if (parts.length === 0) return '';
   return `\n🔧 Fixed automatically: ${parts.join('; ')} — each was an enum or other VALUE imported with \`import type\`, now imported with a plain \`import { … }\`. Nothing to do for these; import an enum the same way from now on.`;
 }
+
+/**
+ * A WRITE THAT MADE IT WORSE SAYS SO (failedbr #1248, 2026-11-20). Write-time errors went 5 → 4 → 14 across three repair
+ * edits — a localStorage → IndexedDB switch half-way — and every note quoted only the errors of the moment, never that
+ * the last edit had tripled them. When a whole-project run finds at least three more errors than the previous one, the
+ * note leads with the jump, so the next turn checks the edit that caused it before adding more. '' otherwise. PURE.
+ */
+export function writeErrorTrendNote(previous: number | null, now: number): string {
+  if (previous === null || !Number.isFinite(previous) || !Number.isFinite(now)) return '';
+  if (now - previous < 3) return '';
+  return `📈 This write raised the project's TypeScript errors from ${previous} to ${now}. The last change made it worse — `
+    + 'check what it changed (an API or a storage swap half-done?) and finish or undo it before writing anything else.\n';
+}

@@ -54,6 +54,13 @@ export const PHASE_POST_BUILD_REVIEW = 'post-build-review';
  * measures (LADDER_DEPTH) do not count a classification as a slice of the build (Q-2751, autopsy 05eb30ba).
  */
 export const PHASE_SCOPE = 'scope';
+/**
+ * The big-app roadmap planner (failedbr #1200, #1188, 2026-11-20). It runs BEFORE the build on its own planner model; on the
+ * Weak ladder that is Haiku — the same model as the ladder's last rung — so LADDER_DEPTH said "Fell to rung 5 of 5" for a
+ * build whose every builder call ran on rung 2. A label for attribution only: it is never a barren phase, so billing is
+ * unchanged.
+ */
+export const PHASE_PLANNER = 'planner';
 
 /**
  * The click explorer's verified repair (explorerRepair.ts, 2026-09-28). Its "delivered nothing" rule

@@ -159,11 +159,13 @@ describe('3 · the review the user reads is never cut mid-word', () => {
 });
 
 describe('4 · a scaffold file the planner says it will not change is not planned', () => {
-  it('the report\'s plan: 9 files become the three it works on', () => {
+  it('the report\'s plan: 9 files become the two it works on', () => {
     const planned = parseFileManifest(PLAN).filter((m) => m.path !== 'src/ErrorBoundary.tsx');
     const { kept, dropped } = dropUnchangedScaffold(planned, SCAFFOLD);
-    expect(kept.map((m) => m.path)).toEqual(['src/main.tsx', 'src/App.tsx', 'src/index.css']);
-    expect(dropped).toEqual(['index.html', 'package.json', 'vite.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'tsconfig.node.json']);
+    // failedbr #1798: `src/main.tsx :: React entry point and root render` describes only the default entry, so it is
+    // read as unchanged too (describesOnlyTheDefault) — the app's real work is App.tsx and its stylesheet.
+    expect(kept.map((m) => m.path)).toEqual(['src/App.tsx', 'src/index.css']);
+    expect([...dropped].sort()).toEqual(['index.html', 'package.json', 'src/main.tsx', 'tsconfig.build.json', 'tsconfig.json', 'tsconfig.node.json', 'vite.config.ts']);
   });
 
   it('a "(provided)" path that is NOT in the scaffold is kept, and a scaffold file with a real edit is kept', () => {

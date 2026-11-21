@@ -103348,3 +103348,19 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — #4397 merged; batch 11 (Medieval Village), textures, FBX pictures, Q-3019, CC-BY packaging
+- **#4397 merged:** batches 9 and 10, FBX attachments, the "where to get it" guide, and the library on every 3D turn.
+- **Batch 11:** the Medieval Village MegaKit (CC0). The kit has no whole house, so two whole village houses were assembled from its 2 m pieces: walls with a door and windows, a floor, and a roof with closed gables. The first assembly left the gables open and the inside showed. Also a wagon, wooden fence, stone stairs, chimney and vine. Test: `libraryBatch11`.
+- **Textures:** Screaming Brain Studios' Tiny Texture Pack (CC0) — 125 seamless 128 px surfaces (grass, bricks, roofs, tile, wood), losslessly recompressed from 10.3 to 4.2 MB.
+  - `add_library_models({ textures })` puts one into a game: durable first, then the sandbox, with the three.js lines to repeat it.
+  - Test: `theGameGetsRealSurfaceTextures`.
+- **FBX pictures:** the picture an FBX names, attached beside it, is embedded as its base colour.
+  - UVs are flipped for glTF on those meshes; the first try put a silver blade in brown.
+  - A missing picture is named to the user. Test: `anFbxBecomesAModelInTheGame` (+3).
+- **Q-3019 closed:** a Surplus model is benched only at its SECOND failure, so the retry keeps a warm cache instead of a cold-cache switch per blip.
+  - Proven by reversion: putting the old rule back fails 5 tests. The two older tests now assert the new rule.
+- **Indian clothing:** a CC-BY model may ship packaged, only with its author credit, which reaches the game.
+  - No such model exists in the library yet. Sketchfab needs a login, so the admin downloads them.
+  - Test: `aCcByModelCarriesItsCredit`.
+- **Env:** `AGENTV3_EXTERNAL_GAME_ASSETS` is ON by default. ENV_REGISTRY now says the key can be deleted (a value of `admin` would keep it owner-only).

@@ -97,6 +97,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['city game', 'city', 'shehar', 'sheher', 'town', 'street', 'streets', 'road grid', 'crossing', 'chauraha', 'zebra crossing', 'buildings', 'imarat', 'skyscraper', 'tower', 'apartment', 'flats', 'shops', 'dukaan', 'market street', 'park', 'street light', 'open city', 'taxi game', 'delivery game', 'gta jaisa', 'city driving'],
   },
   {
+    id: 'game_physics',
+    name: 'Real physics in 3D games (falling, rolling, toppling, ragdoll)',
+    path: 'NavBharatAI Pro → chat → ask for a 3D game with physics (for example "boxes that fall over", "explosion se cheezein ude", "ragdoll when the enemy dies")',
+    description: 'A 3D game can use a real physics engine: crates and barrels fall and come to rest, stacks stand and topple, balls roll and stop at walls, a blast throws everything nearby outward, and a character can go limp as a ragdoll and fall with its limbs still attached. The scene\'s solid buildings and walls are obstacles automatically. Only a game that uses physics installs the engine.',
+    howToUse: 'Ask for it in plain words: "make the crates fall over when hit", "add explosions that knock things around", "enemies fall like a ragdoll". To change it later, just ask again in the chat.',
+    relatedFeatures: ['game_city_blocks', 'game_menus_settings'],
+    keywords: ['physics', 'game physics', 'ragdoll', 'fall over', 'topple', 'stack', 'roll', 'explosion', 'blast', 'girna', 'gir jaye', 'ludhakna', 'udna', 'realistic physics', 'crate', 'barrel', 'boxes fall', 'rigid body'],
+  },
+  {
     id: 'game_asset_librarian',
     name: 'Game asset library and compatibility search',
     path: 'NavBharatAI Pro → describe a game or ask about available game objects',

@@ -103331,3 +103331,22 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   45 with long reds (no overlap, no blocked crossing, no gridlock); a queue backed into a crossing; stopping for the
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
+
+## 2026-11-21 — Real physics for 3D games: things fall, roll, topple, and ragdoll
+
+- **Why:** the admin's plan item "real physics: objects that fall over, roll and ragdoll". The kit had none: a crate
+  a car hit never moved, a stack could not topple, and a character's death could only be a canned pose.
+- **What:** a new kit module `three/physics.ts` (`src/server/lib/GamePhysicsGenerator.ts`) built on cannon-es 0.20.0
+  (MIT, no dependencies, pinned). Hand-writing a rigid-body solver was rejected: stacks jitter and objects tunnel.
+  - `createPhysics(scene)` has gravity and a ground, and turns the scene's solid kit colliders into fixed walls.
+  - `add(mesh, { mass })` sizes a box or sphere from the mesh. Also: `remove`, `explode(point, strength, radius)`,
+    `ragdoll(humanoid)` (11 bones pinned at the joints, driving the kit humanoid's joints), and `step(dt)`
+    (fixed 60 Hz from the game's own dt), `dispose`.
+  - cannon-es is installed **only** when physics.ts ships; the repo pins the same version as a devDependency so
+    our tests run against exactly what users get.
+- **Root cause caught while building:** cannon's `fixedStep` reads the wall clock, so a game stepped by its own `dt`
+  (and every test) barely moved. The module uses `world.step(1/60, dt, 6)`.
+- **Proof:** `tests/thingsFallRollAndRagdoll.test.ts` (7). A crate comes to rest at y = 0.5. A five-box stack stands
+  still for 5 s. A blast topples it away from the blast. A ball rolls and stops at a kit wall. Mass 0 never moves. A
+  ragdoll lands with its head near the ground, no body below the ground, every joint's pivots still meeting, at rest.
+  Four reversions each failed: no joint constraints, no scene walls, no conditional dependency, and wall-clock stepping.

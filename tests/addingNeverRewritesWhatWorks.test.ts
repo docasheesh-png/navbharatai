@@ -91,7 +91,7 @@ describe('🧱 the one verdict', () => {
   });
 
   it('🔴 the mount cannot be replaced, and the game kit cannot be edited — but the platform\'s own writes are never undone', () => {
-    expect(lostMount(APP, 'export default function App() { return <CustomGame />; }')).toEqual(['<OpenWorldGame', 'features={FEATURES}', 'world={WORLD}']);
+    expect(lostMount(APP, 'export default function App() { return <CustomGame />; }')).toEqual(['<OpenWorldGame', 'features={FEATURES}', 'world={WORLD}', 'player={PLAYER}']);
     expect(growthVerdict({ path: APP_FILE, before: APP, after: 'export default function App() { return null; }', request: ask })).toMatchObject({ allow: false, restore: APP });
     expect(growthVerdict({ path: APP_FILE, before: APP, after: APP.replace('title="Open World"', 'title="Mera Shehar"'), request: ask }).allow).toBe(true);
     expect(growthVerdict({ path: KIT, before: kit, after: `${kit}\n// hacked`, request: ask })).toMatchObject({ allow: false, restore: kit });

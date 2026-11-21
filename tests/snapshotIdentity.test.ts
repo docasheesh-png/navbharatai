@@ -154,7 +154,9 @@ describe('wiring — the build records the identity, the final save confirms it,
   });
 
   it('one helper serves the health probe AND the in-browser preview, by content first and clock second', () => {
-    expect(route).toContain('const idleServe = await currentSnapshotFor(workspaceId);');
+    // Since Q-3240 the health probe asks the same helper, then offers the copy only when the person did not ask for live.
+    expect(route).toContain('const currentCopy = await currentSnapshotFor(workspaceId);');
+    expect(route).toContain('const idleServe = probePlan.offerIdleCopy ? currentCopy : null;');
     expect(route).toContain('const copy = await currentSnapshotFor(workspaceId, filesHash);');
     const i = route.indexOf('async function currentSnapshotFor(');
     const helper = route.slice(i, route.indexOf('\n}\n', i));

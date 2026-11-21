@@ -18,12 +18,14 @@ describe('the probe stands down when the saved copy can answer', () => {
   it('the sandbox probe is SKIPPED — that skip is the entire saving', () => {
     // If the probe still ran, nothing would change: the command would reset the idle clock exactly as
     // before and the sweep would still never win.
-    expect(route).toContain('if (diag.livePreviewAvailable && !idleServe) {');
+    // Since 2026-11-21 the skip is planPreviewHealthProbe's verdict: no probe while the copy is offered,
+    // unless the person explicitly asked for the live app (wantLive).
+    expect(route).toContain('if (probePlan.probePort) {');
   });
 
   it('the decision is the shared pure rule, and it is asked BEFORE the probe', () => {
     const decide = route.indexOf('canServeFromSnapshot({');
-    const probe = route.indexOf('if (diag.livePreviewAvailable && !idleServe) {');
+    const probe = route.indexOf('if (probePlan.probePort) {');
     expect(decide).toBeGreaterThan(-1);
     expect(decide).toBeLessThan(probe);
   });
@@ -39,7 +41,8 @@ describe('the probe stands down when the saved copy can answer', () => {
   it('honours the same kill switch as the snapshot itself', () => {
     // The verdict moved into ONE shared helper (2026-09-11, currentSnapshotFor) that the health probe
     // and the in-browser preview both ask, so the two panes can never disagree about the copy.
-    expect(route).toContain('const idleServe = await currentSnapshotFor(workspaceId);');
+    expect(route).toContain('const currentCopy = await currentSnapshotFor(workspaceId);');
+    expect(route).toContain('const idleServe = probePlan.offerIdleCopy ? currentCopy : null;');
     const i = route.indexOf('async function currentSnapshotFor(');
     expect(i).toBeGreaterThan(-1);
     const helper = route.slice(i, route.indexOf('\n}\n', i));
@@ -52,7 +55,8 @@ describe('the probe stands down when the saved copy can answer', () => {
 
 describe('the client frames the copy and says so', () => {
   it('prefers the saved copy over the door while the machine sleeps', () => {
-    expect(surface).toContain('src={idleSnapshotUrl || (doorUrl ?');
+    // One pure chooser (previewWakeIntent.ts): the copy leads unless the person asked for live.
+    expect(surface).toContain('chooseLiveFrameSrc({ snapshotUrl: shownSnapshotUrl');
   });
 
   it('accepts only an http(s) url from the server', () => {
@@ -62,7 +66,7 @@ describe('the client frames the copy and says so', () => {
   it('shows the note, and never both notes at once', () => {
     // `snapshotServing` means the machine is GONE; this means it is alive and deliberately asleep.
     // Two banners saying different things about the same app is worse than either alone.
-    expect(surface).toContain('{!snapshotNote && idleSnapshotNote && (');
+    expect(surface).toContain('{!snapshotNote && idleSnapshotNote && shownSnapshotUrl');
   });
 
   it('resets per workspace, like every other per-workspace signal', () => {

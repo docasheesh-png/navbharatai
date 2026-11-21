@@ -94,7 +94,9 @@ describe('wiring — the surface is driven by the rule, and by nothing else', ()
 
   it('one choice state, default auto; source and mode are DERIVED, never stored', () => {
     expect(code).toContain("const [choice, setChoice] = useState<PreviewChoice>('auto');");
-    expect(code).toContain("const source = choosePreviewSource({ choice, buildPhase: buildPhase ?? 'idle', snapshotUrl: idleSnapshotUrl });");
+    expect(code).toContain("const source = choosePreviewSource({ choice, buildPhase: buildPhase ?? 'idle', snapshotUrl: shownSnapshotUrl });");
+    // The copy the rule may pick is withdrawn while the person has asked for the live app (previewWakeIntent.ts).
+    expect(code).toContain('const shownSnapshotUrl = framedSnapshotUrl(idleSnapshotUrl, liveWanted);');
     expect(code).toContain('const mode = modeForSource(source);');
     expect(code).not.toContain('setMode(');
     expect(code).not.toMatch(/useState<'live' \| 'inbrowser'>/);

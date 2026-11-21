@@ -66,6 +66,8 @@ describe('the preview watchdog is gated on real in-app visibility', () => {
     // it is the thing standing between us and the sweep. Asserted here so the two facts are read
     // together — "it touches the sandbox" is true, and "only when it must" is the reason it is cheap.
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain('if (diag.livePreviewAvailable && !idleServe) {');
+    // Since 2026-11-21: planPreviewHealthProbe decides — skipped while the copy is offered, checked when
+    // the person explicitly asked for the live app (wantLive).
+    expect(route).toContain('if (probePlan.probePort) {');
   });
 });

@@ -673,7 +673,7 @@ import { saveUserActions } from '../AgentV3/UserActionStore';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
-import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
+import { classifyPreviewHealth, previewHealthContextLine, planPreviewHealthProbe } from '../AgentV3/PreviewHealth';
 import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
 import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
 import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends, sanitizeTsconfigReferences } from '../AgentV3/FrameworkFoundation';
@@ -6979,8 +6979,12 @@ async function noteBuildOutcome(
       // One shared verdict (currentSnapshotFor): kill switch, no build running for THIS workspace, and
       // a copy proven current — never a copy that an edit has since outdated, which the inline rule
       // that stood here did not check.
-      const idleServe = await currentSnapshotFor(workspaceId);
-      if (diag.livePreviewAvailable && !idleServe) {
+      // …unless the person explicitly asked for the LIVE app (`wantLive`, sent after a successful Wake
+      // up): then the port is checked for real and the copy is not offered (planPreviewHealthProbe).
+      const currentCopy = await currentSnapshotFor(workspaceId);
+      const probePlan = planPreviewHealthProbe({ liveBackend: diag.livePreviewAvailable, hasCurrentCopy: !!currentCopy, wantLive: req.body?.wantLive === true });
+      const idleServe = probePlan.offerIdleCopy ? currentCopy : null;
+      if (probePlan.probePort) {
         try {
           const actuator = buildActuator();
           const sandboxId = actuator.getSandboxId ? await raceTimeout(actuator.getSandboxId(workspaceId), 4_000, 'previewHealthSandbox').catch(() => null) : null;
@@ -7079,7 +7083,7 @@ async function noteBuildOutcome(
       let snapshotTakenAt: number | null = null;
       let snapshotKind: 'expired' | 'current' | 'older' = 'expired';
       try {
-        if (previewSnapshotEnabled() && livePortUp !== true) {
+        if (previewSnapshotEnabled() && livePortUp !== true && probePlan.standInAllowed) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
           const sandboxGone = !(await raceTimeout(
             buildActuator().getSandboxId ? buildActuator().getSandboxId!(workspaceId) : Promise.resolve(null),
@@ -7118,6 +7122,7 @@ async function noteBuildOutcome(
         everPublished: fileCount > 0, // files exist ⇒ a build ran ⇒ a preview was attempted
         lastError: null,             // a specific crash error only comes from a live boot (Diagnose)
         booting: false,
+        portSkippedForSavedCopy: probePlan.offerIdleCopy, // "not checked" is not "asleep"
       });
       // `serving` is what the CLIENT needs to stop presenting a 404 page as the user's app.
       res.json({

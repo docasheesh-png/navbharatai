@@ -463,6 +463,9 @@ import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gam
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { forgeAssignment, forgeMissingHandoff } from '../AgentV3/forgeForMissing';
+import { objectForgeEnabled } from '../lib/objectForge/ObjectForgeGenerator';
+import { REVIEWED_GAME_ASSETS } from '../AgentV3/gameAssets/providers';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, salvageReadInstruction, repairCompilerFiles, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -19602,6 +19605,15 @@ async function noteBuildOutcome(
                     message: 'The request is a race and says nothing about its course, so the builder is instructed to use NavBharatAI\'s editable endless road library (twelve 10–100 km maps by default). Actual use is checked separately.' });
                 }
                 buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), request: gameTurnRequest(prompt, milestoneRequest), endlessRaceCourse: endlessRace })}\n\n---\n\n${buildPrompt}`;
+                // 🧩 The objects the user named that neither the library nor the kit provides go to the Object Forge, said per
+                // object, and checked after the build (forgeForMissing.ts, admin 2026-11-20). Only a 3D kit, only with the Forge on.
+                const missingObjects = forgeAssignment(gameTurnRequest(prompt, milestoneRequest), REVIEWED_GAME_ASSETS, { kit3D: gameKitSeeded.includes('generate_game_3d'), forgeOn: objectForgeEnabled() });
+                if (missingObjects.length > 0) {
+                  dispatcher.requireForgeSubjects(missingObjects);
+                  buildPrompt = `${forgeMissingHandoff(missingObjects)}\n\n${buildPrompt}`;
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'FORGE_SUBJECTS_ASSIGNED', autoResolved: true,
+                    message: `Not in the model library, so assigned to the Object Forge: ${missingObjects.map((m) => m.word).join(', ')}. Use is checked after the build (advisory).` });
+                }
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0

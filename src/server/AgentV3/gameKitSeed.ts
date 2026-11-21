@@ -103,9 +103,7 @@ export function gameKitFrameworkSupported(framework: string | null | undefined):
 export function gameKitPlan(prompt: string | null | undefined, framework?: string | null): GameKitRecipe[] {
   const text = String(prompt ?? '');
   if (!text.trim() || !gameKitFrameworkSupported(framework)) return [];
-  let domain = '';
-  try { domain = analyzeRequirementGaps(text).domain; } catch { return []; }
-  if (domain !== 'game') return [];
+  if (!isAGameTurn(text)) return [];
   if (gameKitWants3D(text)) {
     // 🗺️ THE BIG MAP IS LAID DOWN BY THE PLATFORM TOO (failedbr #2478, 2026-11-20 — admin: "pubg/free fire/bgmi game … ek
     // bahut bada map bane … library me already maps hai, par use nahi kiye gaye"). The Athree map was only a line in the
@@ -451,7 +449,7 @@ export function gameTurnHandoff(
   env: NodeJS.ProcessEnv = process.env,
 ): { contract: GameScopeContract | null; block: string } {
   if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped
-    || analyzeRequirementGaps(prompt).domain !== 'game') return { contract: null, block: '' };
+    || !isAGameTurn(prompt)) return { contract: null, block: '' };
   const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
@@ -498,9 +496,25 @@ export function gameTurnRequest(original: string, milestone?: string | null): st
   const explicit3D = SAYS_3D.test(original) && gameKitWants3D(original);
   const explicit2D = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional)\b/i.test(original);
   const phone = namedNonSmartphone(original);
-  return [milestone, 'This milestone belongs to a game.', ...gameIdentityLines(original), ...hardConstraintLines(original),
+  return [milestone, GAME_MILESTONE_MARKER, ...gameIdentityLines(original), ...hardConstraintLines(original),
     explicit2D ? 'User constraint: 2D game.' : explicit3D ? 'User constraint: 3D game.' : '',
     phone ? `User device constraint: ${phone.device}.` : ''].filter(Boolean).join('\n');
+}
+
+/**
+ * 🔴 A GAME'S MILESTONE IS STILL A GAME (failedbr #2481, 2026-11-21 — "ek real gta jaise game banao, bahut bade map
+ * par"). The roadmap's step 1 read "a flat terrain (like a square plane), ambient light, and a simple player
+ * character", and `gameTurnRequest` marked it as a game's. The kit plan and the game contract then re-read the DOMAIN
+ * of that combined text — the milestone's words decided it — and "square plane / terrain" read as REAL ESTATE. No
+ * kit was laid down, the builder drew a purple cube on a green plane, and the user who asked for GTA got a box.
+ * The original request already settled that this is a game; the marker it leaves is that verdict, so every reader of
+ * a game turn's text honours it before re-reading the domain. PURE.
+ */
+export const GAME_MILESTONE_MARKER = 'This milestone belongs to a game.';
+export function isAGameTurn(text: string | null | undefined): boolean {
+  const t = String(text ?? '');
+  if (t.includes(GAME_MILESTONE_MARKER)) return true;
+  try { return analyzeRequirementGaps(t).domain === 'game'; } catch { return false; }
 }
 
 /** The original request is a game by the one domain reading the kit uses. Never throws. */

@@ -132,7 +132,7 @@ describe('a game nobody played says so (Q-913, autopsy 50378049)', () => {
       const block = route.slice(at, at + 900);
       for (const field of [
         'enabled: gamePlaytestEnabled()',
-        'isCanvasGame: isCanvasGameProject(playtestFiles)',
+        'isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: isAGameTurn(gameTurnRequest(prompt, milestoneRequest)) })', // Q-3224
         'hasPreviewUrl: !!lastPreviewUrl',
         'awaitsShell: !!awaitsShellNow()',
         'hasRunCommand: !!actuator.runCommand',

@@ -103681,3 +103681,17 @@ The admin asked: "1000 module … 100 house, 100 tree, 100 vehicle, 100 humans �
 - **OPEN root cause:** an FBX's axis setting can arrive turned (the dhoti lies on its side). FBXLoader does not apply every exporter's up-axis.
   - Mitigation: each FBX import tells the user, and a Sketchfab GLB download arrives upright.
   - Fix needed: read GlobalSettings UpAxis/FrontAxis from the FBX and rotate.
+
+## 2026-11-21 — Autopsy failedbr #2481: a GTA request delivered as a purple box (Q-3224)
+
+Admin: *"gta jaisa bada game bnane ko bola, to yeh ghumne wala dabba bana diya!"* Report #2481 ("succeeded", 4.1 min, Weak/Surplus):
+- The mega-roadmap split the request; step 1's brief was "a flat terrain (like a square plane) … a simple player character (can be a
+  cube or capsule). Use OrbitControls". `gameKitPlan` and `gameTurnHandoff` re-read the DOMAIN of the milestone text — REAL ESTATE —
+  though `gameTurnRequest` had marked it as a game's. FAST_LANE_SKIPPED_GAME: "not a game the kit serves". Fix: `isAGameTurn`.
+- The planner called a big map, traffic and pedestrians "backend infrastructure … browser mein nahi ho sakti". Fix: planner rule 9,
+  `GAME_KIT_CLAUSE` on every game step, a game's own needsInfra is not a ceiling (only multiplayer), the false note dropped.
+- "Succeeded" with no playtest: the R3F scene (`@react-three/fiber`, `<Canvas>`, `useFrame`) matched neither half of
+  `isCanvasGameProject`. Fix: R3F counts when the user asked for a game; the skip reason reads the same condition.
+- Seen, not fixed here: the console check probed ports 3000/5000/8080 the app does not use and reported 502s (~30 s of struggle);
+  the summary came in English for a Hinglish prompt.
+Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 2026-11-21: open the PR, do not merge.

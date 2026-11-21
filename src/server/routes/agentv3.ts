@@ -462,7 +462,7 @@ import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, isAGameTurn, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { forgeAssignment, forgeMissingHandoff } from '../AgentV3/forgeForMissing';
 import { objectForgeEnabled } from '../lib/objectForge/ObjectForgeGenerator';
 import { REVIEWED_GAME_ASSETS } from '../AgentV3/gameAssets/providers';
@@ -24796,7 +24796,7 @@ async function noteBuildOutcome(
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
           && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
-          && isCanvasGameProject(playtestFiles)
+          && isCanvasGameProject(playtestFiles, { gameRequested: isAGameTurn(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
           && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
@@ -24858,7 +24858,7 @@ async function noteBuildOutcome(
             const why = playtestSkipReason({
               enabled: gamePlaytestEnabled(),
               buildOk: result?.ok === true,
-              isCanvasGame: isCanvasGameProject(playtestFiles),
+              isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: isAGameTurn(gameTurnRequest(prompt, milestoneRequest)) }),
               isImportTurn,
               aborted: abort.signal.aborted,
               hasRunCommand: !!actuator.runCommand,

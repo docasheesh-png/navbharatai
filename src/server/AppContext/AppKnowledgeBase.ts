@@ -97,6 +97,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['city game', 'city', 'shehar', 'sheher', 'town', 'street', 'streets', 'road grid', 'crossing', 'chauraha', 'zebra crossing', 'buildings', 'imarat', 'skyscraper', 'tower', 'apartment', 'flats', 'shops', 'dukaan', 'market street', 'park', 'street light', 'open city', 'taxi game', 'delivery game', 'gta jaisa', 'city driving'],
   },
   {
+    id: 'game_open_world',
+    name: 'Open-world games on the big map (character, city, traffic, parked cars)',
+    path: 'NavBharatAI Pro → chat → ask for an open-world or GTA-style game (for example "ek bada open-world game banao jisme shehar ho")',
+    description: 'A game played on foot on a big map starts already playable: the animated character stands on the big library map, the camera follows, the joystick and WASD keys move it, and the terrain streams in as it walks. When the game has a city, level ground is made for it on the map and a whole city stands there: streets, crossings, buildings, traffic that obeys the lights, people who cross on the zebras, and parked cars the player can get into. Open country (grass, trees, roads, rivers, the sea, the sky) lies beyond the city.',
+    howToUse: 'Ask in plain words for an open-world, GTA-style, exploration or battle-royale game and say if you want a city. The first preview already shows the character on the map. Then ask for what the game needs next (enemies, missions, races, weapons) one step at a time. To change the city or the map, ask in the chat ("bigger city", "more traffic", "no city, only jungle").',
+    relatedFeatures: ['game_city_blocks', 'game_physics', 'game_menus_settings'],
+    keywords: ['open world', 'open-world', 'gta', 'gta jaisa', 'big map', 'bada map', 'bahut bada map', 'city game', 'shehar', 'sadak', 'traffic', 'explore', 'ghoomna', 'free roam', 'battle royale map', 'character on map', 'map nahi aaya', 'parked car', 'gaadi me baithna'],
+  },
+  {
     id: 'game_physics',
     name: 'Real physics in 3D games (falling, rolling, toppling, ragdoll)',
     path: 'NavBharatAI Pro → chat → ask for a 3D game with physics (for example "boxes that fall over", "explosion se cheezein ude", "ragdoll when the enemy dies")',

@@ -2362,6 +2362,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_open_world',
+      description:
+        'THE OPEN-WORLD STARTER — a character on NavBharatAI\'s big Athree map, playable as it stands (src/game/OpenWorldGame.tsx + '
+        + 'src/game/play/openWorld.ts). It JOINS the map and the game shell: the kit\'s animated player walks on the map\'s own ground, the '
+        + 'follow camera, joystick and keys work, terrain streams as the player moves and the floating origin is handled. world={{ city: true }} '
+        + 'levels ground near the start and stands a whole city on it — streets, crossings, buildings, traffic that obeys the lights, people '
+        + 'who cross on the zebras and parked cars the player can get into. Add the game through its setup and update props. Use it for any '
+        + 'open-world, GTA-style, exploration or big-map game on foot; never hand-write the world, the ground, the player or the camera '
+        + 'beside it. Needs the Athree map in the project (run generate_athree_map first).',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_game_royale',
       description: 'Add an ORIGINAL offline 3D royale practice starter when the user requests a battle-royale-style game. '
         + 'This is a bounded procedural arena with two local bots, a shrinking zone and restart, not PUBG, multiplayer or photorealism. '
@@ -3778,6 +3790,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_board_games',
   'author_object',
   'generate_game_shell',
+  'generate_open_world',
   'generate_game_royale',
   'generate_game_vfx',
   'generate_melody',
@@ -4012,6 +4025,7 @@ export const RECIPE_TOOLS = [
   'generate_board_games',
   'author_object',
   'generate_game_shell',
+  'generate_open_world',
   'generate_game_royale',
   'generate_game_systems',
   'generate_game_vfx',

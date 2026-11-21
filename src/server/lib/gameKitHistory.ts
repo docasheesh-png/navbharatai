@@ -104,6 +104,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40",
     "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb"
   ],
+  "src/game/OpenWorldGame.tsx": [
+    "48c550cff4d14f2bc7edac196803f67b6c94106a981b5aad7a4d19d7ebe6f440"
+  ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
     "b670d1ca7850c12b055c278dd20def90c1ea7a68fb832283009c4fe6b6b3529f",
@@ -185,7 +188,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0b421f21f864a642a7f3f62e54714e039baca33d39a10e8a00ed6c794eb0ccd8",
     "b558e1127300beb2e42e0012e804e393b820e0a5fc0b0eece9c3780be97a3abf",
     "370fe0b003e88bb5d6bd162ebb4012eac59a7a6091b8e47488350e0fecd79c5c",
-    "632c091bfa90c063cf41676e67b6ee415a72c47a7843b30b58b0e6cccd23ae6a"
+    "632c091bfa90c063cf41676e67b6ee415a72c47a7843b30b58b0e6cccd23ae6a",
+    "24777239f198dd0ee5389eec77cb329939ba98e77d639bcd8d3d3c475c55abe7"
   ],
   "src/game/athree/vehicles.ts": [
     "cacc3ff86106db83b4c1c4058b4d7401a39cdfdd748b31fbb24873dccafbaa91",
@@ -205,7 +209,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "28a01d4fcebcc2b0bc75eb0fb6c63f1144a73cbc0dad0630d4a84f3c69c1abbb",
     "2befad6c1f46c5927f77edbfade3f58173505bc89245cc030412766636dfcd0b",
     "d35a8cd244f22d8cd904c02e4433d23ff6ba11548a7468585ce9e6ca97cbd8ff",
-    "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e"
+    "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e",
+    "ec1601a16cb1709c8549e792c0728cb55449d8c0d213865c9cadb3c76faac8f6"
   ],
   "src/game/board/business.ts": [
     "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",
@@ -427,6 +432,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",
     "f1ff14f4eab4da545f34a66b0f8b53dae34bb8e7425fd62235074c50b0eddf4c",
     "38bfbcf96a01d86508968ed33d25362b07b8073821157d7425464477efabcd86"
+  ],
+  "src/game/play/openWorld.ts": [
+    "abee4ff7116d932b34d78e34183af99bd6ef690c776561a30e97be009a8617ed"
   ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"

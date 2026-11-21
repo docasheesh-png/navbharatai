@@ -6,6 +6,8 @@
 export const GAME_STARTERS: ReadonlyArray<{ name: string; module: string; genre: string }> = [
   { name: 'RacingRoadGame', module: 'racingroadgame', genre: 'racing' },
   { name: 'LaneRunnerGame', module: 'lanerunnergame', genre: 'runner' },
+  // Written by generate_open_world (not a shell module): a player on the Athree map, with a city on request.
+  { name: 'OpenWorldGame', module: 'openworldgame', genre: 'open-world' },
 ];
 
 /** The starter names as a regex alternation, for the readers above. */

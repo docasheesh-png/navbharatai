@@ -55,7 +55,8 @@ import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeCon
 import { largeWorldIntent } from './largeWorldIntent';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
-import { athreeMapIntent } from '../lib/athreeMap/athreeMapIntent';
+import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
+import { GTA_TITLE } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
@@ -67,7 +68,7 @@ import { ACTION_VISIBLE_RULE } from './actionVisibility';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d'
-  | 'generate_game_2d' | 'generate_board_games' | 'generate_athree_map';
+  | 'generate_game_2d' | 'generate_board_games' | 'generate_athree_map' | 'generate_open_world';
 
 /** 2D games that MOVE a body on screen — they get the 2D kit (sprites, platformer physics, camera, tilemap, particles). */
 const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
@@ -111,7 +112,12 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
     // a 2D game's big world was already seeded (generate_world_2d). The same reader the recipe itself uses decides, so the
     // seed can never lay a map under a game the recipe would refuse; it runs right after the 3D layer that installs three.js.
     const map: GameKitRecipe[] = athreeMapEnabled() && athreeMapIntent({ prompt: text, seedKey: 'seed-plan' }).use ? ['generate_athree_map'] : [];
-    return ['generate_game_runtime', 'generate_game_3d', ...map, 'generate_game_vfx', 'generate_melody', 'generate_game_shell'];
+    // 🧍 AND THE PLAYER IS PUT ON IT (failedbr #2485, 2026-11-21 — "map aya hi nahi, bas ek character … hawa me move kar raha
+    // hai"). The map and the shell were laid side by side with nothing joining them, and the join was left to the builder.
+    // A game played on foot on the big map gets the open-world starter after the shell: a player standing on the map,
+    // mounted in src/App.tsx, playable before the first model call. A race or a flight has its own vehicle to stand on.
+    const onFoot: GameKitRecipe[] = map.length && openWorldOnFoot(text) ? ['generate_open_world'] : [];
+    return ['generate_game_runtime', 'generate_game_3d', ...map, 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
   }
   // 🗺️ A 2D game whose user wants a big world (the wish, not one word: world2dIntent → largeWorldIntent, admin 2026-11-19)
   // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
@@ -128,6 +134,39 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   // A match-3 is a 'puzzle' to the genre reader, and its rules engine lives in the same pack (2026-11-20).
   if (genre === 'board' || genre === 'card' || (genre === 'sports' && CRICKET.test(text)) || (genre === 'puzzle' && MATCH3.test(text))) flat.push('generate_board_games');
   return flat;
+}
+
+/** Identity lines `gameIdentityLines` writes into a milestone turn, read back here — the user's request decides, once. */
+export const ON_FOOT_LINE = 'The player is on foot on the big map.';
+export const CITY_LINE = 'The map has a city on it: streets, buildings and traffic.';
+const hasLine = (text: string | null | undefined, line: string): boolean => String(text ?? '').split(/\r?\n/).some((l) => l.trim() === line);
+
+/** A big-map game the player walks (open world, royale, exploring) — not a race or a flight, which ride a vehicle. PURE. */
+export function openWorldOnFoot(prompt: string | null | undefined): boolean {
+  // A roadmap milestone carries the answer from the user's own request (gameIdentityLines), never re-read from the step.
+  if (hasLine(prompt, ON_FOOT_LINE)) return true;
+  let profile: string | null = null;
+  try { profile = mapProfileFor(String(prompt ?? '')); } catch { return false; }
+  return profile === 'open-world' || profile === 'battle-royale' || profile === 'explore';
+}
+
+/** Hinglish for a city and its streets — the contract's subject list reads the English words. */
+const CITY_HINGLISH = /\b(?:sheh?a?r|shahar|nagar|sadak\w*|sadke\w*|galiy?\w*|imarat\w*)\b/i;
+
+/**
+ * Does the game's world have a CITY in it — streets, buildings, traffic? Read from the same contract the builder is handed
+ * (its named world subjects), a GTA-style reference, or the Hinglish for a city. A royale or an exploring game that names
+ * none of them gets open country. PURE.
+ */
+export function openWorldWantsCity(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '');
+  if (hasLine(text, CITY_LINE)) return true;
+  try {
+    const c = buildGameContract(text);
+    if ((c.subjects ?? []).some((s) => s === 'building' || s === 'road')) return true;
+    if (GTA_TITLE.test(text)) return true;   // the ONE GTA reader (glued "gta5" too)
+  } catch { /* no contract: the words below still decide */ }
+  return CITY_HINGLISH.test(text);
 }
 
 /**
@@ -208,6 +247,9 @@ export function wantsSceneDetail(prompt: string | null | undefined): boolean {
  */
 export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKitRecipe[], request?: string | null): Record<string, unknown> | undefined {
   if (recipe === 'generate_game_vfx' && !plan.includes('generate_game_3d')) return { include: ['audio'] };
+  // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
+  // city when the game's world has one.
+  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request) };
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
   // a weak builder toward the wrong genre. Without a request (a caller that cannot say), the whole shell, as before.
@@ -273,6 +315,21 @@ export function athreeMapHandoff(recipeResult: string): string {
     + ' it around the player. NEVER replace it with a flat ground plane, a grid, a small arena or terrain of your own.'
     + (usage ? `\nHow to use it (from the recipe):\n${usage}` : '');
 }
+
+/**
+ * The builder's instruction when the platform mounted the open-world starter: the game ALREADY plays, so the builder adds
+ * to it. failedbr #2485: told only "build the game IN the map", a weak builder wrote CustomGame.tsx, its own
+ * characterController.ts and WorldSetup.ts beside the kit, and never joined them to the map.
+ */
+export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP. src/App.tsx renders <OpenWorldGame> (src/game/OpenWorldGame.tsx): the kit\'s'
+  + ' animated player is standing on NavBharatAI\'s Athree map — on a street of its city when the game has one — with the follow camera,'
+  + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). DO NOT rewrite src/App.tsx\'s world,'
+  + ' and NEVER write your own world, ground, player, character controller, camera or game component beside it (no CustomGame, no'
+  + ' WorldSetup, no characterController of your own). Build THIS turn\'s features by passing setup and update to <OpenWorldGame> from your'
+  + ' own file under src/game/<your-game>/: setup(ctx, world) adds things with world.place(object, x, z) (WORLD metres, on the ground),'
+  + ' update(ctx, world, dt) runs your rules with world.playerWorld(); world.city gives the city, its traffic, people, parked cars and'
+  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. Change the city or the map through the world prop'
+  + ' ({ city: { blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }, seed, quality }).';
 
 /** The builder's instruction for the preview's Tune panel (kit core/tuning.ts). */
 export const TUNING_RULE = '🎚️ TUNABLE NUMBERS: declare the numbers a creator will want to adjust by playing — player speed, jump height, '
@@ -342,7 +399,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       : twoD,
     // A race whose course the request did not describe runs on the kit's endless track (endlessRaceCourse.ts):
     // said only when the 3D layer that holds createTrackStream is really on disk.
-    has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
+    has('generate_open_world') ? OPEN_WORLD_HANDOFF
+      : has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
     // The creator's Tune panel (admin 2026-11-21): numbers worth adjusting become sliders in the preview.
@@ -480,6 +538,10 @@ export function gameIdentityLines(original: string): string[] {
   if (ref) out.push(`The game the user named: ${ref.name} — build an ORIGINAL ${ref.genre} game in ${ref.dimension === '3d' ? '3D' : ref.dimension === '2d' ? '2D' : 'its usual view'}, ${ref.camera} camera, in the style of ${ref.name}.`);
   else if (genre !== 'unknown') out.push(`The user's game is a ${genre} game.`);
   if (asksForBattleRoyale(original) || largeWorldIntent(original).wants) out.push('The user\'s game needs a big map — a large open area to explore.');
+  // failedbr #2485: the open-world starter and its city are decided from the user's request, so a milestone ("Create a basic
+  // 3D scene …") can never lose them — the same reason the game marker and the big-map line travel.
+  if (openWorldOnFoot(original)) out.push(ON_FOOT_LINE);
+  if (openWorldWantsCity(original)) out.push(CITY_LINE);
   return out;
 }
 

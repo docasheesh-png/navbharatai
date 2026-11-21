@@ -146,7 +146,7 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       }
       if (roll >= p) continue;
       // These pure queries cannot affect candidate randomness. Water still rejects every admitted tree.
-      if (world.waterAt(px, pz) || world.roadAt(px, pz)) continue;
+      if (world.waterAt(px, pz) || world.roadAt(px, pz) || world.clearAt(px, pz)) continue;
       if (world.normalAt(px, pz).y < minUp) continue;
       if (biome === 'forest' || biome === 'grassland') {
         const conif = fieldNoise(px, pz, seed + 12, 2, 420, period);
@@ -162,7 +162,7 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
 /** Grass quality at one lattice node: ground height, how thick the grass is there (0..1), and its colour (0 dark, 0.6 lush, 1 dry). */
 function grassNode(world: AthreeWorld, x: number, z: number, period: number): { h: number; d: number; t: number } {
   const h = world.heightAt(x, z);
-  if (world.waterAt(x, z) || world.roadAt(x, z)) return { h, d: 0, t: 0.5 };
+  if (world.waterAt(x, z) || world.roadAt(x, z) || world.clearAt(x, z)) return { h, d: 0, t: 0.5 };
   const biome = world.biomeAt(x, z);
   let base = 0;
   let tint = 0.5;

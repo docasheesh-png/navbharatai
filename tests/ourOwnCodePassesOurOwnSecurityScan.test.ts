@@ -73,6 +73,8 @@ const REQUIRED_INPUTS: Record<string, Record<string, unknown>> = {
 /** Files a tool reads before it writes (generate_types turns a schema into types). */
 const PRESENT: Record<string, Record<string, string>> = {
   generate_types: { 'prisma/schema.prisma': 'model Item {\n  id    Int    @id\n  title String\n}\n' },
+  // The open-world starter stands on a map that is already in the project (it refuses without one).
+  generate_open_world: { 'src/game/athree/index.ts': 'export {};\n' },
 };
 /** The two shapes a workspace has: a static app, and an app with a server of its own. */
 const SHAPES: Record<string, Record<string, string>> = {

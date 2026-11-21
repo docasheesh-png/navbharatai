@@ -49,7 +49,7 @@ describe('tree-query optimization preserves complete admitted trees', () => {
       for (const up of [0.73, 0.74, 0.8, 0.92, 1]) {
         const world = { seed: 11, mode: 'loop', sizeMeters: 100000,
           heightAt: (x: number) => x < -20 ? 0.79 : biome === 'mountain' ? 220 : 1,
-          roadAt: (x: number, z: number) => x < -60 && z > 0 ? { kind: 'road' } : null, biomeAt: () => biome, normalAt: () => ({ x: 0, y: up, z: 0 }),
+          roadAt: (x: number, z: number) => x < -60 && z > 0 ? { kind: 'road' } : null, clearAt: () => false, biomeAt: () => biome, normalAt: () => ({ x: 0, y: up, z: 0 }),
           waterAt: (x: number, z: number) => x >= -5 && x <= 40 && z < 10 ? { kind: 'river', surface: 2 } : null };
         const expected = original.treesInRect(world, -180, -180, 180, 180);
         expect(current.treesInRect(world, -180, -180, 180, 180)).toEqual(expected);
@@ -61,7 +61,7 @@ describe('tree-query optimization preserves complete admitted trees', () => {
   it('reduces expensive height/water queries without changing one tree or bypassing water exclusion', () => {
     const calls = { height: 0, water: 0 };
     const world = { seed: 3, mode: 'bounded', sizeMeters: 8000,
-      roadAt: (x: number) => x < -300 ? { kind: 'road' } : null, heightAt: () => { calls.height++; return 4; }, biomeAt: () => 'grassland', normalAt: () => ({ x: 0, y: 1, z: 0 }),
+      roadAt: (x: number) => x < -300 ? { kind: 'road' } : null, clearAt: () => false, heightAt: () => { calls.height++; return 4; }, biomeAt: () => 'grassland', normalAt: () => ({ x: 0, y: 1, z: 0 }),
       waterAt: (x: number) => { calls.water++; return x > 0 ? { kind: 'lake', surface: 5 } : null; } };
     const expected = original.treesInRect(world, -600, -600, 600, 600);
     const before = { ...calls }; calls.height = 0; calls.water = 0;

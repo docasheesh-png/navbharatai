@@ -389,6 +389,7 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
+import { generateOpenWorld, openWorldAppSource } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -10379,6 +10380,36 @@ export class ToolDispatcher {
         const w2dLayers = await this.addMissingRecipeLayers(w2d.files, agent);
         this.scheduleCheckpoint('2d world');
         return `Added the 2D world (${w2dDecision.reason}):\n${w2dWritten.join('\n')}\n\n${w2d.instructions}${w2dLayers}`;
+      }
+
+      case 'generate_open_world': {
+        // THE JOIN BETWEEN THE BIG MAP AND THE GAME (failedbr #2485). The map decision stays where it is made: this recipe
+        // only builds on a map that is already in the project, so it can never put a world under an app that has none.
+        let owHasMap = false;
+        try { await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts'); owHasMap = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        if (!owHasMap) refuse('The open-world starter stands on the Athree map, and this project has none. Run generate_athree_map first; if that is refused, this game has no big map and the starter is not for it.');
+        const ow = generateOpenWorld();
+        const owWritten = await this.writeRecipeFiles(ow.files, agent);
+        const owLayers = await this.addMissingRecipeLayers(ow.files, agent);
+        // MOUNTED BY THE PLATFORM where no game is mounted yet (the kit seed asks for it): the first render is already a
+        // player on the big map. An App that renders a game of its own is never replaced.
+        const owRec = (input as Record<string, unknown>) || {};
+        let owMounted = '';
+        if (owRec.mount === true) {
+          let app: string | null = null;
+          try { app = await this.actuator.readFile(this.workspaceId, 'src/App.tsx'); }
+          catch (error) { if (!isNotFoundError(error)) throw error; }
+          if (app === null || !/GameCanvas|OpenWorldGame|RacingRoadGame|LaneRunnerGame|new\s+Game\s*\(|<canvas/i.test(app)) {
+            const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined });
+            const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
+            this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
+            getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame' + (owRec.city === true ? ' world={{ city: true }}' : '') + ' /> — the game is playable now. Edit that file to add your setup and update; do not replace it.';
+          }
+        }
+        this.scheduleCheckpoint('open world starter');
+        return `Added the open-world starter:\n${owWritten.join('\n')}\n\n${ow.instructions}${owMounted}${owLayers}`;
       }
 
       case 'generate_game_royale': {

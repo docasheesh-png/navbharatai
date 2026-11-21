@@ -42,6 +42,7 @@ import { generateMelody } from './MelodyGenerator';
 import { generateGameRoyale } from './GameRoyaleGenerator';
 import { generateGameShell } from './GameShellGenerator';
 import { generateAthreeMap } from './athreeMap/AthreeMapGenerator';
+import { generateOpenWorld } from './GameOpenWorldGenerator';
 import { generateWorld2D } from './world2d/World2DGenerator';
 import { generateGame2D } from './Game2DGenerator';
 import { generateBoardGames } from './BoardGamesGenerator';
@@ -69,6 +70,8 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_game_shell: generateGameShell,
   generate_game_royale: generateGameRoyale,
   generate_athree_map: generateAthreeMap,
+  // The join between the Athree map and the shell: a player on the big map, playable as it stands (failedbr #2485).
+  generate_open_world: generateOpenWorld,
   generate_world_2d: generateWorld2D,
   generate_game_2d: generateGame2D,
   generate_board_games: generateBoardGames,

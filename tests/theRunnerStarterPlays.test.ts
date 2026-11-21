@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { generateGameShell, GAME_SHELL_MODULES } from '../src/server/lib/GameShellGenerator';
+import { recipeFilePool } from '../src/server/lib/gameRecipeLayers';
 import { generateGameController } from '../src/server/lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../src/server/lib/GameVfxAudioGenerator';
 import { generateGameSystems } from '../src/server/lib/GameSystemsGenerator';
@@ -169,7 +170,8 @@ describe('🏃 the right starter for the right game', () => {
   it('every reader knows every starter is the kit\'s file, not the builder\'s own game', () => {
     for (const s of GAME_STARTERS) {
       expect(isGameOwnSource(`src/game/${s.name}.tsx`), s.name).toBe(false);
-      expect(Object.keys(generateGameShell().files)).toContain(`src/game/${s.name}.tsx`);
+      // In the kit's own file pool (the shell's starters, and the open-world starter from its own recipe).
+      expect(recipeFilePool().has(`src/game/${s.name}.tsx`), s.name).toBe(true);
     }
   });
 });

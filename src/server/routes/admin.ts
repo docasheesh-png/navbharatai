@@ -133,7 +133,7 @@ import { DEPLOY_PATHS, freezeEnforcementNote, freezeWouldNotHold } from '../lib/
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
-import { logStore } from '../lib/logStore';
+import { logStore, logLimit } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
@@ -1799,9 +1799,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const event = typeof req.query.event === 'string' ? req.query.event : undefined;
       const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : undefined;
       const since = req.query.since ? Number(req.query.since) : undefined;
-      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
-      const entries = await logStore.query({ level, event, workspaceId, since, limit });
-      res.json({ entries });
+      // Default 50, max 500 (logLimit). Each read costs what it returns — see logStore.ts's header for the
+      // 2026-11-21 audit where an unfiltered call here read ~5,500 documents to show 40.
+      const limit = logLimit(req.query.limit !== undefined ? parseInt(String(req.query.limit), 10) : undefined);
+      const page = await logStore.queryPage({ level, event, workspaceId, since, limit });
+      // `complete: false` ⇒ a filtered search stopped at its read budget; older matches may exist.
+      res.json({ entries: page.entries, scanned: page.scanned, complete: page.complete });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read logs.' });
     }

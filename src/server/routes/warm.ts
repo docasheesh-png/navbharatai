@@ -97,7 +97,10 @@ export async function runWarmup(): Promise<WarmReport> {
       import('../lib/promptSafety'), import('../lib/authMiddleware'), import('../lib/audit'),
     ])),
     // Firestore singletons — one read pays the admin client init; the rest come back warm.
-    // Cost: 4 Firestore reads per ACTUAL run. The 30s throttle (getWarmReport) caps this to
+    // Cost: 4 Firestore reads per ACTUAL run. 🔴 That was FALSE for the logStore step until 2026-11-21: an
+    // unfiltered log query read ~5,500 documents (logStore.ts header), 8,160 times a month from this
+    // scheduler alone — 71% of the Firestore bill. It is now `orderBy('ts','desc').limit(1)`: one read, and
+    // `tests/serverLogsReadBudget.test.ts` keeps it one. The 30s throttle (getWarmReport) caps this to
     // ~4 reads / 30s no matter the request rate, so a flood costs ~nothing (cached report).
     warmStep('firestore:userCost', () => userCostStore.get('__warmup__')),
     warmStep('firestore:providerState', () => providerStateStore.get('__warmup__', 'netlify')),

@@ -26,6 +26,7 @@ import { createCity, planCity, type City, type CityOptions } from '../three/city
 import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
 import { createCar } from '../three/objects';
+import { softwareRenderer } from '../three/surfaces';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /** Side of the walkable ground patch kept under the player, in metres. Default 96. */
@@ -107,7 +108,8 @@ export interface OpenWorld {
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
   const { patchSize = 96, city: cityOption = false, regions: regionList, ...mapOptions } = options;
-  const map = createAthreeMap({ profile: 'open-world', quality: 'mid', skyOptions: { lights: false }, ...mapOptions, three: THREE } as AthreeMapOptions);
+  // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
+  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   (map as { sky?: { applyTo(scene: THREE.Scene): void } | null }).sky?.applyTo(ctx.scene);

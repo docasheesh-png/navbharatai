@@ -52,7 +52,7 @@ import { leaderboard } from './core/leaderboard';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
-import { groundScene } from './three/surfaces';
+import { groundScene, softwareRenderer } from './three/surfaces';
 import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
@@ -1008,7 +1008,10 @@ export class Game {
    * shadows — which the Graphics setting always promised and never did.
    */
   private applyQuality(): void {
-    const q = this.autoQuality ? steppedQuality(this.chosenQuality, this.perf.drop) : this.chosenQuality;
+    // 🖥️ A browser with no GPU starts at the bottom (failedbr #2487: the open-world city drew 1–3 frames a second in a software
+    // renderer, so Play could not even be pressed and the playtest never played). Measured on that game: 5 → 15 fps on the start
+    // screen, 1.3 → 6 while playing, with the map's phone tier. Only with Auto quality on; a phone or laptop WITH a GPU is unaffected.
+    const q = this.autoQuality ? (softwareRenderer() ? 'low' : steppedQuality(this.chosenQuality, this.perf.drop)) : this.chosenQuality;
     this.effectiveQuality = q;
     const scale = q === 'low' ? 0.55 : q === 'medium' ? 0.8 : 1;
     this.renderer.setPixelRatio(Math.max(0.35, this.basePixelRatio * scale));

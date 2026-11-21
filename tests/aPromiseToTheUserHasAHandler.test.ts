@@ -28,6 +28,7 @@ import ts from 'typescript';
 import { classifyIntentWithConfidence, readerlessIntent } from '../src/server/AgentV3/IntentClassifier';
 import { buildConfirmation, isOfferAcceptance } from '../src/server/AgentV3/buildConfirmation';
 import { wantsAttemptBack, KEEP_CHANGES_PHRASE } from '../src/server/AgentV3/GreenGuard';
+import { wantsVersionUndo } from '../src/lib/versionUndoIntent';
 import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
@@ -174,6 +175,11 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  undo: {
+    handler: 'src/lib/versionUndoIntent.ts; src/components/agentv3/AgentV3Panel.tsx (VersionUndoCard)',
+    why: 'typing undo in Pro chat opens the in-chat version picker (wantsVersionUndo), where one tap restores any saved version',
+    proof: () => wantsVersionUndo('undo') && read('src/components/agentv3/AgentV3Panel.tsx').includes('wantsVersionUndo'),
+  },
   continue: {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/ProjectPlan.ts; src/server/AgentV3/ProjectContext.ts`,
     why: 'a continuation signal (edit_existing, high); the project context resumes the previous plan "only when the current request just says continue", and ProjectPlan resumes a paused module',

@@ -728,6 +728,7 @@ import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey } from '../AgentV3/restorePoint';
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { gameMeasureFromIssues, gameGotWorse, versionBeforeTurn, gameUndoMessage } from '../AgentV3/gameRegression';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -12006,6 +12007,8 @@ async function noteBuildOutcome(
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
     );
+    // The user started this turn as a bug hunt from the ❗️ list: the deep review runs without asking again.
+    const bugHuntAskedByUser = req.body?.bugHunt === true;
     if (weakScopeBlocked) {
       intent = 'chat';
       setAdmittedSurplusScope(surplusSession, false);
@@ -14735,6 +14738,9 @@ async function noteBuildOutcome(
       outcomeBuildId = buildId;
       const promptHash = computePromptHash(prompt);
       emit({ type: 'build_meta', buildId, promptHash, workspaceId });
+      // 🎮 THE GAME AS IT WAS MEASURED BEFORE THIS TURN (gameRegression.ts, admin 2026-11-21): read NOW, before this turn's
+      // first progress save overwrites the stored report, so a turn that makes the game worse can be compared and undone.
+      const previousReportAtStart = loadDiagnostics(workspaceId).catch(() => null);
       const buildDiag = new BuildDiagnostics({
         buildId, promptHash,
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
@@ -24808,6 +24814,18 @@ async function noteBuildOutcome(
               gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
+              // 🎮 DID THIS TURN MAKE THE GAME WORSE? Compared with the measure from before the turn; if so, the user is told
+              // in plain words and offered a one-tap "Go back" to the saved version from just before it (the ❗️ list row (gameUndo.ts) reads
+              // the version id from this finding's detail). Nothing is changed automatically.
+              try {
+                const before = gameMeasureFromIssues((await previousReportAtStart)?.issues);
+                const worse = gameGotWorse(before, { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) });
+                if (worse) {
+                  const versions = await buildHistoryStore.list(restorePointKey(workspaceId, null)).catch(() => []);
+                  const versionId = versionBeforeTurn(versions, buildStartedAt);
+                  if (versionId) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_GOT_WORSE', message: gameUndoMessage(worse), detail: versionId, autoResolved: false });
+                }
+              } catch { /* observation only — never in the way of the build */ }
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
             try {
@@ -26510,6 +26528,7 @@ async function noteBuildOutcome(
         wait: (callId) => waitForUser(callId, bugHuntWaitMs()),
         say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
         record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
+        preApproved: bugHuntAskedByUser,
       });
       if (completedAppReviewEligible({ ok: result.ok, headroom: reviewHeadroomOk, allowed: reviewerAllowed, deferred: !!reviewDeferredToShell, runProven: runProof().proven, stopped: abort.signal.aborted }) && bugHunt.runReview) {
         try {

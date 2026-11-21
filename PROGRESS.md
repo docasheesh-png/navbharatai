@@ -103501,6 +103501,23 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   player; no-lights mode; determinism; dispose. Six reversions each failed (one needed the targeted queue test to bite).
 - 🟡 **Not built yet:** pedestrians.
 
+## 2026-11-21 — Game repair, carefully back on: optional, asked, and one tap to undo a change that made it worse
+
+- **Admin:** "isko savdhani se on karo … optional karo, app/game banne ke bad user se hi pucho … agar game tut jaye to user
+  ek prompt se wapas undo ho jaye."
+- **Found first (mapped end to end):** the ASK already existed — the playtest's problems become a one-tap "Make the game
+  playable" offer that runs only when tapped, as a normal turn; the real version system already saves every good build
+  whole (BuildHistoryStore / Time Machine) and `/restore-version` saves the current app before restoring; "undo /
+  pehle wala" already opens the version picker. What was MISSING: nothing compared the game before and after a turn, so
+  a change that broke a working game ended silently. The old automatic repair stays suspended (it edited unasked and
+  rolled back from an incomplete snapshot).
+- **Fix:** `gameRegression.ts` (pure): the previous turn's measure is read from the stored report BEFORE this turn's first
+  progress save; after this turn's playtest, a new unplayable defect or a ≥15-point drop below 75 is "worse"; the
+  version to go back to is the newest good one saved before the turn. The route records `GAME_GOT_WORSE` (detail = that
+  version id); `GameUndoCard` shows the plain sentence with one-tap "Go back" (the Time Machine's own restore route) and
+  "Keep this version". `docs/security/game-auto-repair-suspension.md` records what replaced the suspended path.
+- **Proof:** `tests/aGameMadeWorseCanBeUndone.test.ts` (12; five reversions each failed, one after a stronger case was
+  added); census green; both typechecks clean.
 ## 2026-11-21 — #4397 merged; batch 11 (Medieval Village), textures, FBX pictures, Q-3019, CC-BY packaging
 - **#4397 merged:** batches 9 and 10, FBX attachments, the "where to get it" guide, and the library on every 3D turn.
 - **Batch 11:** the Medieval Village MegaKit (CC0). The kit has no whole house, so two whole village houses were assembled from its 2 m pieces: walls with a door and windows, a floor, and a roof with closed gables. The first assembly left the gables open and the inside showed. Also a wagon, wooden fence, stone stairs, chimney and vine. Test: `libraryBatch11`.
@@ -103524,6 +103541,25 @@ IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`; their ledgers stay 
 the admin-decision rows (Q-3137, Q-3139, Q-3142, Q-3148, Q-3157, Q-3161, Q-3164, Q-3180, Q-3198 and the older ones) and the
 untouched reports below #669 (admin, 2026-11-21: old reports are set aside; only new reports are autopsied).
 
+## 2026-11-21 — The ❗️ button: game "Go back" moves into it, and "Find and fix bugs" finally does something
+
+- **Admin:** "alag se card dikhaoge, to user paresan ho jayega! koi new button nahi, existing ❗️ button ko hi update
+  kar do" — and "❗️ me 'bug fix' popup … us par click karo, kuch bhi nahi hota hai, builder chalta hi nahi hai".
+- **Go back lives in the ❗️ list.** The separate GameUndoCard is gone. A finished build's GAME_GOT_WORSE finding becomes
+  a row in "What you need to do" (`userActionView.mergeLiveActions`, `gameUndo.ts`) with "Go back" (the Time Machine
+  restore, current app saved first) and "Keep this version".
+- **Root cause of the dead bug-fix button:** the build offers the optional deep bug hunt as a gate and waits 30 s,
+  then carries on. `releaseGate` keeps the row open (rightly), but it still offered "Find and fix bugs", which answered
+  a gate nobody was waiting on. The tap did nothing and the row was marked done.
+  **Class:** an approve row whose gate expired offering an answer button.
+- **Fix (the class):** `gateExpired(action, liveGateCallId)`. A row is live only while the running build holds that
+  exact gate.
+  - An expired bug-hunt row's "Find and fix bugs" starts a NEW turn ("Find and fix the bugs in my app.") with
+    `bugHunt: true`. The route passes `preApproved` to `offerBugHunt`, which runs the review without asking again. On
+    an app that did not finish, it says why and charges nothing for it.
+  - Every other expired gate shows no Approve: "The build carried on without this answer" + Dismiss.
+- **Proof:** `tests/theAlertListActuallyDoesIt.test.ts` (9) + the reworked `tests/aGameMadeWorseCanBeUndone.test.ts`.
+  Reversions failed: `gateExpired` always false (2 failed), and the pre-approved branch removed (1 failed).
 ## 2026-11-21 — #4403 merged; a character customizer on request; the builder picks by meaning (intent map)
 - **#4403 merged:** batch 11 village houses, 125 textures, FBX pictures, Q-3019, CC-BY packaging.
 - **Character customizer** (admin: "par user agar bole to … user jo chahe change bol sakta hai, unexpected"):

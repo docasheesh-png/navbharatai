@@ -27,7 +27,7 @@ import { HeaderBadges } from './HeaderBadges';
 import { UserActionTray } from './UserActionTray';
 import { NextStepCard, useLiveDomain } from './NextStepCard';
 import { useUserActions } from './useUserActions';
-import { askPrompt, isLiveOnly, type LiveAsks, type UserActionView } from './userActionView';
+import { askPrompt, isLiveOnly, BUG_HUNT_TURN_PROMPT, type LiveAsks, type UserActionView } from './userActionView';
 import { saveSecret, listSecrets } from '../../lib/secretsApi';
 // THE SAME vault UI the Settings screen renders — imported, never reimplemented, so the two doors
 // cannot drift into two behaviours. Lazy because most sessions never open it.
@@ -69,6 +69,7 @@ import { HISTORY_TAB_NOTE } from './versionHelp';
 import { VersionTimeline } from '../versions/VersionTimeline';
 import { historyKeyFor } from '../../lib/versionRestoreClient';
 import { VersionUndoCard } from './VersionUndoCard';
+import { gameUndoOffer, restoreGameVersion, GAME_RESTORED_MESSAGE } from './gameUndo';
 import { wantsVersionUndo } from '../../lib/versionUndoIntent';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
@@ -594,11 +595,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   //
   // `live` is memoised on the three pending gates themselves: the hook folds them into the durable
   // list, so a waiting build stays answerable even when the durable write did not land.
+  // The "this change made your game worse — go back?" row in the ❗️ list (gameUndo.ts): closed per build once answered.
+  const [gameUndoClosedFor, setGameUndoClosedFor] = useState<string | null>(null);
+  // The one-line result of the last ❗️-list tap that can fail (a restore), shown inside the list.
+  const [trayNote, setTrayNote] = useState<string | null>(null);
+  // A ❗️-list tap on an expired bug-hunt offer starts a new turn with the hunt already approved.
+  const bugHuntRequestedRef = useRef(false);
+  const gameUndo = useMemo(() => {
+    const offer = state.done ? gameUndoOffer(state.diagnostics as { issues?: Array<{ code?: string; message?: string; detail?: string; autoResolved?: boolean }> } | undefined) : null;
+    const key = state.buildId ?? offer?.versionId ?? null;
+    return offer && key && gameUndoClosedFor !== key ? { key, ...offer } : undefined;
+  }, [state.done, state.diagnostics, state.buildId, gameUndoClosedFor]);
   const liveAsks = useMemo<LiveAsks>(() => ({
+    gameUndo,
     pendingSecrets: state.pendingSecrets,
     pendingPermission: state.pendingPermission,
     pendingClarify: state.pendingClarify,
-  }), [state.pendingSecrets, state.pendingPermission, state.pendingClarify]);
+  }), [gameUndo, state.pendingSecrets, state.pendingPermission, state.pendingClarify]);
   /**
    * The credential form, hoisted out of the message stream so the tray can hold it.
    *
@@ -1888,6 +1901,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         try {
           const forceWeak = weakForceContinueRef.current;
           weakForceContinueRef.current = false;
+          const bugHunt = bugHuntRequestedRef.current;
+          bugHuntRequestedRef.current = false;
           const request = start(msgText, {
             userId, email, onlyOpus,
             // Continue with Weak must actually start a Weak build — never the prior tier from a stale closure.
@@ -1900,6 +1915,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             chatRole: chatMode === 'build' ? undefined : chatMode,
             confirmedFeatures,
             weakForceContinue: forceWeak || undefined,
+            bugHunt: bugHunt || undefined,
           });
           // Execution owns a synchronous lock now, even before React renders running=true.
           // Release preflight immediately so a fast result cannot strand it through an open tail.
@@ -7082,6 +7098,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           onNotNeeded={(action) => { void userActions.close(action, 'not_needed'); }}
           onAsk={askAboutAction}
           onAnswerGate={answerGate}
+          liveGateCallId={state.pendingPermission?.callId ?? null}
+          note={trayNote}
+          onKeepVersion={(action) => { if (action.id.startsWith('live:undo:')) setGameUndoClosedFor(action.id.slice('live:undo:'.length)); }}
+          onRestoreVersion={(action) => {
+            const versionId = action.restoreVersionId;
+            const key = action.id.slice('live:undo:'.length);
+            if (!versionId || !state.workspaceId) return;
+            setTrayNote(null);
+            void restoreGameVersion({ workspaceId: state.workspaceId, versionId, userId, email }).then((out) => {
+              if ('message' in out) { setTrayNote(out.message); return; }
+              handleVersionRestored(out.files);
+              setUserMsgs((c) => [...c, { role: 'agent', text: GAME_RESTORED_MESSAGE, ts: Date.now() }]);
+              setGameUndoClosedFor(key);
+              userActions.setTrayOpen(false);
+            });
+          }}
+          onRunBugHunt={(action) => {
+            // A real new turn, with the user's yes already given — never an answer to a gate that is gone.
+            if (running) { setTrayNote('A build is running. Ask for the bug hunt again when it finishes.'); return; }
+            void userActions.close(action, 'done');
+            userActions.setTrayOpen(false);
+            bugHuntRequestedRef.current = true;
+            void send({ text: BUG_HUNT_TURN_PROMPT, importUrl: '' });
+          }}
         />
       )}
 

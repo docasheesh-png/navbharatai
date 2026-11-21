@@ -1394,8 +1394,20 @@ export function shouldReprobeBoundPort(assumedPort: number, boundPort: number): 
  * package.json needs a reinstall + restart, which HMR can't do). On any doubt this returns false and
  * the full, proven sequence runs — today's behaviour, never worse. Pure + unit-testable.
  */
-export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean, prebundleStale = false): boolean {
-  return portAlreadyUp === true && depsStale !== true && prebundleStale !== true;
+export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean, prebundleStale = false, forced = false): boolean {
+  return portAlreadyUp === true && depsStale !== true && prebundleStale !== true && forced !== true;
+}
+
+/**
+ * Does this dev-server command ASK for a fresh, cache-cleared start? (failedbr #1043, #1022, 2026-11-20.) Vite served an empty
+ * transform of `game.tsx` — "does not provide an export named 'BlockWorldGame'" while tsc and the production build were
+ * clean — and the model's `vite --force` (seven times, then `--port 5174`) was answered "already healthy … reused it (no
+ * relaunch)" every time: the one fix the platform's own guard leaves the model was swallowed by the fast path, for 12
+ * minutes. `--force` is an explicit request to drop the running server's cache, so it is honoured: the port is freed and
+ * the server relaunched like any fresh start. PURE.
+ */
+export function devCommandForcesRestart(command: string): boolean {
+  return /(?:^|[\s;&|])--force\b/.test(String(command ?? ''));
 }
 
 /** Where Vite keeps the dependencies it pre-bundled when the dev server started. */

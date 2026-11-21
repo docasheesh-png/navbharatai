@@ -104,6 +104,73 @@ export function outsideTheAppNote(paths: readonly string[], setAsideFindings: nu
   const more = paths.length > 5 ? `, +${paths.length - 5} more` : '';
   const why = setAsideFindings > 0 ? ` (${setAsideFindings} finding(s) in them are not counted)` : '';
   return `📎 Not judged as the app: ${shown}${more}${why}. These pages are in the workspace but are not part of `
-    + 'what the app builds or ships (they are not the entry, not in public/, and no bundler config names them). '
+    + 'what the app builds or ships (not the entry, not in public/, not in any folder the project\'s tsconfig includes, and named by no bundler config or script). '
     + 'They are the user\'s files — leave them exactly as they are: do not delete, move or rewrite them to change this score.';
+}
+
+/**
+ * 🔴 A WHOLE FOLDER THE APP DOES NOT BUILD (failedbr #728/#731/#734/#735, queue Q-3201). An imported repo carried
+ * ~480 reference files under `Anthropic/claude-code/skills/…`. The readiness snapshot reads at most 300 source
+ * files, so those files crowded the real app out of it: the security scan reported "unsafe-html-sink @
+ * …/artifact.d.ts", design and accessibility were "partially scanned", and four packages the app really uses
+ * were called unused because the files that import them were never read.
+ *
+ * The project already SAYS what it builds: its tsconfig `include`. A top-level folder that no tsconfig includes,
+ * that package.json's scripts, the bundler config and the root index.html never name, is not the app. Narrow:
+ *   • a bundler project only, with at least one root tsconfig that has an `include` list;
+ *   • an include whose first segment is a glob (`**`, `*`, `.`) covers everything ⇒ nothing is set aside;
+ *   • root files are never set aside, and neither are the folders an app conventionally owns.
+ * Unknown means INSIDE. PURE — no I/O.
+ */
+const APP_FOLDERS = new Set(['src', 'public', 'app', 'pages', 'components', 'lib', 'server', 'api', 'functions', 'supabase', 'prisma', 'e2e', 'test', 'tests', '__tests__', 'scripts', 'shared', 'packages', 'apps', 'android', 'ios', 'assets', 'styles']);
+
+function jsonWithComments(text: string): unknown {
+  try { return JSON.parse(text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:"'\\])\/\/[^\n]*/g, '$1').replace(/,\s*([}\]])/g, '$1')); }
+  catch { return null; }
+}
+
+export function foldersOutsideTheApp(
+  files: readonly string[],
+  packageJson: string | null | undefined,
+  projectSources: readonly { path: string; content: string }[],
+): Set<string> {
+  const out = new Set<string>();
+  if (!projectHasBundler(packageJson)) return out;
+  const covered = new Set<string>();
+  let sawInclude = false;
+  for (const s of projectSources) {
+    if (!/^tsconfig(?:\.[\w-]+)?\.json$/.test(normalize(s.path))) continue;
+    const cfg = jsonWithComments(s.content) as { include?: unknown; files?: unknown } | null;
+    if (!cfg || typeof cfg !== 'object') continue;
+    for (const field of ['include', 'files'] as const) {
+      const list = cfg[field];
+      if (!Array.isArray(list)) continue;
+      if (field === 'include') sawInclude = true;
+      for (const entry of list) {
+        if (typeof entry !== 'string') continue;
+        const first = normalize(entry).split('/')[0];
+        if (!first || /[*?{[]/.test(first) || first === '.' || first === '..') return out; // covers everything
+        covered.add(first);
+      }
+    }
+  }
+  if (!sawInclude) return out;
+  const named = [packageJson ?? '', ...projectSources.filter((s) => BUNDLER_CONFIG.test(normalize(s.path)) || normalize(s.path) === 'index.html').map((s) => s.content)].join('\n');
+  for (const raw of files) {
+    const path = normalize(raw);
+    const slash = path.indexOf('/');
+    if (slash <= 0) continue;
+    const top = path.slice(0, slash);
+    if (out.has(top) || covered.has(top) || APP_FOLDERS.has(top) || top.startsWith('.')) continue;
+    if (/^(node_modules|dist|build|coverage)$/.test(top)) continue;
+    if (new RegExp(`(^|[^\\w-])${top.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[/\\\\'"\`\\s]|$)`).test(named)) continue;
+    out.add(top);
+  }
+  return out;
+}
+
+/** Is this path inside one of those folders? */
+export function inFolderOutsideTheApp(folders: ReadonlySet<string>): (path: string) => boolean {
+  if (folders.size === 0) return () => false;
+  return (path: string) => { const p = normalize(path); const i = p.indexOf('/'); return i > 0 && folders.has(p.slice(0, i)); };
 }

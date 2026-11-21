@@ -411,6 +411,7 @@ export function cssConsistencyError(files: Record<string, string>): string | nul
   return [
     `CSS class mismatch: ${missing.length} class name(s) are used in the markup (className / class) but are NOT defined in any CSS file, so the app renders unstyled / visually broken:`,
     missing.map((c) => `  .${c}`).join('\n'),
+    ...(tailwindVocabularyLine(missing) ? [tailwindVocabularyLine(missing)] : []),
     'Fix by making the components and the stylesheet AGREE — either add these classes to the CSS with real styles, or rename the class usages to the classes the CSS actually defines. Keep them consistent across all files.',
     'Removing style rules never fixes this: a stylesheet with fewer rules leaves MORE of these classes unstyled.',
   ].join('\n');
@@ -471,6 +472,7 @@ export function undefinedClassWriteNote(
     wroteSheet
       ? `Style check after this write: ${scope.length} class name(s) the screens use still have no rule in any stylesheet, so those parts render unstyled: ${shown}${more}.`
       : `Style check after this write: ${scope.length} class name(s) in this file have no rule in any stylesheet yet: ${shown}${more}.`,
+    ...(tailwindVocabularyLine(scope) ? [tailwindVocabularyLine(scope)] : []),
     'Define each one in the global stylesheet with the palette variables, or use a class that already exists, before you finish. '
       + APPEND_WITH_EMPTY_OLD_STRING,
   ].join('\n');
@@ -544,11 +546,67 @@ export function cssHealEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_CSS_HEAL ?? '').trim().toLowerCase() !== 'off';
 }
 
+/**
+ * A class name in Tailwind's utility vocabulary (`flex`, `gap-1`, `bg-gray-200`, `font-bold`, `md:p-4`). PURE.
+ * Precision-first: a bare word counts only when it is a Tailwind keyword, and a prefixed word only with a known
+ * utility prefix, so an app's own `card-title` or `btn-primary` never reads as Tailwind.
+ */
+const TAILWIND_KEYWORD = new Set([
+  'flex', 'grid', 'hidden', 'block', 'inline', 'inline-block', 'inline-flex', 'relative', 'absolute', 'fixed',
+  'sticky', 'static', 'border', 'rounded', 'shadow', 'italic', 'underline', 'uppercase', 'lowercase', 'capitalize',
+  'truncate', 'grow', 'shrink', 'container', 'transition', 'sr-only',
+]);
+const TW_COLOR = '(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950)(?:\/\d+)?|white|black|transparent|current';
+const TW_SIZE = '\\d+(?:\\.\\d+)?|\\d+\\/\\d+|px|full|screen|auto|none|xs|sm|base|md|lg|xl|[2-9]xl|\\[[^\\]]+\\]';
+/** Each utility family with the values Tailwind gives it — a value outside them (`order-row`, `bottom-nav`) is the app's own. */
+const TAILWIND_FAMILIES: RegExp[] = [
+  new RegExp(`^-?(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|w|h|min-w|min-h|max-w|max-h|gap|gap-x|gap-y|space-x|space-y|inset|top|bottom|left|right|z|basis|order|translate-x|translate-y)-(?:${TW_SIZE})$`),
+  new RegExp(`^(?:text|bg|border|ring|divide|from|to|via|fill|stroke|outline|decoration|placeholder)-(?:${TW_COLOR})$`),
+  new RegExp(`^(?:text|rounded|shadow|leading|tracking|blur)-(?:${TW_SIZE}|tight|snug|normal|relaxed|loose|wide|wider|widest|inner)$`),
+  new RegExp(`^(?:rounded|border)-[trblxy](?:-(?:${TW_SIZE}))?$`),
+  /^border-\d+$/,
+  /^font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black|sans|serif|mono)$/,
+  /^(?:items|justify|self|content|place-items|place-content)-(?:center|start|end|between|around|evenly|stretch|baseline)$/,
+  /^flex-(?:row|col|wrap|nowrap|1|auto|none|initial|grow|shrink)(?:-reverse)?$/,
+  /^(?:grid-cols|grid-rows|col-span|row-span|line-clamp)-(?:\d+|full|none)$/,
+  /^(?:opacity|duration|scale|rotate)-\d+$/,
+  /^(?:overflow|overflow-x|overflow-y)-(?:auto|hidden|scroll|visible)$/,
+  /^(?:whitespace)-(?:nowrap|normal|pre|pre-wrap|pre-line)$/,
+  /^(?:cursor)-(?:pointer|default|not-allowed|wait|text|move)$/,
+  /^(?:object)-(?:cover|contain|fill|center)$/,
+  /^(?:text)-(?:left|center|right|justify)$/,
+];
+export function isTailwindUtility(cls: string): boolean {
+  // A variant (`md:`, `hover:`, `dark:`) wraps a utility; judge the utility.
+  const c = String(cls ?? '').replace(/^(?:[a-z0-9-]+:)+/, '');
+  if (TAILWIND_KEYWORD.has(c)) return true;
+  return TAILWIND_FAMILIES.some((re) => re.test(c));
+}
+
+/** From this many Tailwind-shaped undefined classes on, the notes say the screens are written in Tailwind. */
+export const TAILWIND_VOCABULARY_MIN = 5;
+
+/**
+ * 🔴 SCREENS WRITTEN IN TAILWIND, IN A PROJECT WITHOUT TAILWIND (failedbr #1881, 2026-11-20). An inventory app's five
+ * screens used 47 classes no stylesheet defined: `.flex`, `.gap-1`, `.bg-gray-200`, `.font-bold`, `.border-b`… Every
+ * one is a Tailwind utility, and the project has no Tailwind. The notes said "define each one in the global
+ * stylesheet", which asks for a hand-written copy of Tailwind, one rule at a time; what the screens need is the
+ * project's own classes. Every undefined-class note and the repair brief now say which it is. `''` below the
+ * threshold. PURE.
+ */
+export function tailwindVocabularyLine(missing: readonly string[]): string {
+  const tw = missing.filter(isTailwindUtility);
+  if (tw.length < TAILWIND_VOCABULARY_MIN) return '';
+  const shown = tw.slice(0, 8).map((c) => `.${c}`).join(', ');
+  return `${tw.length} of them are Tailwind utility classes (${shown}${tw.length > 8 ? ', …' : ''}), and this project does not use Tailwind, so they will never style anything. Rewrite those className values with this project's own classes, or with a few semantic names whose rules you write once; never hand-write one rule per utility, and never install Tailwind mid-build.`;
+}
+
 /** The admin line for `CSS_CLASSES_UNDEFINED`. PURE. */
 export function undefinedClassesNote(missing: readonly string[]): string {
   const shown = missing.slice(0, 12).map((c) => `.${c}`).join(', ');
   const more = missing.length > 12 ? ` and ${missing.length - 12} more` : '';
-  return `${missing.length} class name(s) used by the screens have no style rule in any stylesheet, so those screens render unstyled: ${shown}${more}.`;
+  const tw = tailwindVocabularyLine(missing);
+  return `${missing.length} class name(s) used by the screens have no style rule in any stylesheet, so those screens render unstyled: ${shown}${more}.${tw ? ` ${tw}` : ''}`;
 }
 
 /** Stylesheets that are part of the app — never dependencies, build output or git internals. PURE. */

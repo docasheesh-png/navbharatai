@@ -196,6 +196,22 @@ const DOMAINS: DomainDef[] = [
   },
   // Appended (2026-07-20) AFTER the domains above so existing classifications never change (first match
   // wins): these only catch prompts the domains above did not. High-demand verticals for the SMB market.
+  // A LIBRARY IS NOT A SCHOOL (failedbr #693, queue Q-3210). "Arivu central library … library attendance management
+  // … student login and admin login" matched education on "student", and the builder was told a library register
+  // "almost always needs" courses & lessons, assignments & grading and fees. Its members are students; it teaches
+  // nothing. Placed BEFORE education (first match wins) and narrow: "library" only beside a library's own words
+  // (attendance, books, members, borrow, reading room), so a component / photo / music library never matches.
+  {
+    key: 'library',
+    re: /\blibrar(?:y|ies)\b(?=[^.\n]{0,80}\b(?:attendance|books?|members?|membership|borrow\w*|issue|reading|librarian|visitors?|seats?)\b)|\b(?:attendance|books?|members?|librarian|reading)\b[^.\n]{0,80}\blibrar(?:y|ies)\b|\breading\s+room\b|\bgranthalaya\b|ग्रंथालय|पुस्तकालय/i,
+    features: [
+      { label: 'roles (member / librarian / admin)', re: /role|rbac|permission|librarian|admin|staff/i },
+      { label: 'member registration', re: /member|registration|register|sign\s?-?up|enrol/i },
+      { label: 'attendance / visit log', re: /attendance|check[\s-]?in|visit|entry|log/i },
+      { label: 'book catalogue & issue / return', re: /book|catalog|issue|borrow|return|isbn/i },
+      { label: 'reports', re: /report|analytics|dashboard|export/i },
+    ],
+  },
   {
     key: 'education',
     // `\btutor` is closed to `\btutors?\b|tutoring`: the open prefix matched "tutorial", so any app
@@ -474,6 +490,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   // ecommerce — "store X locally / in IndexedDB / on the device" is PERSISTENCE, never a shop. Same
   // report: "Store translation history locally" was the ecommerce signal.
   /\bstor(?:e|es|ed|ing)\s+(?:[\w-]+\s+){1,4}?(?:locally|offline|on\s+(?:the\s+)?(?:device|phone|disk)|in\s+(?:local\s*storage|indexeddb|the\s+browser|an?\s+database|the\s+database|firestore|supabase|sqlite|memory))\b/gi,
+  // ecommerce — the PLAY STORE / APP STORE is where an app is published, not a shop it sells from (failedbr #1913,
+  // 2026-11-08: "Khatarnak Sa game banaa do Jise main play store mein upload kar Sakun" read as ECOMMERCE, so a game got
+  // cart and checkout as "likely missing" features, no game kit and the fast lane). A shop app that also mentions a store
+  // keeps its own signals; only the platform names are removed.
+  /\b(?:google\s+)?play\s*-?\s*store\b|\b(?:apple\s+)?app\s*-?\s*store\b|\bgoogle\s+play\b|प्ले\s*स्टोर|ऐप\s*स्टोर/gi,
   // social — text on a screen is not a social network. "Use clear messages such as …", "clear status
   // messages", "display messages as chat bubbles" (SignBridge again) describe copy and a visual style;
   // posting, following and friends are what make a social app, and those keep their meaning.
@@ -959,6 +980,15 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     return { domain: domain ? domain.key : 'general', mentioned, likelyMissing, nonFunctional, india: detectIndiaContext(original), clarifyingQuestions: [] };
   }
 
+  // 🧾 A SHOP'S BILLING COUNTER IS NOT AN ONLINE STORE (failedbr #670, queue Q-3218). "Build a GST billing app for a
+  // shop: items with a price and a GST slab, add items to a bill with quantities…" is ecommerce by this file's own
+  // rule (a shop is a shop; billing is a feature word), and was then told it lacked payments + refunds, cart &
+  // checkout and accounts — an ONLINE store's features for a counter that prints a bill. The domain stays named;
+  // only the online-only features are withdrawn, and only when the request is an in-person bill with no online word.
+  if (domain?.key === 'ecommerce' && isAnInStoreBillingCounter(text)) {
+    for (let i = likelyMissing.length - 1; i >= 0; i--) if (ONLINE_ONLY_FEATURES.has(likelyMissing[i])) likelyMissing.splice(i, 1);
+  }
+
   // Ask about the highest-value missing pieces first (cap at 6 so we never over-ask — the admin's rule).
   const clarifyingQuestions: string[] = [];
   for (const label of likelyMissing.slice(0, 4)) clarifyingQuestions.push(`Does it need ${label}?`);
@@ -1021,9 +1051,34 @@ const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|sta
  * missed; "case  study", "case/study" and "case, study" still leaked. The lookbehind is now
  * `(?<!\bcase[\s\-/,]+)` and `study[\s-]+` accepts multiple separators.
  */
+/** Online-store features a billing counter does not have (Q-3218). */
+const ONLINE_ONLY_FEATURES: ReadonlySet<string> = new Set(['payments + refunds', 'cart & checkout', 'accounts & addresses', 'product catalog + search']);
+const COUNTER_BILL = /\b(?:billing|invoic\w*|bills?|receipts?|pos|point[\s-]of[\s-]sale)\b|बिल|रसीद/i;
+const SELLS_ONLINE = /\bonline\b|website|e[-\s]?commerce|\bcart\b|checkout|deliver\w*|ship\w*|customers?\s+(?:can\s+)?(?:order|buy|browse)|order\s+online|marketplace|ऑनलाइन/i;
+/** Is the request an in-person billing counter (a bill, a receipt, a POS) with nothing sold online? PURE. */
+export function isAnInStoreBillingCounter(prompt: string): boolean {
+  const t = String(prompt || '');
+  return COUNTER_BILL.test(t) && !SELLS_ONLINE.test(t);
+}
+
 export function namesASingleLearnerTool(prompt: string): boolean {
   const t = String(prompt || '');
-  return PRACTICE_TOOL_RE.test(t) && !INSTITUTION_SCOPE_RE.test(t);
+  return (PRACTICE_TOOL_RE.test(t) && !INSTITUTION_SCOPE_RE.test(t)) || namesAPersonalToolForStudents(t);
+}
+
+/**
+ * A PERSONAL TOOL WHOSE AUDIENCE IS STUDENTS IS STILL A PERSONAL TOOL (failedbr #1161, 2026-11-20). "Create a attendance
+ * tracker app for engineering students" read as an education platform: roles (student / teacher / admin), courses,
+ * grading and fees became "likely missing", and the build wrote Login.tsx and Courses.tsx. An engineering student's
+ * attendance tracker is the one that counts their own classes against 75%. A tool noun (tracker, planner, calculator,
+ * timer, notes, budget …) for students, with no word that brings in a teacher, an institution or money, is one person's
+ * tool. `attendance` here is the tool's subject, so it is not read as the institution word it is elsewhere. PURE.
+ */
+const PERSONAL_TOOL_FOR_STUDENTS = /\b(?:tracker|planner|calculator|timer|counter|diary|journal|to-?do|budget|expenses?|habits?|reminders?|notes|organi[sz]er|scheduler|timetable)\b[^.\n]{0,48}\bfor\s+(?:\w+\s+){0,2}students?\b/i;
+const SECOND_PARTY_RE = /\b(?:teachers?|tutors?|admins?|administrators?|staff|roles?|log\s?-?ins?|sign\s?-?(?:in|up)s?|multi[\s-]?users?|institutes?|institutions?|coaching|management|platform|portal|erp|lms|classrooms?|batch(?:es)?|enrol\w*|fees?|payments?|subscriptions?|courses?|lessons?|parents?)\b/i;
+export function namesAPersonalToolForStudents(prompt: string): boolean {
+  const t = String(prompt || '');
+  return PERSONAL_TOOL_FOR_STUDENTS.test(t) && !SECOND_PARTY_RE.test(t);
 }
 
 /**

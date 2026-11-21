@@ -104,12 +104,25 @@ export function stripCollidingAmbientShims(source: string): { source: string; re
   return { source: out.replace(/^\s*\n+/, '').replace(/\n{3,}/g, '\n\n'), removed: blocks.map((b) => b.module) };
 }
 
+/**
+ * Is this a file the APP builds — its source, its tests, or a root config — rather than something else the user keeps in
+ * the repo? (failedbr #734, #735, 2026-11-20.) An imported repo held ~480 reference files under
+ * `Anthropic/claude-code/skills/…`; this repair rewrote `…/plugin-authoring/reference/claude-code.d.ts` on every build,
+ * a file no build compiles, and the next restore brought it back so the "heal" fired again and again. PURE.
+ */
+export function inAppBuildScope(path: string): boolean {
+  const p = String(path ?? '').replace(/^\.\//, '');
+  if (!p.includes('/')) return true;                         // a root config: vite.config.ts, playwright.config.ts
+  return /^(?:src|e2e|tests?|__tests__|app|pages|components|lib|server|api)\//.test(p);
+}
+
 /** Which files in the project carry the collision. PURE — the caller decides what to do about it. */
 export function findAmbientShimCollisions(files: Record<string, string>): AmbientShimFinding[] {
   const out: AmbientShimFinding[] = [];
   for (const [path, content] of Object.entries(files ?? {})) {
     if (typeof content !== 'string') continue;
     if (!/\.(ts|tsx|mts|cts)$/i.test(path)) continue;       // only TypeScript can carry `declare module`
+    if (!inAppBuildScope(path)) continue;                     // never the user's reference files (failedbr #734)
     if (!content.includes('declare module')) continue;      // cheap reject before any real work
     for (const m of stripCollidingAmbientShims(content).removed) out.push({ path, module: m });
   }

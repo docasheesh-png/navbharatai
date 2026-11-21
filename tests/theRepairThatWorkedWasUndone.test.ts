@@ -188,7 +188,7 @@ describe('3 · a type-only import of an enum is fixed where it is written', () =
     // locked in tests/aJoinedWriteSeesTheRunItJoined.test.ts.
     expect(DISPATCHER).toMatch(/const healedTypeOnly = errors\.length > 0 \? await this\.typeOnlyHealForRun\(run, tsPaths, sources\)/);
     expect(DISPATCHER).toMatch(/heal = this\.healTypeOnlyImportsAtWrite\(run\.errors \?\? \[\], tsPaths, sources\);/);
-    expect(DISPATCHER).toMatch(/return healedNote \+ writeTypecheckNote\(errors, tsPaths, sources\);/);
+    expect(DISPATCHER).toMatch(/return trendNote \+ healedNote \+ writeTypecheckNote\(errors, tsPaths, sources\);/);
     const salvage = SIMPLE.slice(SIMPLE.indexOf('const salvage = [...generatedSoFar]'), SIMPLE.indexOf("'simple-build-salvage'"));
     expect(salvage).toContain('await deterministicImportFixes(salvage)');
   });

@@ -65,6 +65,11 @@ const BALANCE_TEXT = new RegExp([
   '\\bexceeded_current_quota_error\\b',
   '\\bpayment required\\b',
   'requires billing to be enabled',
+  // A refusal that asks for a recharge is a balance failure, not a rate limit (failedbr #1322, 2026-11-20): KIMI answered
+  // "429 Your credit balance is running low … please recharge immediately", was filed as "1 rate-limit", and stayed the
+  // first rung of every build. The same account later said "suspended due to insufficient balance".
+  '\\bplease recharge\\b',
+  '\\brecharge your account\\b',
   'billing (?:account )?(?:is |has been )?(?:disabled|not enabled)',
   '余额不足',
 ].join('|'), 'i');

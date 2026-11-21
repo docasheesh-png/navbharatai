@@ -353,7 +353,8 @@ function restoreAdapter(source: ReturnType<typeof createBuildSourcePublication>,
   write: (path: string, content: string) => Promise<void>;
   remove: () => Promise<{ exitCode: number }>;
   persist: (files: Record<string, string>) => Promise<{ status: string }>;
-  forget: (paths: string[]) => Promise<number>;
+  /** failedbr #1808: the store's answer — `ok: false` is an unconfirmed delete; nothing stored is `ok: true`. */
+  forget: (paths: string[]) => Promise<{ removed: number; ok: boolean }>;
   stopped?: () => boolean;
 }) {
   const text = readFileSync('src/server/routes/agentv3.ts', 'utf8');
@@ -366,11 +367,12 @@ function restoreAdapter(source: ReturnType<typeof createBuildSourcePublication>,
   visit(ast);
   expect(initializer).toBeTypeOf('string');
   const compiled = ts.transpileModule(`const restore = ${initializer};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  const factory = new Function('runInPass', 'applySnapshotRestore', 'sourcePublication', 'snapshotRestoreStopped', 'abort', 'actuator', 'workspaceId', 'withTimeout', 'buildRemoveCommand', 'reconcileCapturedWrites', 'writtenFiles', 'mergeWorkspaceFiles', 'removeWorkspaceFiles', 'snapshotRestoreComplete', `${compiled}; return restore;`);
+  const factory = new Function('runInPass', 'applySnapshotRestore', 'sourcePublication', 'snapshotRestoreStopped', 'abort', 'actuator', 'workspaceId', 'withTimeout', 'buildRemoveCommand', 'reconcileCapturedWrites', 'writtenFiles', 'mergeWorkspaceFiles', 'removeWorkspaceFilesResult', 'snapshotRestoreComplete', `${compiled}; return restore;`);
   const captured = new Map([['src/App.tsx', 'broken repair'], ['src/extra.ts', 'new failed repair']]);
   const restore = factory((_pass: string, job: () => Promise<unknown>) => job(), applySnapshotRestore, source, snapshotRestoreStopped,
     new AbortController(), { writeFile: (_workspace: string, path: string, content: string) => effects.write(path, content), runCommand: effects.remove }, WS, withTimeout, buildRemoveCommand,
     reconcileCapturedWrites, captured, (_workspace: string, files: Record<string, string>) => effects.persist(files),
+    // failedbr #1808: the route's forget reads `{ ok }` (nothing stored is a completed forget), not a count.
     (_workspace: string, paths: string[]) => effects.forget(paths), snapshotRestoreComplete) as typeof applySnapshotRestore;
   return { restore: (plan: SnapshotRestorePlan) => (restore as any)(plan, effects.stopped), captured };
 }
@@ -392,7 +394,7 @@ describe('actual shared snapshot restore publication before normal module handof
       write: async (path, content) => { sandbox.set(path, content); },
       remove: async () => { if (stage === 'command') await held.wait(); sandbox.delete('src/extra.ts'); return { exitCode: 0 }; },
       persist: async (files) => { if (stage === 'persist') await held.wait(); Object.entries(files).forEach(([path, content]) => durable.set(path, content)); return { status: 'saved' }; },
-      forget: async (paths) => { if (stage === 'forget') await held.wait(); paths.forEach((path) => durable.delete(path)); return paths.length; },
+      forget: async (paths) => { if (stage === 'forget') await held.wait(); paths.forEach((path) => durable.delete(path)); return { removed: paths.length, ok: true }; },
     });
     const restoring = adapter.restore(restorePlan); await held.entered;
     f.publish(moduleResult); await f.request.flushPublication();
@@ -424,7 +426,7 @@ describe('actual shared snapshot restore publication before normal module handof
     const adapter = restoreAdapter(source, {
       write: async () => {}, remove: async () => ({ exitCode: failure === 'failed-command' ? 1 : 0 }),
       persist: async () => ({ status: failure === 'partial-persist' ? 'partial' : 'saved' }),
-      forget: async (paths) => failure === 'unconfirmed-delete' ? 0 : paths.length,
+      forget: async (paths) => failure === 'unconfirmed-delete' ? { removed: 0, ok: false } : { removed: paths.length, ok: true },
       stopped: () => failure === 'stopped',
     });
     const outcome = await adapter.restore(restorePlan);
@@ -442,7 +444,7 @@ describe('actual shared snapshot restore publication before normal module handof
   it('keeps a raw command tracked after its reporting timeout and never recovers READY from its late completion', async () => {
     vi.useFakeTimers(); const f = await firstWindow(); const source = createBuildSourcePublication(); const held = heldEffect();
     let deleted = false;
-    const adapter = restoreAdapter(source, { write: async () => {}, remove: async () => { await held.wait(); deleted = true; return { exitCode: 0 }; }, persist: async () => ({ status: 'saved' }), forget: async (paths) => paths.length });
+    const adapter = restoreAdapter(source, { write: async () => {}, remove: async () => { await held.wait(); deleted = true; return { exitCode: 0 }; }, persist: async () => ({ status: 'saved' }), forget: async (paths) => ({ removed: paths.length, ok: true }) });
     const restoring = adapter.restore(restorePlan); await held.entered;
     await vi.advanceTimersByTimeAsync(20_000);
     const outcome = await restoring;
@@ -465,7 +467,7 @@ describe('actual shared snapshot restore publication before normal module handof
   it('observes a rejected restore status mapper while returning the original rejection to its caller', async () => {
     const f = await firstWindow(); const source = createBuildSourcePublication();
     const error = Error('restore ownership lookup failed');
-    const adapter = restoreAdapter(source, { write: async () => {}, remove: async () => ({ exitCode: 0 }), persist: async () => ({ status: 'saved' }), forget: async () => 1, stopped: () => { throw error; } });
+    const adapter = restoreAdapter(source, { write: async () => {}, remove: async () => ({ exitCode: 0 }), persist: async () => ({ status: 'saved' }), forget: async () => ({ removed: 1, ok: true }), stopped: () => { throw error; } });
     await expect(adapter.restore(restorePlan)).rejects.toBe(error);
     f.publish(moduleResult); await f.request.flushPublication();
     expect(await f.request.retireNormalModule(() => !source.uncertain(), async () => true, () => source.join())).toBe(false);

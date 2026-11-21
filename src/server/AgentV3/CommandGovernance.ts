@@ -43,11 +43,11 @@ const HIGH_RULES: Rule[] = [
   { level: 'high', test: /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\b[^|&;]*\s(\/|~|\$HOME|\/\*|\.\s*$|\*\s*$)/i, reason: 'recursive delete of a root/home/wildcard path (irreversible)' },
   { level: 'high', test: /--no-preserve-root/i, reason: 'rm --no-preserve-root (removes the entire filesystem)' },
   { level: 'high', test: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'fork bomb' },
-  { level: 'high', test: /\b(mkfs|fdisk|dd)\b[^\n]*\b(of=)?\/dev\//i, reason: 'writes directly to a disk device (data loss)' },
+  { level: 'high', test: /\b(mkfs|fdisk|dd)\b(?:[^\n|;&]|[<>]&|&>)*\b(of=)?\/dev\//i, reason: 'writes directly to a disk device (data loss)' },
   { level: 'high', test: />\s*\/dev\/sd[a-z]/i, reason: 'redirect to a raw disk device' },
   { level: 'high', test: /\b(curl|wget|fetch)\b[^\n|]*\|[^\n]*\b(sh|bash|zsh|python[0-9.]*|node)\b/i, reason: 'pipes downloaded content straight into a shell/interpreter (remote code execution)' },
   { level: 'high', test: /\b(printenv|env|cat)\b[^\n]*\|[^\n]*\b(curl|wget|nc|netcat)\b/i, reason: 'pipes environment/secrets to the network (exfiltration)' },
-  { level: 'high', test: /\b(cat|cp|scp)\b[^\n]*(\.ssh\/|id_rsa|id_ed25519|\.aws\/credentials|\.netrc)/i, reason: 'reads/copies private keys or credentials' },
+  { level: 'high', test: /\b(cat|cp|scp)\b(?:[^\n|;&]|[<>]&|&>)*(\.ssh\/|id_rsa|id_ed25519|\.aws\/credentials|\.netrc)/i, reason: 'reads/copies private keys or credentials' },
   // SECURITY Phase 2.4 — a BARE env dump (`printenv`, `env` as a standalone command, optionally piped/
   // redirected) exposes EVERY server secret (ANTHROPIC_API_KEY, SECRET_ENCRYPTION_KEY, …) into the
   // command output → the build report, transcript and model context. Blocked. Note the negative
@@ -60,10 +60,16 @@ const HIGH_RULES: Rule[] = [
   // GENERATES one, and reading it is how a build learns which variables an app needs. Blocking that was
   // a false positive that refused ordinary work, and a guard which refuses ordinary work gets fought
   // until something gives.
-  { level: 'high', test: /\b(cat|less|more|head|tail|nl|xxd|od|strings|grep|awk|sed)\b[^\n|]*(^|[\s/'"=])\.env(?!\.(example|sample|template|dist|defaults?)\b)(\.[A-Za-z0-9_.-]+)?\b/i, reason: 'reads a .env secrets file (exposes stored keys)' },
+  // 🔴 ONE COMMAND, NOT ONE LINE (failedbr #1838, 2026-11-20). `[^\n|]*` crossed `;` and `&&`, so a reader in one
+  // command and `.env` in the NEXT ("sed -n 1,80p a.css; echo ---; cat b.ts; ls -la .env", "cat a.ts && test -f .env")
+  // was refused as a secrets read although no reader ever opened `.env`. The reader and the file must now sit in the
+  // same simple command (a redirect's `2>&1` / `&>` is not a separator); `cat a.ts; cat .env` is still refused by its
+  // second command. The same one-command span is used by every rule that pairs a verb with its argument (disk write,
+  // key read, force-push, global install, kill -9, tee into /etc): `git push origin x && rm -f tmp` is not a force-push.
+  { level: 'high', test: /\b(cat|less|more|head|tail|nl|xxd|od|strings|grep|awk|sed)\b(?:[^\n|;&]|[<>]&|&>)*(^|[\s/'"=])\.env(?!\.(example|sample|template|dist|defaults?)\b)(\.[A-Za-z0-9_.-]+)?\b/i, reason: 'reads a .env secrets file (exposes stored keys)' },
   { level: 'high', test: /\bchmod\s+(-[a-z]*\s+)*777\s+(\/|~|\$HOME)\b/i, reason: 'chmod 777 on a root/home path (insecure + dangerous)' },
   { level: 'high', test: /\bsudo\b/i, reason: 'runs with elevated privileges (sudo)' },
-  { level: 'high', test: /\bgit\s+push\b[^\n]*(--force\b|\s-f\b)/i, reason: 'force-push rewrites remote history (can destroy others\' commits)' },
+  { level: 'high', test: /\bgit\s+push\b(?:[^\n|;&]|[<>]&|&>)*(--force\b|\s-f\b)/i, reason: 'force-push rewrites remote history (can destroy others\' commits)' },
 ];
 
 // MEDIUM — destructive or impactful but local/recoverable, or unexpected network use.
@@ -71,13 +77,13 @@ const MEDIUM_RULES: Rule[] = [
   { level: 'medium', test: /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\b/i, reason: 'recursive/forced delete (verify the path)' },
   { level: 'medium', test: /\bgit\s+reset\s+--hard\b/i, reason: 'git reset --hard discards uncommitted work' },
   { level: 'medium', test: /\bgit\s+clean\s+-[a-z]*f/i, reason: 'git clean -f deletes untracked files' },
-  { level: 'medium', test: /\bnpm\s+(install|i)\b[^\n]*\s(-g|--global)\b/i, reason: 'global npm install (affects the whole environment)' },
-  { level: 'medium', test: /\b(kill|pkill|killall)\b[^\n]*-9\b/i, reason: 'force-kills processes (-9)' },
+  { level: 'medium', test: /\bnpm\s+(install|i)\b(?:[^\n|;&]|[<>]&|&>)*\s(-g|--global)\b/i, reason: 'global npm install (affects the whole environment)' },
+  { level: 'medium', test: /\b(kill|pkill|killall)\b(?:[^\n|;&]|[<>]&|&>)*-9\b/i, reason: 'force-kills processes (-9)' },
   // A request to the app's own server inside the sandbox (`curl http://localhost:8000/health`) is not an
   // external host (autopsy 241215d1: 22 checks of the app's own API each carried this warning). Any URL in
   // the command that is NOT loopback still matches, because `[^\n]*` backtracks over every URL.
   { level: 'medium', test: /\b(curl|wget)\b[^\n]*\bhttps?:\/\/(?!(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?![\w.-]))/i, reason: 'outbound network fetch to an external host' },
-  { level: 'medium', test: /\btee\b[^\n]*\s\/(etc|usr|bin|boot|lib)\b|>\s*\/(etc|usr|bin|boot|lib)\//i, reason: 'writes into a system directory' },
+  { level: 'medium', test: /\btee\b(?:[^\n|;&]|[<>]&|&>)*\s\/(etc|usr|bin|boot|lib)\b|>\s*\/(etc|usr|bin|boot|lib)\//i, reason: 'writes into a system directory' },
 ];
 
 /**

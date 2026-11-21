@@ -165,8 +165,24 @@ const BANANA_INTENT_AUX = /\bbanana\s+(?:hai|h|he|tha|thi|chahta|chahti|chahiye|
  * positive costs a build nobody asked for.
  */
 export function bananaMeansBuild(lower: string): boolean {
-  if (!containsSignalWord(lower, 'banana')) return false;
-  return mentionsBuildNoun(lower) || BANANA_INTENT_AUX.test(lower);
+  if (containsSignalWord(lower, 'banana')) return mentionsBuildNoun(lower) || BANANA_INTENT_AUX.test(lower);
+  return otherGerundMeansBuild(lower);
+}
+
+/**
+ * THE GERUND INFLECTS, AND ONLY ITS MASCULINE FORM WAS READ (failedbr #1352, 2026-11-20). "Muje ek game banani hai" —
+ * `game` taken as feminine, as many speakers do — read as chat at low confidence, so in a workspace with an app it fell
+ * through to an EDIT of that app (a Quran reader's "List / items" requirement) instead of a new game. `banani` / `banaani`
+ * / `bnani` are never a fruit: they count when the sentence names something buildable or completes them into intent;
+ * the plural/oblique `banane` ("app banane mein madad") counts only completed into intent ("banane hai"). PURE.
+ */
+const OTHER_GERUND = /\b(banani|banaani|bnani|banane)\b/;
+const OTHER_GERUND_INTENT = /\b(?:banani|banaani|bnani|banane)\s+(?:hai|h|he|hain|thi|tha|chahta|chahti|chahte|chahiye|padega|padegi|padenge)\b/;
+function otherGerundMeansBuild(lower: string): boolean {
+  const m = OTHER_GERUND.exec(lower);
+  if (!m) return false;
+  if (OTHER_GERUND_INTENT.test(lower)) return true;
+  return m[1] !== 'banane' && mentionsBuildNoun(lower);
 }
 
 /**

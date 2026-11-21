@@ -153,7 +153,7 @@ describe('WIRING — the guard is told what was OBSERVED, not merely what was no
     // honest line inserted before the guard, pushed GREEN_GUARD_UNVERIFIED past it).
     const end = route.indexOf('// P-BRE.2 — incremental signal', at);
     const seg = route.slice(at, end > at ? end : at + 7000);
-    expect(seg).toContain('greenGuardUnverifiedMessage()');
+    expect(seg).toContain("greenGuardUnverifiedMessage({ provenBroken: previewProvenBroken === true, newApp: intent === 'new_build' })"); // failedbr #1153
     expect(seg).toContain('GREEN_GUARD_UNVERIFIED');
   });
 });

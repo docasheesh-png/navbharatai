@@ -93,7 +93,7 @@ describe('the readiness report', () => {
   });
   it('the warning is called from assessBuildReadiness, and the note is said where files are written (source guard)', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
-    expect(src).toMatch(/return await this\._warnIfShellSkipped\(await this\._warnIfActionsAreNotSeen\(/);
+    expect(src).toMatch(/this\._warnIfShellSkipped\(await this\._warnIfActionsAreNotSeen\(/); // still in the readiness chain (the Forge check wraps it since 2026-11-20)
     expect(src).toMatch(/vehicle \+= shellBypassNote\(finding\); this\._shellNoted = true;/);
   });
 });

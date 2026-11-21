@@ -103452,6 +103452,20 @@ Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed)
   - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
 - **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.
 
+## 2026-11-20 — What the library lacks is made with the Object Forge (admin: "han")
+
+- **Class:** an object the user named that neither the reviewed model library nor the 3D kit provides was left to one
+  generic system-prompt line, so a weak builder drew it from boxes (the Athree map's class before it was seeded).
+- **What the platform now does (`AgentV3/forgeForMissing.ts`):** after the 3D kit seed, it reads the objects the user
+  named (`forgeSubjects.subjectWordsIn`), drops those the library serves (`gameAssetRequirements`) or the kit builds,
+  and hands the builder, per object, the `author_object` instruction with its kind's worked example and checklist. The
+  builder also tells the user, in the user's own language, that they can attach their own model (.glb/.gltf/.obj/.fbx
+  or a zip) and ask where to get free ones. The download guide is the other session's `modelSourcesGuide.ts` (#4397).
+- **Checked after:** `ToolDispatcher._warnIfForgeSkipped` adds a readiness WARNING (never a blocker) for an assigned
+  object with no Forge object saved. Diagnostic `FORGE_SUBJECTS_ASSIGNED` names the assignment.
+- **Not done, and why:** the platform writing the Forge spec itself needs a model call outside the builder's turn, which
+  stays held in `ToolDispatcher` (`describe`) until it has admitted billing and cancellation — a money decision.
+- Locked by `tests/whatTheLibraryLacksIsForged.test.ts`; removing the library check fails it.
 ## 2026-11-20 — #4396 merged (batch 8); batches 9–10, FBX import, "where to get it", library on every 3D turn
 - #4396 merged. It also merged the other session's switch: the library is ON by default (`7aac6be51`). The admin can now delete `AGENTV3_EXTERNAL_GAME_ASSETS` from Cloud Run — a value of `admin` would keep it owner-only.
 - **Batch 9:** the Quaternius Farm Animal Pack (CC0 per the pack page). Cow, horse and zebra idle/walk/run/jump/die; llama, pig, sheep and pug idle/jump. Every moving role proven live.

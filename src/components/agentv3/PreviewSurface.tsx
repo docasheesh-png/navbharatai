@@ -18,6 +18,7 @@ import { decidePreviewReload, shouldFlushOnBuildEnd, deferredReloadNote, type Bu
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview, shouldRestorePreview } from './previewAutoReboot';
+import { chooseLiveFrameSrc, framedSnapshotUrl, snapshotNoteAfterWakeFailures, wakeBannerCopy } from './previewWakeIntent';
 import { shouldWatchLivePreview } from './previewKeepAlive';
 import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
@@ -212,7 +213,21 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   /** The saved copy to frame while a FINISHED app's machine is deliberately left asleep, and its note. */
   const [idleSnapshotUrl, setIdleSnapshotUrl] = useState('');
   const [idleSnapshotNote, setIdleSnapshotNote] = useState('');
-  const source = choosePreviewSource({ choice, buildPhase: buildPhase ?? 'idle', snapshotUrl: idleSnapshotUrl });
+  /**
+   * THE PERSON ASKED FOR THE LIVE APP (previewWakeIntent.ts, admin 2026-11-21: one Wake up press must
+   * really wake it). Set by a wake/diagnose THEY pressed that succeeded; holds the workspace it was for,
+   * so it dies with a workspace change, and is cleared when a new build starts. While set, every health
+   * check sends `wantLive` (the server then checks the port for real and offers no copy) and the frame
+   * shows the live address, never the saved copy. State for the render, a ref for the poll callback.
+   */
+  const [liveWantedFor, setLiveWantedFor] = useState<string | null>(null);
+  const liveWantedRef = useRef<string | null>(null);
+  liveWantedRef.current = liveWantedFor;
+  const liveWanted = !!workspaceId && liveWantedFor === workspaceId;
+  /** Person-pressed wakes that failed in a row for this workspace — after two, stop promising "by itself". */
+  const [wakeFailures, setWakeFailures] = useState(0);
+  const shownSnapshotUrl = framedSnapshotUrl(idleSnapshotUrl, liveWanted);
+  const source = choosePreviewSource({ choice, buildPhase: buildPhase ?? 'idle', snapshotUrl: shownSnapshotUrl });
   const mode = modeForSource(source);
   /** Remounts the framed copy on the refresh button — it is a plain static page with nothing else to re-fetch it. */
   const [snapshotReloadKey, setSnapshotReloadKey] = useState(0);
@@ -371,7 +386,13 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); lastHmrAtRef.current = null; lastActivityAtRef.current = null; setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setPicking(false); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
+    setLiveWantedFor(null); setWakeFailures(0);
   }, [workspaceId]);
+  // A NEW BUILD ENDS THE "I WANT LIVE" ASK: its finished copy is the newest truth again, and the build
+  // stream reframes it exactly as before. Keeping the ask would hold a billed machine open forever.
+  useEffect(() => {
+    if (buildPhase && buildPhase !== 'idle') setLiveWantedFor(null);
+  }, [buildPhase]);
 
   // Returns whether the app actually came up, so a caller that SWITCHED the view to Live in order to
   // show this boot can put the view back when it fails instead of stranding the user on a dead tab.
@@ -433,6 +454,13 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {
         setFoundUrl(data.previewUrl);
         setChoice('live');
+        // 🔒 THE SAVED COPY MUST LET GO OF THE FRAME (previewWakeIntent.ts). The frame's src led with
+        // `idleSnapshotUrl`, which a successful wake never cleared — so the copy kept winning and the live
+        // app never appeared. A person who pressed Wake up asked for the live app: remember that, so the
+        // health poll asks the server for live (`wantLive`) instead of being handed the copy again.
+        setIdleSnapshotUrl('');
+        setIdleSnapshotNote('');
+        if (userInitiated) { setLiveWantedFor(workspaceId); liveWantedRef.current = workspaceId; setWakeFailures(0); }
         // ── 🔒 A SUCCESSFUL WAKE MUST ERASE WHAT IT JUST DISPROVED (admin screenshot 2026-08-28:
         // "live preview wakeup hi nahi ho raha") ────────────────────────────────────────────────
         //
@@ -461,9 +489,12 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         healRef.current.streak = 0;
         return true;
       }
+      // A failed wake keeps its reason on screen (the status line) and the Wake up button stays.
+      if (userInitiated) setWakeFailures((n) => n + 1);
       return false;
     } catch (e) {
       setDiagResult({ ok: false, reason: e instanceof Error ? e.message : 'Network error — could not reach the server.', detail: '' });
+      if (userInitiated) setWakeFailures((n) => n + 1);
       return false;
     } finally {
       setDiagnosing(false);
@@ -568,6 +599,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    * was reported. Knowing something and not saying it is the failure this fixes.
    */
   const [health, setHealth] = useState<string | null>(null);
+  /** The sleep / resting banner (with its Wake up button), or null — one rule in previewWakeIntent.ts. */
+  const wakeBanner = wakeBannerCopy(liveWanted && health === 'idle_snapshot' ? null : health, wakeFailures);
   const autoResumedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!autoResume || mode !== 'live' || !workspaceId) return;
@@ -688,7 +721,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
            * makes this a drift between two call sites rather than a missing idea. Both now send the
            * same derived value, so they cannot disagree again.
            */
-          body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: effectiveUrl }),
+          // `wantLive`: the person asked for the live app — check the port, do not hand back the copy.
+          body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: effectiveUrl, wantLive: !!workspaceId && liveWantedRef.current === workspaceId }),
         });
         const health = await res.json().catch(() => null) as {
           status?: unknown; serving?: unknown; servingProblems?: unknown;
@@ -1920,15 +1954,11 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             nothing, and reasonably concluded the preview was broken. The auto-restore below is already
             running by the time this shows; this line exists so the wait is understood rather than
             guessed at, and the button is here for anyone who does not want to wait for the watchdog. */}
-        {(health === 'sleeping' || health === 'crashed') && !diagnosing && (
+        {wakeBanner && !diagnosing && (
           <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-500/10 text-[11px] text-info">
             <span className="flex-1">
-              <span className="font-semibold">
-                {health === 'sleeping' ? 'Preview is in sleep mode.' : 'Your preview stopped.'}
-              </span>{' '}
-              {health === 'sleeping'
-                ? 'It pauses after a while of no activity so it is not billed while nobody is looking. Your app and its files are safe — waking it up brings back exactly what you had.'
-                : 'The app stopped running. Your files are safe — waking it up usually brings it straight back.'}
+              <span className="font-semibold">{wakeBanner.title}</span>{' '}
+              {wakeBanner.body}
             </span>
             <button
               onClick={() => { setWakeIntent(true); void runDiagnose(true); }}
@@ -1946,14 +1976,14 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             Deliberately the same calm style as the expired-machine note and NOT an error: nothing is
             wrong, nothing is missing, and the only thing the user could be surprised by — that an edit
             brings the live server back — is what the line says. */}
-        {!snapshotNote && idleSnapshotNote && (
+        {!snapshotNote && idleSnapshotNote && shownSnapshotUrl && health !== 'idle_snapshot' && (
           <div className="flex items-start gap-2 px-3 py-2 border-b border-line bg-raised text-[11px] text-muted">
             <span className="flex-1">{idleSnapshotNote}</span>
           </div>
         )}
         {snapshotNote && (
           <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-500/10 text-[11px] text-warn">
-            <span className="flex-1">{snapshotNote}</span>
+            <span className="flex-1">{snapshotNoteAfterWakeFailures(snapshotNote, wakeFailures)}</span>
           </div>
         )}
         {/* HELD UPDATES (admin 2026-08-23: "chalti huyi app tut jati hai"). While the engine is
@@ -2009,7 +2039,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             />
           </div>
         )}
-        {shouldShowNotServingSurface({ unreachable, portDown, diagnosing, hasDoorUrl: !!doorUrl, hasSnapshotUrl: !!idleSnapshotUrl, framingUnchecked }) ? (
+        {shouldShowNotServingSurface({ unreachable, portDown, diagnosing, hasDoorUrl: !!doorUrl, hasSnapshotUrl: !!shownSnapshotUrl, framingUnchecked }) ? (
           /**
            * THE URL IS NOT ANSWERING — so we do NOT frame it (admin report 2026-08-13, mitrify).
            *
@@ -2040,7 +2070,12 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; postToPreview({ ...TUNE_LIST_ASK }); }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(idleSnapshotUrl && frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'} />
+            {/* After a person's successful wake the live address leads and the copy steps aside
+                (chooseLiveFrameSrc) — the copy winning this src is what made a working wake look dead. */}
+            {(() => {
+              const frame = chooseLiveFrameSrc({ snapshotUrl: shownSnapshotUrl, doorHref: doorUrl ? resolveApiHref(doorUrl, window as never) : '', effectiveUrl, liveWanted });
+              return <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={frame.src} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; postToPreview({ ...TUNE_LIST_ASK }); }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(frame.isSnapshot && frameUrlSharesPageOrigin(frame.src, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'} />;
+            })()}
           </ResponsiveFrame>
         )}
       </div>

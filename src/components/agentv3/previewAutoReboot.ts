@@ -39,8 +39,14 @@ export interface AutoRebootSignals {
   healthStatus: string | null;
 }
 
-/** Statuses that mean the preview is fine (or will be) — never reboot over these. */
-const HEALTHY = new Set(['live', 'booting']);
+/**
+ * Statuses that mean the preview is fine (or will be) — never reboot over these.
+ *
+ * 'idle_snapshot' (admin 2026-11-21): the finished app is shown from its current saved copy and the
+ * port was deliberately NOT checked. It used to arrive as 'sleeping', so this watchdog re-woke a
+ * healthy app every 180 s up to ten times — a billed reboot loop over an app that was never broken.
+ */
+const HEALTHY = new Set(['live', 'booting', 'idle_snapshot']);
 /** Statuses with nothing to boot — a reboot cannot help. */
 const UNBOOTABLE = new Set(['empty', 'inbrowser_only']);
 

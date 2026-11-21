@@ -72,6 +72,8 @@ interface HealRecord {
    * undefined = healed only once, so there is nothing to compare yet.
    */
   seenBefore?: 'unchanged' | 'changed';
+  /** WHICH heals wrote this file (failedbr #1922, #2100 / Q-3027): a repeat with no name could not be acted on. */
+  by?: Set<string>;
 }
 
 /** Bound the memory: a pathological build must not grow this without limit. */
@@ -92,7 +94,7 @@ function hashOf(content: string): string {
  * caller keeps working unchanged; a repeat recorded without it simply reports the cause as unknown
  * rather than asserting one.
  */
-export function noteHeal(workspaceId: string, path: string, contentAfter: string, contentBefore?: string): void {
+export function noteHeal(workspaceId: string, path: string, contentAfter: string, contentBefore?: string, by?: string): void {
   try {
     if (!workspaceId || !path) return;
     let ws = LEDGER.get(workspaceId);
@@ -116,7 +118,9 @@ export function noteHeal(workspaceId: string, path: string, contentAfter: string
     const seen = prev?.seen ?? new Set<string>();
     if (contentBefore !== undefined) seen.add(hashOf(contentBefore));
     seen.add(hashOf(contentAfter));
-    ws.set(path, { times: (prev?.times ?? 0) + 1, hash: hashOf(contentAfter), seen, ...(seenBefore ? { seenBefore } : {}) });
+    const writers = new Set(prev?.by ?? []);
+    if (by) writers.add(by);
+    ws.set(path, { times: (prev?.times ?? 0) + 1, hash: hashOf(contentAfter), seen, ...(seenBefore ? { seenBefore } : {}), ...(writers.size ? { by: writers } : {}) });
   } catch { /* bookkeeping must never break a heal */ }
 }
 
@@ -157,6 +161,8 @@ export interface HealRepeat {
    * undefined → the caller did not supply the before-content, so we do not claim to know.
    */
   cause?: 'changed' | 'unchanged';
+  /** The heals that wrote it, in first-seen order. */
+  by?: string[];
 }
 
 /**
@@ -168,7 +174,7 @@ export function healRepeats(workspaceId: string): HealRepeat[] {
   if (!ws) return [];
   return [...ws.entries()]
     .filter(([, v]) => v.times > 1)
-    .map(([path, v]) => ({ path, times: v.times, ...(v.seenBefore ? { cause: v.seenBefore } : {}) }))
+    .map(([path, v]) => ({ path, times: v.times, ...(v.seenBefore ? { cause: v.seenBefore } : {}), ...(v.by?.size ? { by: [...v.by] } : {}) }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -180,7 +186,7 @@ export function healRepeats(workspaceId: string): HealRepeat[] {
 export function healRepeatMessage(repeats: readonly HealRepeat[]): string {
   const total = repeats.reduce((n, r) => n + r.times, 0);
   const label = (r: HealRepeat): string =>
-    `${r.path} ×${r.times}${r.cause === 'changed' ? ' (file changed under us)' : r.cause === 'unchanged' ? ' (our write held)' : ''}`;
+    `${r.path} ×${r.times}${r.cause === 'changed' ? ' (file changed under us)' : r.cause === 'unchanged' ? ' (our write held)' : ''}${r.by?.length ? ` by ${r.by.join(' + ')}` : ''}`;
   const shown = repeats.slice(0, 5).map(label).join(', ');
   const more = repeats.length - Math.min(5, repeats.length);
   const head = `${repeats.length} file(s) had to be healed MORE THAN ONCE in this build (${shown}${more > 0 ? ` +${more} more` : ''}, ${total} heal passes in total).`;

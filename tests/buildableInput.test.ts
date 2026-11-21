@@ -160,7 +160,10 @@ describe('the wiring — the check runs BEFORE anything is spent', () => {
 
   it('⚠️ only empty and link-only divert — never too-short', () => {
     // `too-short` would catch "continue" and re-open the continuation amnesia already fixed once.
-    expect(route).toContain("inputCheck.reason === 'link-only' || inputCheck.reason === 'empty'");
+    // Q-3214: the set lives in buildableInput.divertsToChat — empty, link-only and a missing image, never too-short.
+    expect(route).toContain('divertsToChat(inputCheck)');
+    const mod = readFileSync(join(process.cwd(), 'src/server/AgentV3/buildableInput.ts'), 'utf8');
+    expect(mod).toContain("new Set(['link-only', 'empty', 'image-missing'])");
     expect(route).not.toMatch(/inputCheck\.reason === 'too-short'/);
   });
 

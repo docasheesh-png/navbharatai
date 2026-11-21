@@ -175,7 +175,7 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
     const helper = dispatcher.slice(dispatcher.indexOf('private async writeTypecheckNote('), dispatcher.indexOf('async dispatch(call: ToolUse'));
     expect(helper).toContain('private async writeTypecheckNote(sources: Record<string, string>)');
     // Since autopsy 6cd698cc the note may be led by what the write-time heal fixed; the sources still go in.
-    expect(helper).toContain('return healedNote + writeTypecheckNote(errors, tsPaths, sources);');
+    expect(helper).toContain('return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);'); // failedbr #1248
   });
 
   it('every run reaches the evidence bridge the typecheck tool uses, and a JS project is never compiled', () => {

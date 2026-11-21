@@ -244,11 +244,40 @@ export function dropUnchangedScaffold(
   const scaffold = new Set(scaffoldPaths);
   const dropped: string[] = [];
   const kept = manifest.filter((m) => {
-    const unchanged = scaffold.has(m.path) && UNCHANGED_PURPOSE_RE.test(m.purpose || '');
+    const unchanged = scaffold.has(m.path) && (UNCHANGED_PURPOSE_RE.test(m.purpose || '') || describesOnlyTheDefault(m.path, m.purpose || ''));
     if (unchanged) dropped.push(m.path);
     return !unchanged;
   });
   return { kept, dropped };
+}
+
+/**
+ * 🔴 A SCAFFOLD FILE DESCRIBED ONLY BY WHAT IT ALREADY IS (failedbr #1798, 2026-11-20). Planning a counter app, the model
+ * listed `package.json :: Project dependencies and scripts for Vite React TypeScript setup`, `vite.config.ts :: Vite
+ * configuration file for React plugin and build settings`, `src/main.tsx :: Entry point rendering the App component
+ * within React.StrictMode` and `index.html :: HTML template with root div for React app mounting`. None says
+ * "(provided)", so all four were generated — `package.json` and `vite.config.ts` came back as byte-copies of the
+ * starter after 68 s and 102 s — and the lane ran out of budget before `src/App.tsx`, the only file the app needed.
+ *
+ * For these four scaffold files, a purpose made only of the words that describe the default file names no change, and
+ * is read exactly like "(unchanged)". Any other word keeps it: "including react-router-dom", "wraps App in a
+ * BrowserRouter", "sets the page title". PURE.
+ */
+const DEFAULT_SCAFFOLD_FILE = /^(?:package\.json|vite\.config\.[cm]?[jt]s|index\.html|src\/main\.[jt]sx?)$/;
+const DEFAULT_PURPOSE_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'for', 'of', 'to', 'in', 'into', 'with', 'within', 'on', 'that', 'this', 'its', 'it',
+  'project', 'app', 'application', 'react', 'vite', 'typescript', 'ts', 'tsx', 'js', 'jsx', 'node', 'npm',
+  'dependencies', 'dependency', 'deps', 'scripts', 'script', 'setup', 'set', 'up', 'configuration', 'config', 'configured',
+  'file', 'plugin', 'plugins', 'build', 'builds', 'settings', 'dev', 'development', 'server', 'basic', 'standard', 'default',
+  'entry', 'point', 'rendering', 'renders', 'render', 'component', 'root', 'strictmode', 'mounting', 'mount', 'mounts',
+  'main', 'dom', 'element', 'html', 'template', 'div', 'page', 'document', 'module', 'modules', 'bootstrap', 'bootstraps',
+  'tooling', 'metadata', 'manifest', 'package', 'packages', 'library', 'libraries', 'required', 'necessary', 'needed',
+]);
+export function describesOnlyTheDefault(path: string, purpose: string): boolean {
+  if (!DEFAULT_SCAFFOLD_FILE.test(String(path ?? ''))) return false;
+  const words = String(purpose ?? '').toLowerCase().match(/[a-z0-9@][a-z0-9@._/-]*/g) ?? [];
+  if (words.length === 0) return false;
+  return words.every((w) => w.split(/[._/-]+/).filter(Boolean).every((part) => DEFAULT_PURPOSE_WORDS.has(part)));
 }
 
 /**
@@ -468,7 +497,10 @@ const IN_APP_AI_RE = /\b(?:ai|a\.i\.|artificial intelligence|gpt|chatgpt|openai|
  * "without AI", "offline", "bina AI", "AI nahi". `IN_APP_AI_RE` fired on the bare word "AI" in prompts like
  * "simple notes app, no AI, no API, works offline", and the lane wired src/lib/ai.ts anyway. PURE.
  */
-export const NO_AI_RE = /\b(?:no|without|not?\s+using|don'?t\s+(?:use|want|need)|bina|without\s+any)\s+(?:any\s+)?(?:ai|a\.i\.|api|apis|gpt|llm|internet|network|backend)\b|\b(?:ai|api)\s+(?:nahi|nahin|mat|na)\b|\b(?:fully\s+)?offline\b|\bno[- ]internet\b/i;
+// failedbr #1222 (2026-11-20): "Mujhe ek ai banana hai jo kisi api par depend na ho" — an AI that must NOT depend on any API —
+// matched none of these, so the lane wired NavBharatAI's API client into it and told every call "do NOT write any other".
+// The dependency phrasing (English and Hinglish) is the same refusal as "no API".
+export const NO_AI_RE = /\b(?:no|without|not?\s+using|don'?t\s+(?:use|want|need)|bina|without\s+any)\s+(?:any\s+|kisi\s+|koi\s+|external\s+|third[- ]party\s+)?(?:ai|a\.i\.|api|apis|gpt|llm|internet|network|backend)\b|\b(?:ai|api)\s+(?:nahi|nahin|mat|na)\b|\b(?:fully\s+)?offline\b|\bno[- ]internet\b|\b(?:apis?|internet|server|backend)\s+(?:par|pe|per|pr|on)\s+depend\s+(?:na|nahi|nahin|mat)\b|\b(?:not?|never|doesn'?t|does\s+not|shouldn'?t|should\s+not)\s+(?:depend|rely)\s+on\s+(?:any\s+|an\s+|external\s+)?(?:apis?|internet|server|backend|cloud)\b|\bindependent\s+of\s+(?:any\s+)?(?:apis?|internet)\b/i;
 
 /** Where NavBharatAI's keyless AI client lives in a browser app (the `generate_ai` recipe writes the same file). */
 export const LANE_AI_CLIENT_PATH = 'src/lib/ai.ts';

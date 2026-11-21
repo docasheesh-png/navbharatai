@@ -426,8 +426,19 @@ export function greenGuardShouldTellUnverified(input: {
   return n > 0;
 }
 
-export function greenGuardUnverifiedMessage(): string {
-  return '\u26a0\ufe0f I made your change, but I could not open your app to confirm it works this time. Your change is saved, and so is the last version that ran correctly \u2014 nothing was lost. Ask me to open the preview and I\u2019ll check it.';
+/**
+ * 🔴 SAY WHICH ONE HAPPENED (failedbr #1153, #1102, #1043, 2026-11-20). The same sentence — "I made your change, but I could
+ * not open your app" — went out on NEW apps (no change was made to anything) and on previews that WERE opened and showed
+ * an error in the console. Opened-and-broken and never-opened are opposite facts, and a new app is not "your change". The
+ * default (no facts given) is the old sentence, word for word. PURE.
+ */
+export function greenGuardUnverifiedMessage(facts: { provenBroken?: boolean; newApp?: boolean } = {}): string {
+  const what = facts.newApp ? 'I built your app' : 'I made your change';
+  const saved = facts.newApp ? 'Your app is saved' : 'Your change is saved, and so is the last version that ran correctly \u2014 nothing was lost';
+  if (facts.provenBroken) {
+    return `\u26a0\ufe0f ${what}, but when I opened it the preview showed an error, so it is not working yet. ${saved}. Send a follow-up and I\u2019ll fix it.`;
+  }
+  return `\u26a0\ufe0f ${what}, but I could not open your app to confirm it works this time. ${saved}. Ask me to open the preview and I\u2019ll check it.`;
 }
 
 /** Told to the user when the attempt is handed back — plainly, including what it does not promise. */

@@ -103205,6 +103205,124 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
 - #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.
+- #1900 — no defect: the gate's one blocker was BUILD_TIMEOUT on a build that had reported success. Counting it is deliberate (Q-381 batch six, "NO BILL MOVES"): it is what keeps a build that ran out of time unfinished and uncharged. A change to exclude it was tried and reverted when that guard failed.
+- #1922 — no new row: HEAL_NOT_DURABLE (`App.tsx` ×6, "our write held") again without a name. Q-3027's first half is now done: every heal write carries its name and the line prints it. Its binary `.mp3` is BR1952.
+- #1876 — no new rows: 53 ENGINE_R1 fallbacks (Q-2692) and a free build that cost about $1 before the ceiling stopped it (Q-2240, blocked on the admin's money decision).
+- #1913 — Q-3041 the Play Store / App Store are where an app is published, not a shop: a game that mentioned uploading to the play store was read as ecommerce and got no kit.
+- #1930, #1914 — no defect: a user stop at 18 s before any write; the write guard refused a duplicate declaration, then the user stopped.
+- #1910, #1909, #1906, #1898 — no new rows (each read): a user stop at 9 s; #1909 and #1906 rendered at 451 s and 415 s before user stops (#1906's unreported Surplus usage only under-counts our own cost); #1898's guessed `createTerrain` is BR1954's kit-contract class and its skipped write-time typecheck is autopsy 61279465, both fixed.
+- #1896 — Q-3106: the clarity judge's decision (or why it was not consulted) is now a CLARITY_DECISION line in the build report. "Make the game you were going to make" was built without a question, and the report could not say why.
+- #1890 — no defect: a Ludo board stopped by the user at 61 s in the fast lane.
+- #1888 — Q-3103: CGST, SGST and the other GST/invoice terms are ordinary words, not unknown services.
+- #1881 — Q-3104: screens written in Tailwind utilities in a project without Tailwind are named as such in every undefined-class note (they asked for one hand-written rule per utility). Its CSS warning on a user stop of a starter-seeded build is BR1988's boundary (edit-mode turns carry no readyAt).
+- #1879 — Q-3105: a remark ("I saw your ad on YouTube… you don't even make games") no longer confirms a build on the word "game", and "YouTube dekh raha tha" (watching YouTube) is no longer a clone request.
+- #1876 — already ledgered above.
+- #1871 — no defect: a "Continue" turn stopped by the user at 43 s while reading the project.
+- #1870 — Q-3028 again (the Panchang chip rendered at 43 s, then about 130 s of invented polish and three missed edits until a user stop); the row is blocked on the admin's decision and now names this report.
+- #1857 — Q-3040's class (fixed in #4388): "Fix this error and continue building the app: network error" was a NavBharatAI-composed fix request for a dropped connection, stopped at 9 s.
+- #1847 — no new rows: the scope classification ran its full 30 s deadline and failed (Q-2949, which now names this report); a `claude-sonnet-4-6` label on an unanswered Weak builder call is Q-970 (blocked on the admin's routing decision); the user then sent a different request mid-build and stopped.
+- #1846, #1845, #1844, #1843, #1836 — already autopsied by build ID (rows exist).
+- #1838 — Q-3107: the `.env` read rule (and five sibling verb-and-argument rules) crossed `;` and `&&`, so `cat a.ts; ls -la .env` or `git push && rm -f tmp` were refused or flagged; each now reads one command. Its failed `ls` of missing directories as a gate blocker is already fixed on main (`isReadOnlyInspection`). Whether this report's own truncated command had that shape cannot be read from the report; the class is proven.
+
+## 2026-11-20 — #4388 merged (failedbr #1926 / #1925 / #1916; Q-3037, Q-3039, Q-3040 closed)
+
+Closed (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): Q-3037 a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it; Q-3039 a React-writing game recipe is refused in a project that cannot mount React; Q-3040 a dropped-connection message no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a gate blocker. The rows above (Q-3041, Q-3103–Q-3107) go in the next PR.
+
+Ledger, older reports (2026-11-20, next PR):
+- #1831 — no new rows: a user stop at 94 s while the builder read the camera files; its `claude-sonnet-4-6` label on an unanswered Weak call is Q-970, and the Surplus debug note's path is disabled on main.
+- #1823, #1822, #1821 — Q-2316: the style floor's import survives a rewrite of the mount, and an orphaned floor sheet is re-imported once per turn. #1822 also showed invented polish after the app rendered (`generate_tests` with no functions) before a user stop.
+- #1820 — Q-3108: a conflict, diff or wrapper marker in a whole-file write is named in the refusal instead of the duplicate-declaration hint.
+- #1817, #1814, #1813 — already autopsied by build ID (rows exist).
+- #1811 — no new rows: the gate's one blocker was the provider sentence "The build engine is temporarily unavailable", already filed in the provider phase on main (#2424's fix maps this exact sentence to OUTCOME_ENGINE_UNAVAILABLE); its `Input.active` guess is BR1954's kit-contract class; "Start Game" threw in model-written code, which the explore pass found correctly before the outage ended the build.
+- #1808 — Q-3109: a durable forget of files that were never stored is complete, so the rollback is no longer called incomplete. Its 38 build-loop files after the 85 s render, then a broken app and a restore, are Q-2305 (post-green writes kept unverified; blocked on the admin's decision).
+- #1803 — Q-3110: a system package install (apt, yum, apk, brew…) is answered at the bash door with the npm route; the 300 s foreground `node server.ts` is backgrounded on main, and the ffmpeg core and EADDRINUSE items are existing rows/rules.
+- #1801 — Q-3111 (with #1803): a server written without the SPA catch-all is told so at the write; its OUTCOME_AUTHORITY_UNAVAILABLE at 547 s is Q-2957 (blocked), which now names this report.
+- #1798 — Q-3112: a scaffold file the fast-lane plan describes only as it already is (package.json, vite.config, index.html, src/main) is not regenerated; the counter app lost its budget to two byte-copies of the starter before `App.tsx`. The 503 that ended it is a Surplus engine condition.
+- #1795 — no defect: an admin bench prompt stopped by the user at 14 s.
+- #1791 — already fixed: the "BMI autopsy" (#4025) absorbs unverifiable Surplus usage at ₹0 and never stops a build on it.
+- #1786, #1784, #1782, #1781, #1780, #1779, #1776 — already fixed on main: the Surplus scope check's token cap (DNA 05011), the unverified-charge stop (#4025), the billing throw after a rendered app, and OUTCOME_UNEXPLAINED for the engine sentence; "Fix with AI" no longer offers the engine's own outage message; the "your app is built" ticker is gated (Q-1024, #1817).
+- #1785 — Q-3112 again (byte-copied package.json / vite.config.ts) plus the #4025 accounting 503s.
+- #1773 — Q-2957 (lease authority, blocked), which now names this report.
+- #1763–#1757 (seven benchmark builds) — already fixed: a Surplus outage no longer counts as the app's blocker (#2424) or as "no outcome recorded"; the Haiku label on a Weak call is Q-970 (blocked).
+- #1745 — already fixed: "hu" no longer confirms a build (`buildConfirmation`).
+
+Ledger, older reports #1743–#1536 (2026-11-20, next PR):
+- #1743 — no defect: an AI chat app rendered at 261 s, then a user stop; one GLM silence (benched by design).
+- #1617 — Q-3113 (`. ./node_modules/.bin/tsc` sourced as shell → ImageMagick `import`); its missing `src/` and TS5102 `baseUrl` errors were the user's own IDE edits to the starter.
+- #1620 — Q-3114 ("free fire app ke lia panel app" is FOR Free Fire, not a clone).
+- #1577, #1565, #1561, #1544, #1540 — Q-2732 / Q-2242: a "does not provide an export named …" that the file on disk disproves restarts the dev server with a fresh cache before any repair.
+- #1619, #1564, #1537 — Q-3115: a turn that asked the user a question is no longer "no specific error was captured". #1537's ecommerce domain for a voice-assistant spec reads "general" on main.
+- #1615 — Q-3116: bare `types` / `lib` under `baseUrl: "src"` are project files, not missing packages; its failed `ls` blockers and `cd /workspace` are fixed on main (`isReadOnlyInspection`, `fixSandboxWorkspaceCd`).
+- #1563 — Q-3117: no preview ever published is RUNTIME_UNCHECKED, never "runtime verified".
+- #1636 — fixed on main: a Free-Fire-style game read as logistics now reads as game.
+- #1626, #1606, #1605, #1600 — the admin's maintenance pause; filed as OUTCOME_AI_PAUSED on main, never a blocker. #1626's kit-contract TS2322 is BR1954's class; #1600's saved `'types'` vs sandbox `'@/types'` is Q-2232 (shell writes the parser cannot name).
+- #1588, #1584, #1577, #1565, #1563, #1560 — the E2B 20-sandbox cap (Q-2929, blocked on the admin). Their "add credits" upsell on a sandbox outage is suppressed on main (`sandboxUnavailable` counts as interrupted); #1565's kit announced with 0 files is BR1977 (`kitSeedClaimIsHonest`).
+- #1570 — fixed on main: "stopped before the app was running" after a 310 s render (`earliestRenderProof`, a75153ab).
+- #1553 — the 123 no-op `update_preview` calls are now steered after 2 and end honestly (RepeatProbeGuard); its 25-min timeout followed.
+- #1624 — Weak-tier reasoning timeouts (KIMI 150 s with only reasoning) and a futility stop after 10 quiet minutes; the provider class, no platform defect beyond the rows already open.
+- #1559 — a GTA-scale spec in project mode: Kimi TPM / Nemotron 429s, a syntax repair that answered with an unshown file (refused, REPAIR_OUT_OF_SCOPE), then a RED gate; recorded, no new class.
+- #1544 — its Marathi narration for a Hindi request was the model's; main detects the request as Hindi.
+- #1629, #1611, #1609, #1608, #1591, #1573, #1548, #1536 — user stops, no defect.
+
+Ledger, older reports #1533–#1432 (2026-11-20, next PR):
+- #1533 — Q-3118 ("CORS" read as a typo); its replaceSymbol duplicate-declaration refusals worked as designed; the 25-min cap ended a module-1 turn that grew into the whole app (project mode).
+- #1441, #1440 — Q-3118 ("SNR"); user stops.
+- #1449 — Q-3119 OPEN (Minecraft server hosting read as a game).
+- KIMI "suspended due to insufficient balance" (429) in #1465, #1449, #1446, #1441, #1440, #1435, #1432 — Q-1210 (blocked: the provider account's balance is the admin's).
+- glm-5.3 first calls of 140–331 s (#1446, #1435, #1432, #1449) and GLM flashx silences (#1507, #1493, #1487, #1465, #1455) — the Weak-tier provider class already open; benching worked as designed.
+- #1507, #1493 — "stopped before the app was running" after an in-build render is fixed on main (`earliestRenderProof`); #1493's failed `ls` blocker (`isReadOnlyInspection`) and 14 no-op `update_preview` calls (RepeatProbeGuard) are fixed on main; #1507's "stub marker" on coordinate placeholders is the authenticity analyzer's precision, recorded.
+- #1446 — `cd /workspace` (fixed on main: `fixSandboxWorkspaceCd`); a FULL-REWRITE of the kit's `state.ts` was warned and the model restored it.
+- #1509, #1498, #1487, #1465, #1455, #1453, #1447, #1435, #1432 — user stops.
+
+Ledger, older reports #1430–#1358 (2026-11-20, next PR):
+- #1430, #1420 — Q-3120 (a document request is answered, not built).
+- #1384, #1373 — Q-3121 (game titles and ranks are not services).
+- #1270 — Q-3122 (a refusal such as "Nhi banao" is neither a build order nor a yes to our offer).
+- Batch #1357–#1263 (20 reports, 2026-11-20). Fixed: Q-3123 (stringified tool arguments), Q-3124 (Indian places, public-works
+  terms), Q-3125 (FF = Free Fire), Q-3126 (stop discount named apart), Q-3127 (starter preview named to the model), Q-3128
+  (defaults follow the project on disk), Q-3129 (pasted calculator keys and colours), Q-3130 (recharge refusal = balance),
+  Q-3131 (a picture's subject), Q-3132 (code with no words), Q-3133 (every GameOptions type exported), Q-3134 (quoted symptom).
+  Already fixed on main when checked (no new row): stop_build needs the user's own words (1b38d662); "UTF"/"GTA"
+  (Q-3121); cross-origin autofocus noise (AutoFix); Devanagari गेम (#2163); startTier label (Q-2748); "Hindi me bolo" parts
+  count (now 0); stale-module `combo` (Q-2732); the 22× preview loop (Q-3018); kit colours (BR1954); ETA of a stopped build
+  (cut short). Providers (flashx silent, glm-5.3 reasoning-only, Nemotron crawl, KIMI balance) stay with Q-962, Q-1121,
+  Q-1211, Q-1212, Q-1210. Open: Q-3135–Q-3152.
+- Batch #1262–#1177 (25 reports, 2026-11-20; bulk-indexed by the 2026-10-20 audit with completion "not established").
+  Fixed: Q-3153 (best-guess note: present tense, user's script), Q-3154 (planners are not ladder rungs), Q-3155 (planner
+  seconds named, not "0s of preparation"), Q-3156 (an AI with no API dependency gets no API client). Already fixed on main
+  when checked: stopped calls name the served engine (03368870 = #1215), decline/question turns are answers (r6–r10 =
+  #1220), STUCK_TOOL on a Stop is "cut off", "हिंदी में" binds the reply voice (#1225), online classes is education and a
+  404 names its URL (#1182), the starter preview is named to the model (Q-3127, #1188's 76 publishes), the engine stop
+  code (Q-3141, #1202), GTA (Q-3121), stale tier labels (Q-2748), partial batch writes lead with what failed (#1182/#1234),
+  the overdraft floor records debited vs absorbed (#1258/#1234 debit gap), the audit-fix line (npm exits 1 while
+  vulnerabilities remain). Blocked: Q-3157 (dependency-only stop charge — admin), Q-3158 (composer of a "Fix this error"
+  prompt — missing information). Open: Q-3159–Q-3167.
+- Batch #1171–#1021 (20 reports, 2026-11-20). Fixed: Q-3168 (👍 accepts the offer), Q-3169 ("banana hai" is the verb, a
+  date token is a format, "WhatsApp-ready" is not a clone), Q-3170 (vite --force is honoured), Q-3171 (a timed-out build did
+  not "report success"), Q-3172 (the unverified note says which happened). Already fixed on main when checked: STUCK_TOOL on
+  a Stop (#1151), a question turn read as an engine outage (#1171, #1053 — r6–r10), stopped-call model labels (#1155,
+  #1111, #1077 — 03368870), "Almost done… your app is built" (#1043, #1046 — BR1992/8cdb4817), "clone of Instagram" (#1052),
+  "VPS"/"LLM" unknown names (#1052, #1049), the stale-module restart (#1153, #1043 — Q-2732), planner seconds and rungs
+  (Q-3154/Q-3155), the 99% index.html rewrite (#1022: it removed an overlaid old app — the fix, not a loss). Charges on
+  stopped builds (#1161, #1111, #1077, #1049, #1046, #1022, #1021) are Q-3148/Q-3157's policy; vague prompts built at once
+  (#1142, #1078) are Q-3137's. Open: Q-3173–Q-3184.
+- Batch #1020–#919 (11 reports, 2026-11-20). Fixed: Q-3185 (deployment instructions are not a publish order), Q-3186 (a
+  Hindi admin panel is an access gate), Q-3187 (an indirect question is a question). Already fixed on main when checked:
+  the stopped lane's file count (31254f9a), a stopped call is LLM_CALL_STOPPED (#919), STUCK_TOOL on a Stop (#959), the
+  per-module starter (6a5fb04b, #961's 19 minutes), the roadmap's simulated-reply guardrail (#947), design observations
+  on untouched code (obs()). Open: Q-3188–Q-3198.
+- Batches #898–#796 and #755–#698 (23 reports, 2026-11-20, mostly late-September builds). Fixed: Q-3188 (an unfilled
+  template names no app), Q-3199 (Hinglish "bus" is not a vehicle), Q-3200 (the shim repair stays inside the app).
+  Already fixed on main when checked: a user-stop RED gate is info, LLM_CALL_STOPPED, the stopped-build upsell, "I made
+  your change" on a zero-change stop, "send me the code" is answered, compiled Android CSS and vendored CSS are not
+  graded, the "fake/incomplete" blocker names its files, the 45-token grounding warning (Q-3140), pipe-masked tsc errors
+  are counted. Half-charges on stopped builds with no agent change (#733, #732, #749) are Q-3148/Q-3157's policy.
+  Open: Q-3201–Q-3208.
+- KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
+- #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
+- #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.
+- #1426, #1425, #1417, #1406, #1397, #1392, #1377, #1372, #1371, #1362, #1358 — user stops; the slow glm-5.3 / Nemotron first calls and GLM flashx silences are the Weak-tier provider class already open.
+
 
 ## 2026-11-20 — Ready-to-play endless runner starter; one list of genre starters (engine plan, item 3)
 
@@ -103304,6 +103422,26 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Sibling bug fixed:** a 3D app imported as a PROJECT zip had its .glb read as text (corrupted) and its glTF .bin dropped. Both are now kept byte-exact.
 - **Open:** real Indian clothing (saree/dhoti/kurta/turban) geometry. No CC0 rigged model exists. The admin decides: accept CC-BY with an automatic credit, or buy a pack whose licence allows redistribution. FBX conversion is also open: no converter we can trust in the server yet.
 
+## 2026-11-20 — failedbr #745 … #691 autopsied (PR #4390, continued)
+
+Every report from #745 down to #691 read in full (reader subagents, then each item checked against current `main`).
+Most September items were already fixed by later autopsies; those are recorded with their evidence, not re-fixed.
+
+| ID | Report | Problem → root cause / class | Fix · lock |
+|---|---|---|---|
+| Q-3200 | #734/#735/#731/#729/#728 | AMBIENT_SHIM_REMOVED rewrote a reference `.d.ts` in the user's imported repo every build — the repair scanned every `.ts` | `inAppBuildScope` · `theShimRepairStaysInTheApp` |
+| Q-3201 | #728/#731/#734/#735 | ~480 vendored reference files crowded the real app out of the 300-file evaluate snapshot (false sink, "partially scanned", false unused deps) | `foldersOutsideTheApp` decided from tsconfig include / scripts / bundler config / index.html BEFORE the cap · `aVendoredFolderIsNotTheApp` |
+| Q-3202 | #741/#755 | A folder/glob `rm` of files an EARLIER build saved never reached the durable store (Q-246 checked this build's writes only) | `pathsAShellRemovalIsCheckedAgainst(written, savedAtStart)` · `aShellDeleteLeavesTheSavedProject` |
+| Q-3203 | #724–#735 | VITE_ENV_TYPES_ADDED every build | already fixed (de3bb2bb, 2026-10-01) · `theCoactCollectorAutopsy` §6 |
+| Q-3204 | #745 | `ProfilePage() { return null }` / `useSocial() { return {} }` shipped and sold as "profile pages" | `hollowFeature.ts`: write-time note, HOLLOW_FEATURE report line, `feature-claimed-but-empty` claim · `aStubIsNotTheFeature` |
+| Q-3205 | #728 | "Working AI replies — simulated responses" | scripted chat already disclosed (466c260a); `ai-working-but-simulated` claim · same file |
+| Q-3206 / Q-3207 / Q-3208 | #729–#735 | wrong clock named; blocked `rm` shown ✓; dev server given up on while starting | already fixed (bb688add; `refuse()`; 2720e553) |
+| Q-3209 | #696 | A cap filled by stalled ANSWERS ended "not converging / endless loop" — the waste ledger counted only failed calls | stalled successful turn → `stalled` waste · `aStalledAnswerIsEngineTime` |
+| Q-3210 | #693 | A library attendance app graded against a school's LMS list (courses, grading, fees) on "student" | narrow `library` domain before education · `aLibraryIsNotASchool` |
+| Q-3211 | #697 | Assamese UPSC essay routed to a build on length alone | already fixed (e628efd4, f2ff962f, buildConfirmation) · `anEssayQuestionIsNotABuild` |
+| Q-1553…Q-1557 | #696/#695/#693/#692/#691 | bulk rows | autopsied; every remaining item mapped to a fix above or to an earlier one (slowRungBench/crawlBench, runnerChainSummary, retryLeadsHigher, OUTCOME_REAPED, BuildDeadlineLifecycle, isLongRunningCommand, fileMentions KNOWN_ANNOTATIONS) |
+
+Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed). No local CI per the admin.
 ## 2026-11-20 — #4392 and #4394 merged; library batch 8 (KayKit Adventurers 2.0)
 - #4392 (batch 6: guns and cars) and #4394 (Indian characters, library by meaning, user's own models) merged. The full local gate was green on each final tree (#4394: 3656 files, 55562 tests).
 - **Batch 8** (this PR): the admin's KayKit Adventurers 2.0 download (Kay Lousberg, CC0 per the archive's License.txt: "free to use in personal, educational and commercial projects").
@@ -103328,6 +103466,23 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Not done, and why:** the platform writing the Forge spec itself needs a model call outside the builder's turn, which
   stays held in `ToolDispatcher` (`describe`) until it has admitted billing and cancellation — a money decision.
 - Locked by `tests/whatTheLibraryLacksIsForged.test.ts`; removing the library check fails it.
+## 2026-11-20 — #4396 merged (batch 8); batches 9–10, FBX import, "where to get it", library on every 3D turn
+- #4396 merged. It also merged the other session's switch: the library is ON by default (`7aac6be51`). The admin can now delete `AGENTV3_EXTERNAL_GAME_ASSETS` from Cloud Run — a value of `admin` would keep it owner-only.
+- **Batch 9:** the Quaternius Farm Animal Pack (CC0 per the pack page). Cow, horse and zebra idle/walk/run/jump/die; llama, pig, sheep and pug idle/jump. Every moving role proven live.
+  - FBX-only pack, converted with `scripts/library/fbxToGlb.mjs` (three.js in a sandboxed Chromium).
+  - Running the downloaded FBX2glTF binary was refused by the auto-mode classifier, so it was not used.
+- **Batch 10:** the Downtown City MegaKit (CC0) — 3 whole brick buildings, city street tiles, sidewalks and 5 street props.
+  - The kit's vertex-colour wear mask, painted as red streaks, is removed.
+  - Hindi words: chauraha, tiraha, footpath, gamla.
+- **FBX attachments** are converted on the server (`fbxToGlb` in userModels.ts), keeping skin and animations. Three defects were fixed and locked by real CC0 fixtures in `tests/fixtures/fbx`:
+  - materials came out fully transparent;
+  - one primitive per polygon run;
+  - a texture made FBXLoader call `document`, so a textured FBX never parsed.
+  - Open: textures cannot come across in Node. The user is told, with the .glb route.
+- **Where to get a model** (`modelSourcesGuide.ts`): when the user asks for something the library lacks, the builder builds the closest version AND tells the user the free CC0/CC-BY sources, the file to pick, the upload path and the licence rule.
+- **The library on every later turn of a 3D game** (`withLibraryMenuForExistingGame`): it reached only the creating turn before.
+  - Withdrawn after checking: the tested templates are never 3D, so the template path was not a gap.
+- **Process note:** I wrote files into the main checkout while its gate was running. That gate was stopped and discarded; GitHub CI on the exact pushed commit decided #4396.
 ## 2026-11-20 — City traffic: the grid comes alive (engine plan, item 4)
 
 - **Gap:** city.ts gave streets and buildings, and nothing moved on them — `createTraffic()` drives one straight road.

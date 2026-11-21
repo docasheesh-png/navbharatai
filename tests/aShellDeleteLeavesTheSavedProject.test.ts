@@ -161,7 +161,7 @@ describe('🔴 end to end: what the shell removed is not saved again', () => {
 describe('the wiring — proven by reversion', () => {
   it('the route hands the dispatcher its captured paths, and sub-agents share the deletion wiring', () => {
     const route = readFileSync(join(ROOT, 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toMatch(/dispatcher\.setRecordedPaths\(\(\) => \[\.\.\.writtenFiles\.keys\(\)\]\)/);
+    expect(route).toContain('dispatcher.setRecordedPaths(() => pathsAShellRemovalIsCheckedAgainst(writtenFiles.keys(), durableFilePaths));'); // Q-3202 widened it
     expect(route).toMatch(/deletionWiring: \(\) => dispatcherForSubAgents\?\.deletionWiring\(\)/);
     const sub = readFileSync(join(ROOT, 'src/server/AgentV3/SubAgent.ts'), 'utf8');
     expect(sub).toMatch(/childDispatcher\.shareDeletionWiring\(deps\.deletionWiring\?\.\(\)\)/);
@@ -176,5 +176,37 @@ describe('the wiring — proven by reversion', () => {
     child.shareDeletionWiring(parent.deletionWiring());
     await child.run(bash('rm src/candy.css'), 'frontend');
     expect(captured.has('src/candy.css')).toBe(false);
+  });
+});
+
+// failedbr #741 / #755 (queue Q-3202): an EARLIER build's file removed with the shell came back. The check read only
+// this build's writes, so a folder holding files from the saved project named none of them.
+describe('🔴 Q-3202 — a file an EARLIER build saved is forgotten too when the shell removes it', () => {
+  beforeEach(() => { _clearWorkspaceMemory(); });
+
+  it('the helper puts this build\'s writes first, then the saved project, once each', async () => {
+    const { pathsAShellRemovalIsCheckedAgainst } = await import('../src/server/AgentV3/shellWriteTargets');
+    expect(pathsAShellRemovalIsCheckedAgainst(['src/App.tsx'], ['public/sprites/candy.svg', 'src/App.tsx'])).toEqual(['src/App.tsx', 'public/sprites/candy.svg']);
+    expect(pathsAShellRemovalIsCheckedAgainst(['src/App.tsx'], null)).toEqual(['src/App.tsx']);
+  });
+
+  it('end to end: a folder of saved-only files reaches the sink, on the route\'s own wiring', async () => {
+    const { pathsAShellRemovalIsCheckedAgainst } = await import('../src/server/AgentV3/shellWriteTargets');
+    const act = new ShellActuator();
+    const written = new Map<string, string>([['src/App.tsx', act.files.get('src/App.tsx')!]]); // this build wrote only App.tsx
+    const savedAtStart = [...act.files.keys()];
+    const forgotten: string[] = [];
+    const stream = new AgentEventStream();
+    const d = new ToolDispatcher(act, 'ws-q3202', new WorkspaceState(stream), stream);
+    d.setRecordedPaths(() => pathsAShellRemovalIsCheckedAgainst(written.keys(), savedAtStart));
+    d.setFileDeletionSink((paths) => { forgotten.push(...paths); });
+    await d.run(bash('rm -rf public/sprites'), 'architect');
+    expect(forgotten.sort()).toEqual(['public/sprites/candy.svg', 'public/sprites/deep/star.svg']);
+  });
+
+  it('wired: the route checks a shell removal against the saved project, not only this build\'s writes', () => {
+    const route = readFileSync(join(ROOT, 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('dispatcher.setRecordedPaths(() => pathsAShellRemovalIsCheckedAgainst(writtenFiles.keys(), durableFilePaths));');
+    expect(route).not.toContain('dispatcher.setRecordedPaths(() => [...writtenFiles.keys()]);');
   });
 });

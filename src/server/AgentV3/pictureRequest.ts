@@ -46,12 +46,26 @@ const SOFTWARE_OBJECT = new RegExp(
 /** "app", "site", "platform" in the nine other Indian scripts — the same list the safety triage reads. */
 const INDIC_SOFTWARE_OBJECT = new RegExp(indicAlternatives(PLACES).join('|'));
 
+/**
+ * THE PICTURE'S SUBJECT IS NOT THE THING TO BUILD (failedbr #1350, 2026-11-20). "Make a image of the game" named `game`, so
+ * it went down the build path: game domain, a 12-file game kit, a 121 s silent first call, and the user stopped it. The
+ * one word a picture is OF ("an image of the game", "game ki photo") is removed before the software test; a software word
+ * anywhere else ("an image of a cat for my app") still builds. PURE.
+ */
+const PICTURE_NOUN = '(?:images?|pictures?|photos?|pics?|wallpapers?|posters?|drawings?|paintings?|illustrations?|tasveer|tasvir|chitra)';
+const SUBJECT_AFTER = new RegExp(`\\b${PICTURE_NOUN}\\s+of\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|this\\s+|our\\s+|that\\s+)?[\\p{L}\\d-]+`, 'giu');
+const SUBJECT_BEFORE = new RegExp(`[\\p{L}\\d-]+\\s+(?:ki|ka|ke)\\s+${PICTURE_NOUN}\\b`, 'giu');
+function withoutPictureSubject(text: string): string {
+  return text.replace(SUBJECT_AFTER, ' ').replace(SUBJECT_BEFORE, ' ');
+}
+
 /** Does this message ask for a PICTURE (and nothing that is software)? PURE. */
 export function isPictureRequest(prompt: string): boolean {
   const text = String(prompt ?? '').trim();
   if (!text) return false;
   if (!detectImageIntent(text).wants) return false;
-  return !SOFTWARE_OBJECT.test(text) && !INDIC_SOFTWARE_OBJECT.test(text.normalize('NFC'));
+  const rest = withoutPictureSubject(text);
+  return !SOFTWARE_OBJECT.test(rest) && !INDIC_SOFTWARE_OBJECT.test(rest.normalize('NFC'));
 }
 
 export interface PictureAnswerInput {

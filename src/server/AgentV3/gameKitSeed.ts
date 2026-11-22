@@ -50,6 +50,7 @@
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
+import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
@@ -319,6 +320,24 @@ export function athreeMapHandoff(recipeResult: string): string {
 }
 
 /**
+ * 🔓 WHAT THE USER CLEARLY ASKS FOR IS DONE — every "never" in a game rule is a guard for requests that do NOT ask for that
+ * change, never a refusal of one that does (admin 2026-11-22, verbatim: "isko aur flexible aur strong karo! user koi bhi game
+ * banaye kuch bhi edit/update karwa sake!!"). 🧬 THE CLASS: protective rules written as cages ("NEVER write your own camera",
+ * "DO NOT rewrite src/App.tsx's world", "the kit is never edited") read by a builder as bans on the user's own explicit
+ * request — so "apna camera chahiye" or "poora world badal do" was refused, or done and then put back. The growth guard
+ * (growthGuard.ts) opens exactly the parts a request names, by name or by what they do; this line tells the builder the same,
+ * and how to make the change through the kit's own options first. Said wherever a game rule says "never". The ask-when-
+ * unclear rule (GAME_NO_GUESS_RULE) is untouched: this is only for what is CLEAR.
+ */
+export const GAME_ASKED_CHANGE_WINS = '🔓 THE USER\'S CLEAR REQUEST WINS. Every "never" / "do not" in these game rules protects the parts a'
+  + ' request does NOT ask about. When the user clearly asks to change one of them — a feature, a place, src/App.tsx, the camera, the'
+  + ' controls, the HUD, any kit file ("apna camera chahiye", "first-person view karo", "joystick bada karo", "App.tsx ka layout badlo",'
+  + ' "poora world badal do", "poora game badal do", "jo chahe badlo") — do exactly that, fully; never refuse it, never quietly do'
+  + ' something smaller. Use the kit\'s own option first (a camera view is options={{ camera: \'first-person\' | \'third-person\' |'
+  + ' \'top-down\' | \'side-scroller\' | \'chase\' | \'orbit\' | \'fixed\' | \'cinematic\' }} on <OpenWorldGame> / <GameCanvas>); where'
+  + ' no option does it, edit THAT kit file in this game — never write a second copy beside it. Change only what was asked.';
+
+/**
  * 🧩 HOW A GAME GROWS (admin 2026-11-21: "user jo chahe game me judwaye, usi game me judta chala jaye, kuch bhi tute na …
  * 10-100 kitne bhi"). A game that is one big setup() is rewritten on every request, and each rewrite can break what worked.
  * A game that is a LIST of features grows by one file and one line per request; nothing else is edited, and the kit runs
@@ -333,7 +352,7 @@ export const GAME_FEATURES_RULE = '🧩 THIS GAME GROWS BY FEATURES. Everything 
   + ' feature\'s file. To REMOVE it: take it out of the list. NEVER rewrite, merge or move the other features, src/App.tsx or the kit for a'
   + ' request that does not name them — a feature another one builds on is named in needs and read with api.get(id), never copied.'
   + ' Each feature is guarded: one that throws is switched off and named in the console ("[feature <id>] …") while the rest of the game'
-  + ' keeps running, so read the console after adding one.';
+  + ' keeps running, so read the console after adding one. ' + GAME_ASKED_CHANGE_WINS;
 export const GAME_FEATURES_INDEX_FILE = 'src/game/features/index.ts';
 
 /**
@@ -400,10 +419,31 @@ export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/
   + ' "apna player khud banao", "poora game badal do"), do not hide or replace the kit\'s hero by hand and do not touch the map, the'
   + ' controls or the features just to change the character — a clear request from the user always wins. If the library does not have'
   + ' what was asked, say so and change PLAYER.look instead.';
-/** Racing on the kit's road library: a longer road is a prop, never a hand-built track. */
-export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingRoadGame>): twelve road maps that join seamlessly into an endless road.'
-  + ' "Track / road bada karo", "lambi race" → raise finishKm (or pass finishKm={null} for a road that never ends); "aur gaadiyan" →'
-  + ' opponents. Never hand-build a second track or shorten the road to add something else.';
+/**
+ * 🏁 RACING STARTS ON THE ROAD LIBRARY — AND THE USER MAY CHANGE ANY OF IT (admin 2026-11-22, verbatim: "user puri racing game
+ * ko bhi AI se modified karwa sake, jaise chahe sab free hand do!"). The old rule ended "Never hand-build a second track", which
+ * turned the library into a cage: a user who attached their own track or car had no way in. The library is the DEFAULT; a
+ * clear request wins. The user's car and track each live in one small file the starter reads by itself
+ * (kit play/raceCustom.ts), so a change is one edit, and a model that cannot be used is said on screen, never faked.
+ */
+export const RACE_ROAD_RULE = '🏁 THIS RACE STARTS ON THE ROAD LIBRARY (<RacingRoadGame>: twelve road maps joined into one endless road). The library is'
+  + ' only the STARTING POINT — anything the user clearly asks about the race is done. Map each request to its path:'
+  + ' (1) THEIR CAR is src/game/car.ts (export const CAR: CarChoice from \'./play/raceCustom\'; RacingRoadGame reads it by itself — create the'
+  + ' file when it is missing): "gaadi neeli karo" → CAR.color (0xRRGGBB); "tez karo" / handling → CAR.tuning { maxSpeed (m/s; 25 ≈ 90 km/h),'
+  + ' accel, brake, steerRate }; "meri gaadi ye wali kar do" with a 3D model the user ATTACHED → CAR.model = its project path exactly as the'
+  + ' [USER MODELS ADDED] note names it (\'public/models/<name>.glb\'); a LIBRARY car → add_library_models first, then CAR.model = the subject it'
+  + ' was saved under; size → CAR.modelLength (metres); a model that drives backwards → CAR.modelYaw: 180; floating or sunk wheels → CAR.modelLift;'
+  + ' "wapas purani gaadi" → model: null. The kit keeps the driving, the camera and the wheels-on-road physics; only the look becomes the model.'
+  + ' (2) THEIR OWN TRACK (an attached .glb/.gltf/.obj/.fbx, or a zip of one) is src/game/track.ts (export const TRACK: TrackChoice): TRACK.model ='
+  + ' its project path, laps → TRACK.laps, its size → TRACK.size (metres), the other direction → TRACK.reverse. The game makes it the ground,'
+  + ' reads the racing line from the road and runs laps, the position and the rivals on it — or says ON SCREEN why it cannot (then pass TRACK.line'
+  + ' as [x, z] points, or TRACK.roadNames, and tell the user; never fake a line). "Wapas library wala road" → TRACK.model: null.'
+  + ' (3) THE LIBRARY ROAD: "track / road bada karo", "lambi race" → raise finishKm (finishKm={null} for a road that never ends); "race chhoti karo"'
+  + ' → lower finishKm; "aur gaadiyan" / "kam gaadiyan" → opponents (0–7); a course of their own design → the plan prop (createRacingRoadPlan, or a TrackPlan of pieces).'
+  + ' (4) ANYTHING ELSE — weather, time of day, camera, HUD, rules, sounds, colours, a new mode — change it in code as asked: edit'
+  + ' src/game/RacingRoadGame.tsx itself where its props do not reach. Never refuse or water down a clear request because the library lacks it,'
+  + ' never swap the user\'s car or track for the library\'s without saying so, and where a prop or these two files already do the asked change, use them.'
+  + ' If a request can mean two things (which car, which part), ask one short question instead of guessing.';
 
 /**
  * The builder's instruction when the platform mounted the open-world starter: the game ALREADY plays, so the builder adds
@@ -412,12 +452,15 @@ export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingR
  */
 export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP. src/App.tsx renders <OpenWorldGame> (src/game/OpenWorldGame.tsx): the kit\'s'
   + ' animated player is standing on NavBharatAI\'s Athree map — on a street of its city when the game has one — with the follow camera,'
-  + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). DO NOT rewrite src/App.tsx\'s world,'
-  + ' and NEVER write your own world, ground, player, character controller, camera or game component beside it (no CustomGame, no'
-  + ' WorldSetup, no characterController of your own). ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
+  + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). Unless the user asks for it,'
+  + ' do not rewrite src/App.tsx\'s world, and NEVER write a second world, ground, player, character controller, camera or game component'
+  + ' beside it (no CustomGame, no WorldSetup, no characterController of your own): a different one the user asks for is made by'
+  + ' changing the kit\'s own, in this game. ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
   + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
   + ' world.city gives the city, its traffic, people, parked cars and'
-  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0.';
+  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. The corner map (roads, named places; tap or M for the full'
+  + ' map with pan, zoom and a waypoint) is the kit\'s: never draw your own — change it with <OpenWorldGame map={{ corner: \'right\','
+  + ' size: 200, names: false, range: 400, fullMap: false }} /> as the user asks, or map={false} to turn it off.';
 
 /** The builder's instruction for the preview's Tune panel (kit core/tuning.ts). */
 export const TUNING_RULE = '🎚️ TUNABLE NUMBERS: declare the numbers a creator will want to adjust by playing — player speed, jump height, '
@@ -489,8 +532,12 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     // said only when the 3D layer that holds createTrackStream is really on disk.
     has('generate_open_world') ? OPEN_WORLD_HANDOFF
       : has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
+    // Every "NEVER" above guards what the request does not ask for (OPEN_WORLD_HANDOFF carries it through GAME_FEATURES_RULE).
+    has('generate_open_world') ? '' : GAME_ASKED_CHANGE_WINS,
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
+    // Two solid things meet and collide - never pass through each other (admin 2026-11-22).
+    has('generate_game_runtime') ? GAME_COLLISION_RULE : '',
     // The creator's Tune panel (admin 2026-11-21): numbers worth adjusting become sliders in the preview.
     has('generate_game_runtime') ? TUNING_RULE : '',
     // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
@@ -584,13 +631,21 @@ export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): 
 
 /** The growth rules a project's OWN files call for: its features list, its map's regions, its road-library race. PURE. */
 export function projectGrowthRules(files: Readonly<Record<string, string>>): string {
-  return [
+  const rules = [
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
-    typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_NO_GUESS_RULE : '',
+    // Asked, never guessed, in every game that grows by the user's requests — a road-library race included (2026-11-22).
+    typeof files[GAME_FEATURES_INDEX_FILE] === 'string' || /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? GAME_NO_GUESS_RULE : '',
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
-  ].filter(Boolean).join('\n\n');
+    // Every later turn of a game made on the kit: nothing passes through anything (admin 2026-11-22). A game = the kit's loop
+    // is there AND the app itself plays it (App.tsx reaches into src/game) — the kit's files alone do not make an app a game.
+    typeof files['src/game/core/loop.ts'] === 'string' && /['"]\.\/game\//.test(String(files['src/App.tsx'] ?? '')) ? GAME_COLLISION_RULE : '',
+  ].filter(Boolean);
+  // 🔓 Whatever rules a project calls for, their "never"s guard only what the request does not ask for — said once, always
+  // (GAME_FEATURES_RULE carries it; a map, player or race rule without the features list carries it here).
+  if (rules.length > 0 && !rules.some((r) => r.includes(GAME_ASKED_CHANGE_WINS))) rules.push(GAME_ASKED_CHANGE_WINS);
+  return rules.join('\n\n');
 }
 
 /** BR1954: the game request/API contract is a build prerequisite, not a reward for a fresh seed.

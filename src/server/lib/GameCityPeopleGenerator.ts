@@ -197,16 +197,20 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       const mx = (c.ax + c.bx) / 2, mz = (c.az + c.bz) / 2;
       const p = new THREE.Vector3();
       for (const car of traffic.cars) {
-        car.object.getWorldPosition(p);
+        inCity(car.object, p);
         if (Math.hypot(p.x - mx, p.z - mz) < plan.road / 2 + 4) return false;
       }
     }
     return true;
   };
+  // In THIS crowd's frame (the city's), never raw world space — see citytraffic.ts inCity: on the open-world map a city stands
+  // anywhere, and a world-space check never matched, so people walked through the player and stepped in front of cars.
+  const toCity = new THREE.Matrix4();
+  const inCity = (o: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 => { o.getWorldPosition(out); return out.applyMatrix4(toCity); };
   const blocked = (w: Walker, avoid: THREE.Object3D[], fx: number, fz: number): boolean => {
     const p = new THREE.Vector3();
     for (const a of avoid) {
-      a.getWorldPosition(p);
+      inCity(a, p);
       const ahead = (p.x - w.x) * fx + (p.z - w.z) * fz;
       const side = Math.abs((p.x - w.x) * fz - (p.z - w.z) * fx);
       if (ahead > 0 && ahead < 1.2 && side < 0.6) return true;
@@ -225,6 +229,7 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   return {
     root, walkers, bodies: walkers.map((w) => w.body),
     update: (dt, avoid = []) => {
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();   // the crowd's frame, once per step
       if (!(dt > 0)) return;
       clock += dt;
       for (const w of walkers) {

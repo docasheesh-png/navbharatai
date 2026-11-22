@@ -1,12 +1,13 @@
 // The two moments of a turn where the growth guard and the library's place-add act — kept out of the route's handler,
 // which reads and writes through the small ports below (routes/agentv3.ts is one very large function; a step that can be
 // a call is a call).
-import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
+import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, growthNotRestoredNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
 import { PART_NAMES_FILE, rememberPartNames } from './partMeaning';
 import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, MAX_PLACES } from './worldGrow';
 import { characterAsked, librarySubjectOf, libraryMovesOf, characterNotSwappable, modelWasAdded, setPlayerModel, characterSetHandoff, characterNotSetHandoff, PLAYER_FILE_PATH, GAME_SHELL_PATH, SHELL_READS_PLAYER_FILE } from './characterSwap';
 import { GAME_PLAYER_FILE } from '../lib/GamePlayerBodyGenerator';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
+import { setLibraryCarAtTurnStart } from './carSwap';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
 
@@ -48,6 +49,9 @@ export async function enforceGrowthAtTurnEnd(io: {
         message: `This turn changed ${restores.length} file(s) of the game that the request did not ask to change; ${put.length} put back as they were: ${restores.slice(0, 8).map((r) => `${r.path} (${r.reason})`).join('; ')}${restores.length > 8 ? ` and ${restores.length - 8} more` : ''}.` });
       const note = growthUserNote(put);
       if (note) { try { io.say(note.trim()); } catch { /* the report still says it */ } }
+      // And a put-back that FAILED is told too: an unasked change that survived is never left to the report alone.
+      const missed = growthNotRestoredNote(restores.filter((r) => !put.includes(r)));
+      if (missed) { try { io.say(missed.trim()); } catch { /* the report still says it */ } }
     }
     // 🔓 And the user is never left stuck: what the builder wanted to change and could not is named, with the words that
     // allow it — said by the platform, whether or not the builder mentioned it.
@@ -161,10 +165,11 @@ export async function setLibraryCharacterAtTurnStart(io: {
 }
 
 /**
- * The two library actions the platform does itself at the start of a turn — a map place, a character — behind ONE call and
+ * The library actions the platform does itself at the start of a turn — a map place, a character, a racer's car — behind ONE call and
  * ONE write port, so the build route carries one line for both (Q-3237: the handler only shrinks). Never throws.
  */
 export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibraryCharacterAtTurnStart>[0]): Promise<string> {
-  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io)].filter(Boolean);
+  // …and the car a racer drives (carSwap.ts, 2026-11-22).
+  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io), await setLibraryCarAtTurnStart(io)].filter(Boolean);
   return handoffs.join('\n\n---\n\n');
 }

@@ -96,7 +96,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b2140860692d7ab032fd23b05223143d255ac4ae073119a686ba884f184b48b2",
     "89ef1e4ccd41878c6c708ba48ad7be6bb15ecc38d9a4901b2bcac4780e5b83cb",
     "2cc185473f60c59d834ca91a55eb879d633743b729d788171c929520e5c1f076",
-    "b229c81d503ac26e76b4a08b5d41384a60d14049e30d50261ee10facde2757c8"
+    "c8b7adf9e5ab555aeebc5162530a9041dea66b99c5e8ddab3da9f27a435ffd6c"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -107,14 +107,13 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/LaneRunnerGame.tsx": [
     "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40",
-    "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb",
-    "71356106d28aeb5387805c0d32768914702155d42d8972cd4a58bfe27fea985a"
+    "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb"
   ],
   "src/game/OpenWorldGame.tsx": [
     "48c550cff4d14f2bc7edac196803f67b6c94106a981b5aad7a4d19d7ebe6f440",
     "b5bef9555780abb83f2fdad52e3a4e52c1507aa28ea4192d1ce35be9c05ceab7",
     "68713acdd702d65e8c814e651a61792c0206d98ba809e4838dc0c55dc7684ef8",
-    "979c96f4f73ada97d903e71ada81daf0d13a1e2d537b71da9f71ef547e5248c6"
+    "3a44eef271b79b2123ff648fcb758f07ee91484d87277409d2a552bc55fcd218"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
@@ -123,7 +122,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b5b617ab2654eff43fb1c5a5e7bcae89c6c823e701ad99c4bd15a105ac2d0541",
     "c9bfc6b97b35c03a6382846117485ce924d0b076ff7fc477faa5fd41e443b229",
     "e71b801e4d03cb1020e0d23f3e37612e4f49cefd562f0d8d97bba2f65181321a",
-    "0fe8e46b17e6b3244f6fc31cab116ee5ed9f48e11b7d8c9f110795d56f0d8ca1"
+    "0fe8e46b17e6b3244f6fc31cab116ee5ed9f48e11b7d8c9f110795d56f0d8ca1",
+    "c7ea438236cd31125d333f42fc9f2160dfd1ade6c38a7bf1d8d0678efb3be61f",
+    "2da0a2fde705007cec51137c3ad9d4705bad9fba420fafef810649dd0ed16046"
   ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
@@ -355,7 +356,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "26763b0415a83d97907448f7e605ac9ddd527119c2ac59ba08e6e9f743416007",
     "a29d92726e4fd0baf3be8ce978ae3f638d5979892d63416aafa59e6a536e0e86",
     "b2ebe8820b3607824a3e023398f54a691206d1652af01e7eade1f20f762a860c",
-    "45c6d252315b9e4df6315e78303c5002517a5ca52a11ee9deb2410e78355f737"
+    "45c6d252315b9e4df6315e78303c5002517a5ca52a11ee9deb2410e78355f737",
+    "689046399d03be5eb84138750a993d3745f086c8b1b2253e04ee8c127113cace"
   ],
   "src/game/core/state.ts": [
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
@@ -377,7 +379,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "89b605f2878fdbb8f020440ee5d2671174d9a54bd6a52227bf9c1bfcb163ebdb",
     "91add2f6fb4a3a53aa8c211eef4207e6e66019e8aaa64c16887dab5579672a5a",
     "64527f2013bf8fc45d4025926de0dcb9c2990b39187eee1ced5a9e7bda28c88c",
-    "2d383896e653553b51df791673858bf920bfa45adcabf52082f6b29accebbed4"
+    "2d383896e653553b51df791673858bf920bfa45adcabf52082f6b29accebbed4",
+    "b9edc408541aa65f01ab10bb06fcc944a1d313513175d08c3b8b278310aa3204"
   ],
   "src/game/core/swipe.ts": [
     "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
@@ -455,11 +458,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b6fd7ec9eb6a2faf76929c4901c290996fd2b6df77a6223caab1d3dea84e969a",
     "6a90dd423b1c14c2a58686c2582aeb961edb64c71516261db2d4b082a74b361f",
     "bd8e42097665d32f0d6970f2e847469dfa97e47d4eca60b1a5c18881c2af258e",
-    "4b7be6b490e08f39becc4e86fb5bb8f75e19c332b6104c7687c176bb677a554c"
+    "4b7be6b490e08f39becc4e86fb5bb8f75e19c332b6104c7687c176bb677a554c",
+    "44c69a90697ce14830e14f3695197477089eee256ce452b11375e0f8ccbbdd63",
+    "b6e9fd282b301ea95e8df4e455a3d7bdd66e1fea438ced55895f2476eb964cf6"
   ],
   "src/game/play/playerBody.ts": [
-    "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
-    "795e63a219ed1b40b80de950fb709153af4847941c15b40975a2b363751a9e07"
+    "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f"
+  ],
+  "src/game/play/raceCustom.ts": [
+    "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0"
   ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"
@@ -527,16 +534,19 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "ce12e8c67bd8e0ece77212415facfa2468fc5404a05701d9c743ddc877ccfe6c"
   ],
   "src/game/three/citypeople.ts": [
-    "6e42bc38b958c308de5c67dc663db25afba002b4ed2cb24b59292da67b34c6ee"
+    "6e42bc38b958c308de5c67dc663db25afba002b4ed2cb24b59292da67b34c6ee",
+    "9aa32ad02cd425cc3b4a00eeea9ae1a21d35ac5142fae90c5b2c1da118517778"
   ],
   "src/game/three/citytraffic.ts": [
     "a1c64e0c58cd2a3975747dfd84bc554249b3b54f4b00568e1216f58b35946a76",
-    "78f1ec87615b536a1e215a87ae7d53b867177f856f9a5633027777c0d9587f32"
+    "78f1ec87615b536a1e215a87ae7d53b867177f856f9a5633027777c0d9587f32",
+    "22f70211b7897386f45827c28fd2763b0a95e67d70fb62000de18163fd278e45"
   ],
   "src/game/three/collision.ts": [
     "17d7db8f5f5aee65d637043365d0b94e67e4f7bdcd9f92da616b77928fdd3866",
     "9b1aad461db630b41e9e676fb5515f6626e9b10b282dc06e946eb46a735ee90a",
-    "80c4524a9eb7e440b19ed589a51a5ee09a67cf37886638132cfb57a7241e5a84"
+    "80c4524a9eb7e440b19ed589a51a5ee09a67cf37886638132cfb57a7241e5a84",
+    "8bc76dbe488549a1c0eee47b70a606a60fc2e2ac153b849d58cdc99f68f8822f"
   ],
   "src/game/three/environment.ts": [
     "76509d190eeabb44658f377c0487a8217103664d73ed5a3e1888d65e06c9020b"
@@ -597,13 +607,16 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "cb918bf48ca8f64f2943539913e658a108761f1e37b6ea6ac5d725bbd9eb5ab8",
     "fe2d66923322f205defff093200ecc727890ed99f7feb58060008cfb9a9b4f9e",
     "e9ca3f0c156ac3cf2257e8ab81823164712e21911517a6d85dfced61eceaea6a",
-    "a56af822f5eba66cfbbdea0f19750e504574f88f4ee74e15bea8c20a7bae8686"
+    "a56af822f5eba66cfbbdea0f19750e504574f88f4ee74e15bea8c20a7bae8686",
+    "89363f92d8bdbf3a0cc836e7898bbc50d0071c9f22886affc8fe57c78d66374c"
   ],
   "src/game/three/physics.ts": [
     "a4bb8d49546dfe95b0308c25f10149391ef288e9f1a7757555c2732c86c9cfb1"
   ],
   "src/game/three/race.ts": [
-    "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548"
+    "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548",
+    "a98f362a8b1229e2dfe34a28a39a07b978a4170c8b883176d2d8c523b8a17836",
+    "047a1791295d2f98fba403eeacf2fd3170ae2c8b843e57f3ad2f232e7d67dc04"
   ],
   "src/game/three/renderer.ts": [
     "e3bd063f8ab3ab10a658e8d808c0155a163ca15fb0d8744a4cd7d4fb902b7c19",
@@ -658,7 +671,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "990c374fda9df5bd5482ae8e8cefcd1863e2483fd7ac86e15194e8fd362135dd",
     "673ad345f05c90b87c7f736ed9a10aed79344cb98fca8eb377b301a6d0272c16",
     "c921a6669aa6b988cbf9f74039a7364c0a0f1253310f114a591b536f9f10184d",
-    "bb78d8204a9757abf17692e115790e9d585dfd8af35edec8a24adb87225dbab7"
+    "bb78d8204a9757abf17692e115790e9d585dfd8af35edec8a24adb87225dbab7",
+    "dc2ffaef9e627518f873d855bdc53dcfc1b139f34a629f317157fcce55b3ecf3"
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",
@@ -670,6 +684,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "94152bbea352e9ad6187e970552601e373e8b596c3bd9cd17c41b8d56a6c19fe",
     "16592f66e9cc3e26f4fe02b2cf2977c50651aefb1f607b360b7f677a2b0e12b5",
     "6b13c9d45a13c23737c404940f42cd26b22c4e338edfb48ce492d1bc862fd443"
+  ],
+  "src/game/ui/worldMap.ts": [
+    "3767281a0741ee4e0f9723e51d4650b593f7b38aff265b5185f29f59deccb94f"
   ],
   "src/game/world2d/index.ts": [
     "b294ff67e14198e9b23c99563f6c683d2626b416ca5c64b828dd37baec015291"

@@ -1905,7 +1905,8 @@ export let lastRaceResults: RaceResult[] | null = null;
  * Rivals are ghosts: they do not collide with the player (said, not hidden).
  */
 export interface RaceOptions {
-  stream: TrackStream;
+  /** What the rivals drive along: the streamed road, or the user's own track model (play/raceCustom.ts) — only poseAt is read. */
+  stream: Pick<TrackStream, 'poseAt'> & { reset?: () => void };
   /** Rival cars, 0 to 7. Default 3. */
   opponents?: number;
   /** Where the race ends, in metres from the start line; null (default) is an endless race with a live position. */
@@ -1984,6 +1985,9 @@ export function createRace(scene: THREE.Object3D, options: RaceOptions): Race {
   // stream.startPose on GAME_STARTED).
   const offRestart = events.on('GAME_STARTED', () => {
     if (phase !== 'finished') return;
+    // The course itself starts again too (a streamed road lays its first piece again at distance 0), BEFORE the rivals
+    // are put on it — without this a race with a finish line ended at GO on Play again.
+    stream.reset?.();
     time = 0; playerDistance = 0; results = null; lastRaceResults = null; lastPosition = 0;
     rivals.forEach((r, i) => { r.distance = -6 - Math.floor(i / 2) * 7; r.speed = 0; r.finishTime = null; place(r); });
     startCountdown();
@@ -2916,6 +2920,43 @@ export function sweepWorldCapsules(
     return safe;
   }
   return safe;
+}
+
+/** One moving thing for keepApart: its object, how wide it is (a circle on the ground) and whether it may be pushed. */
+export interface Mover { object: THREE.Object3D; radius: number; fixed?: boolean }
+
+/**
+ * NOTHING PASSES THROUGH ANYTHING ELSE (admin 2026-11-22: "jab bhi 2 object takrayenge to ek dusre ke aar paar nahi jane
+ * chahiye, takkar honi chahiye"). Call once per frame with every moving thing - the player, cars, enemies, animals, balls:
+ * two that overlap on the ground are pushed apart along the line between them (a fixed one does not move; two free ones
+ * share the push). Works whatever their parents are: positions are compared in world space and written back in each
+ * object's own parent frame. Returns how many pairs touched, so a game can play a bump sound or take damage on contact.
+ */
+export function keepApart(movers: readonly Mover[]): number {
+  const at = movers.map((m) => m.object.getWorldPosition(new THREE.Vector3()));
+  const push = movers.map(() => new THREE.Vector3());
+  let touched = 0;
+  for (let i = 0; i < movers.length; i++) {
+    for (let j = i + 1; j < movers.length; j++) {
+      const a = movers[i], b = movers[j];
+      if (a.fixed && b.fixed) continue;
+      let dx = at[j].x - at[i].x, dz = at[j].z - at[i].z;
+      const reach = a.radius + b.radius, d = Math.hypot(dx, dz);
+      if (d >= reach) continue;
+      if (d < 1e-6) { dx = 1; dz = 0; } else { dx /= d; dz /= d; }
+      const overlap = reach - d, shareA = a.fixed ? 0 : b.fixed ? 1 : 0.5, shareB = 1 - shareA;
+      push[i].x -= dx * overlap * shareA; push[i].z -= dz * overlap * shareA;
+      push[j].x += dx * overlap * shareB; push[j].z += dz * overlap * shareB;
+      touched++;
+    }
+  }
+  movers.forEach((m, k) => {
+    if (!push[k].x && !push[k].z) return;
+    const target = at[k].add(push[k]);
+    if (m.object.parent) { m.object.parent.updateWorldMatrix(true, false); m.object.parent.worldToLocal(target); }
+    m.object.position.x = target.x; m.object.position.z = target.z;
+  });
+  return touched;
 }
 `;
 
@@ -5018,6 +5059,14 @@ export interface TrackStream {
    * — how rivals (three/race.ts), traffic or a ghost car are put on the road.
    */
   poseAt: (distance: number) => TrackPose | null;
+  /**
+   * Lay the course again from its first piece, at distance 0, with the origin back at 0 — what Play again needs: without
+   * it the next race began where the last one finished, so a race with a finish line was over at GO. startPose is the
+   * start again afterwards; put the player's vehicle there.
+   */
+  reset: () => void;
+  /** Called after reset(), once the first pieces are laid again — put the player's vehicle back on startPose here. */
+  onReset?: () => void;
   dispose: () => void;
   /** Called for every new piece — spawn your own traffic, coins or scenery with the per-loop rng. */
   onSegment?: (segment: TrackSegment, rand: () => number) => void;
@@ -5126,6 +5175,7 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     root, plan, segments, startPose: { ...pose },
     update: () => ({ distance: 0, lap: 0, segment: null, ended: false, rebased: null }),
     setPlan: () => false,
+    reset: () => undefined,
     stats: () => ({ created, alive: segments.length }),
     poseAt: (distance) => {
       for (const sg of segments) {
@@ -5344,6 +5394,19 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
   // The first pieces exist before the first frame, so the start screen shows a road.
   for (let i = 0; i < ahead + 1; i++) if (!spawn()) break;
   let lastCheckpoint = -1;
+  const firstStart = { ...stream.startPose };
+  stream.reset = () => {
+    while (segments.length) segments.shift()!.dispose();
+    origin.x = 0; origin.z = 0;
+    pose = { x: 0, z: 0, heading: 0, y: 0 };
+    cursor = 0; loop = 0; serial = 0; distance = 0; ended = false;
+    currentSerial = -1; sealedAt = -1; lastCheckpoint = -1;
+    loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
+    stream.startPose = { ...firstStart };
+    syncGround();
+    for (let i = 0; i < ahead + 1; i++) if (!spawn()) break;
+    stream.onReset?.();
+  };
 
   stream.update = (player, carry = []) => {
     let rebased: THREE.Vector3 | null = null;

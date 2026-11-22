@@ -2917,6 +2917,43 @@ export function sweepWorldCapsules(
   }
   return safe;
 }
+
+/** One moving thing for keepApart: its object, how wide it is (a circle on the ground) and whether it may be pushed. */
+export interface Mover { object: THREE.Object3D; radius: number; fixed?: boolean }
+
+/**
+ * NOTHING PASSES THROUGH ANYTHING ELSE (admin 2026-11-22: "jab bhi 2 object takrayenge to ek dusre ke aar paar nahi jane
+ * chahiye, takkar honi chahiye"). Call once per frame with every moving thing - the player, cars, enemies, animals, balls:
+ * two that overlap on the ground are pushed apart along the line between them (a fixed one does not move; two free ones
+ * share the push). Works whatever their parents are: positions are compared in world space and written back in each
+ * object's own parent frame. Returns how many pairs touched, so a game can play a bump sound or take damage on contact.
+ */
+export function keepApart(movers: readonly Mover[]): number {
+  const at = movers.map((m) => m.object.getWorldPosition(new THREE.Vector3()));
+  const push = movers.map(() => new THREE.Vector3());
+  let touched = 0;
+  for (let i = 0; i < movers.length; i++) {
+    for (let j = i + 1; j < movers.length; j++) {
+      const a = movers[i], b = movers[j];
+      if (a.fixed && b.fixed) continue;
+      let dx = at[j].x - at[i].x, dz = at[j].z - at[i].z;
+      const reach = a.radius + b.radius, d = Math.hypot(dx, dz);
+      if (d >= reach) continue;
+      if (d < 1e-6) { dx = 1; dz = 0; } else { dx /= d; dz /= d; }
+      const overlap = reach - d, shareA = a.fixed ? 0 : b.fixed ? 1 : 0.5, shareB = 1 - shareA;
+      push[i].x -= dx * overlap * shareA; push[i].z -= dz * overlap * shareA;
+      push[j].x += dx * overlap * shareB; push[j].z += dz * overlap * shareB;
+      touched++;
+    }
+  }
+  movers.forEach((m, k) => {
+    if (!push[k].x && !push[k].z) return;
+    const target = at[k].add(push[k]);
+    if (m.object.parent) { m.object.parent.updateWorldMatrix(true, false); m.object.parent.worldToLocal(target); }
+    m.object.position.x = target.x; m.object.position.z = target.z;
+  });
+  return touched;
+}
 `;
 
 const OBJECTS = `import * as THREE from 'three';

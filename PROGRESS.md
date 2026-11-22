@@ -103853,3 +103853,9 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 
 - `play/openWorld.ts`: MAX_REGIONS 100; every place planned at once (spot + levelled ground), its city built only within BUILD_AHEAD (1.5 km), one per frame; golden-angle √n spiral with dry-ground search; `OpenWorld.places` lists all. The rule: bigger = more regions (never sizeMeters), duplicate = copies. `MAX_PLACES` 100. Tests: aUniverseOfMaps, the 100-region headless test; Chromium: 60-place universe, start screen 2.1 s, 0 errors.
 - Q-3249 queued: the claim audit called a typechecked build "no typecheck ran".
+
+## 2026-11-22 — Nothing passes through anything (Q-3251, admin: "do object takrayenge to aar paar nahi jane chahiye")
+- Root cause: city traffic and the crowd compared world positions with plan coordinates, so on the open-world map (city away from the origin) cars drove through the hero and people walked through him.
+- citytraffic.ts / citypeople.ts read positions in the city's frame; traffic.pushOut called every frame by play/openWorld.ts for the player or their car.
+- collision.ts gains keepApart(movers) for any two moving things; GAME_COLLISION_RULE (gameCollisionRule.ts) said in GAME_KIT_RULE, the seed handoff and projectGrowthRules.
+- Test: tests/twoThingsNeverPassThrough.test.ts (reversion of inCity fails 2 tests). Traffic-vs-traffic was measured already clean; locked, not changed.

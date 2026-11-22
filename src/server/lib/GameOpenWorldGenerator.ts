@@ -515,6 +515,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         locals[i].position.set(at.x - t.centre.x, at.y - t.centre.y, at.z - t.centre.z);
         t.traffic?.update(delta, seated ? [locals[i], seated] : [locals[i]]);
         t.people?.update(delta, [locals[i]]);
+        // ⛔ NOTHING PASSES THROUGH A VEHICLE (admin 2026-11-22: "jab bhi 2 object takrayenge to aar paar nahi jane chahiye"):
+        // the player on foot — or the car they drive — is pushed out of any traffic car it ran into, every frame.
+        if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
       });
     },
     dispose() {

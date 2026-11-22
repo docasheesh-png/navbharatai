@@ -62,6 +62,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "சிறிதாக்கு",
     centreMap: "என் இடம்",
     editControls: "கட்டுப்பாடுகளைத் திருத்து", editControlsHint: "நகர்த்த ஒரு கட்டுப்பாட்டை இழுக்கவும்", smaller: "சிறியது", bigger: "பெரியது", controlsOpacity: "ஒளிபுகுதன்மை", done: "முடிந்தது",
+    joystick: "ஜாய்ஸ்டிக்", fixedJoystick: "நிலையான ஜாய்ஸ்டிக்", editControlsMore: "அளவை மாற்ற பிஞ்ச் செய்யவும் · அம்புக்குறி விசைகள் நகர்த்தும், + / − அளவை மாற்றும்",
+    controlsShrunk: "இந்தத் திரையில் பொருந்த கட்டுப்பாடுகள் சிறியதாக்கப்பட்டன",
   },
   // Telugu
   te: {
@@ -104,6 +106,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "చిన్నది చేయి",
     centreMap: "నా స్థానం",
     editControls: "కంట్రోల్స్ మార్చండి", editControlsHint: "జరపడానికి కంట్రోల్‌ను లాగండి", smaller: "చిన్నది", bigger: "పెద్దది", controlsOpacity: "పారదర్శకత", done: "పూర్తయింది",
+    joystick: "జాయ్‌స్టిక్", fixedJoystick: "స్థిర జాయ్‌స్టిక్", editControlsMore: "పరిమాణం మార్చడానికి పించ్ చేయండి · బాణం కీలు జరుపుతాయి, + / − పరిమాణం మారుస్తాయి",
+    controlsShrunk: "ఈ స్క్రీన్‌కు సరిపోయేలా కంట్రోల్స్ చిన్నవి చేయబడ్డాయి",
   },
   // Bangla
   bn: {
@@ -146,6 +150,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "ছোট করুন",
     centreMap: "আমার জায়গা",
     editControls: "কন্ট্রোল সাজান", editControlsHint: "সরাতে কন্ট্রোলটি টেনে আনুন", smaller: "ছোট", bigger: "বড়", controlsOpacity: "স্বচ্ছতা", done: "হয়ে গেছে",
+    joystick: "জয়স্টিক", fixedJoystick: "স্থির জয়স্টিক", editControlsMore: "আকার বদলাতে পিঞ্চ করুন · তীর কী দিয়ে সরান, + / − দিয়ে আকার বদলান",
+    controlsShrunk: "এই স্ক্রিনে আঁটাতে কন্ট্রোল ছোট করা হয়েছে",
   },
   // Marathi
   mr: {
@@ -188,6 +194,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "लहान करा",
     centreMap: "माझी जागा",
     editControls: "कंट्रोल्स बदला", editControlsHint: "हलवण्यासाठी कंट्रोल ओढा", smaller: "लहान", bigger: "मोठे", controlsOpacity: "पारदर्शकता", done: "झाले",
+    joystick: "जॉयस्टिक", fixedJoystick: "स्थिर जॉयस्टिक", editControlsMore: "आकार बदलण्यासाठी पिंच करा · बाण कळांनी हलवा, + / − ने आकार बदला",
+    controlsShrunk: "या स्क्रीनवर बसावेत म्हणून कंट्रोल्स लहान केले",
   },
   // Gujarati
   gu: {
@@ -230,6 +238,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "નાનું કરો",
     centreMap: "મારી જગ્યા",
     editControls: "કંટ્રોલ્સ બદલો", editControlsHint: "ખસેડવા માટે કંટ્રોલને ખેંચો", smaller: "નાનું", bigger: "મોટું", controlsOpacity: "પારદર્શકતા", done: "થઈ ગયું",
+    joystick: "જોયસ્ટિક", fixedJoystick: "સ્થિર જોયસ્ટિક", editControlsMore: "કદ બદલવા પિંચ કરો · તીર કી વડે ખસેડો, + / − વડે કદ બદલો",
+    controlsShrunk: "આ સ્ક્રીનમાં સમાય તે માટે કંટ્રોલ્સ નાના કર્યા",
   },
   // Kannada
   kn: {
@@ -272,6 +282,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "ಚಿಕ್ಕದು ಮಾಡಿ",
     centreMap: "ನನ್ನ ಜಾಗ",
     editControls: "ಕಂಟ್ರೋಲ್‌ಗಳನ್ನು ಬದಲಿಸಿ", editControlsHint: "ಸರಿಸಲು ಕಂಟ್ರೋಲ್ ಅನ್ನು ಎಳೆಯಿರಿ", smaller: "ಚಿಕ್ಕದು", bigger: "ದೊಡ್ಡದು", controlsOpacity: "ಪಾರದರ್ಶಕತೆ", done: "ಮುಗಿಯಿತು",
+    joystick: "ಜಾಯ್‌ಸ್ಟಿಕ್", fixedJoystick: "ಸ್ಥಿರ ಜಾಯ್‌ಸ್ಟಿಕ್", editControlsMore: "ಗಾತ್ರ ಬದಲಿಸಲು ಪಿಂಚ್ ಮಾಡಿ · ಬಾಣದ ಕೀಲಿಗಳು ಸರಿಸುತ್ತವೆ, + / − ಗಾತ್ರ ಬದಲಿಸುತ್ತವೆ",
+    controlsShrunk: "ಈ ಪರದೆಗೆ ಹೊಂದುವಂತೆ ಕಂಟ್ರೋಲ್‌ಗಳನ್ನು ಚಿಕ್ಕದು ಮಾಡಲಾಗಿದೆ",
   },
   // Malayalam
   ml: {
@@ -314,6 +326,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "ചെറുതാക്കൂ",
     centreMap: "എന്റെ സ്ഥലം",
     editControls: "കൺട്രോളുകൾ മാറ്റുക", editControlsHint: "നീക്കാൻ കൺട്രോൾ വലിക്കുക", smaller: "ചെറുത്", bigger: "വലുത്", controlsOpacity: "സുതാര്യത", done: "കഴിഞ്ഞു",
+    joystick: "ജോയ്‌സ്റ്റിക്", fixedJoystick: "സ്ഥിര ജോയ്‌സ്റ്റിക്", editControlsMore: "വലുപ്പം മാറ്റാൻ പിഞ്ച് ചെയ്യുക · ആരോ കീകൾ നീക്കും, + / − വലുപ്പം മാറ്റും",
+    controlsShrunk: "ഈ സ്ക്രീനിൽ ഒതുങ്ങാൻ കൺട്രോളുകൾ ചെറുതാക്കി",
   },
   // Punjabi (Gurmukhi)
   pa: {
@@ -356,6 +370,8 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "ਛੋਟਾ ਕਰੋ",
     centreMap: "ਮੇਰੀ ਜਗ੍ਹਾ",
     editControls: "ਕੰਟਰੋਲ ਬਦਲੋ", editControlsHint: "ਹਿਲਾਉਣ ਲਈ ਕੰਟਰੋਲ ਨੂੰ ਖਿੱਚੋ", smaller: "ਛੋਟਾ", bigger: "ਵੱਡਾ", controlsOpacity: "ਪਾਰਦਰਸ਼ਤਾ", done: "ਹੋ ਗਿਆ",
+    joystick: "ਜੌਇਸਟਿਕ", fixedJoystick: "ਸਥਿਰ ਜੌਇਸਟਿਕ", editControlsMore: "ਆਕਾਰ ਬਦਲਣ ਲਈ ਪਿੰਚ ਕਰੋ · ਤੀਰ ਕੁੰਜੀਆਂ ਨਾਲ ਹਿਲਾਓ, + / − ਨਾਲ ਆਕਾਰ ਬਦਲੋ",
+    controlsShrunk: "ਇਸ ਸਕ੍ਰੀਨ ਵਿੱਚ ਪੂਰੇ ਆਉਣ ਲਈ ਕੰਟਰੋਲ ਛੋਟੇ ਕੀਤੇ ਗਏ",
   },
   // Odia
   or: {
@@ -398,5 +414,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomOut: "ଛୋଟ କରନ୍ତୁ",
     centreMap: "ମୋ ସ୍ଥାନ",
     editControls: "କଣ୍ଟ୍ରୋଲ ବଦଳାନ୍ତୁ", editControlsHint: "ଘୁଞ୍ଚାଇବାକୁ କଣ୍ଟ୍ରୋଲକୁ ଟାଣନ୍ତୁ", smaller: "ଛୋଟ", bigger: "ବଡ଼", controlsOpacity: "ସ୍ୱଚ୍ଛତା", done: "ହୋଇଗଲା",
+    joystick: "ଜୟଷ୍ଟିକ", fixedJoystick: "ସ୍ଥିର ଜୟଷ୍ଟିକ", editControlsMore: "ଆକାର ବଦଳାଇବାକୁ ପିଞ୍ଚ କରନ୍ତୁ · ତୀର କି ଘୁଞ୍ଚାଏ, + / − ଆକାର ବଦଳାଏ",
+    controlsShrunk: "ଏହି ସ୍କ୍ରିନରେ ଖାପ ଖାଇବାକୁ କଣ୍ଟ୍ରୋଲ ଛୋଟ କରାଗଲା",
   },
 };

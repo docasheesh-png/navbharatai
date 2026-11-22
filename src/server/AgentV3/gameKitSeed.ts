@@ -404,11 +404,11 @@ export const RACE_ROAD_RULE = '🏁 THIS RACE STARTS ON THE ROAD LIBRARY (<Racin
   + ' its project path, laps → TRACK.laps, its size → TRACK.size (metres), the other direction → TRACK.reverse. The game makes it the ground,'
   + ' reads the racing line from the road and runs laps, the position and the rivals on it — or says ON SCREEN why it cannot (then pass TRACK.line'
   + ' as [x, z] points, or TRACK.roadNames, and tell the user; never fake a line). "Wapas library wala road" → TRACK.model: null.'
-  + ' (3) THE LIBRARY ROAD: "track / road bada karo", "lambi race" → raise finishKm (finishKm={null} for a road that never ends); "aur gaadiyan"'
-  + ' → opponents (0–7); a course of their own design → the plan prop (createRacingRoadPlan, or a TrackPlan of pieces).'
+  + ' (3) THE LIBRARY ROAD: "track / road bada karo", "lambi race" → raise finishKm (finishKm={null} for a road that never ends); "race chhoti karo"'
+  + ' → lower finishKm; "aur gaadiyan" / "kam gaadiyan" → opponents (0–7); a course of their own design → the plan prop (createRacingRoadPlan, or a TrackPlan of pieces).'
   + ' (4) ANYTHING ELSE — weather, time of day, camera, HUD, rules, sounds, colours, a new mode — change it in code as asked: edit'
   + ' src/game/RacingRoadGame.tsx itself where its props do not reach. Never refuse or water down a clear request because the library lacks it,'
-  + ' never swap the user\'s car or track for the library\'s without saying so, and never rebuild what a prop or these two files already do.'
+  + ' never swap the user\'s car or track for the library\'s without saying so, and where a prop or these two files already do the asked change, use them.'
   + ' If a request can mean two things (which car, which part), ask one short question instead of guessing.';
 
 /**

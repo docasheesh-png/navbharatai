@@ -113,6 +113,10 @@ describe('🔓 the race rule is a map of paths, not a cage', () => {
     expect(RACE_ROAD_RULE).toMatch(/only the STARTING POINT — anything the user clearly asks about the race is done/);
     expect(RACE_ROAD_RULE).not.toMatch(/Never hand-build a second track/);
     expect(RACE_ROAD_RULE).toMatch(/raise finishKm/);
+    // No flat ban on a change the user asks for (rule audit #4437): shorter is as valid as longer.
+    expect(RACE_ROAD_RULE).toMatch(/"race chhoti karo"\s*→ lower finishKm/);
+    expect(RACE_ROAD_RULE).not.toMatch(/shorten the road|Never hand-build|never build a second/i);
+    for (const ban of RACE_ROAD_RULE.match(/[Nn]ever [^,.;]*/g) ?? []) expect(ban).toMatch(/^[Nn]ever (?:ends|refuse|swap|fake)/);
   });
   it('names each path: the car file and its fields, an attached or library model, the track file, laps, and everything else in code', () => {
     for (const part of ['src/game/car.ts', 'CAR.color', 'CAR.tuning', 'CAR.model', 'CAR.modelYaw: 180', '[USER MODELS ADDED]', 'add_library_models first',

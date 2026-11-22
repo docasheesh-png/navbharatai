@@ -4115,7 +4115,7 @@ const FILES: Record<string, string> = {
   [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'racingroadgame', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**

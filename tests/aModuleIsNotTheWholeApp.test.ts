@@ -160,7 +160,8 @@ describe('the wiring', () => {
     expect(route).not.toContain("type === 'preview' && !moduleAwaitsShell");
     // …and every reader of the prediction yields to it (`shellStillAwaited`).
     expect(route).toContain('const awaitsShellNow = (): string | null => shellStillAwaited(moduleAwaitsShell, lastPreviewUrl);');
-    expect(route).toContain('!isImportTurn && !abort.signal.aborted && !awaitsShellNow()) {');
+    // Since Q-3237 phase 2 the no-preview gate is the phase module's own facts; the route passes awaitsShellNow() into it.
+    expect(route).toContain('importTurn: isImportTurn, aborted: abort.signal.aborted, awaitingShell: !!awaitsShellNow(),');
     // The platform still does NOT start a preview the module was told not to publish.
     expect(route).toContain('awaitingShell: moduleAwaitsShell,');
   });

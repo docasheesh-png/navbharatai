@@ -752,6 +752,18 @@ export function claimCorrection(contradictions: readonly ClaimContradiction[]): 
   return ['', '⚠️ Correction from NavBharatAI itself:', ...lines].join('\n');
 }
 
+/**
+ * ⚠️ THE CORRECTION IS READ BEFORE THE CLAIM, NOT AFTER IT (failedbr #2487, Q-3244). The summary opened "🎉 GTA Style Open
+ * World 3D Game Tayyar Hai! … Yeh game poore taur par functional hai", ran for forty lines, and only its last line said the
+ * game had never been played. A person reads the headline and stops. So the same measured facts now ALSO open the reply,
+ * in one short line, and the full correction stays at the end where each claim is named. PURE.
+ */
+export function claimHeadline(contradictions: readonly ClaimContradiction[]): string {
+  if (!contradictions || contradictions.length === 0) return '';
+  const facts = [...new Set(contradictions.map((c) => c.measured.trim()).filter(Boolean))];
+  return `⚠️ Not verified yet: ${facts.join('; ')}. The summary below says more than NavBharatAI could check — see the correction at the end.\n\n`;
+}
+
 /** The admin-facing one-liner. Pure. */
 export function claimAuditSummary(contradictions: readonly ClaimContradiction[]): string {
   return `The build summary made ${contradictions.length} claim(s) the platform's own measurements contradict: `

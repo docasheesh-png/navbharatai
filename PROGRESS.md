@@ -103875,3 +103875,10 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - citytraffic.ts / citypeople.ts read positions in the city's frame; traffic.pushOut called every frame by play/openWorld.ts for the player or their car.
 - collision.ts gains keepApart(movers) for any two moving things; GAME_COLLISION_RULE (gameCollisionRule.ts) said in GAME_KIT_RULE, the seed handoff and projectGrowthRules.
 - Test: tests/twoThingsNeverPassThrough.test.ts (reversion of inCity fails 2 tests). Traffic-vs-traffic was measured already clean; locked, not changed.
+## 2026-11-22 — "City size badh kyu nahi raha??" (failedbr #2494 / #2495, Q-3270 … Q-3276; Q-3277 open)
+- Q-3270: the kit refresh was blocked whole by a read-back missing 5 kit files; `planKitRefreshAgainstSandbox` plans on the sandbox's own contents (re-plans until every file it writes was read; kit files missing from the copy are looked for). This is why #2494 had no lands/joinTo and #2495 an hour later did.
+- Q-3271: `gameWorldRule(openWorld.ts)` states only what the project's own map file can do (lands, joinTo, custom, spreadMeters, max regions), naming the rest as CANNOT.
+- Q-3272: "shehar bada karo / city ka size badhao / city ko copy kar ke jodo" grows ONE city with joinTo tiles, done by the platform (`worldTurn.worldWishAtTurnStart`, one route call); unclear → asked, nothing changed.
+- Q-3273: `WORLD.spreadMeters` (kit) honours "map 40km*40km"; set by the platform or declined with the reason.
+- Q-3274: a new feature claiming to grow the map is refused at the write with the one real path. Q-3275: claimAudit catches map size / place-count claims the turn did not produce. Q-3276: 'grassland' land (open field, no trees).
+- Test: tests/theCityReallyGrows.test.ts (headless kit: 25-tile city, 40 km spread, grassland). Kit history regenerated (4 new versions).

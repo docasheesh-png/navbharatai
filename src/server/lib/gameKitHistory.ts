@@ -452,7 +452,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6a90dd423b1c14c2a58686c2582aeb961edb64c71516261db2d4b082a74b361f",
     "bd8e42097665d32f0d6970f2e847469dfa97e47d4eca60b1a5c18881c2af258e",
     "4cdf83876f25a2caa36481a87dd55d628d164d44c48f3b59b5f0569e8e77b5ac",
-    "7552efae1de5ff5c985218d9ad691aaeb3ca74260a96a7f1e862621429d5715f"
+    "7552efae1de5ff5c985218d9ad691aaeb3ca74260a96a7f1e862621429d5715f",
+    "4b7be6b490e08f39becc4e86fb5bb8f75e19c332b6104c7687c176bb677a554c"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f"

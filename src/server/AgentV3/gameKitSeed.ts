@@ -361,7 +361,11 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
   + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land). "Isi map ko'
   + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
-  + ' the original. Never build a place by hand beside the list, and never replace the map to make it bigger.';
+  + ' the original. A MAP THE USER ATTACHED (a .glb / .gltf / .obj, loose or in a .zip — it lands at public/models/<name>.glb) and asks'
+  + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'
+  + ' across, default 400); the map loads it when the player comes near and joins it by road. An .fbx or a game-engine project cannot be'
+  + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
+  + ' map to make it bigger.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

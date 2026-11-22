@@ -27,6 +27,7 @@ import { createCity, planCity, type City, type CityOptions } from '../three/city
 import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
 import { createCar } from '../three/objects';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
@@ -48,7 +49,7 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
 }
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
-export type RegionKind = 'city' | 'town' | 'village' | LandKind;
+export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom';
 /** A LAND, not a settlement: a desert, a jungle, mountains, snow or a beach laid on part of the map (no buildings). */
 export type LandKind = 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
 const LAND_BIOME: Record<LandKind, LandBiome> = { desert: 'desert', jungle: 'forest', mountain: 'mountain', snow: 'snow', beach: 'beach' };
@@ -75,6 +76,24 @@ export interface WorldRegion {
    * same ground level, one continuous bigger city. Without toward, it takes a free side of the city at random.
    */
   joinTo?: string;
+  /**
+   * A MAP THE USER GAVE (kind 'custom'): the file name of their model in public/models ("kan" or "public/models/kan.glb") —
+   * any .glb/.gltf/.obj they attached lands there. It stands on its own levelled ground, sized to size metres across.
+   */
+  model?: string;
+  /** A user map only: how wide it stands, in metres (default 400). */
+  size?: number;
+}
+
+/** A user's own map on the world (a 'custom' region): where it stands, and the model it loads when the player comes near. */
+export interface OpenWorldUserMap {
+  readonly id: string;
+  readonly model: string;
+  readonly centre: { x: number; y: number; z: number };
+  readonly size: number;
+  /** 'waiting' until the player comes near, then 'loaded' — or 'failed' with the reason (a missing or unreadable file). */
+  readonly status: 'waiting' | 'loading' | 'loaded' | 'failed';
+  readonly reason?: string;
 }
 
 /** A land on the map (a desert, a jungle, mountains, snow, a beach) — no buildings, just the land itself. */
@@ -117,6 +136,8 @@ export interface OpenWorld {
   readonly regions: OpenWorldCity[];
   /** Every land on the map (desert, jungle, mountain, snow, beach regions), in the order listed. */
   readonly lands: OpenWorldLand[];
+  /** The user's own maps on the world ('custom' regions), each loaded when the player comes near it. */
+  readonly userMaps: ReadonlyArray<OpenWorldUserMap>;
   /** The highways joining every place and land (centre lines in WORLD metres, with their heights). */
   readonly highways: ReadonlyArray<ReadonlyArray<{ x: number; y: number; z: number }>>;
   /**
@@ -140,6 +161,17 @@ export interface OpenWorld {
   frame(ctx: GameContext, delta: number): void;
   dispose(): void;
 }
+
+/** Where a user's map file is served from: a bare name is public/models/<name>.glb; a path is used as given (without public/). */
+export function userMapUrl(model: string): string {
+  const m = String(model || '').trim().replace(/^\/+/, '');
+  const path = m.includes('/') ? m.replace(/^public\//, '') : 'models/' + m + (/\.(glb|gltf)$/i.test(m) ? '' : '.glb');
+  const base = (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL || '/';
+  return base.replace(/\/+$/, '/') + path;
+}
+/** Load a user's map model (GLB/GLTF). Replaceable in tests. */
+export let loadUserMap = (model: string): Promise<THREE.Object3D> => new GLTFLoader().loadAsync(userMapUrl(model)).then((g) => g.scene);
+export function setUserMapLoader(loader: (model: string) => Promise<THREE.Object3D>): void { loadUserMap = loader; }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
   const { patchSize = 96, city: cityOption = false, regions: regionList, ...mapOptions } = options;
@@ -189,6 +221,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const taken: Array<{ x: number; z: number; r: number }> = [];
   const seenIds = new Set<string>();
   const landList: OpenWorldLand[] = [];
+  const userMaps: Array<{ id: string; model: string; centre: { x: number; y: number; z: number }; size: number; status: OpenWorldUserMap['status']; reason?: string; root?: THREE.Object3D }> = [];
   const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
   // 🌌 A UNIVERSE OF PLACES (admin 2026-11-22: "mujhe chahiye 10—100 maps jod kar bahut bada universe bhi bana sake"). Up to
   // MAX_REGIONS places and lands. Every place is PLANNED up front — its spot on the map and its levelled ground, which are cheap
@@ -204,9 +237,28 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   let growSeed = 0x9e3779b9;
   const nextRandom = (): number => { growSeed = (Math.imul(growSeed ^ (growSeed >>> 15), 2246822519) + 0x6d2b79f5) | 0; return ((growSeed >>> 0) % 10000) / 10000; };
   for (const region of wanted) {
-    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length >= MAX_REGIONS) continue;
+    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
-    const n = planned.length + landList.length;
+    const n = planned.length + landList.length + userMaps.length;
+    // 🗺️ A MAP THE USER GAVE (admin 2026-11-22: "user khud ka map kan.zip ya koi aur format upload kar ke bole yeh bhi north add kar
+    // do — to user ka diya map bhi usi game me add ho jaye"). Planned like a land (toward, distance, clear of the others) on its
+    // own levelled ground; the model itself is loaded only when the player comes near, and a file that cannot be read is said.
+    if (region.kind === 'custom') {
+      const model = String(region.model || '').trim();
+      if (!model) { console.error('[world] the map "' + region.id + '" names no model file; it was left out.'); continue; }
+      const size = Math.min(4000, Math.max(40, Number(region.size) || 400)), r = size / 2;
+      const base = planned[0]?.centre ?? spawn;
+      const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
+      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 200, (size + 400) * Math.sqrt(n));
+      let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
+      for (let tries = 0; tries < 8 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+        far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
+      }
+      const y = map.world.levelGround(at.x, at.z, r, r, 60);
+      taken.push({ x: at.x, z: at.z, r });
+      userMaps.push({ id: region.id, model, centre: { x: at.x, y, z: at.z }, size, status: 'waiting' });
+      continue;
+    }
     // A LAND, not a place to build: laid on the map the way it was asked (toward, distance), clear of the places already there.
     if (isLandKind(region.kind)) {
       const r = Math.min(2000, Math.max(150, Number(region.radius) || 450));
@@ -330,7 +382,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // nearest one), each road running from the edge of one to the edge of the other. The land is cut and filled to it by the map
   // itself (world.addRoad), so a car can drive from any place to every other — across a universe of a hundred places — without
   // the road running out. Laid before the first frame, like the levelled ground.
-  const stops = [...planned.map((p) => ({ x: p.centre.x, z: p.centre.z, r: p.reach })), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) }))];
+  const stops = [...planned.map((p) => ({ x: p.centre.x, z: p.centre.z, r: p.reach })), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 }))];
   const roadGroup = new THREE.Group(); roadGroup.name = 'Highways';
   const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95 });
   const roadLines: Array<Array<{ x: number; y: number; z: number }>> = [];
@@ -390,6 +442,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   };
   return {
     map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
+    userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
     places: planned.map((p) => ({ id: p.region.id, kind: p.region.kind, centre: { x: p.centre.x, z: p.centre.z }, radius: p.reach, get built() { return p.built >= 0; } })),
     nearestRegion() {
       const at = playerWorld();
@@ -422,6 +475,21 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (const p of planned) {
         if (p.built >= 0) continue;
         if (Math.hypot(at.x - p.centre.x, at.z - p.centre.z) < p.reach + BUILD_AHEAD) { buildPlace(p); break; }
+      }
+      // A user's map is loaded when the player comes near it (once; a failure is said, never retried in a loop).
+      for (const m of userMaps) {
+        if (m.status !== 'waiting' || Math.hypot(at.x - m.centre.x, at.z - m.centre.z) > m.size / 2 + BUILD_AHEAD) continue;
+        m.status = 'loading';
+        loadUserMap(m.model).then((object) => {
+          // Sized to the ground it was given, standing on it, solid to walk and drive on.
+          const box = new THREE.Box3().setFromObject(object), w = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) || 1;
+          object.scale.multiplyScalar(m.size / w);
+          const fit = new THREE.Box3().setFromObject(object);
+          object.position.set(m.centre.x - chunks.origin.x - (fit.min.x + fit.max.x) / 2, m.centre.y - fit.min.y, m.centre.z - chunks.origin.z - (fit.min.z + fit.max.z) / 2);
+          object.traverse((o) => { if ((o as THREE.Mesh).isMesh) markWorldCollider(o, 'solid'); });
+          object.name = 'User map ' + m.id;
+          ctx.scene.add(object); roots.push(object as THREE.Group); m.root = object; m.status = 'loaded';
+        }).catch((error) => { m.status = 'failed'; m.reason = String(error instanceof Error ? error.message : error).slice(0, 200); console.error('[world] the map "' + m.id + '" could not be loaded from ' + userMapUrl(m.model) + ': ' + m.reason); });
       }
       // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
       const seated = ctx.vehicles.seated;

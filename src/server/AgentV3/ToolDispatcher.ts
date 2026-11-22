@@ -3091,14 +3091,15 @@ export class ToolDispatcher {
     const sources: EvalSourceFile[] = [];
     try {
       // Bound the listing (15s) so a stalled sandbox can't hang the gate before any read starts.
-      files = await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles');
+      // NavBharatAI's own temporary files are never graded as the user's code (failedbr #2496: our asset proof's
+      // 127.0.0.1 test server was reported as the app's "hardcoded localhost URL" and "hardcoded server port") —
+      // dropped from the listing itself, so no reader of this snapshot ever sees one.
+      files = (await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles')).filter((p) => !isPlatformScratchPath(p));
       // A folder the app does not build is decided BEFORE the 300-file cap (Q-3201): ~480 vendored reference files
       // used to crowd the real app out of the snapshot.
       let skip: (path: string) => boolean = () => false;
       if (planSkip) { try { skip = await planSkip(files); } catch { skip = () => false; } }
-      // NavBharatAI's own temporary files are never graded as the user's code (failedbr #2496: our asset proof's
-      // 127.0.0.1 test server was reported as the app's "hardcoded localhost URL" and "hardcoded server port").
-      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p) && !skip(p) && !isPlatformScratchPath(p)).slice(0, 300);
+      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p) && !skip(p)).slice(0, 300);
       // PARALLEL + per-file timeout (audit P0-C): 300 sequential reads after the app is already
       // built was the #1 "fully-built app dies at the readiness gate" cause. Read in bounded batches,
       // each capped at 5s; a slow/unreadable file is dropped, never breaks evaluate.

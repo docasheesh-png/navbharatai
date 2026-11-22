@@ -660,6 +660,8 @@ const EN = {
   map: 'Map', minimap: 'Minimap', openMap: 'Open map', mapHint: 'Drag to move · pinch or scroll to zoom · tap to mark a spot',
   clearMarker: 'Clear marker', zoomIn: 'Zoom in', zoomOut: 'Zoom out', centreMap: 'My position',
   editControls: 'Edit controls', editControlsHint: 'Drag a control to move it', smaller: 'Smaller', bigger: 'Bigger', controlsOpacity: 'Opacity', done: 'Done',
+  joystick: 'Joystick', fixedJoystick: 'Fixed joystick', editControlsMore: 'Pinch to resize · arrow keys move, + / − resize',
+  controlsShrunk: 'Controls made smaller to fit this screen',
 };
 
 export type StringKey = keyof typeof EN;
@@ -694,6 +696,8 @@ const HI: Record<StringKey, string> = {
   map: 'नक्शा', minimap: 'छोटा नक्शा', openMap: 'नक्शा खोलें', mapHint: 'खींचकर घुमाएँ · पिंच या स्क्रॉल से ज़ूम करें · टैप करके जगह चिह्नित करें',
   clearMarker: 'निशान हटाएँ', zoomIn: 'ज़ूम इन', zoomOut: 'ज़ूम आउट', centreMap: 'मेरी जगह',
   editControls: 'कंट्रोल्स बदलें', editControlsHint: 'कंट्रोल को खींचकर नई जगह रखें', smaller: 'छोटा', bigger: 'बड़ा', controlsOpacity: 'पारदर्शिता', done: 'हो गया',
+  joystick: 'जॉयस्टिक', fixedJoystick: 'स्थिर जॉयस्टिक', editControlsMore: 'पिंच करके आकार बदलें · तीर कुंजियों से खिसकाएँ, + / − से आकार बदलें',
+  controlsShrunk: 'इस स्क्रीन में समाने के लिए कंट्रोल्स छोटे किए गए',
 };
 
 const INDIC: Record<Exclude<GameLanguage, 'en' | 'hi'>, Record<StringKey, string>> = {

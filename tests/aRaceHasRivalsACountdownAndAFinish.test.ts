@@ -104,6 +104,35 @@ describe('🔴 the race', () => {
     expect(t.heard.some(([e]) => e === 'RACE_FINISHED')).toBe(false);
     t.done();
   });
+  // 🔴 failedbr-free, found while building the racing free hand (2026-11-22): the distance the race reads comes from the
+  // ROAD (stream.update), and the road kept its distance across Play again — so a race with a finish line was over at GO.
+  // This drives a real car object along the real streamed road, past a floating-origin rebase, finishes, plays again.
+  it('Play again lays the road again from its start: the next race reads distance 0, not the last finish', () => {
+    S.setStatus('playing');
+    const t = setup({ opponents: 1, countdown: 0, finishDistance: 1500 });
+    const car = new THREE.Object3D();
+    let resets = 0;
+    t.stream.onReset = () => { resets++; car.position.set(t.stream.startPose.x, t.stream.startPose.y, t.stream.startPose.z); };
+    car.position.set(t.stream.startPose.x, t.stream.startPose.y, t.stream.startPose.z);
+    let d = 0, rebased = false;
+    for (let i = 0; i < 4000 && t.race.status().phase !== 'finished'; i++) {
+      const ahead = t.stream.poseAt(d + 15);   // path points are metres apart: a bigger step moves the car past the next one
+      if (ahead) car.position.set(ahead.x, ahead.y, ahead.z);
+      const st = t.stream.update(car);
+      if (st.rebased) rebased = true;
+      d = st.distance;
+      t.race.update(1 / 20, d);
+    }
+    expect(t.race.status().phase).toBe('finished');
+    expect(rebased).toBe(true);                               // the hard case: the origin moved during the race
+    S.setStatus('playing');                                   // Play again (GAME_STARTED)
+    expect(resets).toBe(1);
+    const again = t.stream.update(car);
+    expect(again.distance).toBeLessThan(5);
+    for (let i = 0; i < 40; i++) t.race.update(1 / 20, t.stream.update(car).distance);
+    expect(t.race.status().phase).toBe('racing');            // not over at GO
+    t.done();
+  });
   it('a finite race ends at the line with ordered results, ends the round, and Play again runs it from the grid', () => {
     S.setStatus('playing');
     const t = setup({ opponents: 3, countdown: 1, finishDistance: 300 });
@@ -134,8 +163,10 @@ describe('the racing starter and the Hud use it', () => {
   it('RacingRoadGame races 3 rivals by default, holds the car at the line through the countdown, and stays endless', () => {
     const src = shell['src/game/RacingRoadGame.tsx'];
     expect(src).toMatch(/opponents = 3, finishKm = null/);
-    expect(src).toMatch(/race = createRace\(ctx\.scene, \{ stream, opponents, finishDistance: finishKm != null && finishKm > 0 \? finishKm \* 1000 : null \}\)/);
-    expect(src).toMatch(/if \(!race \|\| race\.canDrive\(\)\) drive = driveVehicle\(car, drive, ctx\.input\.axis\(\), dt\);/);
+    expect(src).toMatch(/race = createRace\(ctx\.scene, \{ stream: stream!, opponents, finishDistance: finishKm != null && finishKm > 0 \? finishKm \* 1000 : null \}\)/);
+    // On the user's own track model the same race runs for its laps (play/raceCustom.ts).
+    expect(src).toMatch(/race = createRace\(ctx\.scene, \{ stream: custom, opponents, finishDistance: custom\.laps \* custom\.length \}\)/);
+    expect(src.match(/if \(!race \|\| race\.canDrive\(\)\) drive = driveVehicle\(car, drive, ctx\.input\.axis\(\), dt, tuning\);/g)).toHaveLength(2);
     expect(src).toMatch(/'P' \+ standing\.position \+ '\/' \+ standing\.total/);
   });
   it('the Hud shows the countdown and the place, and lists a finished race\'s results on the end screen', () => {

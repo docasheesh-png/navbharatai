@@ -50,6 +50,7 @@
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
+import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
@@ -470,6 +471,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       : has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
+    // Two solid things meet and collide - never pass through each other (admin 2026-11-22).
+    has('generate_game_runtime') ? GAME_COLLISION_RULE : '',
     // The creator's Tune panel (admin 2026-11-21): numbers worth adjusting become sliders in the preview.
     has('generate_game_runtime') ? TUNING_RULE : '',
     // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
@@ -569,6 +572,8 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
+    // Every later turn of any game made on the kit: nothing passes through anything (admin 2026-11-22).
+    typeof files['src/game/core/loop.ts'] === 'string' ? GAME_COLLISION_RULE : '',
   ].filter(Boolean).join('\n\n');
 }
 

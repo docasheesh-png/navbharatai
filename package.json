@@ -110,7 +110,7 @@
   "devDependencies": {
     "@capacitor/android": "^8.5.3",
     "@capacitor/cli": "^8.5.3",
-    "@capacitor/ios": "^8.5.3",
+    "@capacitor/ios": "^8.6.2",
     "@csstools/postcss-cascade-layers": "^6.0.0",
     "@csstools/postcss-color-mix-function": "^4.0.14",
     "@csstools/postcss-oklab-function": "^5.0.16",

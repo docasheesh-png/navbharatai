@@ -383,7 +383,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "91add2f6fb4a3a53aa8c211eef4207e6e66019e8aaa64c16887dab5579672a5a",
     "64527f2013bf8fc45d4025926de0dcb9c2990b39187eee1ced5a9e7bda28c88c",
     "2d383896e653553b51df791673858bf920bfa45adcabf52082f6b29accebbed4",
-    "b9edc408541aa65f01ab10bb06fcc944a1d313513175d08c3b8b278310aa3204"
+    "b9edc408541aa65f01ab10bb06fcc944a1d313513175d08c3b8b278310aa3204",
+    "49418f1ab38dcf2056251498c03da0c7fb6819f9cf98f4ace0dcee1b9fa0c0f8"
   ],
   "src/game/core/swipe.ts": [
     "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
@@ -687,7 +688,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6dac5b20d3be57d8952df9896aed138a2ddf62c73531b69d0bfd8651c110b0ab",
     "94152bbea352e9ad6187e970552601e373e8b596c3bd9cd17c41b8d56a6c19fe",
     "16592f66e9cc3e26f4fe02b2cf2977c50651aefb1f607b360b7f677a2b0e12b5",
-    "6b13c9d45a13c23737c404940f42cd26b22c4e338edfb48ce492d1bc862fd443"
+    "6b13c9d45a13c23737c404940f42cd26b22c4e338edfb48ce492d1bc862fd443",
+    "06dff1cb46c93d8ec539985e02b99dca1753988f808b48dcc209356633b4e140"
   ],
   "src/game/ui/worldMap.ts": [
     "3767281a0741ee4e0f9723e51d4650b593f7b38aff265b5185f29f59deccb94f"

@@ -343,19 +343,18 @@ export const GAME_FEATURES_INDEX_FILE = 'src/game/features/index.ts';
  * rule maps the user's WISH to the smallest change that fulfils it, and is said on every turn of a game that has the file.
  */
 export const GAME_WORLD_FILE = 'src/game/world.ts';
-export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; kinds: city, town, village). Read what the user'
+export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; places: city, town, village; lands: desert, jungle, mountain, snow, beach). Read what the user'
   + ' WANTS, not the words: "map / zameen bada karo", "aur jagah chahiye", "ek aur shehar / gaon jodo", "duniya chhoti hai" → ADD one'
   + ' region per place asked for (several at once when they ask for several; a new id each; toward: north / east / … when they say where),'
   + ' and never edit or remove the regions already there. "Yeh shehar bada karo", "zyada traffic / log" → edit ONLY that region\'s own'
-  + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }). A different land (desert,'
-  + ' islands, mountains) → WORLD.style / seed. Up to 12 regions: at 12, say so and offer to make one of them bigger instead. Never'
-  + ' build a place by hand beside the list, and never replace the map to make it bigger.'
+  + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }).'
   // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
-  // "Jungle" and "Mountain" and the summary called them that. A name is not a land: say what the map can and cannot do.
-  + ' A region is ONLY a city, a town or a village — there is no desert, jungle, mountain, beach or snow region yet. If the user asks'
-  + ' for one, do NOT add a town and call it "Desert"/"Jungle"/"Mountain": add the places that ARE asked for and possible, and tell'
-  + ' the user plainly that a separate desert / jungle / mountain land cannot be added yet (the whole map\'s land can be changed'
-  + ' with WORLD.style instead) — then ask whether they want that.';
+  // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
+  + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','
+  + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). NEVER add a'
+  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 12 regions (places and lands'
+  + ' together): at 12, say so and offer to make one bigger instead. Never build a place by hand beside the list, and never replace'
+  + ' the map to make it bigger.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

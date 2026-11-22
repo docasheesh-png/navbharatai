@@ -203,6 +203,8 @@ import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './roads';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
+/** A land a game can lay on part of the map (setLand). */
+export type LandBiome = 'beach' | 'desert' | 'forest' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
 
 export interface AthreeWorldOptions {
@@ -288,6 +290,11 @@ export interface AthreeWorld {
   levelGround(x: number, z: number, halfX: number, halfZ: number, margin?: number): number;
   /** True on levelled ground: nothing grows there. */
   clearAt(x: number, z: number): boolean;
+  /**
+   * Make a round area of the map a different LAND (a desert, a forest, mountains, snow, a beach) — the colour, the plants and,
+   * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
+   */
+  setLand(x: number, z: number, radius: number, land: LandBiome): void;
   /** Every road, plaza, the race circuit and the runways (regions are built on demand). */
   roadNetwork(): RoadNetwork;
   /** The road under a place (on the paved width), or null. */
@@ -488,8 +495,30 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const t = terrainNoRoads(x, z);
     return withRoads ? roadsOf().carve(x, z, t) : t;
   }
+  // LAND PATCHES (admin 2026-11-21, failedbr #2488: "ek village, ek desert, ek jungle aur ek mountain" became three TOWNS named
+  // so). A round area of the map is given another land: biomeAt answers it inside (with a ragged edge, so it is not a circle),
+  // and mountains rise out of the ground there. Laid before the first frame, so the terrain, the plants and the colliders agree.
+  const lands: Array<{ x: number; z: number; r: number; land: LandBiome }> = [];
+  function landAt(x: number, z: number): { land: LandBiome; w: number } | null {
+    for (const l of lands) {
+      const d = Math.hypot(x - l.x, z - l.z);
+      if (d >= l.r * 1.25) continue;
+      const edge = l.r * (0.85 + 0.3 * fieldNoise(x, z, seed + 31, 2, Math.max(60, l.r / 2), 0));
+      if (d <= edge) return { land: l.land, w: 1 - smoothstep(edge * 0.55, edge, d) };
+    }
+    return null;
+  }
+  function setLand(x: number, z: number, radius: number, land: LandBiome): void {
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
+    lands.push({ x, z, r: Math.min(4000, Math.max(60, radius)), land });
+  }
   function heightAt(x: number, z: number): number {
     let t = naturalHeightAt(x, z);
+    if (lands.length) {
+      const l = landAt(x, z);
+      // Mountains rise from the land (higher towards the middle, ridged by noise), never out of the water.
+      if (l && l.land === 'mountain' && t > 2) t += l.w * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+    }
     for (const p of pads) {
       const d = Math.max(Math.abs(x - p.x) - p.hx, Math.abs(z - p.z) - p.hz);
       if (d >= p.margin) continue;
@@ -545,6 +574,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   function biomeAt(x: number, z: number): Biome {
     const h = heightAt(x, z) / vs;
     if (h < -1) return 'ocean';
+    if (lands.length && h >= 0) {
+      const l = landAt(x, z);
+      if (l && l.w > 0.15) return l.land === 'mountain' && h > snowLine ? 'snow' : l.land;
+    }
     if (h < 3) return 'beach';
     const ix = stretched ? x * k : x; const iz = stretched ? z * k : z;
     const moisture = fieldNoise(ix, iz, seed + 4, 4, 9000 / biomeScale, period) - style.aridity;
@@ -665,7 +698,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 

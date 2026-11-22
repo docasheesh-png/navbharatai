@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import type { GameContext } from '../Game';
 import { markWorldCollider } from '../three/collision';
 import { createAthreeMap, type AthreeMap, type AthreeMapOptions } from '../athree';
+import type { LandBiome } from '../athree/world';
 import { createCity, planCity, type City, type CityOptions } from '../three/city';
 import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
@@ -46,7 +47,11 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
 }
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
-export type RegionKind = 'city' | 'town' | 'village';
+export type RegionKind = 'city' | 'town' | 'village' | LandKind;
+/** A LAND, not a settlement: a desert, a jungle, mountains, snow or a beach laid on part of the map (no buildings). */
+export type LandKind = 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
+const LAND_BIOME: Record<LandKind, LandBiome> = { desert: 'desert', jungle: 'forest', mountain: 'mountain', snow: 'snow', beach: 'beach' };
+export function isLandKind(kind: unknown): kind is LandKind { return typeof kind === 'string' && kind in LAND_BIOME; }
 export type Compass = 'north' | 'north-east' | 'east' | 'south-east' | 'south' | 'south-west' | 'west' | 'north-west';
 export interface WorldRegion {
   /** A short unique name: 'old-town', 'harbour', 'hill-village'. */
@@ -58,9 +63,20 @@ export interface WorldRegion {
   distance?: number;
   /** Change this place: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }. */
   city?: RegionCity;
+  /** A land region only: how far it reaches from its centre, in metres (default 450). */
+  radius?: number;
+}
+
+/** A land on the map (a desert, a jungle, mountains, snow, a beach) — no buildings, just the land itself. */
+export interface OpenWorldLand {
+  readonly id: string;
+  readonly kind: LandKind;
+  /** Its centre in WORLD metres, and how far it reaches. */
+  readonly centre: { x: number; z: number };
+  readonly radius: number;
 }
 const COMPASS: Record<Compass, number> = { north: 0, 'north-east': Math.PI / 4, east: Math.PI / 2, 'south-east': (3 * Math.PI) / 4, south: Math.PI, 'south-west': (5 * Math.PI) / 4, west: (3 * Math.PI) / 2, 'north-west': (7 * Math.PI) / 4 };
-const REGION_PRESETS: Record<RegionKind, { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
+const REGION_PRESETS: Record<'city' | 'town' | 'village', { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
   city: { city: { blocksX: 4, blocksZ: 4, style: 'mixed' }, traffic: 12, people: 30, parkedCars: 4 },
   town: { city: { blocksX: 3, blocksZ: 3, style: 'town', maxFloors: 4 }, traffic: 6, people: 16, parkedCars: 3 },
   village: { city: { blocksX: 2, blocksZ: 2, style: 'town', maxFloors: 2, parks: 0.3 }, traffic: 2, people: 8, parkedCars: 1 },
@@ -89,6 +105,8 @@ export interface OpenWorld {
   readonly city: OpenWorldCity | null;
   /** Every place on the map, in the order listed. */
   readonly regions: OpenWorldCity[];
+  /** Every land on the map (desert, jungle, mountain, snow, beach regions), in the order listed. */
+  readonly lands: OpenWorldLand[];
   /** The place the player is in or nearest to, and how far its centre is. null in a world with no places. */
   nearestRegion(): { region: OpenWorldCity; distance: number } | null;
   /** Where the player starts: WORLD metres. */
@@ -153,10 +171,26 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const locals: THREE.Object3D[] = [];
   const taken: Array<{ x: number; z: number; r: number }> = [];
   const seenIds = new Set<string>();
+  const landList: OpenWorldLand[] = [];
   const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
   for (const region of wanted) {
-    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || towns.length >= 12) continue;
+    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || towns.length + landList.length >= 12) continue;
     seenIds.add(region.id);
+    // A LAND, not a place to build: laid on the map the way it was asked (toward, distance), clear of the places already there.
+    if (isLandKind(region.kind)) {
+      const r = Math.min(2000, Math.max(150, Number(region.radius) || 450));
+      const base = towns[0]?.centre ?? spawn;
+      const angle = region.toward !== undefined ? COMPASS[region.toward] : ((towns.length + landList.length) * 2.399963);
+      let far = Math.max(region.distance ?? 0, (towns[0]?.radius ?? 0) + r + 300);
+      let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
+      for (let tries = 0; tries < 6 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+        far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
+      }
+      map.world.setLand(at.x, at.z, r, LAND_BIOME[region.kind]);
+      taken.push({ x: at.x, z: at.z, r });
+      landList.push({ id: region.id, kind: region.kind, centre: at, radius: r });
+      continue;
+    }
     const preset = REGION_PRESETS[region.kind] || REGION_PRESETS.city;
     const { traffic: trafficOption, people: peopleOption, parkedCars = preset.parkedCars, ...own } = region.city || {};
     const cityOptions: CityOptions = { ...preset.city, seed: 11 + towns.length * 17, ...own };
@@ -222,7 +256,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
   };
   return {
-    map, spawn, playerWorld, city: town, regions: towns,
+    map, spawn, playerWorld, city: town, regions: towns, lands: landList,
     nearestRegion() {
       const at = playerWorld();
       let found: { region: OpenWorldCity; distance: number } | null = null;

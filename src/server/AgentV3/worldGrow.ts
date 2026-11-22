@@ -7,14 +7,14 @@
 // it is done. PURE: the route does the reading and the writing.
 import { parseRegions } from './growthGuard';
 
-export type PlaceKind = 'city' | 'town' | 'village';
-const KINDS: readonly PlaceKind[] = ['city', 'town', 'village'];
+export type PlaceKind = 'city' | 'town' | 'village' | 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
+const KINDS: readonly PlaceKind[] = ['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach'];
 /** The most places a map holds (play/openWorld.ts). */
 export const MAX_PLACES = 12;
 
 /** The request the library's "Add to game" sends for a map place (libraryThumbnails.addToGamePrompt). Exactly that shape. PURE. */
 export function mapPlaceAsked(prompt: string | null | undefined): PlaceKind | null {
-  const m = /\(library map place: "(city|town|village)"\)/.exec(String(prompt ?? ''));
+  const m = /\(library map place: "(city|town|village|desert|jungle|mountain|snow|beach)"\)/.exec(String(prompt ?? ''));
   return m && (KINDS as readonly string[]).includes(m[1]) ? (m[1] as PlaceKind) : null;
 }
 

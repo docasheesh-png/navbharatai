@@ -103843,3 +103843,8 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 ## 2026-11-22 — a completed Weak build is billed even when Surplus receipts do not settle (failedbr #2487; owner: "yahi to hamara revenue hai")
 
 - **Q-3247.** Root cause: `surplusBuildCharges` threw on ONE call without a valid receipt and the route absorbed ALL Surplus calls at ₹0; only a user Stop had an estimate (BR2279). Now: per-call settlement, and a completed Weak build (preview ran, own files, not a stop) bills the unsettled calls an estimate — recorded tokens × cheapest published Surplus rate × `tieredMarkupUsd`, capped at 10× cost, `SURPLUS_UNSETTLED_COST_ESTIMATED`. One helper for both billing points (`decideSurplusStopTokenFloor`). Kill switch `AGENTV3_BILL_SURPLUS_UNSETTLED_ESTIMATE=off`. #2487 would have been $0.64 (cost estimate $0.16). Owner decision recorded in ROUTING_AND_BILLING.md (2026-11-22). Open: why #2487's receipts did not settle.
+
+## 2026-11-22 — real lands on the open-world map: desert, jungle, mountains, snow, beach (failedbr #2488, Q-3243)
+
+- `setLand` in the Athree world (biome override inside a ragged-edged area; mountains rise from dry land), land region kinds in `play/openWorld.ts` (`OpenWorld.lands`), the map rule, worldGrow and five new Game Library map places. Places and lands share the 12-region limit. `tests/aDesertIsReallyADesert.test.ts` runs the real kit with the #2488 request; Chromium shows the mountain beside the city, 0 console errors.
+- Also in flight: #4426 (Weak billing estimate), #4427 (correction at the top), #4428 (build start bounded; the seed is not the builder's work).

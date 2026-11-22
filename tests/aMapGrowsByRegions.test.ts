@@ -125,13 +125,14 @@ describe('🗺️ the game\'s own map file, and the rule that grows it', () => {
 describe('📚 the library offers places for the map, beside its objects', () => {
   it('city, town and village are in the library under their own category, and can be searched', () => {
     const all = browseLibrary({ limit: 120 });
-    expect(all.categories.find((c) => c.category === 'map-places')?.count).toBe(3);
-    expect(browseLibrary({ category: 'map-places' }).rows.map((r) => r.id)).toEqual(['map-place:city', 'map-place:town', 'map-place:village']);
+    // + five lands since Q-3243 (failedbr #2488): desert, jungle, mountain, snow, beach.
+    expect(all.categories.find((c) => c.category === 'map-places')?.count).toBe(8);
+    expect(browseLibrary({ category: 'map-places' }).rows.map((r) => r.id)).toEqual(['map-place:city', 'map-place:town', 'map-place:village', 'map-place:desert', 'map-place:jungle', 'map-place:mountain', 'map-place:snow', 'map-place:beach']);
     expect(browseLibrary({ q: 'gaon' }).rows.map((r) => r.id)).toContain('map-place:village');
     expect(browseLibrary({ q: 'shehar' }).rows.map((r) => r.id)).toContain('map-place:city');
     expect(mapPlaceRows().every((r) => r.thumb === null)).toBe(true);
     // The models are all still there: one row per reviewed model, as before.
-    expect(all.total).toBe(libraryBrowseRows().length + 3);
+    expect(all.total).toBe(libraryBrowseRows().length + 8);
   });
 
   it('choosing a place sends a request for ONE more place that keeps the others; choosing a model is unchanged', () => {

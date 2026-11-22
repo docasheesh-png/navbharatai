@@ -692,7 +692,7 @@ function kitApiBlock(api: string): string {
 
 /** A turn whose words read as no particular kind of app (an edit, a fix) — not a request for a different app. */
 function turnNamesNoOtherApp(text: string): boolean {
-  try { return analyzeRequirementGaps(String(text ?? '')).domain === 'general'; } catch { return false; }
+  return requestDomain(text) === 'general';
 }
 
 /** A milestone owns game preparation too. GTA in the later/full goal must not force a 3D shell
@@ -762,7 +762,11 @@ export function gameTurnRequest(original: string, milestone?: string | null): st
 
 /** The original request is a game by the one domain reading the kit uses. Never throws. */
 function requestIsGame(text: string): boolean {
-  try { return analyzeRequirementGaps(String(text ?? '')).domain === 'game'; } catch { return false; }
+  return requestDomain(text) === 'game';
+}
+// The module's one domain reading (census).
+function requestDomain(text: string): string | null {
+  try { return analyzeRequirementGaps(String(text ?? '')).domain; } catch { return null; }
 }
 
 /** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */

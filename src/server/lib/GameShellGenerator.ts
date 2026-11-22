@@ -3142,6 +3142,18 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
           },
         });
         live.current = game; game.start();
+        if (stream) {
+          // Play again: the race has laid the road again from its first piece (race.ts calls stream.reset()); the car
+          // goes back to the start line on it.
+          const road = stream;
+          road.onReset = () => {
+            if (!car) return;
+            car.position.set(road.startPose.x, road.startPose.y, road.startPose.z);
+            car.rotation.y = road.startPose.heading;
+            drive = createVehicleState(car, tuning);
+            lastMap = -1;
+          };
+        }
         if (custom) {
           // Play again after the finish starts the same lap race from the line.
           offs.push(events.on('GAME_STARTED', () => {

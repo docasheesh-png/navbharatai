@@ -658,6 +658,8 @@ const EN = {
   controls: 'Controls', pressKey: 'Press a key (Esc to cancel)', resetControls: 'Reset controls', up: 'Up', down: 'Down', reload: 'Reload',
   crouch: 'Crouch / dive', language: 'Language',
   editControls: 'Edit controls', editControlsHint: 'Drag a control to move it', smaller: 'Smaller', bigger: 'Bigger', controlsOpacity: 'Opacity', done: 'Done',
+  joystick: 'Joystick', fixedJoystick: 'Fixed joystick', editControlsMore: 'Pinch to resize · arrow keys move, + / − resize',
+  controlsShrunk: 'Controls made smaller to fit this screen',
 };
 
 export type StringKey = keyof typeof EN;
@@ -690,6 +692,8 @@ const HI: Record<StringKey, string> = {
   controls: 'कंट्रोल्स', pressKey: 'कोई कुंजी दबाएँ (रद्द करने के लिए Esc)', resetControls: 'कंट्रोल्स रीसेट करें', up: 'ऊपर', down: 'नीचे', reload: 'रीलोड',
   crouch: 'झुकें / गोता', language: 'भाषा',
   editControls: 'कंट्रोल्स बदलें', editControlsHint: 'कंट्रोल को खींचकर नई जगह रखें', smaller: 'छोटा', bigger: 'बड़ा', controlsOpacity: 'पारदर्शिता', done: 'हो गया',
+  joystick: 'जॉयस्टिक', fixedJoystick: 'स्थिर जॉयस्टिक', editControlsMore: 'पिंच करके आकार बदलें · तीर कुंजियों से खिसकाएँ, + / − से आकार बदलें',
+  controlsShrunk: 'इस स्क्रीन में समाने के लिए कंट्रोल्स छोटे किए गए',
 };
 
 const INDIC: Record<Exclude<GameLanguage, 'en' | 'hi'>, Record<StringKey, string>> = {

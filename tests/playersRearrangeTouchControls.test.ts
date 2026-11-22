@@ -124,7 +124,7 @@ describe('the layout maths (pure)', () => {
     expect(b.controls.jump).toEqual({ size: 1.8, x: 0.2, y: 0.2 });
     expect(b.opacity).toBe(0.3);
     // Nothing anywhere: every control in the kit's own spot, fully opaque.
-    expect(PURE.resolveTouchLayout({}, null)).toEqual({ controls: {}, opacity: 1 });
+    expect(PURE.resolveTouchLayout({}, null)).toEqual({ controls: {}, opacity: 1, joystickMode: 'floating' });
   });
 
   it('keeps a control whole on screen and out of the safe-area inset; an unmeasured screen only keeps 0..1', () => {
@@ -249,7 +249,10 @@ describe('the editor (Settings → Edit controls)', () => {
     button('nbg-tc-bigger').fire('click', {});
     button('nbg-tc-bigger').fire('click', {});
     expect(tc.placement.controls.sprint.size).toBe(1.3);
-    expect(btn('sprint').style.transform).toBe('scale(1.3)');
+    // Run sits in the bottom-right corner: grown in place it would poke past the edge, so it is kept whole on screen.
+    expect(btn('sprint').style.transform).toContain('scale(1.3)');
+    const run = tc.onScreen.find((b: any) => b.id === 'sprint');
+    expect(run.x + run.hw).toBeLessThanOrEqual(800 - 8 + 1e-6);
     const range = bar.children.find((c) => c.tag === 'label')!.children[0];
     range.value = '0.4';
     range.fire('input', {});
@@ -257,7 +260,7 @@ describe('the editor (Settings → Edit controls)', () => {
     expect(JSON.parse(storage.map.get('nbg-touch-layout-v1:g1')!).opacity).toBe(0.4);
     button('nbg-tc-reset').fire('click', {});
     expect(storage.map.has('nbg-touch-layout-v1:g1')).toBe(false);
-    expect(tc.placement).toEqual({ controls: {}, opacity: 1 });
+    expect(tc.placement).toEqual({ controls: {}, opacity: 1, joystickMode: 'floating' });
     button('nbg-tc-done').fire('click', {});
     expect(tc.editing).toBe(false);
     expect(root.find('nbg-tc-edit')).toBeUndefined();
@@ -307,6 +310,358 @@ describe('the game wires it in', () => {
   it('every new label is in the game\'s strings (English shown here)', () => {
     for (const [k, v] of [['editControls', 'Edit controls'], ['smaller', 'Smaller'], ['bigger', 'Bigger'], ['controlsOpacity', 'Opacity'], ['done', 'Done']]) {
       expect(STRINGS).toContain(k + ": '" + v + "'");
+    }
+  });
+});
+
+// ── 2026-11-22 follow-up: pinch, no overlaps, fixed/floating in the editor, and the rough edges ─────
+// "Pinch to resize, overlapping controls pushed apart, floating vs fixed in the player's editor — rock solid" (admin).
+
+/** No two boxes overlap and every box is whole inside the screen minus the inset. */
+function assertClean(boxes: Array<{ id: string; x: number; y: number; hw: number; hh: number }>, w: number, h: number, inset = 8) {
+  for (const b of boxes) {
+    expect(b.x - b.hw, b.id + ' left').toBeGreaterThanOrEqual(inset - 1e-6);
+    expect(b.y - b.hh, b.id + ' top').toBeGreaterThanOrEqual(inset - 1e-6);
+    expect(b.x + b.hw, b.id + ' right').toBeLessThanOrEqual(w - inset + 1e-6);
+    expect(b.y + b.hh, b.id + ' bottom').toBeLessThanOrEqual(h - inset + 1e-6);
+  }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    const overlap = Math.abs(a.x - b.x) < a.hw + b.hw - 0.01 && Math.abs(a.y - b.y) < a.hh + b.hh - 0.01;
+    expect(overlap, a.id + ' covers ' + b.id).toBe(false);
+  }
+}
+
+/** Resize the fake game area and tell the controls, the way a turned phone does. */
+function resizeTo(root: any, win: any, w: number, h: number) {
+  root.rect = { left: 0, top: 0, right: w, bottom: h, width: w, height: h };
+  win.fire('resize', {});
+}
+
+const NO_INSET = { left: 8, top: 8, right: 8, bottom: 8 };
+
+describe('separateTouchControls (pure): none covers another, all on screen, deterministic', () => {
+  it('the first box keeps its spot; a later box that covers it moves to the NEAREST free spot', () => {
+    const boxes = [{ id: 'a', x: 400, y: 200, hw: 32, hh: 32 }, { id: 'b', x: 410, y: 205, hw: 32, hh: 32 }];
+    const r = PURE.separateTouchControls(boxes, 800, 400, NO_INSET);
+    expect(r.fits).toBe(true);
+    expect(r.scale).toBe(1);
+    expect(r.boxes[0]).toMatchObject({ id: 'a', x: 400, y: 200 });
+    // b goes right by the least it can: a's right edge + the gap + its own half.
+    expect(r.boxes[1]).toMatchObject({ id: 'b', x: 400 + 32 + PURE.TOUCH_GAP + 32, y: 205 });
+    assertClean(r.boxes, 800, 400);
+    // Same input, same answer.
+    expect(PURE.separateTouchControls(boxes, 800, 400, NO_INSET)).toEqual(r);
+  });
+
+  it('boxes that already fit are left exactly where they are', () => {
+    const boxes = [{ id: 'a', x: 100, y: 300, hw: 56, hh: 56 }, { id: 'b', x: 700, y: 300, hw: 32, hh: 32 }];
+    expect(PURE.separateTouchControls(boxes, 800, 400, NO_INSET)).toEqual({ boxes, scale: 1, fits: true });
+  });
+
+  it('a screen too small for every control shrinks them all by one factor, then nothing overlaps', () => {
+    const boxes = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id, x: 100, y: 60, hw: 32, hh: 32 }));
+    const r = PURE.separateTouchControls(boxes, 220, 120, NO_INSET);
+    expect(r.fits).toBe(true);
+    expect(r.scale).toBeLessThan(1);
+    expect(new Set(r.boxes.map((b: any) => b.hw)).size).toBe(1);
+    assertClean(r.boxes, 220, 120);
+  });
+
+  it('when even the smallest size cannot fit, it says so (fits: false) and still keeps every box on screen', () => {
+    const boxes = Array.from({ length: 12 }, (_, i) => ({ id: 'k' + i, x: 50, y: 50, hw: 60, hh: 60 }));
+    const r = PURE.separateTouchControls(boxes, 120, 100, NO_INSET);
+    expect(r.fits).toBe(false);
+    expect(r.scale).toBe(PURE.TOUCH_FIT_MIN);
+    for (const b of r.boxes) { expect(b.x - b.hw).toBeGreaterThanOrEqual(8 - 1e-6); expect(b.y + b.hh).toBeLessThanOrEqual(100 - 8 + 1e-6); }
+  });
+
+  it('THE CLASS: across 400 random layouts and screens, whatever fits is clean (no cover, all on screen)', () => {
+    let seed = 1234567;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    for (let n = 0; n < 400; n++) {
+      const w = 200 + Math.floor(rnd() * 1800);
+      const h = 150 + Math.floor(rnd() * 1200);
+      const boxes = Array.from({ length: 1 + Math.floor(rnd() * 9) }, (_, i) => {
+        const hw = 20 + rnd() * 90;
+        return { id: 'c' + i, x: rnd() * w, y: rnd() * h, hw, hh: rnd() < 0.3 ? hw * 0.5 : hw };
+      });
+      const r = PURE.separateTouchControls(boxes, w, h, NO_INSET);
+      expect(r.boxes.map((b: any) => b.id)).toEqual(boxes.map((b) => b.id));
+      if (r.fits) assertClean(r.boxes, w, h);
+    }
+  });
+
+  it('pinch size follows the fingers and stays inside 0.6..2', () => {
+    expect(PURE.touchPinchSize(1, 100, 150)).toBe(1.5);
+    expect(PURE.touchPinchSize(1.2, 100, 50)).toBe(0.6);
+    expect(PURE.touchPinchSize(1.5, 100, 400)).toBe(2);
+    expect(PURE.touchPinchSize(1.1, 0, 400)).toBe(1.1);
+    expect(PURE.touchPinchSize(1.1, 100, NaN)).toBe(1.1);
+  });
+
+  it('joystick mode: kit default floating < the prompt\'s mode < the player\'s switch; junk is dropped', () => {
+    expect(PURE.resolveTouchLayout({}, null).joystickMode).toBe('floating');
+    expect(PURE.resolveTouchLayout({ joystick: { mode: 'fixed' } }, null).joystickMode).toBe('fixed');
+    expect(PURE.resolveTouchLayout({ joystick: { mode: 'fixed' } }, { controls: {}, joystickMode: 'floating' }).joystickMode).toBe('floating');
+    expect(PURE.sanitizeTouchLayout({ controls: {}, joystickMode: 'sticky' })).toEqual({ controls: {} });
+    expect(PURE.sanitizeTouchLayout({ controls: {}, joystickMode: 'fixed' })).toEqual({ controls: {}, joystickMode: 'fixed' });
+  });
+
+  it('a saved value naming __proto__ / constructor never becomes a control or touches the prototype', () => {
+    const s = PURE.sanitizeTouchLayout(JSON.parse('{"controls":{"__proto__":{"x":0.5,"y":0.5},"constructor":{"size":2},"jump":{"size":1.2}}}'));
+    expect(Object.keys(s.controls)).toEqual(['jump']);
+    expect(Object.getPrototypeOf(s.controls)).toBe(Object.prototype);
+    expect((s.controls as any).x).toBeUndefined();
+  });
+});
+
+describe('TouchControls keeps every control clear of the others', () => {
+  it('dropping Jump onto Attack: Jump stays where it was dropped, Attack makes room, and a reload opens the same', () => {
+    const { tc, btn, ev, storage, root } = setup({ gameId: 'ov' });
+    tc.editLayout();
+    const attack = tc.onScreen.find((b: any) => b.id === 'attack');
+    btn('jump').fire('pointerdown', ev(9, 700, 300));
+    btn('jump').fire('pointermove', ev(9, attack.x + 6, attack.y + 4));
+    btn('jump').fire('pointerup', ev(9, attack.x + 6, attack.y + 4));
+    const after = tc.onScreen;
+    assertClean(after, 800, 400);
+    const jump = after.find((b: any) => b.id === 'jump');
+    expect(Math.abs(jump.x - (attack.x + 6))).toBeLessThan(1);
+    expect(Math.abs(jump.y - (attack.y + 4))).toBeLessThan(1);
+    // What was drawn is what was saved: a new TouchControls over the same storage draws the very same spots.
+    const again = setup({ gameId: 'ov' }, Object.fromEntries(storage.map));
+    for (const b of again.tc.onScreen) {
+      const was = after.find((x: any) => x.id === b.id);
+      expect(Math.abs(b.x - was.x), b.id).toBeLessThan(1);
+      expect(Math.abs(b.y - was.y), b.id).toBeLessThan(1);
+    }
+    // And the DOM agrees with the boxes: a placed button sits at its box centre.
+    const a2 = after.find((b: any) => b.id === 'attack');
+    expect(parseFloat(btn('attack').style.left)).toBeCloseTo((a2.x / 800) * 100, 3);
+    expect(root.find('nbg-tc-buttons')).toBeDefined();
+  });
+
+  it('dropping a placed control onto another PLACED one: what the player saw is saved, so a reload does not swap who moved', () => {
+    // Both already placed by the player: Attack first in drawing order. Without saving the push, a reload would let
+    // Attack keep its spot and shove Jump away from where the player dropped it.
+    const seed = { 'nbg-touch-layout-v1:ov2': JSON.stringify({ controls: { attack: { x: 0.5, y: 0.5 }, jump: { x: 0.2, y: 0.3 } } }) };
+    const { tc, btn, ev, storage } = setup({ gameId: 'ov2' }, seed);
+    tc.editLayout();
+    btn('jump').fire('pointerdown', ev(4, 160, 120));
+    btn('jump').fire('pointermove', ev(4, 410, 205));
+    btn('jump').fire('pointerup', ev(4, 410, 205));
+    const seen = tc.onScreen;
+    assertClean(seen, 800, 400);
+    const dropped = seen.find((b: any) => b.id === 'jump');
+    expect(Math.abs(dropped.x - 410)).toBeLessThan(1);
+    expect(Math.abs(dropped.y - 205)).toBeLessThan(1);
+    const again = setup({ gameId: 'ov2' }, Object.fromEntries(storage.map)).tc.onScreen;
+    for (const b of again) {
+      const was = seen.find((x: any) => x.id === b.id);
+      expect(Math.abs(b.x - was.x), b.id).toBeLessThan(1);
+      expect(Math.abs(b.y - was.y), b.id).toBeLessThan(1);
+    }
+  });
+
+  it('Bigger seven times on the corner button: it never pokes off screen and never covers a neighbour', () => {
+    const { tc, root, btn, ev } = setup({ gameId: 'big' });
+    tc.editLayout();
+    btn('sprint').fire('pointerdown', ev(5, 0, 0));
+    btn('sprint').fire('pointerup', ev(5, 0, 0));
+    const bigger = root.find('nbg-tc-edit')!.all('nbg-tc-bigger')[0];
+    for (let i = 0; i < 7; i++) bigger.fire('click', {});
+    expect(tc.placement.controls.sprint.size).toBe(2);
+    assertClean(tc.onScreen, 800, 400);
+  });
+
+  it('a resize or rotation re-fits every control to the new screen; the player\'s saved layout is not rewritten by it', () => {
+    const saved = { controls: { attack: { x: 0.9, y: 0.85, size: 1.6 }, jump: { x: 0.88, y: 0.8, size: 1.4 }, joystick: { x: 0.12, y: 0.8, size: 1.5 } } };
+    const seed = { 'nbg-touch-layout-v1:rot': JSON.stringify(saved) };
+    const { tc, root, win, storage } = setup({ gameId: 'rot' }, seed);
+    assertClean(tc.onScreen, 800, 400);
+    resizeTo(root, win, 360, 640);
+    assertClean(tc.onScreen, 360, 640);
+    resizeTo(root, win, 1600, 1000);
+    assertClean(tc.onScreen, 1600, 1000);
+    expect(JSON.parse(storage.map.get('nbg-touch-layout-v1:rot')!)).toEqual(saved);
+  });
+
+  it('a tiny screen shrinks the controls together, the editor says so honestly, and a big screen grows them back', () => {
+    const { tc, root, win } = setup({ gameId: 'tiny' });
+    resizeTo(root, win, 240, 150);
+    expect(tc.fit).toBeLessThan(1);
+    assertClean(tc.onScreen, 240, 150);
+    tc.editLayout();
+    const note = root.find('nbg-tc-fit')!;
+    expect(note.textContent).toBe('Controls made smaller to fit this screen');
+    expect(note.style.display).toBe('');
+    resizeTo(root, win, 900, 500);
+    expect(tc.fit).toBe(1);
+    expect(note.style.display).toBe('none');
+    assertClean(tc.onScreen, 900, 500);
+  });
+
+  it('the drive pads are fitted too (a bigger pedal pad never covers the steer pad)', () => {
+    const { tc, root, win } = setup({ gameId: 'drv', layout: 'drive' });
+    tc.setPlayerLayout({ controls: { steer: { size: 2 }, pedals: { size: 2 } } });
+    resizeTo(root, win, 640, 360);
+    expect(tc.onScreen.map((b: any) => b.id)).toEqual(['steer', 'pedals']);
+    assertClean(tc.onScreen, 640, 360);
+  });
+});
+
+describe('pinch to resize (two fingers) while editing', () => {
+  it('two fingers spread: the picked control grows with them, clamped at 2; nothing is pressed; let go saves', () => {
+    const { tc, root, btn, ev, input, storage } = setup({ gameId: 'pin' });
+    tc.editLayout();
+    const a = tc.onScreen.find((b: any) => b.id === 'attack');
+    btn('attack').fire('pointerdown', { ...ev(1, a.x, a.y), pointerType: 'touch', isPrimary: true });
+    // The second finger lands ON another control: it pinches Attack, it does not pick Jump up or press it.
+    const j = tc.onScreen.find((b: any) => b.id === 'jump');
+    btn('jump').fire('pointerdown', { ...ev(2, a.x, a.y - 100), pointerType: 'touch', isPrimary: false });
+    root.fire('pointermove', { ...ev(2, a.x, a.y - 150), pointerType: 'touch' });
+    expect(tc.placement.controls.attack.size).toBe(1.5);
+    root.fire('pointermove', { ...ev(2, a.x, a.y - 900), pointerType: 'touch' });
+    expect(tc.placement.controls.attack.size).toBe(2);
+    for (const action of ['attack', 'jump', 'interact', 'sprint']) expect(input.isDown(action), action).toBe(false);
+    expect(j).toBeDefined();
+    root.fire('pointerup', { ...ev(2, a.x, a.y - 900), pointerType: 'touch' });
+    root.fire('pointerup', { ...ev(1, a.x, a.y), pointerType: 'touch' });
+    expect(JSON.parse(storage.map.get('nbg-touch-layout-v1:pin')!).controls.attack.size).toBe(2);
+    assertClean(tc.onScreen, 800, 400);
+  });
+
+  it('pinching in shrinks to 0.6 and no further; two fingers on the background pinch the picked control', () => {
+    const { tc, root, ev } = setup({ gameId: 'pin2' });
+    tc.editLayout();   // the joystick is picked when the editor opens
+    root.fire('pointerdown', { ...ev(1, 300, 200), pointerType: 'touch', isPrimary: true });
+    root.fire('pointerdown', { ...ev(2, 500, 200), pointerType: 'touch', isPrimary: false });
+    root.fire('pointermove', { ...ev(2, 310, 200), pointerType: 'touch' });
+    expect(tc.placement.controls.joystick.size).toBe(0.6);
+    root.fire('pointerup', { ...ev(2, 310, 200), pointerType: 'touch' });
+    // The finger left on the glass does not suddenly drag anything.
+    root.fire('pointermove', { ...ev(1, 50, 50), pointerType: 'touch' });
+    expect(tc.placement.controls.joystick.x).toBeUndefined();
+  });
+
+  it('a lost release never leaves a ghost finger: the next single press is a drag, not a pinch', () => {
+    const { tc, btn, ev } = setup({ gameId: 'ghost' });
+    tc.editLayout();
+    btn('attack').fire('pointerdown', { ...ev(1, 700, 300), pointerType: 'touch', isPrimary: true });
+    // pointer 1's release never arrives (the browser lost it); the next touch starts a new sequence.
+    btn('jump').fire('pointerdown', { ...ev(5, 700, 250), pointerType: 'touch', isPrimary: true });
+    btn('jump').fire('pointermove', { ...ev(5, 200, 100), pointerType: 'touch' });
+    btn('jump').fire('pointerup', { ...ev(5, 200, 100), pointerType: 'touch' });
+    expect(tc.placement.controls.jump).toMatchObject({ x: 0.25, y: 0.25 });
+    expect(tc.placement.controls.attack?.size ?? 1).toBe(1);
+  });
+});
+
+describe('floating vs fixed joystick, in the player\'s editor', () => {
+  it('the switch shows the prompt\'s choice, the player overrides it (saved per game), Reset goes back to the prompt', () => {
+    const { tc, root, storage, ev } = setup({ gameId: 'js', joystick: { mode: 'fixed' } });
+    tc.editLayout();
+    const box = root.find('nbg-tc-fixed')! as any;
+    expect(box.checked).toBe(true);
+    box.checked = false;
+    box.fire('change', {});
+    expect(tc.placement.joystickMode).toBe('floating');
+    expect(JSON.parse(storage.map.get('nbg-touch-layout-v1:js')!).joystickMode).toBe('floating');
+    tc.finishEditing();
+    // Floating now: the joystick jumps under the thumb.
+    const move = root.find('nbg-tc-move')!;
+    move.rect = { left: 0, top: 140, right: 400, bottom: 400, width: 400, height: 260 };
+    move.fire('pointerdown', ev(3, 200, 250));
+    expect(root.find('nbg-tc-base')!.style.left).toBe('200px');
+    move.fire('pointerup', ev(3, 200, 250));
+    // Another game with the same prompt keeps the prompt's fixed joystick.
+    expect(setup({ gameId: 'js-other', joystick: { mode: 'fixed' } }, Object.fromEntries(storage.map)).tc.placement.joystickMode).toBe('fixed');
+    tc.editLayout();
+    root.find('nbg-tc-edit')!.all('nbg-tc-reset')[0].fire('click', {});
+    expect(tc.placement.joystickMode).toBe('fixed');
+    expect((root.find('nbg-tc-fixed') as any).checked).toBe(true);
+  });
+
+  it('a fixed joystick saved by the player beats a floating prompt: the base stays put under the thumb', () => {
+    const { root, ev, input } = setup({ gameId: 'js2' }, { 'nbg-touch-layout-v1:js2': JSON.stringify({ controls: {}, joystickMode: 'fixed' }) });
+    const base = root.find('nbg-tc-base')!;
+    base.rect = { left: 24, top: 264, right: 136, bottom: 376, width: 112, height: 112 };
+    const before = base.style.left;
+    const move = root.find('nbg-tc-move')!;
+    move.fire('pointerdown', ev(1, 200, 200));
+    expect(base.style.left).toBe(before);
+    expect(input.axis().x).toBeGreaterThan(0.5);
+  });
+
+  it('the switch is hidden in the drive layout (there is no joystick there)', () => {
+    const { tc, root } = setup({ gameId: 'js3', layout: 'drive' });
+    tc.editLayout();
+    expect(root.find('nbg-tc-fixed-row')!.style.display).toBe('none');
+  });
+});
+
+describe('rough edges: Esc / Done mid-gesture, teardown, keyboard, corrupt data', () => {
+  it('Esc in the middle of a drag closes the editor AND keeps the move (it used to show it but never save it)', () => {
+    const { tc, win, btn, ev, storage } = setup({ gameId: 'esc' });
+    tc.editLayout();
+    btn('attack').fire('pointerdown', ev(1, 700, 300));
+    btn('attack').fire('pointermove', ev(1, 200, 100));
+    win.fire('keydown', { key: 'Escape' });
+    expect(tc.editing).toBe(false);
+    expect(JSON.parse(storage.map.get('nbg-touch-layout-v1:esc')!).controls.attack).toMatchObject({ x: 0.25, y: 0.25 });
+  });
+
+  it('disposing the controls while the editor is open removes its key listener (Esc reaches the game again)', () => {
+    const { tc, win } = setup({ gameId: 'disp' });
+    tc.editLayout();
+    tc.dispose();
+    let stopped = false;
+    win.fire('keydown', { key: 'Escape', stopImmediatePropagation: () => { stopped = true; }, preventDefault: () => { stopped = true; } });
+    expect(stopped).toBe(false);
+    expect(tc.editing).toBe(false);
+  });
+
+  it('keyboard only: focus picks a control, arrows move it (Shift = bigger steps), + / - resize, slider keys stay the slider\'s', () => {
+    const { tc, win, btn, storage } = setup({ gameId: 'kb' });
+    tc.editLayout();
+    btn('jump').fire('focus', {});
+    const start = tc.onScreen.find((b: any) => b.id === 'jump');
+    win.fire('keydown', { key: 'ArrowLeft' });
+    expect(tc.onScreen.find((b: any) => b.id === 'jump').x).toBeCloseTo(start.x - 8, 0);
+    win.fire('keydown', { key: 'ArrowUp', shiftKey: true });
+    expect(tc.onScreen.find((b: any) => b.id === 'jump').y).toBeCloseTo(start.y - 32, 0);
+    win.fire('keydown', { key: '+' });
+    expect(tc.placement.controls.jump.size).toBe(1.15);
+    win.fire('keydown', { key: '-' });
+    expect(tc.placement.controls.jump.size).toBe(1);
+    const savedNow = storage.map.get('nbg-touch-layout-v1:kb');
+    win.fire('keydown', { key: 'ArrowLeft', target: { tagName: 'INPUT' } });
+    expect(storage.map.get('nbg-touch-layout-v1:kb')).toBe(savedNow);
+    assertClean(tc.onScreen, 800, 400);
+    win.fire('keydown', { key: 'Escape' });
+    expect(tc.editing).toBe(false);
+    // Closed: the arrow keys belong to the game again.
+    let stopped = false;
+    win.fire('keydown', { key: 'ArrowLeft', stopImmediatePropagation: () => { stopped = true; } });
+    expect(stopped).toBe(false);
+  });
+
+  it('the joystick can take keyboard focus and has a name while editing, and gives both back after', () => {
+    const { tc, root } = setup({ gameId: 'kb2' });
+    tc.editLayout();
+    const base = root.find('nbg-tc-base')!;
+    expect(base.attrs.tabindex).toBe('0');
+    expect(base.attrs['aria-label']).toBe('Joystick');
+  });
+
+  it('corrupt saved data of every shape opens the default layout and never throws', () => {
+    for (const raw of ['not json', '[]', 'null', '{"controls":[1,2,3]}', '{"controls":{"attack":{"x":"0.5","y":null}}}', '{"controls":{"__proto__":{"x":0.1,"y":0.1}}}', '{"opacity":"x","joystickMode":5}']) {
+      const { tc } = setup({ gameId: 'bad' }, { 'nbg-touch-layout-v1:bad': raw });
+      expect(tc.placement.controls.attack, raw).toBeUndefined();
+      expect(tc.placement.opacity).toBe(1);
+      expect(tc.placement.joystickMode).toBe('floating');
+      assertClean(tc.onScreen, 800, 400);
     }
   });
 });
@@ -379,5 +734,100 @@ await b.close();
     expect(Math.abs(out.reloaded.x - 300)).toBeLessThan(2);
     expect(Math.abs(out.reloaded.y - 200)).toBeLessThan(2);
     expect(JSON.parse(out.saved).controls.attack).toMatchObject({ size: 1.15 });
+  }, 90_000);
+
+  it('real touch: two-finger pinch resizes, a drop never covers another control, rotation re-fits, the kit spots match the CSS', async () => {
+    const dir = makeTempDir('nbai-touch-solid-');
+    const file = join(dir, 'run.mjs');
+    writeFileSync(file, `import playwright from '${PW}';
+const { chromium } = playwright;
+const b = await chromium.launch();
+const out = {};
+const ctx = await b.newContext({ viewport: { width: 900, height: 420 }, hasTouch: true });
+const p = await ctx.newPage(); await p.goto(${JSON.stringify(base)}); await p.waitForFunction(() => !!window.__input);
+const cdp = await ctx.newCDPSession(p);
+const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], i) => ({ x, y, id: i + 1 })) });
+// Every drawn control as a DOM rectangle, and as the controls' own boxes.
+const dom = () => p.evaluate(() => {
+  const rects = {};
+  const put = (id, el) => { const r = el.getBoundingClientRect(); if (r.width > 0) rects[id] = { x: r.x + r.width / 2, y: r.y + r.height / 2, hw: r.width / 2, hh: r.height / 2 }; };
+  for (const el of document.querySelectorAll('.nbg-tc-buttons .nbg-tc-btn, .nbg-tc > .nbg-tc-btn')) put(el.getAttribute('data-action'), el);
+  put('joystick', document.querySelector('.nbg-tc-base'));
+  put('steer', document.querySelector('.nbg-tc-steer'));
+  put('pedals', document.querySelector('.nbg-tc-pedals'));
+  return rects;
+});
+const boxes = () => p.evaluate(() => window.__tc.onScreen);
+const drift = async () => { const d = await dom(); let worst = 0; for (const bx of await boxes()) { const r = d[bx.id]; if (!r) return 'missing ' + bx.id; worst = Math.max(worst, Math.abs(r.x - bx.x), Math.abs(r.y - bx.y), Math.abs(r.hw - bx.hw), Math.abs(r.hh - bx.hh)); } return worst; };
+const clean = async (w, h) => { const d = Object.entries(await dom()); for (const [id, r] of d) if (r.x - r.hw < 7.5 || r.y - r.hh < 7.5 || r.x + r.hw > w - 7.5 || r.y + r.hh > h - 7.5) return 'off screen ' + id; for (let i = 0; i < d.length; i++) for (let j = i + 1; j < d.length; j++) { const [ia, a] = d[i], [ib, c] = d[j]; if (Math.abs(a.x - c.x) < a.hw + c.hw - 0.5 && Math.abs(a.y - c.y) < a.hh + c.hh - 0.5) return ia + ' covers ' + ib; } return 'ok'; };
+out.driftMove = await drift();
+await p.evaluate(() => window.__tc.setLayout('drive')); out.driftDrive = await drift(); await p.evaluate(() => window.__tc.setLayout('move'));
+
+await p.evaluate(() => window.__tc.editLayout());
+// A two-finger pinch: first finger on Attack, second 100 px above, spread to 150 px.
+const a = (await boxes()).find((x) => x.id === 'attack');
+await touch('touchStart', [[a.x, a.y]]);
+await touch('touchStart', [[a.x, a.y], [a.x, a.y - 100]]);
+for (const d of [110, 120, 130, 140, 150]) await touch('touchMove', [[a.x, a.y], [a.x, a.y - d]]);
+out.pressedDuringPinch = await p.evaluate(() => ['attack', 'jump', 'interact', 'sprint'].some((k) => window.__input.isDown(k)));
+await touch('touchEnd', []);
+out.pinchSize = await p.evaluate(() => window.__tc.placement.controls.attack && window.__tc.placement.controls.attack.size);
+out.pinchWidth = (await dom()).attack.hw * 2;
+out.savedPinch = await p.evaluate(() => JSON.parse(localStorage.getItem('nbg-touch-layout-v1:real')).controls.attack.size);
+out.cleanAfterPinch = await clean(900, 420);
+
+// Drag Jump with the mouse and drop it right on top of Attack.
+const j = (await boxes()).find((x) => x.id === 'jump');
+const a2 = (await boxes()).find((x) => x.id === 'attack');
+await p.mouse.move(j.x, j.y); await p.mouse.down(); await p.mouse.move(a2.x + 5, a2.y + 5, { steps: 10 }); await p.mouse.up();
+out.cleanAfterDrop = await clean(900, 420);
+out.jumpWhereDropped = (await boxes()).find((x) => x.id === 'jump');
+out.dropAt = { x: a2.x + 5, y: a2.y + 5 };
+// The joystick switch, and the keyboard.
+await p.click('.nbg-tc-fixed');
+out.mode = await p.evaluate(() => JSON.parse(localStorage.getItem('nbg-touch-layout-v1:real')).joystickMode);
+await p.focus('.nbg-tc-base');
+const j0 = (await boxes()).find((x) => x.id === 'joystick');
+await p.keyboard.press('ArrowRight');
+const j1 = (await boxes()).find((x) => x.id === 'joystick');
+out.keyMoved = j1.x - j0.x;
+await p.keyboard.press('Escape');
+out.editingAfterEsc = await p.evaluate(() => window.__tc.editing);
+const before = await dom();
+await p.reload(); await p.waitForFunction(() => !!window.__input);
+const after = await dom();
+out.reloadDiff = Math.max(...Object.keys(before).map((k) => Math.max(Math.abs(before[k].x - after[k].x), Math.abs(before[k].y - after[k].y))));
+// Turn the phone, then a tiny window: nothing covers anything, nothing leaves the screen.
+await p.setViewportSize({ width: 360, height: 640 }); await p.waitForTimeout(150);
+out.cleanPortrait = await clean(360, 640);
+await p.setViewportSize({ width: 260, height: 160 }); await p.waitForTimeout(150);
+out.cleanTiny = await clean(260, 160);
+out.fitTiny = await p.evaluate(() => window.__tc.fit);
+out.driftTiny = await drift();
+console.log(JSON.stringify(out));
+await b.close();
+`);
+    const { execFile } = await import('node:child_process');
+    const stdout = await new Promise<string>((res, rej) => execFile(process.execPath, [file], { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS }, timeout: 80_000 }, (e, o) => (e ? rej(e) : res(o))));
+    const out = JSON.parse(stdout.trim().split('\n').pop()!);
+    // The overlap solver's idea of the kit's own spots is where the CSS really draws them (move and drive sets).
+    expect(out.driftMove).toBeLessThan(1);
+    expect(out.driftDrive).toBeLessThan(1);
+    expect(out.pressedDuringPinch).toBe(false);
+    expect(out.pinchSize).toBe(1.5);
+    expect(Math.abs(out.pinchWidth - 96)).toBeLessThan(2);
+    expect(out.savedPinch).toBe(1.5);
+    expect(out.cleanAfterPinch).toBe('ok');
+    expect(out.cleanAfterDrop).toBe('ok');
+    expect(Math.abs(out.jumpWhereDropped.x - out.dropAt.x)).toBeLessThan(2);
+    expect(Math.abs(out.jumpWhereDropped.y - out.dropAt.y)).toBeLessThan(2);
+    expect(out.mode).toBe('fixed');
+    expect(Math.abs(out.keyMoved - 8)).toBeLessThan(1);
+    expect(out.editingAfterEsc).toBe(false);
+    expect(out.reloadDiff).toBeLessThan(1);
+    expect(out.cleanPortrait).toBe('ok');
+    expect(out.cleanTiny).toBe('ok');
+    expect(out.fitTiny).toBeLessThan(1);
+    expect(out.driftTiny).toBeLessThan(1);
   }, 90_000);
 });

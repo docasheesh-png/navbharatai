@@ -21172,7 +21172,7 @@ async function noteBuildOutcome(
       // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
       // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
       // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
-      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);
+      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest, process.env, { existedAtStart: durableFilePaths }); // + scratch copies (scratchCopies.ts)
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.

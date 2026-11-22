@@ -143,7 +143,7 @@ describe('Q-978 · a component nobody asked for and nothing shows is removed, no
   it('the route runs it once, after the build loop, on a new app only', () => {
     // The guard moved into leftoverComponents.ts when #3698 was merged after #3692 (2026-10-13): the route handler is at
     // TypeScript's control-flow limit (TS2563) and one more `if (a && b && c && d)` crossed it. The facts still travel.
-    expect(read('src/server/routes/agentv3.ts')).toContain('await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);');
+    expect(read('src/server/routes/agentv3.ts')).toContain('await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest, process.env, { existedAtStart: durableFilePaths });');
   });
   it('the guard runs the net only for a finished, un-stopped NEW build (the condition that left the route)', async () => {
     const deps = { undefinedClassesNow: async () => ({ orphans: ['src/components/LoadingSpinner.tsx'] }), removeLeftoverFiles: async (p: readonly string[]) => [...p] };

@@ -84,7 +84,8 @@ describe('an EXISTING 3D game sees the library on every later turn (admin 2026-1
 
   it('the chat route calls it before the new-game seed block, with the workspace reader', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    const call = route.indexOf('buildPrompt = await withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid });');
+    // Timed as its own setup step since failedbr #2484 (Q-3245).
+    const call = route.indexOf("buildPrompt = await finalSteps.step('library menu', () => withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid }));");
     expect(call).toBeGreaterThan(0);
     expect(call).toBeLessThan(route.indexOf('// ── GAME KIT SEED'));
   });

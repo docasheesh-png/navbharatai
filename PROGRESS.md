@@ -103875,3 +103875,11 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - citytraffic.ts / citypeople.ts read positions in the city's frame; traffic.pushOut called every frame by play/openWorld.ts for the player or their car.
 - collision.ts gains keepApart(movers) for any two moving things; GAME_COLLISION_RULE (gameCollisionRule.ts) said in GAME_KIT_RULE, the seed handoff and projectGrowthRules.
 - Test: tests/twoThingsNeverPassThrough.test.ts (reversion of inCity fails 2 tests). Traffic-vs-traffic was measured already clean; locked, not changed.
+
+## 2026-11-22 — a request the platform already completed runs no builder (failedbr #2496, Q-3270–Q-3273, PR #4442)
+- Report: "Use as my character" (Q7 Villager Man). The platform set PLAYER.model at 20.5 s, then the builder loop ran anyway: 16 model calls (~1 M tokens), an unasked edit put back by the growth guard, a model review, a starter test, the explorer and the playtest. Total 6.9 min, under an ETA of 7.5–23.5 min.
+- Class: a turn whose whole request a deterministic platform action satisfied still ran the builder, and its ETA was priced as a build. Covered for every action in `libraryActionsAtTurnStart`: character, car and map place.
+- Fix: `platformDoneTurn.ts`. A request that is exactly the library's own instruction, whose action recorded its success receipt, ends with a zero-token stand-in result. The preview is started, and the typecheck gate plus the real-browser render proof are kept. The reviewer, finishing writers, explorer and playtest stand down, each said in the report. The ETA is a short honest band, and the turn never teaches the build ETA. Kill switch: `AGENTV3_PLATFORM_DONE_TURN=off`.
+- Test: `tests/aRequestThePlatformFinishedRunsNoBuilder.test.ts` (15). The census fails if a new `*AtTurnStart` action has no success receipt. Proven by reversion: 7 mutations, each one fails.
+- Open (honest): a request with words added still runs the builder; the growth guard (not prevention) catches an unasked edit there. The finishing proofs (preview verify, mobile, prod build, tests) still take their time on a picker turn.
+

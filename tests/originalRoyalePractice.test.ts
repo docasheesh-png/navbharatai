@@ -117,4 +117,4 @@ it('typechecks new emitted modules against the real generated kit with strict Ty
     const diagnostics=ts.getPreEmitDiagnostics(program).filter(d=>d.file && paths.has(d.file.fileName)).map(d=>ts.flattenDiagnosticMessageText(d.messageText,' '));
     expect(diagnostics).toEqual([]);
   } finally {rmSync(dir,{recursive:true,force:true});}
-},20000);
+},120_000); // a strict compile of the WHOLE kit (it grows with every module): 4 s locally, past 20 s under CI coverage — the same budget as theKitCompilesUnderAStrictApp

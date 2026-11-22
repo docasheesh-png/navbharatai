@@ -15,3 +15,15 @@ export function refusePlatformNoticeAsBuildRequest(res: RefusalResponse, prompt:
   }
   return true;
 }
+
+/**
+ * The build route's prompt gate after the empty check, as ONE call so the chat handler gains no branch (its budget,
+ * tests/theChatHandlerHasHeadroom.test.ts): too long, or only a platform notice. Returns true when it answered.
+ */
+export function refuseUnusableBuildPrompt(res: RefusalResponse, prompt: string, maxLen: number): boolean {
+  if (prompt.length > maxLen) {
+    res.status(400).json({ error: `Prompt is too long (max ${maxLen} chars).` });
+    return true;
+  }
+  return refusePlatformNoticeAsBuildRequest(res, prompt);
+}

@@ -13,7 +13,7 @@ import { BUILD_STILL_STOPPING_MESSAGE } from '../src/server/AgentV3/stoppingBuil
 import {
   errorCanBeFixedByEditingTheApp, fixErrorAndContinuePrompt, platformNoticeAsBuildRequest,
 } from '../src/lib/platformFixRequest';
-import { refusePlatformNoticeAsBuildRequest } from '../src/server/AgentV3/platformNoticePrompt';
+import { refusePlatformNoticeAsBuildRequest, refuseUnusableBuildPrompt } from '../src/server/AgentV3/platformNoticePrompt';
 import { createBuildPreflightStream } from '../src/server/AgentV3/BuildRequestCoordination';
 
 const read = (p: string) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
@@ -66,6 +66,12 @@ describe('a notice sent back as a build request is refused before any work (serv
     expect(refusePlatformNoticeAsBuildRequest(res, REPORT_2498_PROMPT)).toBe(true);
     expect(status).toBe(400);
     expect(body).toEqual({ error: PLATFORM_NOTICE_NOT_A_REQUEST_MESSAGE, code: PLATFORM_NOTICE_NOT_A_REQUEST_CODE });
+    // the route's one gate: the old length refusal is unchanged, a real prompt passes untouched
+    let longStatus = 0;
+    expect(refuseUnusableBuildPrompt({ status: (c: number) => { longStatus = c; return { json: () => undefined }; } }, 'x'.repeat(11), 10)).toBe(true);
+    expect(longStatus).toBe(400);
+    expect(refuseUnusableBuildPrompt({ status: () => ({ json: () => undefined }) }, REPORT_2498_PROMPT, 20_000)).toBe(true);
+    expect(refuseUnusableBuildPrompt({ status: () => { throw new Error('must not answer'); } }, 'ek bahut bada map par bubg jaisa game banao!!', 20_000)).toBe(false);
     expect(PLATFORM_NOTICE_NOT_A_REQUEST_MESSAGE).not.toMatch(/claude|glm|kimi|firestore|cloud run|instance/i);
   });
 
@@ -88,8 +94,8 @@ describe('a notice sent back as a build request is refused before any work (serv
   });
 
   it('the route asks before any lock, lease, sandbox or model call', () => {
-    const at = ROUTE.indexOf('if (refusePlatformNoticeAsBuildRequest(res, prompt)) return;');
-    expect(at).toBeGreaterThan(ROUTE.indexOf('Prompt is too long (max'));
+    const at = ROUTE.indexOf('if (refuseUnusableBuildPrompt(res, prompt, MAX_PROMPT_LEN)) return;');
+    expect(at).toBeGreaterThan(ROUTE.indexOf('A non-empty "prompt" is required.'));
     expect(at).toBeLessThan(ROUTE.indexOf("await import('../AgentV3/AbuseDetector')"));
     expect(at).toBeLessThan(ROUTE.indexOf('const buildLeaseToken = randomUUID();'));
   });

@@ -29,6 +29,7 @@ import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../th
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
+import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /** Side of the walkable ground patch kept under the player, in metres. Default 96. */
@@ -62,6 +63,8 @@ export type Compass = 'north' | 'north-east' | 'east' | 'south-east' | 'south' |
 export interface WorldRegion {
   /** A short unique name: 'old-town', 'harbour', 'hill-village'. */
   id: string;
+  /** The name the map writes on it ("Mumbai", "Rampur"). Left out: made from the id ('old-town' is "Old Town"). */
+  name?: string;
   kind: RegionKind;
   /** Which way from the first place. Left out: the places spread around by themselves. */
   toward?: Compass;
@@ -440,6 +443,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
   };
+  // 🗺️ THE MAP KNOWS THE WORLD (admin 2026-11-22: "jaise PUBG/Free Fire me location map … tap kar kar pura map aur location").
+  // Every place, land and user map with its name, and every highway, handed to the Hud's corner map and full map in WORLD
+  // metres. origin() turns the render positions the shell reads (the player, the vehicle it drives, every marker) into WORLD
+  // metres, so the map stays right across origin shifts. A tile of a grown city is drawn but not named (its city is).
+  const named = (region: WorldRegion): string => (typeof region.name === 'string' && region.name.trim() ? region.name.trim().slice(0, 40) : placeName(region.id));
+  const regionOf = (id: string, kind: RegionKind): WorldRegion => wanted.find((r) => r && r.id === id) ?? { id, kind };
+  const mapPlaces: WorldMapPlace[] = [
+    ...planned.map((p): WorldMapPlace => ({ id: p.region.id, name: p.cluster && !p.region.name ? '' : named(p.region), kind: p.region.kind, x: p.centre.x, z: p.centre.z, radius: p.reach, shape: 'square' })),
+    ...landList.map((l): WorldMapPlace => ({ id: l.id, name: named(regionOf(l.id, l.kind)), kind: l.kind, x: l.centre.x, z: l.centre.z, radius: l.radius, shape: 'circle' })),
+    ...userMaps.map((m): WorldMapPlace => ({ id: m.id, name: named(regionOf(m.id, 'custom')), kind: 'custom', x: m.centre.x, z: m.centre.z, radius: m.size / 2, shape: 'square' })),
+  ];
+  const unregisterMap = setWorldMapSource({ places: () => mapPlaces, roads: () => roadLines, origin: () => ({ x: chunks.origin.x, z: chunks.origin.z }) });
   return {
     map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
@@ -510,6 +525,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
+      unregisterMap();
     },
   };
 }
@@ -611,7 +627,7 @@ export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — 
 // update() runs your rules — never replace the world, the player or the camera.
 import React, { useMemo, useRef } from 'react';
 import { GameCanvas } from './GameCanvas';
-import type { GameContext, GameOptions } from './Game';
+import type { GameContext, GameOptions, MinimapOptions } from './Game';
 import { createOpenWorld, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
 import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
 import { applyPlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
@@ -635,18 +651,25 @@ export interface OpenWorldGameProps {
   setup?: (ctx: GameContext, world: OpenWorld) => void;
   /** Your rules, at a fixed 60 Hz, after the world has streamed for this step. */
   update?: (ctx: GameContext, world: OpenWorld, delta: number) => void;
+  /**
+   * THE MAP, the user's to shape (like PUBG / Free Fire): a round map in a corner with the roads and the names of places, and a
+   * tap on it (or M) opens the whole world with pan, zoom and a waypoint. { corner: 'right' } moves it, { size: 200 } makes it
+   * bigger (80–240), { names: false } hides the names, { range: 400 } shows more around the player, { fullMap: false } keeps it
+   * small only; false turns the map off. The player can also hide the corner map in Settings → Minimap.
+   */
+  map?: MinimapOptions | boolean;
   /** Any other shell option (camera, touch buttons, language, music …). */
   options?: Omit<GameOptions, 'container' | 'setup' | 'update'>;
 }
 
-export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, setup, update, options }: OpenWorldGameProps) {
+export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, map = true, setup, update, options }: OpenWorldGameProps) {
   const world = useRef<OpenWorld | null>(null);
   const host = useRef<FeatureHost<OpenWorld> | null>(null);
   const listed = useRef(features); listed.current = features;
   const body = useRef<PlayerBody | null>(null);
   const hooks = useRef({ setup, update }); hooks.current = { setup, update };
   const gameOptions = useMemo<Omit<GameOptions, 'container'>>(() => ({
-    camera: 'third-person', gameId: 'open-world', minimap: true,
+    camera: 'third-person', gameId: 'open-world', minimap: map,
     startScreen: { title, ...(subtitle ? { subtitle } : {}) },
     ...(player?.look ? { playerLook: player.look } : {}),
     ...options,
@@ -773,6 +796,13 @@ export function generateOpenWorld(): RecipeOutput {
       'parks), with traffic that obeys the lights, people who cross on the zebras, and parked cars the player gets into with Use (E). world.city',
       'gives the city, its traffic, its people, the parked cars and toWorld(x, z) for its lots and routes. Pass city options',
       '({ blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }) to change it, or leave city out for open country.',
+      'THE MAP IS ALREADY THERE (like PUBG / Free Fire): a round map in the top-left corner shows the highways and the places near the',
+      'player with their names, and a tap on it (or M) opens the WHOLE world full screen — every place and land named, the roads, the player',
+      'and its heading; drag to pan, pinch or scroll to zoom, tap to drop a waypoint that the corner map then shows with its distance. Never',
+      'draw your own minimap or map screen. Do what the user says through the map prop of <OpenWorldGame>: "map right corner me" →',
+      'map={{ corner: \'right\' }}; "bada minimap" → map={{ size: 200 }} (80–240 px); "naam mat dikhao" → map={{ names: false }}; "aur door tak',
+      'dikhao" → map={{ range: 400 }} (metres); "full map nahi chahiye" → map={{ fullMap: false }}; "map band karo" → map={false}. A place\'s',
+      'name on the map is its region name in src/game/world.ts ({ id: \'old-town\', kind: \'town\', name: \'Rampur\' }), else made from its id.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

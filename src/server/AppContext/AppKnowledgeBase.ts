@@ -115,6 +115,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['change character', 'replace character', 'character badlo', 'character badalna', 'hero badlo', 'player badlo', 'my character', 'mera character', 'character ka rang', 'character kapde', 'use as my character', 'player model', 'skin', 'avatar', 'character bekar hai', 'naya character'],
   },
   {
+    id: 'game_racing_own_car_track',
+    name: 'Change anything in a racing game: your own car, your own track, laps, rivals and more',
+    path: 'NavBharatAI Pro → chat → ask for the change in your racing game (attach a 3D model with the paperclip for your own car or track) — or the mode button under the message box → Game library → Use as my car',
+    description: 'A racing game starts on NavBharatAI\'s endless road library, but nothing about it is fixed — ask for any change. YOUR OWN CAR: attach a 3D model (.glb, .gltf, .obj, .fbx or a zip of one) and say it is your car, or pick one in the Game library with "Use as my car": it becomes the car you drive, sized to a car, while steering, speed, the camera and the wheels-on-the-road driving stay the same. You can also change its colour, size, top speed, acceleration, braking and steering. YOUR OWN TRACK: attach a 3D model of a track and say to race on it: it becomes the ground, the racing line is read from its road, and the race runs your number of laps with your position, a lap timer and rival cars. ANYTHING ELSE: a longer or endless road, more or fewer rivals, a course of your own design, weather, time of day, camera, the on-screen display, the rules. The car lives in src/game/car.ts and the track in src/game/track.ts. Honest limits: if a car model cannot be loaded the game says so on screen and the standard car is shown; if a track cannot be raced on (for example it is one flat open area, a point-to-point road or a road that crosses itself) the game says why on screen and runs on the road library until the racing line is given; rival cars are the standard car; scenery on your track (walls, buildings) is not solid.',
+    howToUse: 'Attach your model with the paperclip and ask, in your own words, for it to be your car — or for the race to run on it as your track, with the number of laps you want. From the library: open Game library, tap "Use as my car", tap a model, then send. Other changes by text: "gaadi neeli karo", "gaadi tez karo", "race lambi karo", "aur gaadiyan daalo", "raat ka race karo". To go back: "wapas purani gaadi" or "wapas library wala road".',
+    relatedFeatures: ['game_library_picker', 'game_player_character', 'game_asset_librarian'],
+    keywords: ['racing game', 'race game', 'my car', 'meri gaadi', 'gaadi badlo', 'car badlo', 'apni gaadi', 'own car', 'car model', 'use as my car', 'my track', 'apna track', 'own track', 'track model', 'race track upload', 'laps', 'lap race', 'rivals', 'opponents', 'gaadi tez karo', 'racing track badlo'],
+    aiSurface: 'pro_chat',
+  },
+  {
     id: 'game_physics',
     name: 'Real physics in 3D games (falling, rolling, toppling, ragdoll)',
     path: 'NavBharatAI Pro → chat → ask for a 3D game with physics (for example "boxes that fall over", "explosion se cheezein ude", "ragdoll when the enemy dies")',

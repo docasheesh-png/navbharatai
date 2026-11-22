@@ -27,6 +27,7 @@
 // PURE builder → the caller writes the files.
 
 import { kitTypeContract } from './kitTypeContract';
+import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
   files: Record<string, string>;
@@ -3319,18 +3320,28 @@ import * as THREE from 'three';
 import { Game } from './Game';
 import { events } from './core/events';
 import { state } from './core/state';
-import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState } from './three/objects';
+import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
 import { createRace, type Race } from './three/race';
+import { applyCarChoice, loadModelTrack, projectRaceChoices, type CarChoice, type CarModelHandle, type ModelTrack, type TrackChoice } from './play/raceCustom';
 
 /** Original racing starter. New plan identity restarts the game (all settings apply).
- * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan. */
-export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }: {
+ * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan.
+ * THE CAR AND THE TRACK ARE THE USER'S: src/game/car.ts (export const CAR) and src/game/track.ts (export const TRACK) are
+ * read by themselves when they exist (play/raceCustom.ts); the car and track props win over them. */
+export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, car: carProp, track: trackProp }: {
   plan?: TrackPlan; onReady?: (stream: TrackStream) => void;
   /** Rival cars on the road (0 to 7); 0 is a solo drive. */
   opponents?: number;
   /** A finish line this many km from the start; null (default) keeps the endless road endless. */
   finishKm?: number | null;
+  /** The player's car: colour, size, how it drives, or a 3D model. Default: src/game/car.ts, else the kit car. */
+  car?: CarChoice;
+  /** Race on a 3D track model instead of the road library (laps, its own racing line). Default: src/game/track.ts. */
+  track?: TrackChoice;
 } = {}) {
+  const own = projectRaceChoices();
+  const carChoice = carProp ?? own.car ?? undefined;
+  const trackChoice = trackProp ?? own.track ?? undefined;
   const host = useRef<HTMLDivElement>(null);
   const hud = useRef<HTMLDivElement>(null);
   const live = useRef<Game | null>(null);
@@ -3339,11 +3350,14 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
   const [failure, setFailure] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [call, setCall] = useState<string | null>(null);
+  // What the player must be told about their own car or track (loading, scaled, or why it could not be used).
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!host.current) return;
-    setFailure(null);
-    let game: Game | null = null, stream: TrackStream | null = null;
-    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null;
+    setFailure(null); setNotice(null);
+    let game: Game | null = null, stream: TrackStream | null = null, course: ModelTrack | null = null;
+    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null, look: CarModelHandle | null = null;
+    const tuning: VehicleTuning = { ...(carChoice?.tuning ?? {}) };
     // 3-2-1-GO! big in the middle; GO! clears itself.
     let callTimer: ReturnType<typeof setTimeout> | undefined;
     const offCount = events.on('RACE_COUNTDOWN', (p: { n?: number }) => {
@@ -3361,58 +3375,119 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
       if (released) return; released = true;
       for (const off of offs) off();
       offCount(); offGo(); clearTimeout(callTimer);
-      race?.dispose(); stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
+      look?.dispose(); race?.dispose(); stream?.dispose(); course?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
     };
-    try {
-      game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
-        setup: (ctx) => {
-          stream = createTrackStream(config.current.plan, { detail: 'lite' });
-          car = createCar({ color: 0xb42b2b, detail: 'lite' });
-          car.position.set(stream.startPose.x, stream.startPose.y, stream.startPose.z);
-          car.rotation.y = stream.startPose.heading;
-          drive = createVehicleState(car);
-          ctx.scene.add(stream.root, car); ctx.follow(car);
-          race = createRace(ctx.scene, { stream, opponents, finishDistance: finishKm != null && finishKm > 0 ? finishKm * 1000 : null });
-        },
-        update: (ctx, dt) => {
-          if (!stream || !car) return;
-          // Held at the line through the countdown; the car keeps its starting speed for the moment GO comes.
-          if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt);
-          const status = stream.update(car);
-          const standing = race?.update(dt, status.distance);
-          if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
-          const piece = status.segment?.piece;
-          const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
-          if (id !== lastMap) {
-            lastMap = id;
-            ctx.scene.background = new THREE.Color(skies[id - 1] ?? skies[0]);
-            ctx.scene.fog = new THREE.Fog(skies[id - 1] ?? skies[0], 70, 450);
-            ctx.lights.key.intensity = map?.lighting === 'night' ? 0.6 : 2.2;
-            ctx.lights.hemisphere.intensity = map?.lighting === 'night' ? 0.6 : 1;
-            ctx.lights.ambient.intensity = map?.lighting === 'night' ? 0.35 : 0.2;
-          }
-          hudTime += dt;
-          if (hud.current && hudTime >= 0.2) {
-            hudTime = 0;
-            const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
-            const place = standing && standing.total > 1 ? 'P' + standing.position + '/' + standing.total + ' · ' : '';
-            const clock = standing ? Math.floor(standing.time / 60) + ':' + (standing.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
-            hud.current.textContent = place + clock + (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
-          }
-        },
+    const begin = (custom: ModelTrack | null) => {
+      if (released || !host.current) return;
+      course = custom;
+      if (custom) tuning.ground = custom.heightAt;
+      try {
+        game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
+          setup: (ctx) => {
+            if (!custom) stream = createTrackStream(config.current.plan, { detail: 'lite' });
+            const start = custom ? custom.startPose : stream!.startPose;
+            car = createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
+            car.position.set(start.x, start.y, start.z);
+            car.rotation.y = start.heading;
+            drive = createVehicleState(car, tuning);
+            ctx.scene.add(custom ? custom.root : stream!.root, car); ctx.follow(car);
+            // The user's own car model, when they chose one: the kit car keeps driving, the model is its look.
+            look = applyCarChoice(car, carChoice, undefined, setNotice);
+            if (custom) {
+              ctx.scene.background = new THREE.Color(skies[0]);
+              ctx.scene.fog = new THREE.Fog(skies[0], 120, 900);
+              race = createRace(ctx.scene, { stream: custom, opponents, finishDistance: custom.laps * custom.length });
+            } else {
+              race = createRace(ctx.scene, { stream: stream!, opponents, finishDistance: finishKm != null && finishKm > 0 ? finishKm * 1000 : null });
+            }
+          },
+          update: (ctx, dt) => {
+            if (!car) return;
+            if (course) {
+              // A lap race on the user's own track: the race holds the car at the line, then laps count to the finish.
+              if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt, tuning);
+              const lapStatus = course.update(car);
+              const lapStanding = race?.update(dt, lapStatus.distance);
+              hudTime += dt;
+              if (hud.current && hudTime >= 0.2) {
+                hudTime = 0;
+                const place = lapStanding && lapStanding.total > 1 ? 'P' + lapStanding.position + '/' + lapStanding.total + ' · ' : '';
+                const clock = lapStanding ? Math.floor(lapStanding.time / 60) + ':' + (lapStanding.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
+                hud.current.textContent = place + clock + course.name + ' · Lap ' + Math.min(course.laps, lapStatus.lap + 1) + '/' + course.laps + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+              }
+              return;
+            }
+            if (!stream) return;
+            // Held at the line through the countdown; the car keeps its starting speed for the moment GO comes.
+            if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt, tuning);
+            const status = stream.update(car);
+            const standing = race?.update(dt, status.distance);
+            if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
+            const piece = status.segment?.piece;
+            const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
+            if (id !== lastMap) {
+              lastMap = id;
+              ctx.scene.background = new THREE.Color(skies[id - 1] ?? skies[0]);
+              ctx.scene.fog = new THREE.Fog(skies[id - 1] ?? skies[0], 70, 450);
+              ctx.lights.key.intensity = map?.lighting === 'night' ? 0.6 : 2.2;
+              ctx.lights.hemisphere.intensity = map?.lighting === 'night' ? 0.6 : 1;
+              ctx.lights.ambient.intensity = map?.lighting === 'night' ? 0.35 : 0.2;
+            }
+            hudTime += dt;
+            if (hud.current && hudTime >= 0.2) {
+              hudTime = 0;
+              const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
+              const place = standing && standing.total > 1 ? 'P' + standing.position + '/' + standing.total + ' · ' : '';
+              const clock = standing ? Math.floor(standing.time / 60) + ':' + (standing.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
+              hud.current.textContent = place + clock + (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+            }
+          },
+        });
+        live.current = game; game.start();
+        if (stream) {
+          // Play again: the race has laid the road again from its first piece (race.ts calls stream.reset()); the car
+          // goes back to the start line on it.
+          const road = stream;
+          road.onReset = () => {
+            if (!car) return;
+            car.position.set(road.startPose.x, road.startPose.y, road.startPose.z);
+            car.rotation.y = road.startPose.heading;
+            drive = createVehicleState(car, tuning);
+            lastMap = -1;
+          };
+        }
+        if (custom) {
+          // Play again after the finish starts the same lap race from the line.
+          offs.push(events.on('GAME_STARTED', () => {
+            if (!car || !course) return;
+            course.reset();
+            car.position.set(course.startPose.x, course.startPose.y, course.startPose.z);
+            car.rotation.y = course.startPose.heading;
+            drive = createVehicleState(car, tuning);
+          }));
+        }
+        if (stream) config.current.onReady?.(stream);
+      } catch (error) {
+        release();
+        setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
+      }
+    };
+    const trackName = typeof trackChoice?.model === 'string' ? trackChoice.model.trim() : '';
+    if (trackChoice && trackName) {
+      // The user's own track: loaded and read first, then raced on — or the reason it cannot be, said on screen.
+      setNotice('Loading your track...');
+      void loadModelTrack(trackChoice).then((built) => {
+        if (released) { if (built.ok) built.track.dispose(); return; }
+        if (built.ok) { setNotice(built.notes.length ? built.notes.join(' ') : null); begin(built.track); }
+        else { setNotice('Your track "' + trackName + '" cannot be raced on: ' + built.reason + '. This race runs on the road library instead.'); begin(null); }
       });
-      live.current = game; game.start();
-      const ready = () => { if (stream) config.current.onReady?.(stream); }; ready();
-    } catch (error) {
-      release();
-      setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
-    }
+    } else begin(null);
     return () => { live.current = null; release(); };
-  }, [plan, opponents, finishKm]);
+  }, [plan, opponents, finishKm, carChoice, trackChoice]);
   return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
     <div ref={host} style={{ position: 'absolute', inset: 0 }} />
     <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
-      <div ref={hud}>01/12 · Highway Straight · 0/10 km · Loop 1</div>
+      <div ref={hud}>{trackChoice?.model ? 'Your track' : '01/12 · Highway Straight · 0/10 km · Loop 1'}</div>
       <small>W/S or arrows: gas/brake · A/D: steer · Touch controls on phones</small>
     </div>
     <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {
@@ -3424,6 +3499,7 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
       } else live.current.pause();
     }}>{paused ? 'Resume' : 'Pause'}</button>
     {call && <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 96, fontWeight: 900, textShadow: '0 4px 12px rgba(0,0,0,.8)', pointerEvents: 'none' }}>{call}</div>}
+    {notice && <div role="status" aria-live="polite" style={{ position: 'absolute', left: 16, right: 16, bottom: 16, color: 'white', background: '#7f1d1dd9', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>{notice}</div>}
     {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}
   </div>;
 }
@@ -3987,6 +4063,8 @@ export function gridStep(scale: number, minPx = 70): number {
 const FILES: Record<string, string> = {
   'src/game/Game.ts': GAME,
   'src/game/RacingRoadGame.tsx': RACING_ROAD_GAME,
+  // The race's car and track are the user's to change (car.ts / track.ts, models included): read by the starter (2026-11-22).
+  [RACE_CUSTOM_PATH]: RACE_CUSTOM,
   'src/game/LaneRunnerGame.tsx': LANE_RUNNER_GAME,
   'src/game/GameCanvas.tsx': GAME_CANVAS,
   'src/game/ui/Hud.tsx': HUD,
@@ -3997,7 +4075,7 @@ const FILES: Record<string, string> = {
   'src/game/play/features.ts': GAME_FEATURES,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'racingroadgame', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -4081,6 +4159,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     }
     // GameCanvas constructs Game and renders Hud; Hud imports Game's type. Neither compiles alone.
     if (files['src/game/LaneRunnerGame.tsx']) files['src/game/GameCanvas.tsx'] = FILES['src/game/GameCanvas.tsx'];
+    // The race starter reads the user's own car and track through play/raceCustom.ts; it never compiles without it.
+    if (files['src/game/RacingRoadGame.tsx']) files[RACE_CUSTOM_PATH] = FILES[RACE_CUSTOM_PATH];
     if (files['src/game/GameCanvas.tsx'] || files['src/game/ui/Hud.tsx'] || files['src/game/RacingRoadGame.tsx']) {
       files['src/game/Game.ts'] = FILES['src/game/Game.ts'];
     }
@@ -4107,6 +4187,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
+      (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +
       (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +
       // 🔴 THE TYPES FIRST, AND FIRST ON PURPOSE (Q-909, autopsy 50378049). The example below touches
       // three of GameContext's nine members, so for the rest the reported build GUESSED — ctx.canvas,

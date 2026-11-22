@@ -404,10 +404,31 @@ export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/
   + ' PLAYER.model to the subject it was saved under (PLAYER.modelHeight for its size); "wapas purana character" → model: null. Never build'
   + ' a second player, never hide or replace the kit\'s hero by hand, and never touch the map, the controls or the features to change the'
   + ' character. If the library does not have what was asked, say so and change PLAYER.look instead.';
-/** Racing on the kit's road library: a longer road is a prop, never a hand-built track. */
-export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingRoadGame>): twelve road maps that join seamlessly into an endless road.'
-  + ' "Track / road bada karo", "lambi race" → raise finishKm (or pass finishKm={null} for a road that never ends); "aur gaadiyan" →'
-  + ' opponents. Never hand-build a second track or shorten the road to add something else.';
+/**
+ * 🏁 RACING STARTS ON THE ROAD LIBRARY — AND THE USER MAY CHANGE ANY OF IT (admin 2026-11-22, verbatim: "user puri racing game
+ * ko bhi AI se modified karwa sake, jaise chahe sab free hand do!"). The old rule ended "Never hand-build a second track", which
+ * turned the library into a cage: a user who attached their own track or car had no way in. The library is the DEFAULT; a
+ * clear request wins. The user's car and track each live in one small file the starter reads by itself
+ * (kit play/raceCustom.ts), so a change is one edit, and a model that cannot be used is said on screen, never faked.
+ */
+export const RACE_ROAD_RULE = '🏁 THIS RACE STARTS ON THE ROAD LIBRARY (<RacingRoadGame>: twelve road maps joined into one endless road). The library is'
+  + ' only the STARTING POINT — anything the user clearly asks about the race is done. Map each request to its path:'
+  + ' (1) THEIR CAR is src/game/car.ts (export const CAR: CarChoice from \'./play/raceCustom\'; RacingRoadGame reads it by itself — create the'
+  + ' file when it is missing): "gaadi neeli karo" → CAR.color (0xRRGGBB); "tez karo" / handling → CAR.tuning { maxSpeed (m/s; 25 ≈ 90 km/h),'
+  + ' accel, brake, steerRate }; "meri gaadi ye wali kar do" with a 3D model the user ATTACHED → CAR.model = its project path exactly as the'
+  + ' [USER MODELS ADDED] note names it (\'public/models/<name>.glb\'); a LIBRARY car → add_library_models first, then CAR.model = the subject it'
+  + ' was saved under; size → CAR.modelLength (metres); a model that drives backwards → CAR.modelYaw: 180; floating or sunk wheels → CAR.modelLift;'
+  + ' "wapas purani gaadi" → model: null. The kit keeps the driving, the camera and the wheels-on-road physics; only the look becomes the model.'
+  + ' (2) THEIR OWN TRACK (an attached .glb/.gltf/.obj/.fbx, or a zip of one) is src/game/track.ts (export const TRACK: TrackChoice): TRACK.model ='
+  + ' its project path, laps → TRACK.laps, its size → TRACK.size (metres), the other direction → TRACK.reverse. The game makes it the ground,'
+  + ' reads the racing line from the road and runs laps, the position and the rivals on it — or says ON SCREEN why it cannot (then pass TRACK.line'
+  + ' as [x, z] points, or TRACK.roadNames, and tell the user; never fake a line). "Wapas library wala road" → TRACK.model: null.'
+  + ' (3) THE LIBRARY ROAD: "track / road bada karo", "lambi race" → raise finishKm (finishKm={null} for a road that never ends); "race chhoti karo"'
+  + ' → lower finishKm; "aur gaadiyan" / "kam gaadiyan" → opponents (0–7); a course of their own design → the plan prop (createRacingRoadPlan, or a TrackPlan of pieces).'
+  + ' (4) ANYTHING ELSE — weather, time of day, camera, HUD, rules, sounds, colours, a new mode — change it in code as asked: edit'
+  + ' src/game/RacingRoadGame.tsx itself where its props do not reach. Never refuse or water down a clear request because the library lacks it,'
+  + ' never swap the user\'s car or track for the library\'s without saying so, and where a prop or these two files already do the asked change, use them.'
+  + ' If a request can mean two things (which car, which part), ask one short question instead of guessing.';
 
 /**
  * The builder's instruction when the platform mounted the open-world starter: the game ALREADY plays, so the builder adds
@@ -597,7 +618,8 @@ export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): 
 export function projectGrowthRules(files: Readonly<Record<string, string>>): string {
   const rules = [
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
-    typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_NO_GUESS_RULE : '',
+    // Asked, never guessed, in every game that grows by the user's requests — a road-library race included (2026-11-22).
+    typeof files[GAME_FEATURES_INDEX_FILE] === 'string' || /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? GAME_NO_GUESS_RULE : '',
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',

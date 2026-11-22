@@ -122,7 +122,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b5b617ab2654eff43fb1c5a5e7bcae89c6c823e701ad99c4bd15a105ac2d0541",
     "c9bfc6b97b35c03a6382846117485ce924d0b076ff7fc477faa5fd41e443b229",
     "e71b801e4d03cb1020e0d23f3e37612e4f49cefd562f0d8d97bba2f65181321a",
-    "0fe8e46b17e6b3244f6fc31cab116ee5ed9f48e11b7d8c9f110795d56f0d8ca1"
+    "0fe8e46b17e6b3244f6fc31cab116ee5ed9f48e11b7d8c9f110795d56f0d8ca1",
+    "c7ea438236cd31125d333f42fc9f2160dfd1ade6c38a7bf1d8d0678efb3be61f",
+    "2da0a2fde705007cec51137c3ad9d4705bad9fba420fafef810649dd0ed16046"
   ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
@@ -463,6 +465,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f"
   ],
+  "src/game/play/raceCustom.ts": [
+    "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0"
+  ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"
   ],
@@ -602,13 +607,16 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "cb918bf48ca8f64f2943539913e658a108761f1e37b6ea6ac5d725bbd9eb5ab8",
     "fe2d66923322f205defff093200ecc727890ed99f7feb58060008cfb9a9b4f9e",
     "e9ca3f0c156ac3cf2257e8ab81823164712e21911517a6d85dfced61eceaea6a",
-    "a56af822f5eba66cfbbdea0f19750e504574f88f4ee74e15bea8c20a7bae8686"
+    "a56af822f5eba66cfbbdea0f19750e504574f88f4ee74e15bea8c20a7bae8686",
+    "89363f92d8bdbf3a0cc836e7898bbc50d0071c9f22886affc8fe57c78d66374c"
   ],
   "src/game/three/physics.ts": [
     "a4bb8d49546dfe95b0308c25f10149391ef288e9f1a7757555c2732c86c9cfb1"
   ],
   "src/game/three/race.ts": [
-    "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548"
+    "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548",
+    "a98f362a8b1229e2dfe34a28a39a07b978a4170c8b883176d2d8c523b8a17836",
+    "047a1791295d2f98fba403eeacf2fd3170ae2c8b843e57f3ad2f232e7d67dc04"
   ],
   "src/game/three/renderer.ts": [
     "e3bd063f8ab3ab10a658e8d808c0155a163ca15fb0d8744a4cd7d4fb902b7c19",

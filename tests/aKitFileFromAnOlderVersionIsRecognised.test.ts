@@ -157,7 +157,8 @@ describe('the dispatcher brings an untouched older kit file up to date, and neve
     act.reads = [];
     await d.dispatch({ id: 't3', name: 'generate_game_shell', input: {} }, 'architect');
     const shellOwn = new Set(Object.keys(GAME_RECIPES.generate_game_shell().files));
-    expect(act.reads.filter((p) => p !== 'package.json' && !shellOwn.has(p))).toEqual([]);
+    // src/game/player.ts is the game's OWN file (who the player is), created once — so whether it exists is the one read.
+    expect(act.reads.filter((p) => p !== 'package.json' && p !== 'src/game/player.ts' && !shellOwn.has(p))).toEqual([]);
   });
 });
 

@@ -2433,7 +2433,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, features, racingroadgame, lanerunnergame. Default = all. features is the guarded feature list a game grows by (one file per thing); racingroadgame and lanerunnergame are the ready racing and endless-runner games.',
+            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, features, playerbody, racingroadgame, lanerunnergame. Default = all. features is the guarded feature list a game grows by (one file per thing); playerbody is who the player is (the game reads src/game/player.ts by itself, and it always ships with game); racingroadgame and lanerunnergame are the ready racing and endless-runner games.',
           },
         },
       },

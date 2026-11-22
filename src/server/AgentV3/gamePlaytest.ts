@@ -1629,6 +1629,8 @@ export function playtestSkipReason(ctx: {
   hasRunCommand: boolean;
   hasPreviewUrl: boolean;
   awaitsShell: boolean;
+  /** The platform completed the whole request itself (platformDoneTurn.ts): the turn ends at typecheck + render proof. */
+  platformDone?: boolean;
   timeLeft: boolean;
 }): string | null {
   // Not applicable — silence is the honest answer, and a warning here would be a nag.
@@ -1636,6 +1638,7 @@ export function playtestSkipReason(ctx: {
   // Could not look — each one names what was missing, never "something went wrong".
   if (!ctx.hasPreviewUrl) return 'no live preview address was available to open the game at';
   if (ctx.awaitsShell) return 'this turn built one project module and the app is assembled by a later one';
+  if (ctx.platformDone) return 'the platform made the one change asked for itself, and this turn was finished at the typecheck and the real-browser render, without playing the game';
   if (!ctx.hasRunCommand) return 'this sandbox has no way to run a browser';
   if (!ctx.timeLeft) return 'the build had no time left to play it in';
   return null;

@@ -75,7 +75,8 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
-import { enforceGrowthAtTurnEnd, libraryActionsAtTurnStart } from '../AgentV3/growthTurn';
+import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
+import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
@@ -15809,6 +15810,7 @@ async function noteBuildOutcome(
           // Autopsy 778d7c58: a seeded finished template is a ~1 min verify, not a from-scratch build.
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           Object.assign(est, capTemplateVerifyEstimate(est, scaffoldWillSeed && isTemplateVerifyJob(seededScaffold?.tier ?? null), past.length > 0));
+          Object.assign(est, capPlatformDoneEstimate(est, prompt)); // a library pick the platform does itself (failedbr #2496)
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
@@ -15842,9 +15844,9 @@ async function noteBuildOutcome(
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
           etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
           etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;
-          const etaShown = etaEvidenced
+          const etaShown = platformDoneEtaLine(prompt) ?? (etaEvidenced
             ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
-            : unevidencedFirstEtaLine(est);
+            : unevidencedFirstEtaLine(est));
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
           // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
@@ -19523,10 +19525,14 @@ async function noteBuildOutcome(
       }
       // 🗺️🧍 WHAT IS PICKED IN THE LIBRARY IS DONE BY THE PLATFORM ITSELF (growthTurn.ts): a map place (worldGrow.ts) or the
       // player's character (characterSwap.ts). Where it cannot be done, nothing is changed on a guess and the user is asked.
+      // ⚡ And when that WAS the whole request, the builder does not run at all (platformDoneTurn.ts, failedbr #2496).
+      const platformDoneRef: { cur: PlatformDone | null } = { cur: null };
       if (!isImportTurn && !projectModuleRef) {
-        const libraryHandoff = await libraryActionsAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        const libraryHandoff = await libraryActionsForTurn({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
-          addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
+          addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? ''),
+          done: platformDoneRef, narrate: (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+          startPreview: () => startTemplatePreview(true, () => dispatcher.dispatch({ id: 'platform-done-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined)) });
         if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
       }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
@@ -20658,6 +20664,7 @@ async function noteBuildOutcome(
         record: (row) => { try { buildDiag.record({ phase: 'build', severity: row.severity, code: row.code, message: row.message, autoResolved: true }); } catch { /* best-effort */ } },
       });
       result = templateRunResult(result, verbatimTemplate);
+      result = platformDoneRunResult(result, platformDoneRef.cur);
       fastLaneGated = templateCountsAsGated(fastLaneGated, verbatimTemplate.deliver);
 
       // FREE-TIER: never escalate a free build — escalation climbs to Sonnet/Claude, and a not-yet-
@@ -20947,6 +20954,7 @@ async function noteBuildOutcome(
         signal: abort.signal,
         remainingMs: () => effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (workElapsed()),
         record: (note) => buildDiag.record(note),
+        platformDone: () => platformDoneRef.cur !== null,
       });
       if (result.timedOut === true) {
         recordFinishingPassesHeld(buildDiag);
@@ -24800,7 +24808,7 @@ async function noteBuildOutcome(
         const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
-          && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
+          && !isImportTurn && !abort.signal.aborted && !awaitsShellNow() && !platformDoneRef.cur
           && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
           && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
@@ -24870,6 +24878,7 @@ async function noteBuildOutcome(
               hasRunCommand: !!actuator.runCommand,
               hasPreviewUrl: !!lastPreviewUrl,
               awaitsShell: !!awaitsShellNow(),
+              platformDone: !!platformDoneRef.cur,
               timeLeft: effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000,
             });
             if (why) {
@@ -24903,7 +24912,7 @@ async function noteBuildOutcome(
       // EXPLORE_NOT_RUN, not a pass. Kill switch AGENTV3_CLICK_EXPLORE=off.
       if (
         clickExplorerEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
-        && !isImportTurn && !abort.signal.aborted
+        && !isImportTurn && !abort.signal.aborted && !platformDoneRef.cur
         && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         try {
@@ -26464,7 +26473,7 @@ async function noteBuildOutcome(
         fastLaneGated,
         reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE') || bugHuntAskedByUser,
         startTierSonnet: analysis?.startTier === 'sonnet',
-        templateDelivered: verbatimTemplate.deliver,
+        templateDelivered: verbatimTemplate.deliver || platformDoneRef.cur !== null,
       });
       // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
       // read a half-built project and report the starter page as the product. The shell turn reviews the

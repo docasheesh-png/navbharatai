@@ -81,8 +81,10 @@ describe('🗺️ one more place, nothing else touched', () => {
 
   it('the route calls it before the builder, with the sandbox as the source of truth', () => {
     const route = read('src/server/routes/agentv3.ts');
-    // Since 2026-11-21 the place and the character share one call (growthTurn.libraryActionsAtTurnStart).
-    expect(route).toMatch(/const libraryHandoff = await libraryActionsAtTurnStart\(\{ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: \(p\) => actuator\.readFile\(workspaceId, p\),/);
+    // Since 2026-11-21 the place and the character share one call (growthTurn.libraryActionsAtTurnStart); since failedbr
+    // #2496 the route reaches it through platformDoneTurn.libraryActionsForTurn, which also decides whether the turn is done.
+    expect(read('src/server/AgentV3/platformDoneTurn.ts')).toContain('await libraryActionsAtTurnStart({ ...io,');
+    expect(route).toMatch(/const libraryHandoff = await libraryActionsForTurn\(\{ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: \(p\) => actuator\.readFile\(workspaceId, p\),/);
     expect(route).toMatch(/if \(libraryHandoff\) buildPrompt = `\$\{libraryHandoff\}/);
     expect(readFileSync(join(__dirname, '..', 'src/server/AgentV3/growthTurn.ts'), 'utf8')).toContain('await addLibraryPlaceAtTurnStart(io)');
   });

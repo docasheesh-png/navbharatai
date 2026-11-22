@@ -253,6 +253,8 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     normalizeImportSpecifiers, injectGlobalStylesheetImport, dedupeStylesheetImports, injectDotenvLoad,
     dotenvWiringMessage, missingViteEnvTypes, viteEnvTypesNote, redactCredentialLogs, isImportTurn: false,
     createFinishingPassGuard, FinishingPassDeferredError, GreenFreezeError, retainFinishingFileRepairs, retainedRepairRecords,
+    // The guard reads whether the platform completed the turn itself (platformDoneTurn.ts); these synthetic turns never are.
+    platformDoneRef: { cur: null },
     effectiveBuildSeconds: 0, buildStartedAt: Date.now(), singleHtmlFileRule: false,
     shouldAutoScaffoldE2e, renderRescueEligible, lastPreviewUrl: options.existingPreview ? 'https://synthetic.invalid/preview' : null,
     findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote, withE2eExcluded, e2eExcludeNote,

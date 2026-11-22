@@ -502,7 +502,7 @@ import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TI
 import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapDecision, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
-import { withTimeout } from '../AgentV3/asyncUtils';
+import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
 import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
 import { removedProbeFeatures } from '../AgentV3/changeEngine/requestConsistency';
@@ -18774,7 +18774,7 @@ async function noteBuildOutcome(
 
         const instrPath = findProjectInstructionPath(tree);
         if (instrPath) {
-          const instr = normalizeProjectInstructions(instrPath, await actuator.readFile(workspaceId, instrPath).catch(() => ''));
+          const instr = normalizeProjectInstructions(instrPath, await promptSteps.step('instructions read', () => actuator.readFile(workspaceId, instrPath).catch(() => '')));
           const block = projectInstructionsBlock(instr);
           if (block) {
             buildPrompt = `${block}\n\n---\n\n${buildPrompt}`;
@@ -18835,7 +18835,7 @@ async function noteBuildOutcome(
           .filter((e) => e.kind === 'error')
           .slice(-25)
           .map((e) => e.text);
-        const detail = await mistakeLedgerStore.guardDetailFor(userId, pastErrors);
+        const detail = await promptSteps.step('mistake ledger', () => mistakeLedgerStore.guardDetailFor(userId, pastErrors));
         let guardSource: 'personal' | 'fleet' | null = null;
         if (detail.text) {
           buildPrompt = `${detail.text}\n\n---\n\n${buildPrompt}`;
@@ -18844,7 +18844,7 @@ async function noteBuildOutcome(
         } else if (pastErrors.length > 0) {
           // FLEET FALLBACK: the fleet may hold a proven fix the user has never personally earned
           // (anonymous by construction — signature keys, sanitized text, no identity stored).
-          const fleet = await fleetMistakeLedgerStore.guardDetailFor(pastErrors);
+          const fleet = await promptSteps.step('fleet ledger', () => fleetMistakeLedgerStore.guardDetailFor(pastErrors));
           if (fleet.text) {
             buildPrompt = `${fleet.text}\n\n---\n\n${buildPrompt}`;
             mistakeGuardSigs = fleet.signatures;
@@ -18879,7 +18879,7 @@ async function noteBuildOutcome(
       // Setup (and its asset restore) is done: what is newer than this marker, the build itself made.
       // `buildAssets.ts` reads it at the save so a regenerated icon replaces the stored one.
       if (expectsArtifacts && !isImportTurn) {
-        try { await withTimeout(actuator.runCommand(workspaceId, MARK_ASSET_BASELINE_COMMAND), 5_000, 'asset-baseline'); } catch { /* no marker ⇒ only new assets are saved */ }
+        try { await promptSteps.step('asset baseline', () => withTimeout(actuator.runCommand(workspaceId, MARK_ASSET_BASELINE_COMMAND), 5_000, 'asset-baseline')); } catch { /* no marker ⇒ only new assets are saved */ }
       }
       if (megaRoadmapActive && megaRoadmapActive.steps.length > 0) {
         const step1 = megaRoadmapActive.steps[0];
@@ -19446,7 +19446,7 @@ async function noteBuildOutcome(
 
       // An EXISTING 3D game sees the library menu on every later turn too (gameLibrarySelection.ts) — one call, no branch here,
       // and OUTSIDE the new-build seed block below (it never runs on a new build).
-      buildPrompt = await withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid });
+      buildPrompt = await finalSteps.step('library menu', () => withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid }));
       // ── GAME KIT SEED (admin 2026-10-11, build 46e2d74b: "racing game me car ulti chal rahi hai") ──
       // The player's car showed its headlights and LEFT turned it right. The kit had the correct camera and
       // steering since 2026-10-05; that build never ran a single recipe and hand-wrote its own engine, so
@@ -19500,13 +19500,15 @@ async function noteBuildOutcome(
           if (refresh.blocked) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${refresh.blocked}.` });
           } else if (Object.keys(refresh.write).length > 0) {
-            const live = await Promise.all(Object.keys(refresh.write).map(async (p) => [p, await actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)).catch(() => null)] as const));
+            const live = await finalSteps.step('kit refresh read', () => Promise.all(Object.keys(refresh.write).map(async (p) => [p, await actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)).catch(() => null)] as const)));
             const drifted = live.filter(([p, c]) => (p in projectFilesAtTurnStart! ? c !== projectFilesAtTurnStart![p] : c !== null)).map(([p]) => p);
             if (drifted.length > 0) {
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${drifted.join(', ')} changed in the sandbox since it was saved.` });
             } else {
+              // Several at once, like the recipes' own writes (Q-3232): one by one this was a sandbox round trip per kit file
+              // before the builder's first call (failedbr #2484, "Final preparation … other 46.5 s").
+              await finalSteps.step('kit refresh write', () => mapWithConcurrency(Object.entries(refresh.write), 6, ([p, c]) => actuator.writeFile(workspaceId, p, c)));
               for (const [p, c] of Object.entries(refresh.write)) {
-                await actuator.writeFile(workspaceId, p, c);
                 writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,

@@ -37,3 +37,12 @@ describe('the warm index is bounded in wall-clock time', () => {
     expect(route).toContain('${warmIndexTimedOutCount()} read(s) not answered within the cap');
   });
 });
+
+describe('the rest of the preparation names its own steps (no more "other 46.5 s")', () => {
+  it('each sandbox / store call before the first model call is a timed step; the kit refresh writes several at once', () => {
+    const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
+    for (const step of ['instructions read', 'mistake ledger', 'fleet ledger', 'asset baseline']) expect(route, step).toContain(`promptSteps.step('${step}'`);
+    for (const step of ['library menu', 'kit refresh read', 'kit refresh write']) expect(route, step).toContain(`finalSteps.step('${step}'`);
+    expect(route).toContain("mapWithConcurrency(Object.entries(refresh.write), 6, ([p, c]) => actuator.writeFile(workspaceId, p, c))");
+  });
+});

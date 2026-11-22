@@ -346,8 +346,10 @@ export const GAME_WORLD_FILE = 'src/game/world.ts';
 export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; places: city, town, village; lands: desert, jungle, mountain, snow, beach). Read what the user'
   + ' WANTS, not the words: "map / zameen bada karo", "aur jagah chahiye", "ek aur shehar / gaon jodo", "duniya chhoti hai" → ADD one'
   + ' region per place asked for (several at once when they ask for several; a new id each; toward: north / east / … when they say where),'
-  + ' and never edit or remove the regions already there. "Yeh shehar bada karo", "zyada traffic / log" → edit ONLY that region\'s own'
-  + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }).'
+  + ' and never edit or remove the regions already there. "Zyada traffic / log" → edit ONLY that region\'s own entry (city: { traffic:'
+  + ' { count }, people: { count }, parkedCars }). "Yeh shehar bada karo", "city ko bada karo" → GROW it with joined tiles: add'
+  + ' { id: \'main-city-2\', kind: \'city\', joinTo: \'main-city\' } (several for "bahut bada"; toward: east / north … when they say'
+  + ' where) — each tile is a new block of streets and buildings edge to edge with the city, the streets carried straight on.'
   // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
   // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
   + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','
@@ -359,7 +361,11 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
   + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land). "Isi map ko'
   + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
-  + ' the original. Never build a place by hand beside the list, and never replace the map to make it bigger.';
+  + ' the original. A MAP THE USER ATTACHED (a .glb / .gltf / .obj, loose or in a .zip — it lands at public/models/<name>.glb) and asks'
+  + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'
+  + ' across, default 400); the map loads it when the player comes near and joins it by road. An .fbx or a game-engine project cannot be'
+  + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
+  + ' map to make it bigger.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

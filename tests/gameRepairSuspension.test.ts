@@ -17,7 +17,7 @@ describe('game repair data preservation suspension', () => {
     for (const callback of [repair, replay, revert, changedSince]) expect(callback).not.toHaveBeenCalled();
     expect([...files].map(([path, bytes]) => [path, bytes.toString('hex')])).toEqual(before);
     expect(gameRepairRecord(outcome).message).not.toContain('attempted and undone');
-    expect(gameIncompleteReason([{ code: 'GAME_DEFECT_BLANK', evidence: scenario }], ['levels'])).toContain('not playable');
+    expect(gameIncompleteReason([{ code: 'GAME_DEFECT_BLANK', evidence: scenario }], ['levels'], { played: true })).toContain('not playable');
   });
   it('never interprets an environment value as sufficient rollback proof', () => {
     for (const value of [undefined, '', 'on', 'true', '1', 'off', 'ON', 'force']) expect(gameAutoRepairEnabled({ AGENTV3_GAME_AUTO_REPAIR: value })).toBe(false);

@@ -20,13 +20,13 @@ describe('🧭 the classification', () => {
     const defects = playtestDefects(run, null);
     expect(defects.map((d) => d.code)).toEqual(['GAME_DEFECT_TOUCH_SCROLLS']);
     expect(defects[0].evidence).toMatch(/passive: false|touch-action: none/);
-    expect(gameIncompleteReason(defects, [])).toBeNull();
+    expect(gameIncompleteReason(defects, [], { played: true })).toBeNull();
     expect(gameRepairPrompt('make a game', defects, [])).toMatch(/GAME_DEFECT_TOUCH_SCROLLS: .*\{ passive: false \}/);
   });
   it('a real uncaught error is still a runtime error and still blocks', () => {
     const run = { ok: true, errorCount: 1, errors: ['player.velocity is undefined'] } as PlaytestRun;
     expect(playtestDefects(run, null).map((d) => d.code)).toContain('GAME_DEFECT_RUNTIME_ERROR');
-    expect(gameIncompleteReason(playtestDefects(run, null), [])).toMatch(/runtime error/);
+    expect(gameIncompleteReason(playtestDefects(run, null), [], { played: true })).toMatch(/runtime error/);
   });
   it('the pattern matches the browser\'s wording (with or without the [Intervention] tag), and nothing ordinary', () => {
     expect(BROWSER_INTERVENTION.test(REPORTED)).toBe(true);
@@ -96,6 +96,6 @@ describe.skipIf(!haveBrowser)('🔴 in a real browser: a working game that trigg
     const defects = playtestDefects(run, score);
     expect(defects.map((d) => d.code)).toContain('GAME_DEFECT_TOUCH_SCROLLS');
     expect(defects.map((d) => d.code)).not.toContain('GAME_DEFECT_RUNTIME_ERROR');
-    expect(gameIncompleteReason(defects, [])).toBeNull();
+    expect(gameIncompleteReason(defects, [], { played: true })).toBeNull();
   }, 150_000);
 });

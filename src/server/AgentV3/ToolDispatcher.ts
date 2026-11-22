@@ -517,7 +517,7 @@ import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ig
 import { isNotFoundError } from './fsErrors';
 import { SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
 import { withoutPreviewBridge, bridgeShellNote, bridgeLineRanges, withoutBridgeGrepMatches } from './previewBridge';
-import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
+import { LIST_PRUNE_DIRS, isListPrunedPath, isPlatformScratchPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
 import { locatedErrorText } from './runtimeErrorSite';
@@ -3091,7 +3091,10 @@ export class ToolDispatcher {
     const sources: EvalSourceFile[] = [];
     try {
       // Bound the listing (15s) so a stalled sandbox can't hang the gate before any read starts.
-      files = await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles');
+      // NavBharatAI's own temporary files are never graded as the user's code (failedbr #2496: our asset proof's
+      // 127.0.0.1 test server was reported as the app's "hardcoded localhost URL" and "hardcoded server port") —
+      // dropped from the listing itself, so no reader of this snapshot ever sees one.
+      files = (await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles')).filter((p) => !isPlatformScratchPath(p));
       // A folder the app does not build is decided BEFORE the 300-file cap (Q-3201): ~480 vendored reference files
       // used to crowd the real app out of the snapshot.
       let skip: (path: string) => boolean = () => false;

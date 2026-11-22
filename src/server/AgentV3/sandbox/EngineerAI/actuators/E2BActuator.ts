@@ -94,7 +94,7 @@ import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../..
 import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from '../../../previewBridge';
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
-import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
+import { LIST_PRUNE_DIRS, isListPrunedPath, isPlatformScratchPath } from '../../../../lib/generatedDirs';
 import type { ActuatorCommandTiming } from '../../../commandTiming';
 import { NPM_INSTALL_LOCK, NPM_INSTALL_LOCK_FRESH, INSTALL_WAIT_SECONDS, PRIME_NODE_MODULES, WARM_NODE_MODULES, STAMP_NODE_MODULES } from '../../../tscCommand';
 
@@ -1961,6 +1961,7 @@ export class E2BActuator implements IEngineerActuator {
   private _cacheFileWrite(workspaceId: string, relPath: string, content: string): void {
     if (content.length > E2BActuator.FILE_CACHE_MAX_BYTES) return;      // skip huge files (they re-install/re-generate)
     if (/(^|\/)(node_modules|\.git|dist|build)\//.test(relPath)) return; // never cache dependency/build output
+    if (isPlatformScratchPath(relPath)) return; // our own temporary files are never replayed onto a new sandbox (failedbr #2496)
     let m = this._fileCache.get(workspaceId);
     if (!m) { m = new Map(); this._fileCache.set(workspaceId, m); }
     if (!m.has(relPath) && m.size >= E2BActuator.FILE_CACHE_MAX_FILES) return; // bounded — never grows unbounded

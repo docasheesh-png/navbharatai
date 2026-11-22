@@ -185,7 +185,7 @@ export interface WorldFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored' | 'visual-fix-unseen';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -241,6 +241,30 @@ const SIZE_CLAIMED: readonly RegExp[] = [
   /\b\d{2}\s*(?:px|dp|pt)\b[^\n]{0,30}\b(?:tap|touch)[ -]targets?\b/i,
   /\bfits?\b[^\n]{0,20}\b(?:on\s+)?(?:a|any|every|all)?\s*(?:phone|mobile)(?:\s+screens?)?\b/i,
 ];
+
+/**
+ * 👁️ A COMPLAINT ABOUT WHAT THE USER SEES, ANSWERED WITHOUT LOOKING (failedbr #2495, 2026-11-22). The user wrote "aapne asmaan
+ * kala kar diya hai, isko natural karo" — the sky had turned black. The builder read lighting.ts and atmosphere.ts (files the
+ * open world does not even draw its sky with), declared "no fix required — it's already correct", took no screenshot, and the
+ * summary said "✅ Sky ko natural banaya". The cause was real and in the kit (the Athree sky was written to the screen raw).
+ * Code says what SHOULD be on screen; only a picture says what IS. So: the request names a thing on screen together with how
+ * it looks wrong, no screenshot was taken this turn, and a summary line names that same thing as done or as already right.
+ * Narrow on purpose — both halves (a visible SUBJECT and a LOOK) must be in the request, and the same subject in the line.
+ */
+const VISUAL_SUBJECTS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  { re: /\b(?:sky|aa?sm[aā]a?n|asman|aakash|akash)\b|आसमान|आकाश/i, label: 'the sky' },
+  { re: /\bbackground\b|\bbg\b/i, label: 'the background' },
+  { re: /\b(?:colou?rs?|rang)\b|रंग/i, label: 'the colours' },
+  { re: /\b(?:lighting|lights?|roshni|shadows?)\b|रोशनी/i, label: 'the lighting' },
+  { re: /\b(?:text|font|letters?)\b/i, label: 'the text' },
+  { re: /\b(?:screen|display|picture|image|images|logo|icons?)\b/i, label: 'the screen' },
+  { re: /\b(?:water|paani|pani|grass|ghas|ghaas|ground|zameen|road|sadak)\b/i, label: 'the ground and scenery' },
+];
+/** A LOOK that is a complaint, not a wish: a colour request ("make it blue") is not here, and neither is "realistic". */
+const VISUAL_LOOK = /\b(?:black|kaa?la|kaali|white|safed|dark|andhera|dim|faded|blurr?y|blur|invisible|transparent|grey|gray|ugly|weird|ajeeb|wrong|broken|ghalat|galat|missing|gayab|blank|empty|khali)\b|dikh(?:ta|ti|te)?\s+nahi|not\s+(?:showing|visible)|काला|अंधेरा/i;
+/** The line calls it fixed, done — or already correct, which is the same claim made without a change. */
+const VISUAL_DONE = /✅|\b(?:fixed|fix\s+kiya|theek|thik|sahi|natural|banaya|bana\s+diya|changed|updated|corrected|resolved|verified|already\s+(?:correct|fine|right|ok|good|natural)|no\s+(?:fix|change)s?\s+(?:required|needed))\b/i;
+const VISUAL_NOT_CHANGED = /\balready\b|\bpehle\s+se\b|\bno\s+(?:fix|change)s?\s+(?:required|needed)\b|\bverify\s+kiya\b|\bverified\b/i;
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -708,6 +732,25 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       claimed: 'that file uploads work',
       measured: 'the app keeps each uploaded file as text in the browser\'s local storage, which holds about 5 MB for the whole app — one video or a few PDFs fill it, after which nothing more is saved, and the files stay on this one device',
     });
+  }
+
+  // A visible complaint answered as fixed without anyone looking at the screen (failedbr #2495). Only on a measured "no
+  // screenshot this turn"; the platform's own render check is not a look at the thing the user named.
+  if (typeof facts.userRequest === 'string' && facts.screenshotTaken === false && VISUAL_LOOK.test(facts.userRequest)) {
+    const lines = text.split(/\n+/);
+    for (const subject of VISUAL_SUBJECTS) {
+      if (!subject.re.test(facts.userRequest)) continue;
+      const line = lines.find((l) => subject.re.test(l) && VISUAL_DONE.test(l));
+      if (!line) continue;
+      const unchanged = VISUAL_NOT_CHANGED.test(line);
+      out.push({
+        kind: 'visual-fix-unseen',
+        claimed: `that ${subject.label} you said looks wrong is ${unchanged ? 'already right' : 'fixed'}`,
+        measured: `you described what you SEE, and nobody looked: no screenshot was taken this turn, so ${subject.label} was judged from code, not from the screen`
+          + (unchanged ? ' — and nothing was changed for it' : ''),
+      });
+      break;
+    }
   }
 
   // "the exact versions you specified" when the user wrote no version at all (autopsy 33812996).

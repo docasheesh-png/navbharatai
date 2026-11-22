@@ -1629,6 +1629,8 @@ export function playtestSkipReason(ctx: {
   hasRunCommand: boolean;
   hasPreviewUrl: boolean;
   awaitsShell: boolean;
+  /** The platform completed the whole request itself (platformDoneTurn.ts): the turn ends at typecheck + render proof. */
+  platformDone?: boolean;
   timeLeft: boolean;
 }): string | null {
   // Not applicable — silence is the honest answer, and a warning here would be a nag.
@@ -1636,6 +1638,7 @@ export function playtestSkipReason(ctx: {
   // Could not look — each one names what was missing, never "something went wrong".
   if (!ctx.hasPreviewUrl) return 'no live preview address was available to open the game at';
   if (ctx.awaitsShell) return 'this turn built one project module and the app is assembled by a later one';
+  if (ctx.platformDone) return 'the platform made the one change asked for itself, and this turn was finished at the typecheck and the real-browser render, without playing the game';
   if (!ctx.hasRunCommand) return 'this sandbox has no way to run a browser';
   if (!ctx.timeLeft) return 'the build had no time left to play it in';
   return null;
@@ -1873,6 +1876,39 @@ export function gameDefectsMessage(defects: readonly GameDefect[]): string {
 /** The kit layer files the project imports but does not have (gameRecipeLayers.ts). PURE. */
 export function missingKitLayerPaths(files: Record<string, string>): string[] {
   try { return [...missingLayerFiles(files, new Set(Object.keys(files || {}))).keys()]; } catch { return []; }
+}
+
+/**
+ * 🔴 "NOT ON DISK" MUST BE ASKED OF THE DISK (failedbr #2494, 2026-11-22). The playtest's file map is the saved
+ * copy read back at turn start plus this turn's writes — and on #2494 that saved copy was missing five kit files
+ * the sandbox still had (EDIT_BASE_PARTIAL, KIT_REFRESH_BLOCKED "changed in the sandbox"). The production build
+ * compiled, so the files were there; the playtest still recorded GAME_DEFECT_MISSING_LAYER and the release gate
+ * went RED on it. Every kit layer the map says is missing is read from the sandbox first and added to the map,
+ * so the layer check, the scope match and the code facts all judge the project that actually runs. A path the
+ * sandbox cannot read stays missing — a real missing layer is still found. Bounded: a few rounds, since a file
+ * read back can import a further layer. Never throws.
+ */
+export async function withKitLayersFromDisk(
+  files: Record<string, string>,
+  read: (path: string) => Promise<string | null | undefined>,
+  maxRounds = 4,
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = { ...(files || {}) };
+  const tried = new Set<string>();
+  for (let round = 0; round < maxRounds; round++) {
+    const wanted = missingKitLayerPaths(out).filter((p) => !tried.has(p));
+    if (wanted.length === 0) break;
+    let added = 0;
+    for (const p of wanted) {
+      tried.add(p);
+      try {
+        const text = await read(p);
+        if (typeof text === 'string') { out[p] = text; added++; }
+      } catch { /* unreadable: it stays missing */ }
+    }
+    if (added === 0) break;
+  }
+  return out;
 }
 
 /** The first error a playthrough hit, with where it was thrown when its stack names an app file (Q-2301). */

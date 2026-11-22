@@ -12,7 +12,7 @@
 // resolves to the correct relative path. A relative path is unchanged. Traversal ("..") can still never
 // escape the root. Pure + unit-tested; shared so the four actuator copies can't drift.
 
-import { isNeverSourcePath } from './generatedDirs';
+import { isNeverSourcePath, isPlatformScratchPath } from './generatedDirs';
 
 /** Live env files carry the user's vault — never durable. Examples/templates are fine. */
 const ENV_ALLOWED = /^\.env\.(example|sample|template)$/i;
@@ -74,7 +74,9 @@ export function toDurableFileKey(filePath: string): string | null {
   // files: `loadWorkspaceFiles` and `listWorkspaceFilePaths` read through this function, exactly as they
   // do for the phantom paths above. Only the unambiguous tier (`NEVER_SOURCE_DIRS`) is refused — a
   // folder called `build` can hold hand-written files and stays stored.
-  if (isNeverSourcePath(key) || isSecretEnvPath(key)) return null;
+  // NavBharatAI's own temporary files are refused (and dropped from a store that already holds one) for the same
+  // reason — see `isPlatformScratchPath` (failedbr #2496).
+  if (isNeverSourcePath(key) || isSecretEnvPath(key) || isPlatformScratchPath(key)) return null;
   return key;
 }
 

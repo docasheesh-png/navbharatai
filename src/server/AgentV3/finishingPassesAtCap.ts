@@ -91,6 +91,12 @@ export interface FinishingPassGuardDeps {
   /** Live remaining wall clock; Infinity means the watchdog is disabled. */
   remainingMs: () => number;
   record: (note: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }) => unknown;
+  /**
+   * The platform itself completed this turn's whole request (platformDoneTurn.ts, failedbr #2496): no finishing pass writes
+   * into the app — the user asked for one change and got exactly that one (the build report showed a starter test and an
+   * unasked edit written on such a turn). The proofs that only READ the app (typecheck, browser) are not passes of this guard.
+   */
+  platformDone?: () => boolean;
 }
 
 /**
@@ -109,6 +115,17 @@ export function createFinishingPassGuard(d: FinishingPassGuardDeps): {
   const held = new Set<string>();
   const allow = (pass: string): boolean => {
     const left = d.remainingMs();
+    if (!d.aborted() && d.platformDone?.()) {
+      // One line for the whole turn, not one per pass: none of them was ever going to write.
+      if (held.size === 0) {
+        try {
+          d.record({ phase: 'build', severity: 'info', code: 'FINISHING_PASSES_SKIPPED_PLATFORM_DONE', autoResolved: true,
+            message: `No finishing pass wrote into the app (first asked: ${pass}): the platform completed this request itself, and nothing else in the app is changed on this turn.` });
+        } catch { /* a timeline failure cannot authorize a write */ }
+      }
+      held.add(pass);
+      return false;
+    }
     const reason = d.aborted() ? 'the build has been stopped'
       : capStoppedTheRun(d.result()) ? 'the generation run reached its time limit'
         : !(left > FINISHING_PROOF_RESERVE_MS) ? 'the remaining time is reserved for opening and verifying the app'

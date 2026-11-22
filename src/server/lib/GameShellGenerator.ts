@@ -27,6 +27,7 @@
 // PURE builder → the caller writes the files.
 
 import { kitTypeContract } from './kitTypeContract';
+import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerator';
 
 export interface GameShellResult {
   files: Record<string, string>;
@@ -59,6 +60,7 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
+import { applyPlayerChoice, resolvePlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -133,6 +135,14 @@ export interface GameOptions {
    * … 1.2 heavy; height in metres). It stays the kit's animated person — it walks, runs, jumps and plays every action pose.
    */
   playerLook?: HumanoidOptions;
+  /**
+   * WHO THE PLAYER IS — the kit person's look, a library character (model) or the user's own model file (file). Left
+   * out, the shell reads src/game/player.ts BY ITSELF, so every game on the kit changes its character in that one file
+   * and nothing has to wire it. The model takes the default body's place, plays its own clips for the way it moves and
+   * for every pose (ctx.hero.act), and says on screen which move it lacks. A game with no default body (first-person, or
+   * playerBody given) says so when a model is asked.
+   */
+  player?: PlayerChoice;
   /**
    * Which POSE the default body plays when an action button is pressed — so every button is SEEN doing its thing
    * (admin 2026-11-19: "jump, action, fight, fire etc me action ke movement dikhne chahiye"). Default:
@@ -307,6 +317,9 @@ export class Game {
   private setupDone = false;
   /** The default body (createHumanoid), when the game did not bring its own. */
   private hero: Humanoid | null = null;
+  /** Who the player is (options.player, or src/game/player.ts), and the model standing in the default body's place. */
+  private readonly playerChoice: PlayerChoice | undefined;
+  private playerModel: PlayerBody | null = null;
   /** A gun fired / a sword swung during this step — what an 'auto' attack pose becomes. */
   private firedThisStep = false;
   private swungThisStep = false;
@@ -363,11 +376,12 @@ export class Game {
     // third-person game the hero was invisible unless the model happened to add a mesh, and the player
     // saw a camera drifting over the ground. (Found by PLAYING the shell: gamePlaytest.ts.)
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
+    this.playerChoice = resolvePlayerChoice(options.player);
     // true means "the default body", the same as leaving it out (failedbr #1334: a boolean was passed and failed to compile).
     if (options.playerBody && typeof options.playerBody === 'object') {
       this.player.object.add(options.playerBody);
     } else if (options.playerBody !== false && !firstPerson) {
-      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || {}) });
+      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) });
       this.player.object.add(this.hero.root);
     }
     // BOTH blend layers. Adding one is how half the effects end up invisible.
@@ -528,6 +542,8 @@ export class Game {
     audio.unlock();
     loadSoundLibrary();
 
+    // The player's own character (src/game/player.ts) takes the default body's place before the game's setup runs.
+    this.playerModel = applyPlayerChoice(this.context, this.playerChoice);
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
@@ -715,6 +731,7 @@ export class Game {
         // In a vehicle the camera follows the vehicle; a body standing at the spawn point would read as a bug.
         this.hero.root.visible = !this.chased;
       }
+      this.playerModel?.update(delta);
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
@@ -1078,6 +1095,7 @@ export class Game {
     if (this.input) safe(() => this.input.dispose());
     safe(() => audio.stopAll());
     safe(() => this.particles.dispose());
+    safe(() => this.playerModel?.dispose());
     safe(() => this.hero?.dispose());
     safe(() => clearBreakables());   // a reloaded game starts with no breakables or debris from this one
     this.scene.traverse((obj: THREE.Object3D) => {
@@ -3137,6 +3155,7 @@ import { LaneRunner, runnerInput, type RunnerOptions } from './core/runner';
 import { bindSwipe } from './core/swipe';
 import { tunable } from './core/tuning';
 import { createHumanoid } from './three/humanoid';
+import { createPlayerCharacter, resolvePlayerChoice, type PlayerChoice } from './play/playerBody';
 
 /**
  * ORIGINAL ENDLESS-RUNNER STARTER (admin 2026-11-20 engine plan: a complete, working game per genre, so the builder
@@ -3161,6 +3180,12 @@ export interface LaneRunnerGameProps {
   skyColor?: number;
   /** The same seed gives the same course (default: a new course every run). */
   seed?: number;
+  /**
+   * WHO RUNS: the kit runner's look, a library character or the user's own model (see play/playerBody.ts). Left out, the
+   * runner reads src/game/player.ts by itself — change the character there. The model runs, jumps, slides and falls with
+   * its own clips, and says on screen which of those moves it lacks.
+   */
+  player?: PlayerChoice;
 }
 
 /** World x for a runner x: the camera looks down +Z, so the screen's right is world -X. */
@@ -3215,8 +3240,14 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
   const POSTS = 30, SPACING = 8;
   const posts: THREE.Mesh[] = [];
   for (let i = 0; i < POSTS * 2; i++) { const p = new THREE.Mesh(post.geo, post.mat); posts.push(p); root.add(p); }
-  const runner = createHumanoid({ height: 1.7, shirt: props.runnerColor ?? 0x2563eb });
+  const choice = resolvePlayerChoice(props.player);
+  const runner = createHumanoid({ height: 1.7, shirt: 0x2563eb, ...(choice?.look || {}), ...(props.runnerColor !== undefined ? { shirt: props.runnerColor } : {}) });
   root.add(runner.root);
+  // The player's own character (src/game/player.ts) runs in the kit runner's place once it has loaded.
+  const body = new THREE.Group();
+  body.name = 'Player character';
+  root.add(body);
+  const character = createPlayerCharacter(body, choice, () => { runner.root.visible = false; });
   const obstacleMeshes = new Map<number, THREE.Mesh | THREE.Group>();
   const coinMeshes = new Map<number, THREE.Mesh>();
   let scored = 0;
@@ -3231,6 +3262,7 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     clearPieces();
     scored = 0;
     runner.revive();
+    character.revive();
     runner.root.scale.set(1, 1, 1);
   };
   const offStart = events.on('GAME_STARTED', restart);
@@ -3249,6 +3281,10 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     const x = runnerWorldX(run.x);
     runner.root.position.set(x, run.y, run.distance);
     runner.root.scale.y = run.sliding ? 0.55 : 1;
+    // The character takes the move the run is in; it is squashed for a slide only when it has no slide clip of its own.
+    const own = character.move(!run.alive ? 'idle' : run.sliding ? 'slide' : run.jumping ? 'jump' : state.status === 'playing' ? 'run' : 'idle');
+    body.position.copy(runner.root.position);
+    body.scale.y = run.sliding && !own ? 0.55 : 1;
     track.position.z = run.distance + 150;
     for (let i = 0; i < posts.length; i++) {
       const side = i % 2 === 0 ? -1 : 1;
@@ -3286,15 +3322,16 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
       ctx.follow(runner.root);
     },
     update: (ctx, dt) => {
-      if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); return; }
+      if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); character.update(dt); return; }
       const t = dt * pace.value;
       for (const ev of run.update(t, runnerInput(ctx.input))) {
         const at = { x: runnerWorldX(run.x), y: run.y + 1, z: run.distance };
-        if (ev.type === 'jump') { runner.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
+        if (ev.type === 'jump') { runner.act('jump'); character.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
         else if (ev.type === 'coin') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.coin.lane)), y: 0.8, z: ev.coin.z } });
-        else if (ev.type === 'crash') { runner.die(); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
+        else if (ev.type === 'crash') { runner.die(); character.act('die'); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
       }
       runner.update(t, run.alive ? run.speed * pace.value : 0, !run.jumping);
+      character.update(t);
       const score = run.score;
       if (score > scored) { addScore(score - scored); scored = score; }
       sync();
@@ -3303,6 +3340,7 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
       offStart();
       clearPieces();
       root.removeFromParent();
+      character.dispose();
       runner.dispose();
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();
@@ -3455,9 +3493,11 @@ const FILES: Record<string, string> = {
   'src/game/ui/touchControls.ts': TOUCH_CONTROLS,
   // How a game grows: a list of small features, each guarded, added one file at a time (2026-11-21).
   'src/game/play/features.ts': GAME_FEATURES,
+  // Who the player is, for every game on the shell: src/game/player.ts swaps the character (2026-11-22).
+  [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'features', 'racingroadgame', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'features', 'playerbody', 'racingroadgame', 'lanerunnergame'];
 
 
 /**
@@ -3548,6 +3588,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/Game.ts']) files['src/game/ui/touchControls.ts'] = FILES['src/game/ui/touchControls.ts'];
     // The feature host types against Game's context, and every game on the shell may grow by features.
     if (files['src/game/Game.ts']) files['src/game/play/features.ts'] = FILES['src/game/play/features.ts'];
+    // Game reads who the player is (src/game/player.ts) through it, so the two always ship together.
+    if (files['src/game/Game.ts']) files[GAME_PLAYER_BODY_PATH] = FILES[GAME_PLAYER_BODY_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

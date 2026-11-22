@@ -372,13 +372,27 @@ export const GAME_NO_GUESS_RULE = '🛑 NEVER CHANGE THIS GAME ON A GUESS. If th
   + ' name or behaviour nobody asked about, and never question a request that is already exact.';
 /** Who the player is lives in ONE file, so replacing the character never touches the game. */
 export const GAME_PLAYER_FILE_PATH_IN_GAME = 'src/game/player.ts';
-export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/player.ts (PLAYER, passed as <OpenWorldGame player={PLAYER} />). "Character badlo",'
-  + ' "hero ko lal kapde / lamba / mota karo", "make my character a soldier" → edit ONLY that file. A different LOOK of the same person →'
-  + ' PLAYER.look ({ height, build, skin, hair, shirt, trousers, shoes }; colours 0xRRGGBB). A character FROM THE LIBRARY (the request names a'
-  + ' library id, or asks for a ready model: knight, zombie, animal…) → first add_library_models with that exact id/subject, then set'
-  + ' PLAYER.model to the subject it was saved under (PLAYER.modelHeight for its size); "wapas purana character" → model: null. Never build'
-  + ' a second player, never hide or replace the kit\'s hero by hand, and never touch the map, the controls or the features to change the'
-  + ' character. If the library does not have what was asked, say so and change PLAYER.look instead.';
+/**
+ * 🧍 Said on every turn of ANY game that has src/game/player.ts (projectGrowthRules) — the open world, the endless runner,
+ * a fighting/boxing game or any game the builder wrote on the shell (2026-11-22: "Use as my character" in ALL games). Each
+ * of them reads that file by itself, so the character is changed there and nowhere else, whatever the request's words.
+ */
+export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/player.ts (PLAYER). The game reads it BY ITSELF (the kit shell, the open'
+  + ' world and the endless runner all do) — never wire it, never pass it around, never build a second player. "Character badlo",'
+  + ' "hero ko lal kapde / lamba / mota karo", "mera character ye wala", "boxer ko ye model do", "use my model as the player" → edit ONLY'
+  + ' that file. A different LOOK of the same person → PLAYER.look ({ height, build, skin, hair, shirt, trousers, shoes }; colours'
+  + ' 0xRRGGBB). The user\'s OWN model (they attached a .glb/.gltf/.obj/.fbx or a zip — the [USER MODELS ADDED] note names it, e.g.'
+  + ' public/models/hero.glb) → PLAYER.file = \'/models/hero.glb\' and PLAYER.model = null. A character FROM THE LIBRARY (the request'
+  + ' names a library id, or asks for a ready model: knight, zombie, boxer, animal…) → first add_library_models with that exact id/subject,'
+  + ' then set PLAYER.model to the subject it was saved under and PLAYER.file = null. Size → PLAYER.modelHeight (metres); a model that'
+  + ' faces backwards → turn: 180; a clip the game does not recognise by name → moves: { punch: \'<its clip name>\' } using the model\'s'
+  + ' OWN clip names. "Wapas purana character" → model: null and file: null. MOVES: the model plays its own clips (idle, walk, run,'
+  + ' jump, punch, kick, block, hit, die…); a move it does NOT have is never faked — the game says so on screen — so tell the user'
+  + ' plainly which moves their character lacks (the [USER MODELS ADDED] note and the library list its clips). For a move the kit'
+  + ' person has no button pose for (block, die, slide), call playMove(ctx, \'block\') from ./play/playerBody. A racing game\'s player is'
+  + ' its car and a first-person game shows no body: say so instead of editing this file. Never hide or replace the kit\'s hero by hand,'
+  + ' and never touch the map, the controls or the features to change the character. If the library does not have what was asked,'
+  + ' say so and change PLAYER.look instead.';
 /** Racing on the kit's road library: a longer road is a prop, never a hand-built track. */
 export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingRoadGame>): twelve road maps that join seamlessly into an endless road.'
   + ' "Track / road bada karo", "lambi race" → raise finishKm (or pass finishKm={null} for a road that never ends); "aur gaadiyan" →'

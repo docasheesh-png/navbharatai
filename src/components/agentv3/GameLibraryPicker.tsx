@@ -82,7 +82,7 @@ export function GameLibraryPicker({ onPick }: Props) {
     <div className="flex flex-col gap-2 p-2" data-testid="game-library-picker">
       <div className="text-xs font-semibold text-ink">Game library</div>
       <p className="text-[11px] leading-snug text-muted">
-        {use === 'add' ? 'Ready 3D models for your game. Tap one to add it to your message, then send.' : 'Tap a model to make it the character you play as, then send.'}
+        {use === 'add' ? 'Ready 3D models for your game. Tap one to add it to your message, then send.' : 'Tap a model to make it the character you play as in your game, then send. To use your own model, attach its file and say it is your character.'}
       </p>
       <div className="flex gap-1" role="group" aria-label="What a tapped model does">
         {([['add', 'Add to my game'], ['character', 'Use as my character']] as const).map(([mode, text]) => (

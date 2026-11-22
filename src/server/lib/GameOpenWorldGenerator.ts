@@ -112,6 +112,8 @@ export interface OpenWorld {
   readonly regions: OpenWorldCity[];
   /** Every land on the map (desert, jungle, mountain, snow, beach regions), in the order listed. */
   readonly lands: OpenWorldLand[];
+  /** The highways joining every place and land (centre lines in WORLD metres, with their heights). */
+  readonly highways: ReadonlyArray<ReadonlyArray<{ x: number; y: number; z: number }>>;
   /**
    * EVERY place on the map, built or not, in the order listed. regions holds the places whose city has been built so far:
    * the first at once, the others as the player comes near (so a map of a hundred places starts as fast as a map of one).
@@ -280,6 +282,48 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     ctx.scene.add(root); root.updateMatrixWorld(true);
     return built;
   };
+  // 🛣️ ROADS THAT NEVER END (admin 2026-11-22: "user kitni bhi gaadiyan chalaye — abhi 30 sec me hi road khatam ho jati hai").
+  // Every place and land is joined to the network by a highway: a minimum spanning tree over their centres (each new place to its
+  // nearest one), each road running from the edge of one to the edge of the other. The land is cut and filled to it by the map
+  // itself (world.addRoad), so a car can drive from any place to every other — across a universe of a hundred places — without
+  // the road running out. Laid before the first frame, like the levelled ground.
+  const stops = [...planned.map((p) => ({ x: p.centre.x, z: p.centre.z, r: p.reach })), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) }))];
+  const roadGroup = new THREE.Group(); roadGroup.name = 'Highways';
+  const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95 });
+  const roadLines: Array<Array<{ x: number; y: number; z: number }>> = [];
+  if (stops.length > 1) {
+    const joined = new Set<number>([0]);
+    while (joined.size < stops.length) {
+      let best: [number, number, number] | null = null;
+      for (const a of joined) for (let b = 0; b < stops.length; b++) {
+        if (joined.has(b)) continue;
+        const d = Math.hypot(stops[a].x - stops[b].x, stops[a].z - stops[b].z);
+        if (!best || d < best[2]) best = [a, b, d];
+      }
+      if (!best) break;
+      joined.add(best[1]);
+      const A0 = stops[best[0]], B0 = stops[best[1]], len = best[2] || 1;
+      const ux = (B0.x - A0.x) / len, uz = (B0.z - A0.z) / len;
+      if (len < A0.r + B0.r + 20) continue;                                                   // touching places need no road
+      const from = { x: A0.x + ux * (A0.r + 6), z: A0.z + uz * (A0.r + 6) }, to = { x: B0.x - ux * (B0.r + 6), z: B0.z - uz * (B0.r + 6) };
+      roadLines.push(map.world.addRoad([from, to], 9));
+    }
+  }
+  /** One asphalt ribbon per road, a little above the carved ground, with a white centre line. */
+  for (const line of roadLines) {
+    if (line.length < 2) continue;
+    const pos: number[] = [], idx: number[] = [];
+    for (let i = 0; i < line.length; i++) {
+      const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
+      const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * 4.5, nz = dx / l * 4.5;
+      pos.push(line[i].x + nx, line[i].y + 0.08, line[i].z + nz, line[i].x - nx, line[i].y + 0.08, line[i].z - nz);
+      if (i > 0) { const k = i * 2; idx.push(k - 2, k - 1, k, k - 1, k + 1, k); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, asphalt); mesh.receiveShadow = true; mesh.name = 'Highway';
+    roadGroup.add(mesh);
+  }
   // The first place is where the player starts: built now, and the player stands on one of its streets.
   if (planned[0]) {
     const home = buildPlace(planned[0]);
@@ -287,6 +331,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   }
   const town: OpenWorldCity | null = towns[0] || null;
   map.update(spawn.x, spawn.z, 0, spawn.y);
+  // The highways are drawn in WORLD metres: their group sits at minus the origin, and moves back with every origin shift.
+  roadGroup.position.set(-chunks.origin.x, 0, -chunks.origin.z); ctx.scene.add(roadGroup);
   // The first place was put on the map before map.update() moved the origin: line it up again.
   towns.forEach((t, i) => { roots[i].position.set(t.centre.x - chunks.origin.x, t.centre.y, t.centre.z - chunks.origin.z); roots[i].updateMatrixWorld(true); });
   layGround(spawn.x, spawn.z);
@@ -300,7 +346,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
   };
   return {
-    map, spawn, playerWorld, city: town, regions: towns, lands: landList,
+    map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
     places: planned.map((p) => ({ id: p.region.id, kind: p.region.kind, centre: { x: p.centre.x, z: p.centre.z }, radius: p.reach, get built() { return p.built >= 0; } })),
     nearestRegion() {
       const at = playerWorld();
@@ -325,6 +371,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         ctx.camera.position.x -= shift.dx; ctx.camera.position.z -= shift.dz;
         for (const [object] of anchored) { object.position.x -= shift.dx; object.position.z -= shift.dz; }
         for (const root of roots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
+        roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
       }
       layGround(at.x, at.z);
       // A place still only planned is built when the player comes near it — at most one per frame, so walking towards a
@@ -347,6 +394,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
+      ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
     },
   };

@@ -290,11 +290,19 @@ export interface AthreeWorld {
   levelGround(x: number, z: number, halfX: number, halfZ: number, margin?: number): number;
   /** True on levelled ground: nothing grows there. */
   clearAt(x: number, z: number): boolean;
+  /** True on a road the game laid with addRoad (its paved width). */
+  gameRoadAt(x: number, z: number): boolean;
   /**
    * Make a round area of the map a different LAND (a desert, a forest, mountains, snow, a beach) — the colour, the plants and,
    * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
    */
   setLand(x: number, z: number, radius: number, land: LandBiome): void;
+  /**
+   * Lay a ROAD the game asks for (a highway between two of its places), through these points. The ground is cut and filled
+   * to it (a smooth grade, a shoulder) so it can be driven, roadAt answers it, and the returned centre line (with heights)
+   * is what to draw. Call it BEFORE the first map.update(), like levelGround.
+   */
+  addRoad(points: ReadonlyArray<{ x: number; z: number }>, width?: number): Array<{ x: number; y: number; z: number }>;
   /** Every road, plaza, the race circuit and the runways (regions are built on demand). */
   roadNetwork(): RoadNetwork;
   /** The road under a place (on the paved width), or null. */
@@ -512,6 +520,54 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
     lands.push({ x, z, r: Math.min(4000, Math.max(60, radius)), land });
   }
+  // GAME ROADS (admin 2026-11-22: "abhi 30 sec me hi road khatam ho jati hai"). A highway the game lays between its own places:
+  // resampled every 10 m, its height the ground averaged along it and limited to an 8 percent grade, and the land cut and filled
+  // to it with a shoulder — the same heightAt feeds the drawn terrain, the collider and the road ribbon, so they always agree.
+  // Kept in a 100 m grid of buckets so a hundred long roads cost a lookup, not a scan.
+  const gameRoads: Array<{ pts: Array<{ x: number; y: number; z: number }>; half: number }> = [];
+  const roadCells = new Map<string, Array<[number, number]>>();
+  const ROAD_CELL = 100, ROAD_SHOULDER = 30;
+  function addRoad(points: ReadonlyArray<{ x: number; z: number }>, width = 9): Array<{ x: number; y: number; z: number }> {
+    const src = (points || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.z));
+    if (src.length < 2) return [];
+    const line: Array<{ x: number; z: number }> = [];
+    for (let i = 0; i < src.length - 1; i++) {
+      const a = src[i], b = src[i + 1], len = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(len / 10));
+      for (let k = 0; k < n; k++) line.push({ x: a.x + ((b.x - a.x) * k) / n, z: a.z + ((b.z - a.z) * k) / n });
+    }
+    line.push({ x: src[src.length - 1].x, z: src[src.length - 1].z });
+    // Ground along the line (with the places' level pads), averaged over ±50 m, then the grade limited both ways.
+    const ground = line.map((p) => heightAt(p.x, p.z));
+    const y = ground.map((_, i) => { let s = 0, c = 0; for (let j = Math.max(0, i - 5); j <= Math.min(ground.length - 1, i + 5); j++) { s += ground[j]; c++; } return Math.max(1.5, s / c); });
+    y[0] = Math.max(1.5, ground[0]); y[y.length - 1] = Math.max(1.5, ground[ground.length - 1]);
+    for (let i = 1; i < y.length; i++) y[i] = Math.min(Math.max(y[i], y[i - 1] - 0.8), y[i - 1] + 0.8);
+    for (let i = y.length - 2; i >= 0; i--) y[i] = Math.min(Math.max(y[i], y[i + 1] - 0.8), y[i + 1] + 0.8);
+    const pts = line.map((p, i) => ({ x: p.x, y: y[i], z: p.z }));
+    const id = gameRoads.length;
+    gameRoads.push({ pts, half: Math.max(2, width / 2) });
+    for (let i = 0; i < pts.length - 1; i++) {
+      const r = Math.max(2, width / 2) + ROAD_SHOULDER;
+      const x0 = Math.floor((Math.min(pts[i].x, pts[i + 1].x) - r) / ROAD_CELL), x1 = Math.floor((Math.max(pts[i].x, pts[i + 1].x) + r) / ROAD_CELL);
+      const z0 = Math.floor((Math.min(pts[i].z, pts[i + 1].z) - r) / ROAD_CELL), z1 = Math.floor((Math.max(pts[i].z, pts[i + 1].z) + r) / ROAD_CELL);
+      for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) { const key = cx + ',' + cz; const list = roadCells.get(key) || []; list.push([id, i]); roadCells.set(key, list); }
+    }
+    return pts;
+  }
+  /** The nearest game road at a place: its surface height there, how far from its centre line, and its half width. */
+  function gameRoadNear(x: number, z: number): { y: number; d: number; half: number } | null {
+    if (!gameRoads.length) return null;
+    const list = roadCells.get(Math.floor(x / ROAD_CELL) + ',' + Math.floor(z / ROAD_CELL));
+    if (!list) return null;
+    let best: { y: number; d: number; half: number } | null = null;
+    for (const [id, i] of list) {
+      const r = gameRoads[id], a = r.pts[i], b = r.pts[i + 1];
+      const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz || 1;
+      const t = Math.min(1, Math.max(0, ((x - a.x) * dx + (z - a.z) * dz) / l2));
+      const d = Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t));
+      if (!best || d < best.d) best = { y: a.y + (b.y - a.y) * t, d, half: r.half };
+    }
+    return best;
+  }
   function heightAt(x: number, z: number): number {
     let t = naturalHeightAt(x, z);
     if (lands.length) {
@@ -525,6 +581,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       const w = d <= 0 ? 1 : 1 - smoothstep(0, p.margin, d);
       t += (p.y - t) * w;
     }
+    if (gameRoads.length) {
+      const r = gameRoadNear(x, z);
+      if (r && r.d < r.half + ROAD_SHOULDER) { const w = r.d <= r.half ? 1 : 1 - smoothstep(r.half, r.half + ROAD_SHOULDER, r.d); t += (r.y - t) * w; }
+    }
     return t;
   }
   function levelGround(x: number, z: number, halfX: number, halfZ: number, margin = 40): number {
@@ -536,12 +596,14 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   }
   function clearAt(x: number, z: number): boolean {
     for (const p of pads) if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true;
+    if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half + 4) return true; }
     return false;
   }
 
   function surfaceAt(x: number, z: number): 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water' {
     if (waterAt(x, z) || heightAt(x, z) < 0) return 'water';
     if (withRoads && roadsOf().roadAt(x, z)) return 'asphalt';
+    if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half) return 'asphalt'; }
     switch (biomeAt(x, z)) {
       case 'ocean': return 'water';
       case 'beach': case 'desert': return 'sand';
@@ -698,7 +760,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 

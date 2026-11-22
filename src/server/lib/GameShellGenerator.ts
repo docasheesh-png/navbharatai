@@ -4075,7 +4075,7 @@ const FILES: Record<string, string> = {
   'src/game/play/features.ts': GAME_FEATURES,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'racingroadgame', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**

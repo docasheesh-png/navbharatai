@@ -14,7 +14,7 @@
 import { asksForBattleRoyale, buildGameContract } from '../../AgentV3/gameIntent';
 import { ATHREE_MAP, LIBRARY_MAPS, type LibraryMap, type MapProfile } from './athreeMapLibrary';
 import { largeWorldIntent } from '../../AgentV3/largeWorldIntent';
-import { GTA_TITLE } from '../wellKnownGameTitles';
+import { namesGtaTitle } from '../wellKnownGameTitles';
 import { withoutNonObjectSenses } from '../heroObjectSpec';
 
 export type AthreeVia = 'stored' | 'named' | 'needed' | 'librarian' | 'declined' | 'other-map' | 'named-not-needed' | 'road-library' | 'none';
@@ -52,7 +52,7 @@ const CHANGE_MAP = /\b(?:change|switch|different|another|new|badlo|badal|naya|do
 // royale starter's guard kept private copies that had drifted apart).
 const FLIGHT = /फ्लाइट|हवाई\s*जहाज|विमान|प्लेन|flight|\bplane\b|aeroplane|aircraft|\bjet\b|helicopter|\bfly(?:ing)?\b|\bpilot\b/;
 const RACING = /रेसिंग|रेस\s*गेम|गाड़ी|गाडी|\brac(?:e|ing|er)\b|drift|gadi|gaadi|rally|sport\s*car|supercar|bike\s+race|car\s+game|driving/;
-const OPEN_WORLD = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|\bgta\b|sandbox|\bworld\b.*\b(?:explore|big|huge|large)\b|\b(?:big|huge|large|massive|infinite)\s+(?:map|world)\b|survival|\bexplor(?:e|ing|ation)\b|\bisland\b|\bterrain\b/;
+const OPEN_WORLD = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|sandbox|\bworld\b.*\b(?:explore|big|huge|large)\b|\b(?:big|huge|large|massive|infinite)\s+(?:map|world)\b|survival|\bexplor(?:e|ing|ation)\b|\bisland\b|\bterrain\b/;
 
 /** The game shape a request needs a map for, or null when it needs none (a calculator, a form, a 2D puzzle). */
 export function mapProfileFor(prompt: string): MapProfile | null {
@@ -64,8 +64,8 @@ export function mapProfileFor(prompt: string): MapProfile | null {
   // (failedbr #2478: roadmap step 1's "ground plane" made a BGMI request a FLIGHT game). c.vehicle already reads it that way.
   if (FLIGHT.test(withoutNonObjectSenses(t)) || c.vehicle === 'aircraft') return 'flight';
   if (c.genre === 'racing' || RACING.test(t) || (c.vehicle && ['car', 'motorcycle', 'truck', 'bus', 'tractor'].includes(c.vehicle) && /\bgame\b|\bsim/.test(t))) return 'racing';
-  // GTA_TITLE is the shared reader ("gta5" glued too — the private `\bgta\b` missed it).
-  if (OPEN_WORLD.test(t) || GTA_TITLE.test(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';
+  // namesGtaTitle is the shared tolerant reader ("gta5", "gtaa", "g.t.a" — the private `\bgta\b` missed them).
+  if (OPEN_WORLD.test(t) || namesGtaTitle(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';
   // 🗺️ The WISH, not the word (admin 2026-11-19: "sirf word par nahi, intension par trigger ho"). "Bada map banao",
   // "kahin bhi ghoom sakun", "map bahut chhota hai" mean a big world as surely as "open world" does. Only for a
   // GAME: a big font or a long list is not a world. An endless runner is a lane, not a world.
@@ -91,13 +91,13 @@ function isGameRequest(t: string, c: ReturnType<typeof buildGameContract>): bool
  */
 export function raceWantsOpenWorld(prompt: string): boolean {
   const t = norm(prompt);
-  if (OPEN_WORLD_RACE.test(t) || GTA_TITLE.test(t)) return true;
+  if (OPEN_WORLD_RACE.test(t) || namesGtaTitle(t)) return true;
   const wish = largeWorldIntent(prompt);
   // "Bada MAP / badi DUNIYA" asks for land around the race; "lambi sadak" asks for road, which the library gives.
   return wish.wish === 'free-roam' || (wish.wish === 'big-space' && WORLD_NOUN.test(wish.evidence));
 }
 const WORLD_NOUN = /\b(?:maps?|worlds?|land|terrain|island|duniya|dunia|zameen|zamin|naksh\w*|ilaa?ka|area|region|continent)\b|मैप|दुनिया|नक्श|ज़मीन|जमीन|इलाक/;
-const OPEN_WORLD_RACE = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|\bgta\b|sandbox|free[\s-]?roam|off[\s-]?road|\bterrain\b|\bisland\b/;
+const OPEN_WORLD_RACE = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|sandbox|free[\s-]?roam|off[\s-]?road|\bterrain\b|\bisland\b/;
 
 function hashString(s: string): number {
   let h = 2166136261;

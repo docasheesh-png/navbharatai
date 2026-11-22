@@ -89,7 +89,7 @@ import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
-import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
+import { projectHasUserCode, modelAuthoredPaths, isPlatformSeededFile } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
@@ -23792,7 +23792,7 @@ async function noteBuildOutcome(
           // `tsc --noEmit` on the next turn (autopsy eed79815 — see testSkeletonsCanRun).
           const skeletonsSafe = testSkeletonsCanRun(pkgForTests)
             && testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
-          const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
+          const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3, platformOwned: isPlatformSeededFile }) : [];
           const scaffolded: string[] = [];
           // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`
           // this pass's `currentPass()` is `null`, so Green Freeze refuses every write and each refusal

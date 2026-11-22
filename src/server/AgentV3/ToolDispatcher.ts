@@ -517,7 +517,7 @@ import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ig
 import { isNotFoundError } from './fsErrors';
 import { SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
 import { withoutPreviewBridge, bridgeShellNote, bridgeLineRanges, withoutBridgeGrepMatches } from './previewBridge';
-import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
+import { LIST_PRUNE_DIRS, isListPrunedPath, isPlatformScratchPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
 import { locatedErrorText } from './runtimeErrorSite';
@@ -3096,7 +3096,9 @@ export class ToolDispatcher {
       // used to crowd the real app out of the snapshot.
       let skip: (path: string) => boolean = () => false;
       if (planSkip) { try { skip = await planSkip(files); } catch { skip = () => false; } }
-      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p) && !skip(p)).slice(0, 300);
+      // NavBharatAI's own temporary files are never graded as the user's code (failedbr #2496: our asset proof's
+      // 127.0.0.1 test server was reported as the app's "hardcoded localhost URL" and "hardcoded server port").
+      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p) && !skip(p) && !isPlatformScratchPath(p)).slice(0, 300);
       // PARALLEL + per-file timeout (audit P0-C): 300 sequential reads after the app is already
       // built was the #1 "fully-built app dies at the readiness gate" cause. Read in bounded batches,
       // each capped at 5s; a slow/unreadable file is dropped, never breaks evaluate.

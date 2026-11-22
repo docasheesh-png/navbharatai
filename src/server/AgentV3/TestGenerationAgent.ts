@@ -212,7 +212,15 @@ export interface TestPlanItem {
  */
 export function planAutoTests(
   files: Array<{ path: string; content: string }>,
-  opts: { existingPaths?: Iterable<string>; limit?: number } = {},
+  opts: {
+    existingPaths?: Iterable<string>;
+    limit?: number;
+    /**
+     * Is this file (path + bytes) NavBharatAI's own code? The route passes `isPlatformSeededFile`. Passed in rather
+     * than imported: platformAuthored reaches the template registry, which imports this module.
+     */
+    platformOwned?: (path: string, content: string) => boolean;
+  } = {},
 ): TestPlanItem[] {
   if (!Array.isArray(files) || files.length === 0) return [];
   const limit = Math.max(1, opts.limit ?? 3);
@@ -223,8 +231,15 @@ export function planAutoTests(
   const existing = new Set<string>(norms.map((f) => f.path));
   for (const p of opts.existingPaths || []) existing.add(norm(p));
 
+  // 🔴 A STARTER TEST IS FOR CODE SOMEBODY AUTHORED, NEVER FOR OUR OWN ENGINE (failedbr #2496). `writtenFiles` also
+  // holds what the PLATFORM wrote this turn — add_library_models regenerated `src/game/three/assetModels.ts`, the
+  // game kit's model loader — and that file was handed an it.todo skeleton as if the builder had written it: noise in
+  // the user's project, a test of NavBharatAI's generator filed under their app. Ranking only considers authored
+  // files; usage is still counted across every file, ours included.
+  const owned = opts.platformOwned;
   const ranked = norms
     .filter((f) => isTestableSource(f.path))
+    .filter((f) => { try { return !owned?.(f.path, f.content); } catch { return true; } })
     .map((f) => {
       const functions = extractExportedFunctions(f.content);
       const names = functions.map((fn) => fn.name);
@@ -435,7 +450,7 @@ export function starterTestsNarration(paths: readonly string[], packageJson: str
     declared = !!(pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest);
   } catch { declared = false; }
   return declared
-    ? `🧪 Scaffolded ${list} — Vitest is declared; installation and execution are not verified. Export smoke checks are included; behavioural cases remain pending (it.todo).`
+    ? `🧪 Scaffolded ${list} — Vitest is declared; installation and execution are not verified yet (the final checks run the project's test suite and report that result separately). Export smoke checks are included; behavioural cases remain pending (it.todo).`
     : generatedVitestRange(packageJson)
       ? `🧪 Scaffolded ${list} — Vitest skeletons with pending behavioural cases (it.todo). Vitest is not declared; run \`npm install -D vitest@${generatedVitestRange(packageJson)}\` and then \`npx vitest\` to run them. No test execution is verified.`
       : `🧪 Scaffolded ${list} — behavioural cases remain pending (it.todo). No compatible Vitest version was selected for this Vite range; resolve compatibility before installation or execution. The tests are unverified.`;

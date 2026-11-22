@@ -1,11 +1,13 @@
 // The two moments of a turn where the growth guard and the library's place-add act — kept out of the route's handler,
 // which reads and writes through the small ports below (routes/agentv3.ts is one very large function; a step that can be
 // a call is a call).
-import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
+import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, growthNotRestoredNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
 import { PART_NAMES_FILE, rememberPartNames } from './partMeaning';
 import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, MAX_PLACES } from './worldGrow';
-import { characterAsked, librarySubjectOf, modelWasAdded, setPlayerModel, characterSetHandoff, characterNotSetHandoff, PLAYER_FILE_PATH } from './characterSwap';
+import { characterAsked, librarySubjectOf, libraryMovesOf, characterNotSwappable, modelWasAdded, setPlayerModel, characterSetHandoff, characterNotSetHandoff, PLAYER_FILE_PATH, GAME_SHELL_PATH, SHELL_READS_PLAYER_FILE } from './characterSwap';
+import { GAME_PLAYER_FILE } from '../lib/GamePlayerBodyGenerator';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
+import { setLibraryCarAtTurnStart } from './carSwap';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
 
@@ -47,6 +49,9 @@ export async function enforceGrowthAtTurnEnd(io: {
         message: `This turn changed ${restores.length} file(s) of the game that the request did not ask to change; ${put.length} put back as they were: ${restores.slice(0, 8).map((r) => `${r.path} (${r.reason})`).join('; ')}${restores.length > 8 ? ` and ${restores.length - 8} more` : ''}.` });
       const note = growthUserNote(put);
       if (note) { try { io.say(note.trim()); } catch { /* the report still says it */ } }
+      // And a put-back that FAILED is told too: an unasked change that survived is never left to the report alone.
+      const missed = growthNotRestoredNote(restores.filter((r) => !put.includes(r)));
+      if (missed) { try { io.say(missed.trim()); } catch { /* the report still says it */ } }
     }
     // 🔓 And the user is never left stuck: what the builder wanted to change and could not is named, with the words that
     // allow it — said by the platform, whether or not the builder mentioned it.
@@ -116,7 +121,9 @@ export async function addLibraryPlaceAtTurnStart(io: {
 /**
  * A character picked in the Game Library (characterSwap.ts): the platform adds that exact model and sets PLAYER.model
  * itself, then returns what the builder is told. Where it cannot, NOTHING is changed on a guess and the builder is told to
- * say so and ask. '' when this turn is not that request, or the game has no player file. Never throws.
+ * say so and ask. Every game on the kit's shell can take a character (2026-11-22): a game without src/game/player.ts whose
+ * shell reads that file gets it created, already set; a game with no character to swap (a racing game's car, first
+ * person, a game not on the kit) is told so plainly — never silence. '' only when this turn is not that request. Never throws.
  */
 export async function setLibraryCharacterAtTurnStart(io: {
   prompt: string;
@@ -128,7 +135,8 @@ export async function setLibraryCharacterAtTurnStart(io: {
   record: (issue: Issue) => void;
 }): Promise<string> {
   const id = characterAsked(io.prompt);
-  if (!id || !io.filesAtTurnStart || typeof io.filesAtTurnStart[PLAYER_FILE_PATH] !== 'string') return '';
+  if (!id || !io.filesAtTurnStart) return '';
+  const files = io.filesAtTurnStart;
   const name = libraryDisplayName(id);
   const refuse = (why: string) => {
     io.record({ phase: 'build', severity: 'info', code: 'PLAYER_CHARACTER_NOT_SET', autoResolved: true, message: `The library character "${name}" was not set as the player: ${why}. Nothing was changed; the user is told and asked.` });
@@ -137,22 +145,31 @@ export async function setLibraryCharacterAtTurnStart(io: {
   try {
     const subject = librarySubjectOf(id);
     if (!subject) return refuse('it is not a model in the NavBharatAI library');
+    const notSwappable = characterNotSwappable(files);
+    if (notSwappable) return refuse(notSwappable);
+    const readOrNull = (path: string) => io.read(path).then((c) => (typeof c === 'string' ? c : null), () => null);
+    // No player file yet: the game can still take a character when its shell reads that file by itself (it is created).
+    const hasFile = typeof files[PLAYER_FILE_PATH] === 'string';
+    if (!hasFile && !String(await readOrNull(GAME_SHELL_PATH) ?? '').includes(SHELL_READS_PLAYER_FILE)) {
+      return refuse(`this game has no player character the platform can replace — it is not built on the NavBharatAI game kit's shell (or its ${GAME_SHELL_PATH} is an edited older version), so there is no ${PLAYER_FILE_PATH} for its character`);
+    }
     const receipt = await io.addModel(id).catch((error) => `failed: ${error instanceof Error ? error.message : String(error)}`);
     if (!modelWasAdded(receipt, subject)) return refuse(`the model could not be added to the game (${receipt.replace(/\s+/g, ' ').slice(0, 220)})`);
-    const live = await io.read(PLAYER_FILE_PATH).then((c) => (typeof c === 'string' ? c : null), () => null);
+    const live = hasFile ? await readOrNull(PLAYER_FILE_PATH) : GAME_PLAYER_FILE;
     const set = live === null ? { ok: false as const } : setPlayerModel(live, subject);
     if (!set.ok) return refuse(`the model is in the game now (subject '${subject}'), but ${PLAYER_FILE_PATH} is no longer in the shape the platform can set safely`);
-    if (set.changed) await io.write(PLAYER_FILE_PATH, set.source);
-    io.record({ phase: 'build', severity: 'info', code: 'PLAYER_CHARACTER_SET', autoResolved: true, message: `The platform set the library character "${name}" the user picked as the player (PLAYER.model = '${subject}').` });
-    return characterSetHandoff(name, subject);
+    if (set.changed || !hasFile) await io.write(PLAYER_FILE_PATH, set.source);
+    io.record({ phase: 'build', severity: 'info', code: 'PLAYER_CHARACTER_SET', autoResolved: true, message: `The platform set the library character "${name}" the user picked as the player (PLAYER.model = '${subject}'${hasFile ? '' : `; ${PLAYER_FILE_PATH} was created — the game's shell reads it by itself`}).` });
+    return characterSetHandoff(name, subject, libraryMovesOf(id));
   } catch (error) { return refuse(`an unexpected error (${error instanceof Error ? error.message : String(error)})`); }
 }
 
 /**
- * The two library actions the platform does itself at the start of a turn — a map place, a character — behind ONE call and
+ * The library actions the platform does itself at the start of a turn — a map place, a character, a racer's car — behind ONE call and
  * ONE write port, so the build route carries one line for both (Q-3237: the handler only shrinks). Never throws.
  */
 export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibraryCharacterAtTurnStart>[0]): Promise<string> {
-  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io)].filter(Boolean);
+  // …and the car a racer drives (carSwap.ts, 2026-11-22).
+  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io), await setLibraryCarAtTurnStart(io)].filter(Boolean);
   return handoffs.join('\n\n---\n\n');
 }

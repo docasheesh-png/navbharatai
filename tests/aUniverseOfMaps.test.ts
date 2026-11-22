@@ -13,7 +13,7 @@ describe('🌌 the limits and the rule', () => {
     expect(MAX_PLACES).toBe(100);
     const bridge = recipeFilePool().get('src/game/play/openWorld.ts')!.content;
     expect(bridge).toContain('export const MAX_REGIONS = 100;');
-    expect(bridge).toMatch(/planned\.length \+ landList\.length >= MAX_REGIONS/);
+    expect(bridge).toMatch(/planned\.length \+ landList\.length \+ userMaps\.length >= MAX_REGIONS/);   // + user maps (2026-11-22)
     expect(bridge).toMatch(/if \(Math\.hypot\(at\.x - p\.centre\.x, at\.z - p\.centre\.z\) < p\.reach \+ BUILD_AHEAD\) \{ buildPlace\(p\); break; \}/);
   });
   it('bigger means MORE places (a mix, every direction) — never a stretched sizeMeters; duplicate means copies with new ids', () => {

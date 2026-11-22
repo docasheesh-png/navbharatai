@@ -175,6 +175,12 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  // The user's own map (admin 2026-11-22, Q-3248 follow-on): with a model attached, "isse north me jod do" adds it to the world.
+  'isse north me jod do': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/gameKitSeed.ts (GAME_WORLD_RULE → a 'custom' region); src/server/lib/GameOpenWorldGenerator.ts (loadUserMap)`,
+    why: 'an add order on the open project: the world rule turns it into ONE custom region with the attached model and the direction said, and play/openWorld.ts loads that model on its own ground',
+    proof: () => reachesReaderAsWork('isse north me jod do') && read('src/server/AgentV3/gameKitSeed.ts').includes('isse north me jod do') && read('src/server/lib/GameOpenWorldGenerator.ts').includes("region.kind === 'custom'"),
+  },
   // The growth guard's ask (growthAskNote, 2026-11-21): the user lets the builder change what is needed, this once.
   'jo zaroori ho badal do': {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/growthGuard.ts (PERMIT)`,

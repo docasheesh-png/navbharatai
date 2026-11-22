@@ -103883,3 +103883,9 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - Test: `tests/aRequestThePlatformFinishedRunsNoBuilder.test.ts` (15). The census fails if a new `*AtTurnStart` action has no success receipt. Proven by reversion: 7 mutations, each one fails.
 - Open (honest): a request with words added still runs the builder; the growth guard (not prevention) catches an unasked edit there. The finishing proofs (preview verify, mobile, prod build, tests) still take their time on a picker turn.
 
+
+## 2026-11-22 — a status notice is not an error, and a dead build gets an end (failedbr #2497 → #2498, Q-3320–Q-3328)
+- Report: #2497 (a big-map game) recorded nothing after 46 s; the user's next message was refused with "Your earlier build for this app is still running…", which arrived in the open preflight stream, was shown as an error with "Fix with AI", and the press ran #2498 on that sentence for 15+ minutes (5 min of reads with no kit API, a max_tokens cut, two blank-browser clicks).
+- Fixes: `platformAdmissionNotices.ts` (every admission refusal; client stands down, in-stream refusals carry `beforeBuildStarted`); `platformNoticeAsBuildRequest` + route 400 before any work; orphaned reports settled when the next build holds the lease (`orphanedBuildReport.ts`); a silent lease holder (2 missed beats) is waited out instead of reported as running; the kit API snapshot on game-project turns whose words name no other app; a third "WRITE NOW" exploration hand-back; browser_action reopens the last preview page when the shared browser is blank.
+- Tests: aPlatformNoticeIsNotAnError, aDeadBuildGetsAnHonestEnd, aBlankBrowserReopensThePreview — 8 reversions, each fails.
+- Open: Q-3323 (why the instance died — Cloud Run logs), Q-3326 (reasoning budget vs output cap — admin's money decision), Q-3328 (benched Surplus model chosen again — not worked).

@@ -2531,8 +2531,10 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // non-module, untouched-starter guard, and only after a successful 3D recipe. Its helper is
     // default-off and returns files only after durable acknowledgement; seed accounting below
     // attributes every file to the platform. This writer cannot run on a survey/import/edit.
-    // 16000 since 2026-11-21: the seed grew the library actions' call and the seed preview (both helpers, one line each).
-    const seed = SRC.slice(SRC.indexOf('// ── GAME KIT SEED'), SRC.indexOf('// ── GAME KIT SEED') + 16000);
+    // The whole seed section, up to the next section header — a character window (16000) broke every time a helper call
+    // was added inside it (2026-11-22: the platform-done turn and the map wishes pushed preseededGolden past it).
+    const seedAt = SRC.indexOf('// ── GAME KIT SEED');
+    const seed = SRC.slice(seedAt, SRC.indexOf('// ── ONE-SHOT FAST LANE', seedAt));
     expect(seed).toContain("if (intent === 'new_build' && !projectModuleRef && !isImportTurn)");
     expect(seed).toContain('await srcHoldsOnlyOurStarter(');
     expect(seed).toContain('if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted)');

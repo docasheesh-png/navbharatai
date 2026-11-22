@@ -79,7 +79,10 @@ describe('🔒 census: every game the kit mounts takes the user\'s character fro
   it('the shell reads the file by itself and applies it before the game\'s setup — so ANY game built on it (boxing, shooter, the builder\'s own) swaps its body', () => {
     const shell = pool.get('src/game/Game.ts')!.content;
     expect(shell).toMatch(/this\.playerChoice = resolvePlayerChoice\(options\.player\)/);
-    expect(shell.indexOf('this.playerModel = applyPlayerChoice(this.context, this.playerChoice)')).toBeLessThan(shell.indexOf('options.setup?.(this.context)'));
+    const applied = shell.indexOf('this.playerModel = applyPlayerChoice(this.context, this.playerChoice)');
+    expect(applied).toBeGreaterThan(0);
+    expect(applied).toBeLessThan(shell.indexOf('options.setup?.(this.context)'));
+    expect(shell).toMatch(/this\.playerModel\?\.update\(delta\)/);
     expect(shell).toMatch(/safe\(\(\) => this\.playerModel\?\.dispose\(\)\)/);
   });
   it('the body ships with the shell whatever subset is asked for (the shell imports it)', () => {

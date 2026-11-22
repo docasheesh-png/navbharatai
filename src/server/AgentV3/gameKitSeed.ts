@@ -390,9 +390,10 @@ export const GAME_PLAYER_RULE = '🧍 THIS GAME\'S PLAYER CHARACTER IS src/game/
   + ' jump, punch, kick, block, hit, die…); a move it does NOT have is never faked — the game says so on screen — so tell the user'
   + ' plainly which moves their character lacks (the [USER MODELS ADDED] note and the library list its clips). For a move the kit'
   + ' person has no button pose for (block, die, slide), call playMove(ctx, \'block\') from ./play/playerBody. A racing game\'s player is'
-  + ' its car and a first-person game shows no body: say so instead of editing this file. Never hide or replace the kit\'s hero by hand,'
-  + ' and never touch the map, the controls or the features to change the character. If the library does not have what was asked,'
-  + ' say so and change PLAYER.look instead.';
+  + ' its car and a first-person game shows no body: say so instead of editing this file. Unless the user clearly asks for it (e.g.'
+  + ' "apna player khud banao", "poora game badal do"), do not hide or replace the kit\'s hero by hand and do not touch the map, the'
+  + ' controls or the features just to change the character — a clear request from the user always wins. If the library does not have'
+  + ' what was asked, say so and change PLAYER.look instead.';
 /** Racing on the kit's road library: a longer road is a prop, never a hand-built track. */
 export const RACE_ROAD_RULE = '🏁 THIS RACE RUNS ON THE ROAD LIBRARY (<RacingRoadGame>): twelve road maps that join seamlessly into an endless road.'
   + ' "Track / road bada karo", "lambi race" → raise finishKm (or pass finishKm={null} for a road that never ends); "aur gaadiyan" →'

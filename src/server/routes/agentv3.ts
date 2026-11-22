@@ -264,7 +264,7 @@ import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { applyGateRedNotice } from '../AgentV3/gateRedNotice';
 import { releaseGate, releaseGateRecord, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
-import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
+import { auditSummaryClaims, claimCorrection, claimHeadline, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
@@ -26139,7 +26139,7 @@ async function noteBuildOutcome(
         });
         // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).
         // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.
-        const auditedSummary = `${result.summary}${claimCorrection(contradictions)}`;
+        const auditedSummary = `${claimHeadline(contradictions)}${result.summary}${claimCorrection(contradictions)}`;
         const adFacts = await adFactsNow();
         const adPlayers = adFacts.players;
         const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers, undefined, adFacts.ownAds);

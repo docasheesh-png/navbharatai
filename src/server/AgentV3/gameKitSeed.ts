@@ -572,8 +572,9 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
-    // Every later turn of any game made on the kit: nothing passes through anything (admin 2026-11-22).
-    typeof files['src/game/core/loop.ts'] === 'string' ? GAME_COLLISION_RULE : '',
+    // Every later turn of a game made on the kit: nothing passes through anything (admin 2026-11-22). A game = the kit's loop
+    // is there AND the app itself plays it (App.tsx reaches into src/game) — the kit's files alone do not make an app a game.
+    typeof files['src/game/core/loop.ts'] === 'string' && /['"]\.\/game\//.test(String(files['src/App.tsx'] ?? '')) ? GAME_COLLISION_RULE : '',
   ].filter(Boolean).join('\n\n');
 }
 

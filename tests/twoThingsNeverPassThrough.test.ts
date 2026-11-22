@@ -117,7 +117,9 @@ describe('💥 two things never pass through each other', () => {
   it('the builder is told the rule in every game build and every later turn of a game', () => {
     expect(GAME_COLLISION_RULE).toMatch(/keepApart/);
     expect(GAME_KIT_RULE).toContain(GAME_COLLISION_RULE);
-    expect(projectGrowthRules({ 'src/game/core/loop.ts': 'x' })).toContain(GAME_COLLISION_RULE);
+    expect(projectGrowthRules({ 'src/game/core/loop.ts': 'x', 'src/App.tsx': "import { OpenWorldGame } from './game/OpenWorldGame';" })).toContain(GAME_COLLISION_RULE);
+    // The kit's files alone, in an app that does not play them, are not a game.
+    expect(projectGrowthRules({ 'src/game/core/loop.ts': 'x', 'src/App.tsx': 'export default function App() { return null; }' })).not.toContain(GAME_COLLISION_RULE);
     expect(projectGrowthRules({ 'src/App.tsx': 'x' })).not.toContain(GAME_COLLISION_RULE);
   });
 });

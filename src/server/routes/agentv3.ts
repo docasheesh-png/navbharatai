@@ -468,6 +468,7 @@ import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
 import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff, withLibraryMenuForExistingGame } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt, useAsCharacterPrompt } from '../AgentV3/gameAssets/libraryThumbnails';
+import { useAsCarPrompt } from '../AgentV3/carSwap';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, turnIsGame, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
@@ -5319,7 +5320,8 @@ async function noteBuildOutcome(
     });
     res.setHeader('Cache-Control', 'private, max-age=60');
     res.json({ enabled: externalGameAssetsEnabled(process.env, uid), ...result, prompts: Object.fromEntries(result.rows.map((r) => [r.id, addToGamePrompt(r)])),
-      characterPrompts: Object.fromEntries(result.rows.flatMap((r) => { const text = useAsCharacterPrompt(r); return text ? [[r.id, text]] : []; })) });
+      characterPrompts: Object.fromEntries(result.rows.flatMap((r) => { const text = useAsCharacterPrompt(r); return text ? [[r.id, text]] : []; })),
+      carPrompts: Object.fromEntries(result.rows.flatMap((r) => { const text = useAsCarPrompt(r); return text ? [[r.id, text]] : []; })) });
   });
   // Pictures are renders of public, reviewed models — no user data — so an <img> can load them without a token. Only a
   // file named by a catalogue hash is ever read.

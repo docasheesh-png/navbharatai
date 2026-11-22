@@ -99,7 +99,7 @@ import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexit
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
-import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand } from '../AgentV3/writeTimeTypecheck';
+import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand, writeTimeTypecheckRan } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel, answerTimeOf } from '../AgentV3/answeringModel';
 import { recordedTextCall } from '../AgentV3/recordedTextCall';
@@ -26133,7 +26133,8 @@ async function noteBuildOutcome(
           // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
           // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot
           // claim a typecheck happened when it did not.
-          typecheckRan: gateEvidence.typecheck !== 'not-run',
+          // …or a write-time compile that really looked at the project (Q-3249: "no typecheck ran" beside 5 write-time runs).
+          typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
         });

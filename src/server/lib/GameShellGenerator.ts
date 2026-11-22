@@ -2543,7 +2543,8 @@ const CSS = [
   '.nbg-tc-edit label{display:flex;gap:8px;align-items:center}',
   '.nbg-tc-edit p{margin:0;width:100%;text-align:center;font-weight:500;opacity:0.85}',
   '.nbg-tc-edit p.nbg-tc-fit{color:#fde047;opacity:1;display:none}',
-  '.nbg-tc-edit input[type="checkbox"]{width:22px;height:22px;margin:0}',
+  '.nbg-tc-fixed-row{cursor:pointer}',
+  '.nbg-tc-fixed{width:22px;height:22px;margin:0;accent-color:#fde047}',
   '.nbg-tc.editing .nbg-tc-base:focus-visible,.nbg-tc.editing .nbg-tc-btn:focus-visible{outline:3px solid #fff;outline-offset:3px}',
 ].join('');
 

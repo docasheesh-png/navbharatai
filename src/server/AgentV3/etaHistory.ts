@@ -27,6 +27,9 @@
 import type { Complexity, HistoricalBuild } from '../lib/BuildTimeEstimator';
 import type { TaskType } from './RequestAnalyser';
 
+/** The report code of a turn the platform completed with no builder (platformDoneTurn.ts). Defined here, a leaf module, so the history reader can import it. */
+export const PLATFORM_DONE_TURN_CODE = 'PLATFORM_DONE_TURN';
+
 /** The few fields we need off a stored report. Deliberately loose — old records lack newer fields. */
 export interface BuildRecordLike {
   startedAt?: number;
@@ -36,6 +39,11 @@ export interface BuildRecordLike {
   outcome?: string;
   /** Time spent waiting for the user's answer — not build time (autopsy 1219c639). */
   userWaitMs?: number;
+  /**
+   * The platform completed this turn's request itself, with no builder (platformDoneTurn.ts, failedbr #2496). Its minute
+   * says nothing about how long a BUILD of this app takes, so it never teaches the estimate.
+   */
+  platformDoneTurn?: boolean;
 }
 
 /** The build's own working time: wall clock minus the time it waited for the user. PURE. */
@@ -66,6 +74,7 @@ export const MAX_SANE_BUILD_MS = 45 * 60_000;    // past 45 min it was almost ce
  */
 export function isTeachableBuild(r: BuildRecordLike): boolean {
   if (!r || typeof r.startedAt !== 'number' || typeof r.endedAt !== 'number') return false;
+  if (r.platformDoneTurn === true) return false;
   const ms = workingMs(r);
   if (!(ms >= MIN_SANE_BUILD_MS && ms <= MAX_SANE_BUILD_MS)) return false;
   // `ok` is authoritative when present; otherwise fall back to the recorded outcome string.

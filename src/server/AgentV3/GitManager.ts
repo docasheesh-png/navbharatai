@@ -126,6 +126,8 @@ function sanitizeMessage(message: string): string {
 const GITIGNORE_PATTERNS = [
   ...LIST_PRUNE_DIRS.filter((d) => d !== '.git').map((d) => `${d}/`),
   '.DS_Store', '*.log',
+  // A platform proof file an older build left at the project root (failedbr #2496, see isPlatformScratchPath).
+  '/.nbai-asset-*',
 ];
 const ENSURE_GITIGNORE_CMD =
   'touch .gitignore; ' +

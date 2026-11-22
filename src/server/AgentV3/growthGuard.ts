@@ -277,6 +277,10 @@ export interface GrowthVerdict { allow: boolean; reason?: string; restore?: stri
  */
 export function growthVerdict(input: { path: string; before: string | undefined; after: string | null; request: string; platformWrote?: string | null; known?: PartsKnown }): GrowthVerdict {
   const { path, before, after, request, known } = input;
+  // A NEW feature that only pretends to grow the map (Q-3304): refused at the write, with the one path that does.
+  if (typeof before !== 'string' && after !== null && FEATURE_FILE.test(path) && path !== FEATURES_INDEX && featurePretendsToGrowMap(path, after)) {
+    return { allow: false, reason: `the feature "${featureIdOf(path)}" claims to grow the map, and a feature cannot: ${MAP_GROWS_ONLY_IN_WORLD}` };
+  }
   if (typeof before !== 'string') return { allow: true };            // new this turn: adding is how a game grows
   if (after === before) return { allow: true };
   if (input.platformWrote != null && after === input.platformWrote) return { allow: true };
@@ -314,6 +318,26 @@ export function growthVerdict(input: { path: string; before: string | undefined;
   return { allow: true };
 }
 
+/**
+ * 🧬 A FEATURE CANNOT GROW THE MAP (Q-3304 — failedbr #2494, 2026-11-22). Refused at world.ts five times, the builder wrote
+ * regionExpansion, giantWorld, worldStreamer and worldEnhancement and its summary said the map had grown to "12 regions" — while
+ * WORLD.regions never changed. It cannot have: the map is laid from WORLD.regions before the first frame (play/openWorld.ts), and
+ * a feature's setup() is handed the world that is already there — the feature API has no way to add a place. So a feature whose
+ * own name or `about` says it adds regions or enlarges the map is a fake feature by construction (CLAUDE.md's second absolute
+ * rule), and it is refused at the write with the one path that really does it. Narrow on purpose: streaming props, a better
+ * look or more traffic are real features and pass. PURE.
+ */
+const MAP_GROWTH_CLAIM = /\b(?:regions?\s+expan\w*|expan(?:d|ds|sion|der)\s+(?:the\s+)?(?:world|map|regions?)|(?:world|map)\s+expan\w*|(?:giant|big|bigger|huge|larger)\s+(?:\w+\s+)?(?:world|map)|(?:world|map)\s+size|enlarg\w*\s+(?:the\s+)?(?:world|map|city)|extend(?:ed)?\s+(?:the\s+)?(?:world|map)|(?:more|add|adds|extra)\s+(?:places|cities|regions))\b/i;
+export const MAP_GROWS_ONLY_IN_WORLD = 'the map is laid from WORLD.regions in src/game/world.ts before the first frame, and a feature only gets the world that'
+  + ' is already there. A new place is ONE more entry there; a bigger city is tiles that join it ({ id: \'main-city-2\', kind: \'city\', joinTo:'
+  + ' \'main-city\' }); a land is its own kind (desert, jungle, mountain, snow, beach, grassland); a size the user named is WORLD.spreadMeters.'
+  + ' If that file refused you, the request did not ask to change the places already there: ADD entries, never rewrite or remove the others.';
+export function featurePretendsToGrowMap(path: string, content: string): boolean {
+  const id = featureIdOf(path).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ');
+  const about = /\babout\s*:\s*\[([^\]]*)\]/.exec(String(content ?? ''))?.[1] ?? '';
+  return MAP_GROWTH_CLAIM.test(id) || MAP_GROWTH_CLAIM.test(about.replace(/['"`]/g, ' '));
+}
+
 /** The files of a project the guard watches. PURE. */
 export function growthProtectedPaths(filesAtTurnStart: Readonly<Record<string, string>>): string[] {
   if (!growsByLists(filesAtTurnStart)) return [];
@@ -342,7 +366,9 @@ export function growthRestores(input: {
 export function growthRefusal(path: string, reason: string): string {
   return `REFUSED (growth guard): ${path} was not changed — ${reason}. This game grows by ADDING: create a NEW file under src/game/features/ `
     + 'with defineFeature({ id, needs?, setup, update }) and add ONE line to src/game/features/index.ts; build on another feature with needs + '
-    + 'api.get(id), never by editing it. A new place is ONE more entry in src/game/world.ts. This file opens the moment the user\'s own words '
+    + 'api.get(id), never by editing it. A new place is ONE more entry in src/game/world.ts.'
+    + ((path === WORLD_FILE || /\bmap\b/.test(reason)) && !reason.includes(MAP_GROWS_ONLY_IN_WORLD) ? ` THE MAP: ${MAP_GROWS_ONLY_IN_WORLD}` : '')
+    + ' This file opens the moment the user\'s own words '
     + 'ask for it — its name or what it does ("camera badlo", "police hatao"), "jo chahe badlo", or "poora game badal do" — so if you believe the '
     + 'user asked for exactly this change, do everything else, then say in your reply which part it needs and ask them to say so.';
 }

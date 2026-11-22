@@ -8,7 +8,7 @@ import { withReplyLanguage, replyVoiceForRequest, replyLanguageBinding } from '.
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
-import { planKitRefresh } from '../lib/gameRecipeLayers';
+import { planKitRefreshAgainstSandbox } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -75,7 +75,9 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
-import { enforceGrowthAtTurnEnd, libraryActionsAtTurnStart } from '../AgentV3/growthTurn';
+import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
+import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
+import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
@@ -89,7 +91,7 @@ import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
-import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
+import { projectHasUserCode, modelAuthoredPaths, isPlatformSeededFile } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
@@ -772,7 +774,7 @@ import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type 
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
 import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS, GAME_AUTO_REPAIR_SUSPENSION_REASON } from '../AgentV3/gameRepair';
 import { scopeMatch } from '../AgentV3/gameIntent';
-import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, withKitLayersFromDisk, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -15809,6 +15811,7 @@ async function noteBuildOutcome(
           // Autopsy 778d7c58: a seeded finished template is a ~1 min verify, not a from-scratch build.
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           Object.assign(est, capTemplateVerifyEstimate(est, scaffoldWillSeed && isTemplateVerifyJob(seededScaffold?.tier ?? null), past.length > 0));
+          Object.assign(est, capPlatformDoneEstimate(est, prompt)); // a library pick the platform does itself (failedbr #2496)
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
@@ -15842,9 +15845,9 @@ async function noteBuildOutcome(
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
           etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
           etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;
-          const etaShown = etaEvidenced
+          const etaShown = platformDoneEtaLine(prompt) ?? (etaEvidenced
             ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
-            : unevidencedFirstEtaLine(est);
+            : unevidencedFirstEtaLine(est));
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
           // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
@@ -19500,15 +19503,13 @@ async function noteBuildOutcome(
       if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart
         && String(process.env.AGENTV3_KIT_REFRESH ?? '').trim().toLowerCase() !== 'off') {
         try {
-          const refresh = planKitRefresh(projectFilesAtTurnStart);
+          // Q-3300 (failedbr #2494): planned against the SANDBOX, not the saved copy — a read-back missing five kit files used
+          // to block the whole refresh, leaving play/openWorld.ts without the lands and joinTo the builder's rule described.
+          const refresh = await finalSteps.step('kit refresh read', () => planKitRefreshAgainstSandbox(projectFilesAtTurnStart!, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null))));
           if (refresh.blocked) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${refresh.blocked}.` });
           } else if (Object.keys(refresh.write).length > 0) {
-            const live = await finalSteps.step('kit refresh read', () => Promise.all(Object.keys(refresh.write).map(async (p) => [p, await actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)).catch(() => null)] as const)));
-            const drifted = live.filter(([p, c]) => (p in projectFilesAtTurnStart! ? c !== projectFilesAtTurnStart![p] : c !== null)).map(([p]) => p);
-            if (drifted.length > 0) {
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${drifted.join(', ')} changed in the sandbox since it was saved.` });
-            } else {
+            {
               // Several at once, like the recipes' own writes (Q-3232): one by one this was a sandbox round trip per kit file
               // before the builder's first call (failedbr #2484, "Final preparation … other 46.5 s").
               await finalSteps.step('kit refresh write', () => mapWithConcurrency(Object.entries(refresh.write), 6, ([p, c]) => actuator.writeFile(workspaceId, p, c)));
@@ -19516,19 +19517,27 @@ async function noteBuildOutcome(
                 writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,
-                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.` });
+                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
             }
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
       // 🗺️🧍 WHAT IS PICKED IN THE LIBRARY IS DONE BY THE PLATFORM ITSELF (growthTurn.ts): a map place (worldGrow.ts) or the
       // player's character (characterSwap.ts). Where it cannot be done, nothing is changed on a guess and the user is asked.
+      // ⚡ And when that WAS the whole request, the builder does not run at all (platformDoneTurn.ts, failedbr #2496).
+      const platformDoneRef: { cur: PlatformDone | null } = { cur: null };
       if (!isImportTurn && !projectModuleRef) {
-        const libraryHandoff = await libraryActionsAtTurnStart({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        const libraryHandoff = await libraryActionsForTurn({ prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
-          addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
+          addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? ''),
+          done: platformDoneRef, narrate: (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+          startPreview: () => startTemplatePreview(true, () => dispatcher.dispatch({ id: 'platform-done-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined)) });
         if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
       }
+      // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3302/Q-3303 — failedbr #2495):
+      // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
+      buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
         if (kitPlan.length === 0) {
@@ -20658,6 +20667,7 @@ async function noteBuildOutcome(
         record: (row) => { try { buildDiag.record({ phase: 'build', severity: row.severity, code: row.code, message: row.message, autoResolved: true }); } catch { /* best-effort */ } },
       });
       result = templateRunResult(result, verbatimTemplate);
+      result = platformDoneRunResult(result, platformDoneRef.cur);
       fastLaneGated = templateCountsAsGated(fastLaneGated, verbatimTemplate.deliver);
 
       // FREE-TIER: never escalate a free build — escalation climbs to Sonnet/Claude, and a not-yet-
@@ -20947,6 +20957,7 @@ async function noteBuildOutcome(
         signal: abort.signal,
         remainingMs: () => effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (workElapsed()),
         record: (note) => buildDiag.record(note),
+        platformDone: () => platformDoneRef.cur !== null,
       });
       if (result.timedOut === true) {
         recordFinishingPassesHeld(buildDiag);
@@ -23792,7 +23803,7 @@ async function noteBuildOutcome(
           // `tsc --noEmit` on the next turn (autopsy eed79815 — see testSkeletonsCanRun).
           const skeletonsSafe = testSkeletonsCanRun(pkgForTests)
             && testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
-          const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
+          const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3, platformOwned: isPlatformSeededFile }) : [];
           const scaffolded: string[] = [];
           // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`
           // this pass's `currentPass()` is `null`, so Green Freeze refuses every write and each refusal
@@ -24792,7 +24803,7 @@ async function noteBuildOutcome(
       // started the game for the explorer is the one the playtest presses first.
       let gamePlaytestDone = false;
       // Game Engine Ultra Phase 3 inputs (gameRepair.ts): the last measured defects and still-missing named features.
-      type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[] };
+      type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[]; played: boolean };
       const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
       const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
@@ -24800,14 +24811,15 @@ async function noteBuildOutcome(
         const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
-          && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
+          && !isImportTurn && !abort.signal.aborted && !awaitsShellNow() && !platformDoneRef.cur
           && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
           && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
             const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
             const playRun = parsePlaytest(out.stdout);
-            const verdict = playtestVerdict(playRun, replayFromCode(playtestFiles));
+            const playedFiles = await withKitLayersFromDisk(playtestFiles, (p) => actuator.readFile(workspaceId, p));
+            const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
             if (gameProof.outcome === 'not-run') gameProof.unplayed = true; // the runner's own "never played" answer
@@ -24815,8 +24827,8 @@ async function noteBuildOutcome(
             gateEvidence.game = gameProof.outcome;
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
-              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles), replayFromCode(playtestFiles));
-              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
+              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playedFiles), replayFromCode(playedFiles));
+              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playedFiles).missing : [], played: gameProof.outcome !== 'not-run' };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
               // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
@@ -24837,7 +24849,7 @@ async function noteBuildOutcome(
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
             try {
-              const scope = gameContract ? gameScopeVerdict(gameContract, playtestFiles) : null;
+              const scope = gameContract ? gameScopeVerdict(gameContract, playedFiles) : null;
               if (scope) buildDiag.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
             } catch { /* observation only */ }
           } catch (err) {
@@ -24869,6 +24881,7 @@ async function noteBuildOutcome(
               hasRunCommand: !!actuator.runCommand,
               hasPreviewUrl: !!lastPreviewUrl,
               awaitsShell: !!awaitsShellNow(),
+              platformDone: !!platformDoneRef.cur,
               timeLeft: effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000,
             });
             if (why) {
@@ -24902,7 +24915,7 @@ async function noteBuildOutcome(
       // EXPLORE_NOT_RUN, not a pass. Kill switch AGENTV3_CLICK_EXPLORE=off.
       if (
         clickExplorerEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
-        && !isImportTurn && !abort.signal.aborted
+        && !isImportTurn && !abort.signal.aborted && !platformDoneRef.cur
         && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         try {
@@ -25077,7 +25090,7 @@ async function noteBuildOutcome(
             barrenPhases.add(PHASE_GAME_REPAIR);
             buildDiag.record({ phase: 'preview', ...gameRepairRecord(outcome) });
             if (outcome.kept && outcome.after) {
-              gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing };
+              gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing, played: outcome.proof ? true : gamePlayed.played };
               // The repaired game was PLAYED again and nothing hard remains: that replay is the gate's game proof.
               if (outcome.proof) {
                 gameProof = { ...outcome.proof };
@@ -25095,7 +25108,7 @@ async function noteBuildOutcome(
         }
         if (gameCompleteGateEnabled()) {
           try {
-            const why = gameIncompleteReason(gamePlayed.defects, gamePlayed.scopeMissing);
+            const why = gameIncompleteReason(gamePlayed.defects, gamePlayed.scopeMissing, { played: gamePlayed.played });
             if (why) {
               gateEvidence.gameIncomplete = why;
               buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_COMPLETE_GATE_BLOCKED', autoResolved: false, message: `Not reported complete: ${why}.` });
@@ -26104,6 +26117,8 @@ async function noteBuildOutcome(
           typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
+          // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3305).
+          world: worldClaimFacts(projectFilesAtTurnStart?.[WORLD_PATH], writtenFiles.get(WORLD_PATH) ?? projectFilesAtTurnStart?.[WORLD_PATH], prompt) ?? undefined,
         });
         // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).
         // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.
@@ -26463,7 +26478,7 @@ async function noteBuildOutcome(
         fastLaneGated,
         reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE') || bugHuntAskedByUser,
         startTierSonnet: analysis?.startTier === 'sonnet',
-        templateDelivered: verbatimTemplate.deliver,
+        templateDelivered: verbatimTemplate.deliver || platformDoneRef.cur !== null,
       });
       // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
       // read a half-built project and report the starter page as the product. The shell turn reviews the

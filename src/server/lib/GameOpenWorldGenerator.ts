@@ -49,13 +49,25 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * only the cities near the player are built, so a long list is a big universe, not a slow start.
    */
   regions?: WorldRegion[];
+  /**
+   * HOW FAR THE PLACES SPREAD, in metres (admin 2026-11-22, failedbr #2495: "map ko 40km*40km banao"). The places and lands
+   * that do not name a distance are laid across a square this many metres wide around the first place, instead of next to
+   * each other — open country between them, joined by highways. Left out: they stand a journey apart, close together.
+   * Clamped to 1 km .. 1000 km; a loop world is never smaller than the spread (sizeMeters is raised to it when needed).
+   */
+  spreadMeters?: number;
 }
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
 export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom';
-/** A LAND, not a settlement: a desert, a jungle, mountains, snow or a beach laid on part of the map (no buildings). */
-export type LandKind = 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
-const LAND_BIOME: Record<LandKind, LandBiome> = { desert: 'desert', jungle: 'forest', mountain: 'mountain', snow: 'snow', beach: 'beach' };
+/**
+ * A LAND, not a settlement: a desert, a jungle, mountains, snow, a beach or an open grass field (a maidan, a meadow) laid on
+ * part of the map (no buildings).
+ */
+export type LandKind = 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach' | 'grassland';
+// 'grassland' is named through LandBiome so that this file still compiles beside an older athree/world.ts: its biomeAt already
+// answers 'grassland' for the patch, so the ground is grass there either way (the newer world also keeps trees out of it).
+const LAND_BIOME: Record<LandKind, LandBiome> = { desert: 'desert', jungle: 'forest', mountain: 'mountain', snow: 'snow', beach: 'beach', grassland: 'grassland' as LandBiome };
 export function isLandKind(kind: unknown): kind is LandKind { return typeof kind === 'string' && kind in LAND_BIOME; }
 /** How many places and lands one map holds (admin 2026-11-22: "10—100 maps … bahut bada universe"). */
 export const MAX_REGIONS = 100;
@@ -179,9 +191,14 @@ export let loadUserMap = (model: string): Promise<THREE.Object3D> => new GLTFLoa
 export function setUserMapLoader(loader: (model: string) => Promise<THREE.Object3D>): void { loadUserMap = loader; }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, ...mapOptions } = options;
+  // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
+  // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
+  const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
+  const loopSize = Number(mapOptions.sizeMeters) > 0 ? Number(mapOptions.sizeMeters) : 100000;
+  const sized = spread > loopSize ? { sizeMeters: spread } : {};
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
-  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, three: THREE } as AthreeMapOptions);
+  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   (map as { sky?: { applyTo(scene: THREE.Scene): void } | null }).sky?.applyTo(ctx.scene);
@@ -241,6 +258,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const AXIS: Record<string, [number, number]> = { north: [0, -1], 'north-east': [1, -1], east: [1, 0], 'south-east': [1, 1], south: [0, 1], 'south-west': [-1, 1], west: [-1, 0], 'north-west': [-1, -1] };
   let growSeed = 0x9e3779b9;
   const nextRandom = (): number => { growSeed = (Math.imul(growSeed ^ (growSeed >>> 15), 2246822519) + 0x6d2b79f5) | 0; return ((growSeed >>> 0) % 10000) / 10000; };
+  // With a spread, the k-th of the M places that stand on their own (not a tile of a city) is laid about sqrt(k / (M - 1)) of the
+  // way to the edge of the square, on the same golden-angle spiral: the places fill the whole area instead of crowding the start.
+  const ownPlaces = wanted.filter((r) => r && typeof r.id === 'string' && !(typeof r.joinTo === 'string' && r.joinTo));
+  const spreadFar = (region: WorldRegion): number => {
+    const k = ownPlaces.indexOf(region);
+    return spread > 0 && k > 0 ? (spread / 2) * 0.92 * Math.sqrt(k / Math.max(1, ownPlaces.length - 1)) : 0;
+  };
   for (const region of wanted) {
     if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
@@ -254,7 +278,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const size = Math.min(4000, Math.max(40, Number(region.size) || 400)), r = size / 2;
       const base = planned[0]?.centre ?? spawn;
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
-      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 200, (size + 400) * Math.sqrt(n));
+      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 200, (size + 400) * Math.sqrt(n), region.distance === undefined ? spreadFar(region) : 0);
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       for (let tries = 0; tries < 8 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
@@ -269,7 +293,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const r = Math.min(2000, Math.max(150, Number(region.radius) || 450));
       const base = planned[0]?.centre ?? spawn;
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
-      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 300, (r * 2 + 400) * Math.sqrt(n));
+      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 300, (r * 2 + 400) * Math.sqrt(n), region.distance === undefined ? spreadFar(region) : 0);
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       for (let tries = 0; tries < 8 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
@@ -321,7 +345,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const first = planned.length === 0;
     const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);   // the golden angle: spread, never stacked
     const spacing = reach * 2 + 400;
-    let far = Math.max(region.distance ?? 0, first ? 0 : spacing * Math.max(1, Math.sqrt(n)));
+    let far = Math.max(region.distance ?? 0, first ? 0 : spacing * Math.max(1, Math.sqrt(n)), first || region.distance !== undefined ? 0 : spreadFar(region));
     let best = { x: spawn.x, z: spawn.z, cost: Number.POSITIVE_INFINITY };
     const samples = first ? 3 : 2;                                                                       // 7×7 for the start, 5×5 after
     // Water or roads where it was asked: look a little further out (and, for a spread place, a little to either side), before
@@ -654,6 +678,9 @@ export function gameWorldFileSource(options: { city?: boolean } = {}): string {
   return [
     '// THIS GAME\'S MAP. The land is NavBharatAI\'s big Athree map; the places on it are the regions list below.',
     '// To make the map BIGGER: add one more region (a city, a town or a village; say which way with toward, or leave it out).',
+    "// To make ONE CITY bigger: add tiles that join it ({ id: '<its id>-2', kind: 'city', joinTo: '<its id>' }).",
+    '// A land is a region too: kind desert, jungle, mountain, snow, beach or grassland (an open grass field).',
+    '// To lay the places across a size the user asked for: spreadMeters (for example 40000 for 40 km x 40 km).',
     '// To change ONE place: edit only its entry (city: { blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }).',
     '// The first region is where the player starts. Nothing else needs to change.',
     "import type { OpenWorldOptions } from './play/openWorld';",
@@ -690,9 +717,11 @@ export function generateOpenWorld(): RecipeOutput {
       'another names it in needs: [\'coins\'] and reads what it shared with api.get(\'coins\'). Each feature is guarded: one that throws is switched',
       'off and named in the console, and the rest of the game keeps running. To add the next thing, add the next file — never rewrite the others.',
       'GROW THE MAP BY REGIONS: world={{ regions: [{ id: \'main-city\', kind: \'city\' }, { id: \'old-town\', kind: \'town\', toward: \'east\' }, { id: \'hill-village\', kind: \'village\' }] }}',
-      'stands each place on its own levelled ground, spread across the map with open country and roads between them (up to 12; far places are',
-      'not drawn, only near ones run their traffic). Keep the list in src/game/world.ts; a bigger map is ONE more entry. world.regions lists',
-      'them and world.nearestRegion() says where the player is.',
+      'stands each place on its own levelled ground, spread across the map with open country and roads between them (up to 100 places and',
+      'lands together; a far place\'s city is built only when the player comes near). Keep the list in src/game/world.ts; a bigger map is ONE',
+      'more entry. A bigger CITY is tiles that join it: { id: \'main-city-2\', kind: \'city\', joinTo: \'main-city\' }. A land is a region',
+      'of kind desert, jungle, mountain, snow, beach or grassland (an open grass field, no trees). spreadMeters: 40000 lays the places',
+      'across 40 km x 40 km. world.regions lists them and world.nearestRegion() says where the player is.',
       'world={{ city: true }} levels ground near the start and stands a city on it (streets, crossings, pavements, shops, apartments, offices,',
       'parks), with traffic that obeys the lights, people who cross on the zebras, and parked cars the player gets into with Use (E). world.city',
       'gives the city, its traffic, its people, the parked cars and toWorld(x, z) for its lots and routes. Pass city options',

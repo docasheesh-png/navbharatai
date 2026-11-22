@@ -19501,7 +19501,7 @@ async function noteBuildOutcome(
       if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart
         && String(process.env.AGENTV3_KIT_REFRESH ?? '').trim().toLowerCase() !== 'off') {
         try {
-          // Q-3270 (failedbr #2494): planned against the SANDBOX, not the saved copy — a read-back missing five kit files used
+          // Q-3300 (failedbr #2494): planned against the SANDBOX, not the saved copy — a read-back missing five kit files used
           // to block the whole refresh, leaving play/openWorld.ts without the lands and joinTo the builder's rule described.
           const refresh = await finalSteps.step('kit refresh read', () => planKitRefreshAgainstSandbox(projectFilesAtTurnStart!, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null))));
           if (refresh.blocked) {
@@ -19528,7 +19528,7 @@ async function noteBuildOutcome(
           addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
         if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
       }
-      // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3272/Q-3273 — failedbr #2495):
+      // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3302/Q-3303 — failedbr #2495):
       // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
       buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
@@ -26107,7 +26107,7 @@ async function noteBuildOutcome(
           typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
-          // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3275).
+          // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3305).
           world: worldClaimFacts(projectFilesAtTurnStart?.[WORLD_PATH], writtenFiles.get(WORLD_PATH) ?? projectFilesAtTurnStart?.[WORLD_PATH], prompt) ?? undefined,
         });
         // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).

@@ -161,7 +161,7 @@ export interface MeasuredFacts {
    */
   uploadsInSmallStore?: boolean;
   /**
-   * THE MAP, measured (worldTurn.worldClaimFacts — Q-3275, failedbr #2494 / #2495). "World ko 50x bada kiya (707 km × 707 km),
+   * THE MAP, measured (worldTurn.worldClaimFacts — Q-3305, failedbr #2494 / #2495). "World ko 50x bada kiya (707 km × 707 km),
    * 12 regions add kiye" over a turn whose map file was put back exactly as it began; "All conditions met" over a request for
    * a 40 km × 40 km map that was never set. Omitted ⇒ the game has no map file, nothing judged.
    */
@@ -719,7 +719,7 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
     });
   }
 
-  // THE MAP (Q-3275): a size or a number of places the turn did not produce, or a size the user named that it never set.
+  // THE MAP (Q-3305): a size or a number of places the turn did not produce, or a size the user named that it never set.
   if (facts.world) out.push(...worldClaims(text, facts.world));
 
   // A kit capability named as the app's (autopsy db07e0af) — judged only against the whole app's own source.

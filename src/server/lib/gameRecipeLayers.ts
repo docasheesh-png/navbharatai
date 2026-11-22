@@ -431,7 +431,7 @@ export function planKitRefresh(
 }
 
 /**
- * 🧬 THE REFRESH IS JUDGED AGAINST THE SANDBOX, NOT AGAINST A SAVED COPY THAT MISSES FILES (Q-3270 — failedbr #2494,
+ * 🧬 THE REFRESH IS JUDGED AGAINST THE SANDBOX, NOT AGAINST A SAVED COPY THAT MISSES FILES (Q-3300 — failedbr #2494,
  * 2026-11-22: "city size badh kyu nahi raha??"). The saved copy read back at the start of that turn was missing five kit
  * files the sandbox had (EDIT_BASE_PARTIAL: core/crafting, dialogue, economy, events, feel). planKitRefresh, reading the
  * saved copy, planned to ADD those five; the route then re-read the sandbox, found them already there, called that "changed

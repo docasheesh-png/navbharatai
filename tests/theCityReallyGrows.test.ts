@@ -7,7 +7,7 @@
 // #2495 "un citys aur village ko jod jod ke copy clone kar ke map ko 40km*40km banao … bich me realistic ghas ka maidan":
 // separate cities instead of a city grown, 40 km ignored ("All conditions met"), a hand-made green circle for the field.
 //
-// Each class is locked here (Q-3270 … Q-3275). The kit parts run the REAL generated kit, headless.
+// Each class is locked here (Q-3300 … Q-3305). The kit parts run the REAL generated kit, headless.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -25,7 +25,7 @@ const OLD_OPEN_WORLD = "export type RegionKind = 'city' | 'town' | 'village';\ne
 const ONE_CITY = gameWorldFileSource({ city: true });
 const read = (files: Record<string, string>) => async (p: string): Promise<string> => { if (p in files) return files[p]; throw new Error('ENOENT: not found'); };
 
-describe('Q-3270 — the kit refresh is planned against the sandbox, not a saved copy that misses files', () => {
+describe('Q-3300 — the kit refresh is planned against the sandbox, not a saved copy that misses files', () => {
   // A small kit: a.ts gained a name and an import of c.ts; b.ts imports a.ts; d.ts is a kit file in the same folder.
   const OLD_A = 'export const x = 1;\n', NEW_A = "import { z } from './c';\nexport const x = 1;\nexport const y = z;\n";
   const OLD_B = "import { x } from './a';\nexport const b = x;\n", NEW_B = "import { x, y } from './a';\nexport const b = x + y;\n";
@@ -66,7 +66,7 @@ describe('Q-3270 — the kit refresh is planned against the sandbox, not a saved
   });
 });
 
-describe('Q-3271 — the map rule says only what THIS project\'s own kit can do', () => {
+describe('Q-3301 — the map rule says only what THIS project\'s own kit can do', () => {
   it('the current kit: every capability, and the rule is exactly GAME_WORLD_RULE', () => {
     expect(worldCapabilities(CURRENT_OPEN_WORLD)).toEqual({ lands: ['desert', 'jungle', 'mountain', 'snow', 'beach', 'grassland'], joinTo: true, custom: true, spread: true, maxRegions: 100 });
     expect(gameWorldRule(CURRENT_OPEN_WORLD)).toBe(GAME_WORLD_RULE);
@@ -87,7 +87,7 @@ describe('Q-3271 — the map rule says only what THIS project\'s own kit can do'
   });
 });
 
-describe('Q-3272 — "shehar bada karo" grows ONE city with joined tiles, done by the platform', () => {
+describe('Q-3302 — "shehar bada karo" grows ONE city with joined tiles, done by the platform', () => {
   it('reads the wish, and tells a bigger city from more cities', () => {
     for (const ask of ['city ka size badhao', 'shehar bada karo', 'yeh shehar aur bada karo', 'city ko copy clone kar ke jodo', 'city ko duplicate kar ke merge karo', 'expand the city', 'make the city bigger', 'city 4 guna badi karo'])
       expect(cityGrowthAsked(ask), ask).toBe('grow');
@@ -142,7 +142,7 @@ describe('Q-3272 — "shehar bada karo" grows ONE city with joined tiles, done b
   });
 });
 
-describe('Q-3273 — a map size the user names is set, or declined with the reason', () => {
+describe('Q-3303 — a map size the user names is set, or declined with the reason', () => {
   it('reads the size, never a speed or a race track', () => {
     expect(mapSizeAskedKm('map ko 40km*40km banao')).toBe(40);
     expect(mapSizeAskedKm('map 40 x 60 km ka banao')).toBe(60);
@@ -188,7 +188,7 @@ const context = () => {
 const small = { blocksX: 3, blocksZ: 3, traffic: { count: 1 }, people: { count: 1 }, parkedCars: 0 };
 
 describe('🏙️ the real kit, headless', () => {
-  it('Q-3272: the platform\'s 24 tiles make ONE continuous city of 25 blocks — every tile touches another, none overlap, one level', () => {
+  it('Q-3302: the platform\'s 24 tiles make ONE continuous city of 25 blocks — every tile touches another, none overlap, one level', () => {
     const g = growCity(ONE_CITY.replace("{ id: 'main-city', kind: 'city' }", "{ id: 'main-city', kind: 'city', city: { blocksX: 3, blocksZ: 3, traffic: { count: 1 }, people: { count: 1 }, parkedCars: 0 } }"), 'city 25 guna bada karo', CURRENT_OPEN_WORLD);
     if (!g.ok) throw new Error(g.reason);
     const regions = parseRegions(g.source)!.map((r) => { const id = /id: '([^']+)'/.exec(r.text)![1]; return id === 'main-city' ? { id, kind: 'city', city: small } : { id, kind: 'city', joinTo: 'main-city' }; });
@@ -205,7 +205,7 @@ describe('🏙️ the real kit, headless', () => {
     expect(world.highways.length).toBe(0);                                                   // one city: no highway inside it
     world.dispose();
   }, 180_000);
-  it('Q-3273: spreadMeters 40000 lays the places across 40 km — not crowded at the start, not beyond the square', () => {
+  it('Q-3303: spreadMeters 40000 lays the places across 40 km — not crowded at the start, not beyond the square', () => {
     const regions = [{ id: 'main-city', kind: 'city', city: small }, ...['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, kind: 'village', city: { traffic: { count: 1 }, people: { count: 1 }, parkedCars: 0 } }))];
     const near = OW.createOpenWorld(context(), { seed: 7, regions });
     const far = OW.createOpenWorld(context(), { seed: 7, regions, spreadMeters: 40000 });
@@ -219,7 +219,7 @@ describe('🏙️ the real kit, headless', () => {
     expect(huge.map.world.sizeMeters).toBe(300000);                                         // raised, never lowered
     huge.dispose();
   }, 180_000);
-  it('Q-3276: a grassland land is really an open grass field — grass biome, no tree in it, the map colours it', () => {
+  it('Q-3306: a grassland land is really an open grass field — grass biome, no tree in it, the map colours it', () => {
     const world = OW.createOpenWorld(context(), { seed: 7, regions: [{ id: 'main-city', kind: 'city', city: small }, { id: 'maidan', kind: 'grassland', toward: 'east', radius: 600 }] });
     expect(world.lands.map((l: any) => l.kind)).toEqual(['grassland']);
     const c = world.lands[0].centre, w = world.map.world;
@@ -232,7 +232,7 @@ describe('🏙️ the real kit, headless', () => {
   }, 180_000);
 });
 
-describe('Q-3274 — a feature cannot grow the map, so a feature that claims to is refused at the write', () => {
+describe('Q-3304 — a feature cannot grow the map, so a feature that claims to is refused at the write', () => {
   const v = (path: string, content = 'export default defineFeature({ id: "x", setup() {} });') => growthVerdict({ path, before: undefined, after: content, request: 'map ko giant banao' });
   it('#2494\'s workaround features are refused, with the one path that really grows the map', () => {
     for (const id of ['regionExpansion', 'giantWorld', 'giantRealisticWorld', 'worldExpansion', 'mapSize']) {
@@ -250,7 +250,7 @@ describe('Q-3274 — a feature cannot grow the map, so a feature that claims to 
   });
 });
 
-describe('Q-3275 — a summary may not claim a map size or a place count the turn did not produce', () => {
+describe('Q-3305 — a summary may not claim a map size or a place count the turn did not produce', () => {
   const s2494 = "## Summary\n- **50x bada kiya**: Original 100km × 100km map ko 707km × 707km tak bada diya (~50x area increase)\n- **Total 12 regions** add kiye hain:";
   it('#2494: the map file was put back as it began — the size and the 12 regions are corrected', () => {
     const before = ONE_CITY;

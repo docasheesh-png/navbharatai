@@ -368,7 +368,7 @@ const KIT_LANDS = ['desert', 'jungle', 'mountain', 'snow', 'beach', 'grassland']
 export interface WorldCapabilities { lands: string[]; joinTo: boolean; custom: boolean; spread: boolean; maxRegions: number }
 export const GAME_OPEN_WORLD_FILE = 'src/game/play/openWorld.ts';
 /**
- * 🧬 THE RULE STATES ONLY WHAT THE PROJECT'S OWN KIT CAN DO (Q-3271 — failedbr #2494, 2026-11-22). The rule described lands
+ * 🧬 THE RULE STATES ONLY WHAT THE PROJECT'S OWN KIT CAN DO (Q-3301 — failedbr #2494, 2026-11-22). The rule described lands
  * (desert, jungle …) and joinTo, but that project's play/openWorld.ts was an older copy whose RegionKind was 'city' | 'town' |
  * 'village': the builder wrote regions its own kit rejected, fought six to eleven type errors, and made features that pretended
  * to grow the map. The class: an instruction that describes the CURRENT kit, said to a project holding ANOTHER version. So the
@@ -706,7 +706,7 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
     // Asked, never guessed, in every game that grows by the user's requests — a road-library race included (2026-11-22).
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' || /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? GAME_NO_GUESS_RULE : '',
-    // Q-3271: what THIS project's own play/openWorld.ts can do, never the current kit's on faith.
+    // Q-3301: what THIS project's own play/openWorld.ts can do, never the current kit's on faith.
     typeof files[GAME_WORLD_FILE] === 'string' ? gameWorldRule(files[GAME_OPEN_WORLD_FILE]) : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',

@@ -2581,7 +2581,7 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //   1× the growth guard's end-of-turn restore (growthTurn.enforceGrowthAtTurnEnd) — it only PUTS BACK the content a
     //      protected file had when the turn began, on a path this turn already wrote; it never adds a path, so on a
     //      survey turn it can only undo a write that should not have happened. Inside runInPass('growth-guard-restore'). ✓.
-    // +1 (2026-11-22, failedbr #2495, Q-3272/Q-3273): the map wishes at turn start (worldTurn.worldWishAtTurnStart: a city
+    // +1 (2026-11-22, failedbr #2495, Q-3302/Q-3303): the map wishes at turn start (worldTurn.worldWishAtTurnStart: a city
     //      grown by joined tiles, a named map size) — `skip: isImportTurn || !!projectModuleRef`, and it writes only
     //      src/game/world.ts of a game that already has one, only when the request asks exactly that; never on a read-only
     //      import/survey turn. Entered in preseededGolden (the platform's work, not billed as the model's). Considered ✓.

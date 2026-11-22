@@ -277,7 +277,7 @@ export interface GrowthVerdict { allow: boolean; reason?: string; restore?: stri
  */
 export function growthVerdict(input: { path: string; before: string | undefined; after: string | null; request: string; platformWrote?: string | null; known?: PartsKnown }): GrowthVerdict {
   const { path, before, after, request, known } = input;
-  // A NEW feature that only pretends to grow the map (Q-3274): refused at the write, with the one path that does.
+  // A NEW feature that only pretends to grow the map (Q-3304): refused at the write, with the one path that does.
   if (typeof before !== 'string' && after !== null && FEATURE_FILE.test(path) && path !== FEATURES_INDEX && featurePretendsToGrowMap(path, after)) {
     return { allow: false, reason: `the feature "${featureIdOf(path)}" claims to grow the map, and a feature cannot: ${MAP_GROWS_ONLY_IN_WORLD}` };
   }
@@ -319,7 +319,7 @@ export function growthVerdict(input: { path: string; before: string | undefined;
 }
 
 /**
- * 🧬 A FEATURE CANNOT GROW THE MAP (Q-3274 — failedbr #2494, 2026-11-22). Refused at world.ts five times, the builder wrote
+ * 🧬 A FEATURE CANNOT GROW THE MAP (Q-3304 — failedbr #2494, 2026-11-22). Refused at world.ts five times, the builder wrote
  * regionExpansion, giantWorld, worldStreamer and worldEnhancement and its summary said the map had grown to "12 regions" — while
  * WORLD.regions never changed. It cannot have: the map is laid from WORLD.regions before the first frame (play/openWorld.ts), and
  * a feature's setup() is handed the world that is already there — the feature API has no way to add a place. So a feature whose

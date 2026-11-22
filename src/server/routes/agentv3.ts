@@ -450,6 +450,8 @@ import {
   planSmokeChecks, type SmokePlan,
 } from '../AgentV3/RouteSmokeCheck';
 import { runRouteSmokeCheck } from '../AgentV3/buildPhases/routeSmoke';
+import { recordPreviewNeverCameUp } from '../AgentV3/buildPhases/previewNeverCameUp';
+import { captureDeclaredPort } from '../AgentV3/buildPhases/declaredPortCapture';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -623,7 +625,7 @@ import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
 import { keepFailedBuildCopy, takeBuildCopy } from '../AgentV3/failedBuildCopy';
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, snapshotStandIn, snapshotStandInNote, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
-import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
+import { declaredPortFrom } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
@@ -25102,27 +25104,8 @@ async function noteBuildOutcome(
       // so the card and the verdict can never tell the user two different stories. Still exactly ONE
       // emit (the build card has one slot, and a second event would erase the first).
 
-      // NO PREVIEW AT ALL IS THE LOUDEST FINDING THERE IS — and it was the one thing the report never
-      // said (build f323a4db/49a7a987, admin 2026-08-06). Every post-build verification is gated on a
-      // preview URL: the route smoke check, the page-render check and the E2E scaffold all silently
-      // no-op without one. So EXACTLY when the app is most broken — it never came up — we verify the
-      // LEAST, and the report reads clean. That build ran 18.8 minutes, reported ok, charged ₹286, and
-      // the only trace of the failure was a passing mention inside the E2E skip reason.
-      //
-      // `PREVIEW_ERROR` already exists, but it fires only when a preview ATTEMPT reports an error. A
-      // preview that was never produced at all raised nothing. This is that gap, and it is deliberately
-      // a WARNING on the build itself rather than a note buried in another check's explanation.
-      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()) {
-        try {
-          buildDiag.record({
-            phase: 'preview', severity: 'warning', code: 'PREVIEW_NEVER_CAME_UP',
-            message: 'The build finished, but no live preview was ever available — so nothing here has been '
-              + 'proven to RUN. The route smoke check, the page-render check and the end-to-end scaffold all '
-              + 'need a running app and were skipped, which is why the rest of this report looks quiet.',
-            autoResolved: false,
-          });
-        } catch { /* diagnostics are best-effort and must never affect the build */ }
-      }
+      // NO PREVIEW AT ALL IS THE LOUDEST FINDING THERE IS (admin 2026-08-06) — buildPhases/previewNeverCameUp.ts (Q-3237).
+      recordPreviewNeverCameUp({ ok: result.ok, hadPreview: !!lastPreviewUrl, importTurn: isImportTurn, aborted: abort.signal.aborted, awaitingShell: !!awaitsShellNow(), record: (issue) => buildDiag.record(issue) });
 
       // DOES THIS APP ACTUALLY BUILD? The one command Publish, the APK workflow and every deploy
       // provider depend on — and the only one no gate has ever run. `tsc --noEmit` type-checks, the
@@ -25150,30 +25133,8 @@ async function noteBuildOutcome(
         try {
           let pkgRaw: string | undefined;
           try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
-          // WHAT PORT DOES THIS APP SAY IT SERVES ON (declaredPort.ts, admin report 2026-08-24)?
-          //
-          // Captured here, on EVERY successful build, because the alternative — the proven-port recipe —
-          // only exists once a preview has genuinely come up. An app whose preview has never once
-          // rendered has no recipe at all, and that is exactly when the door fell through to a common-
-          // ports guess and offered 3000 for an Express app serving on 5000. The engine had even read
-          // the port and written it into its own reply; it just never captured it for a machine to use.
-          // Bounded reads, all best-effort — a port hint must never be able to affect a build.
-          try {
-            const portFiles: Record<string, string | undefined> = { 'package.json': pkgRaw };
-            for (const path of DECLARED_PORT_FILES) {
-              if (path === 'package.json' || portFiles[path] !== undefined) continue;
-              try { portFiles[path] = await withTimeout(actuator.readFile(workspaceId, path), 4_000, 'declared-port'); } catch { /* absent is normal */ }
-            }
-            const declared = declaredPortFrom(portFiles);
-            if (declared) {
-              await sandboxStore.saveDeclaredPort(workspaceId, declared.port).catch(() => {});
-              buildDiag.record({
-                phase: 'preview', severity: 'info', code: 'DECLARED_PORT',
-                message: `This app declares it serves on port ${declared.port} (from ${declared.source}). The preview will try that before any common-port guess.`,
-                autoResolved: true,
-              });
-            }
-          } catch { /* best-effort — never affects the build */ }
+          // WHAT PORT DOES THIS APP SAY IT SERVES ON (admin 2026-08-24) — buildPhases/declaredPortCapture.ts (Q-3237).
+          await captureDeclaredPort({ pkgRaw, read: (path) => actuator.readFile(workspaceId, path), save: (port) => sandboxStore.saveDeclaredPort(workspaceId, port), record: (issue) => buildDiag.record(issue) });
           // No real build script — nothing to prove, and running a placeholder would "pass" without
           // building anything, which is the fake success this whole check exists to prevent.
           if (buildScriptFrom(pkgRaw)) {

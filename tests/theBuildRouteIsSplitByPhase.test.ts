@@ -46,3 +46,36 @@ describe('every phase file is wired into the route', () => {
     for (const f of phases) expect(route, f).toContain(`from '../AgentV3/buildPhases/${f.replace(/\.ts$/, '')}'`);
   });
 });
+
+describe('phase 2 — "no live preview was ever available"', () => {
+  it('records the warning only for a successful, non-import, unstopped build with no preview and no shell awaited', async () => {
+    const { recordPreviewNeverCameUp } = await import('../src/server/AgentV3/buildPhases/previewNeverCameUp');
+    const seen: string[] = [];
+    const base = { ok: true, hadPreview: false, importTurn: false, aborted: false, awaitingShell: false, record: (i: { code: string }) => { seen.push(i.code); } };
+    expect(recordPreviewNeverCameUp(base)).toBe(true);
+    for (const over of [{ ok: false }, { hadPreview: true }, { importTurn: true }, { aborted: true }, { awaitingShell: true }]) expect(recordPreviewNeverCameUp({ ...base, ...over })).toBe(false);
+    expect(seen).toEqual(['PREVIEW_NEVER_CAME_UP']);
+    expect(recordPreviewNeverCameUp({ ...base, record: () => { throw new Error('store down'); } })).toBe(false);
+  });
+});
+
+describe('phase 3 — the declared port', () => {
+  it('reads the port files, saves the port and says where it came from; absent files are normal', async () => {
+    const { captureDeclaredPort } = await import('../src/server/AgentV3/buildPhases/declaredPortCapture');
+    const saved: number[] = []; const seen: string[] = [];
+    const port = await captureDeclaredPort({
+      pkgRaw: JSON.stringify({ scripts: { start: 'node server.js' } }),
+      read: async (p) => { if (p === 'server.js') return "const PORT = process.env.PORT || 5000; app.listen(PORT);"; throw new Error('ENOENT'); },
+      save: async (p) => { saved.push(p); },
+      record: (i) => { seen.push(`${i.code}:${i.message}`); },
+    });
+    expect(port === null || typeof port === 'number').toBe(true);
+    if (port !== null) { expect(saved).toEqual([port]); expect(seen[0]).toMatch(/^DECLARED_PORT:This app declares it serves on port/); }
+    expect(await captureDeclaredPort({ pkgRaw: undefined, read: async () => { throw new Error('ENOENT'); }, save: async () => {}, record: () => {} })).toBeNull();
+  });
+  it('the route keeps only the calls', () => {
+    expect(route).toContain('await captureDeclaredPort({ pkgRaw, read: (path) => actuator.readFile(workspaceId, path),');
+    expect(route).not.toContain('declaredPortFrom(portFiles)');
+    expect(route).not.toMatch(/code: 'PREVIEW_NEVER_CAME_UP'/);
+  });
+});

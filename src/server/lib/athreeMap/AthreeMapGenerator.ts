@@ -287,7 +287,7 @@ export interface AthreeWorld {
    * Level a rectangle of ground for something flat (a city, a base): one height inside, easing back into the land over the
    * margin. Call it BEFORE the first map.update(), so the terrain is drawn level. Returns the pad's height.
    */
-  levelGround(x: number, z: number, halfX: number, halfZ: number, margin?: number): number;
+  levelGround(x: number, z: number, halfX: number, halfZ: number, margin?: number, height?: number): number;
   /** True on levelled ground: nothing grows there. */
   clearAt(x: number, z: number): boolean;
   /** True on a road the game laid with addRoad (its paved width). */
@@ -587,10 +587,11 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     return t;
   }
-  function levelGround(x: number, z: number, halfX: number, halfZ: number, margin = 40): number {
+  function levelGround(x: number, z: number, halfX: number, halfZ: number, margin = 40, height?: number): number {
     let sum = 0, n = 0;
     for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) { sum += naturalHeightAt(x + (i / 2) * halfX, z + (j / 2) * halfZ); n++; }
-    const y = Math.max(1.5, sum / n);
+    // A given height joins this pad to a neighbour at the same level (a city that grows by another block of streets).
+    const y = typeof height === 'number' && Number.isFinite(height) ? height : Math.max(1.5, sum / n);
     pads.push({ x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) });
     return y;
   }

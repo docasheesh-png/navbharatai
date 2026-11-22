@@ -346,8 +346,10 @@ export const GAME_WORLD_FILE = 'src/game/world.ts';
 export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; places: city, town, village; lands: desert, jungle, mountain, snow, beach). Read what the user'
   + ' WANTS, not the words: "map / zameen bada karo", "aur jagah chahiye", "ek aur shehar / gaon jodo", "duniya chhoti hai" → ADD one'
   + ' region per place asked for (several at once when they ask for several; a new id each; toward: north / east / … when they say where),'
-  + ' and never edit or remove the regions already there. "Yeh shehar bada karo", "zyada traffic / log" → edit ONLY that region\'s own'
-  + ' entry (city: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }).'
+  + ' and never edit or remove the regions already there. "Zyada traffic / log" → edit ONLY that region\'s own entry (city: { traffic:'
+  + ' { count }, people: { count }, parkedCars }). "Yeh shehar bada karo", "city ko bada karo" → GROW it with joined tiles: add'
+  + ' { id: \'main-city-2\', kind: \'city\', joinTo: \'main-city\' } (several for "bahut bada"; toward: east / north … when they say'
+  + ' where) — each tile is a new block of streets and buildings edge to edge with the city, the streets carried straight on.'
   // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
   // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
   + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','

@@ -70,6 +70,11 @@ export interface WorldRegion {
   city?: RegionCity;
   /** A land region only: how far it reaches from its centre, in metres (default 450). */
   radius?: number;
+  /**
+   * GROW A CITY: the id of a city (or of another tile of it) this one joins edge to edge — the same streets carried on, the
+   * same ground level, one continuous bigger city. Without toward, it takes a free side of the city at random.
+   */
+  joinTo?: string;
 }
 
 /** A land on the map (a desert, a jungle, mountains, snow, a beach) — no buildings, just the land itself. */
@@ -191,8 +196,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // the player comes within BUILD_AHEAD metres of it, one place per frame, so a hundred places cost what the nearest few cost.
   // The places spread out on a golden-angle spiral (the n-th one about √n spacings from the first), never stacked, always
   // reachable; a place asked to lie toward a direction keeps that direction.
-  interface PlannedPlace { region: WorldRegion; preset: (typeof REGION_PRESETS)['city']; cityOptions: CityOptions; centre: { x: number; y: number; z: number }; reach: number; built: number }
+  interface PlannedPlace { region: WorldRegion; preset: (typeof REGION_PRESETS)['city']; cityOptions: CityOptions; centre: { x: number; y: number; z: number }; reach: number; built: number;
+    /** A grown city: the first tile's id, and this tile's cell on the city's grid. */
+    cluster?: { root: string; gx: number; gz: number; stepX: number; stepZ: number } }
   const planned: PlannedPlace[] = [];
+  const AXIS: Record<string, [number, number]> = { north: [0, -1], 'north-east': [1, -1], east: [1, 0], 'south-east': [1, 1], south: [0, 1], 'south-west': [-1, 1], west: [-1, 0], 'north-west': [-1, -1] };
+  let growSeed = 0x9e3779b9;
+  const nextRandom = (): number => { growSeed = (Math.imul(growSeed ^ (growSeed >>> 15), 2246822519) + 0x6d2b79f5) | 0; return ((growSeed >>> 0) % 10000) / 10000; };
   for (const region of wanted) {
     if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
@@ -211,6 +221,39 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       taken.push({ x: at.x, z: at.z, r });
       landList.push({ id: region.id, kind: region.kind, centre: at, radius: r });
       continue;
+    }
+    // 🏙️ A CITY THAT GROWS BY ITS OWN BLOCKS (admin 2026-11-22: "map/city ko bada karna — building/road ko clone kar kar ke,
+    // randomly add kar kar ke bada map ban jaye"). A tile that joins a city stands EDGE TO EDGE with it on the city's own grid:
+    // the same block size (so the streets carry straight on — the shared edge street is one street), the same ground level, a new
+    // set of buildings. Tile by tile, a city becomes as big as asked; with no direction it grows on a free side at random.
+    const joinBase = typeof region.joinTo === 'string' ? planned.find((q) => q.region.id === region.joinTo) : undefined;
+    if (joinBase) {
+      const rootId = joinBase.cluster?.root ?? joinBase.region.id;
+      const root = planned.find((q) => q.region.id === rootId)!;
+      const rootPlan = planCity(root.cityOptions);
+      const stepX = rootPlan.width - rootPlan.road, stepZ = rootPlan.depth - rootPlan.road;
+      const tiles = planned.filter((q) => (q.cluster?.root ?? q.region.id) === rootId);
+      const cellOf = (q: PlannedPlace): [number, number] => (q.cluster ? [q.cluster.gx, q.cluster.gz] : [0, 0]);
+      const used = new Set(tiles.map((q) => cellOf(q).join(',')));
+      let cell: [number, number] | null = null;
+      if (region.toward !== undefined) {
+        const [dx, dz] = AXIS[region.toward]; let [gx, gz] = cellOf(joinBase);
+        do { gx += dx; gz += dz; } while (used.has(gx + ',' + gz));
+        cell = [gx, gz];
+      } else {
+        const free: Array<[number, number]> = [];
+        for (const q of tiles) { const [gx, gz] = cellOf(q); for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = (gx + dx) + ',' + (gz + dz); if (!used.has(k) && !free.some((f) => f.join(',') === k)) free.push([gx + dx, gz + dz]); } }
+        cell = free[Math.floor(nextRandom() * free.length)] ?? null;
+      }
+      if (cell) {
+        const own = region.city || {};
+        const cityOptions: CityOptions = { ...root.cityOptions, ...(own.style ? { style: own.style } : {}), ...(own.maxFloors ? { maxFloors: own.maxFloors } : {}), seed: 11 + planned.length * 17 };
+        const x = root.centre.x + cell[0] * stepX, z = root.centre.z + cell[1] * stepZ;
+        map.world.levelGround(x, z, rootPlan.width / 2 + 8, rootPlan.depth / 2 + 8, 60, root.centre.y);
+        taken.push({ x, z, r: root.reach });
+        planned.push({ region: { ...region, kind: root.region.kind }, preset: root.preset, cityOptions, centre: { x, y: root.centre.y, z }, reach: root.reach, built: -1, cluster: { root: rootId, gx: cell[0], gz: cell[1], stepX, stepZ } });
+        continue;
+      }
     }
     const preset = REGION_PRESETS[region.kind] || REGION_PRESETS.city;
     const { traffic: _t, people: _p, parkedCars: _c, ...own } = region.city || {};

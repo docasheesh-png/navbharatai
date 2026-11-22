@@ -52,6 +52,8 @@ export interface CityTraffic {
   lightAt(i: number, j: number, axis: 'x' | 'z', ahead?: number): LightColour;
   /** Advance. avoid: objects no vehicle may drive into (the player, the player's car). */
   update(dt: number, avoid?: THREE.Object3D[]): void;
+  /** Push an object (the player, the car they drive) out of any vehicle it is inside. True when it touched one. */
+  pushOut(object: THREE.Object3D, radius?: number): boolean;
   dispose(): void;
 }
 
@@ -202,12 +204,46 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
     return room;
   };
   const tmp = new THREE.Vector3();
+  /**
+   * Where an object is in THIS city's own frame (the frame the plan, the lanes and every car live in). 🔴 The avoid list used
+   * getWorldPosition and compared it with plan coordinates — right only for a city at the scene origin. On the open-world map
+   * a city stands anywhere (and the floating origin moves), so a car never saw the player and drove straight through him
+   * (admin 2026-11-22: "hero gadiyo se takrata nahi, aar paar chala jata hai").
+   */
+  const toCity = new THREE.Matrix4();
+  /** Read the city's frame ONCE per update (a per-object updateMatrixWorld walked every car for every check). */
+  const frame = (): void => { root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert(); };
+  const inCity = (o: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 => { o.getWorldPosition(out); return out.applyMatrix4(toCity); };
+  const carAt = (c: TrafficCar) => trafficPose(plan, c.from, c.to, c.along);
 
   return {
     root, cars, lightAt,
+    pushOut: (object: THREE.Object3D, radius = 0.45): boolean => {
+      // A car is a box (its length along its heading, 2 m wide). Anything inside one is pushed out the shortest way, in the
+      // city's frame, and moved back to its own parent's frame — the player cannot walk or drive through a vehicle.
+      if (!object.parent) return false;
+      frame();
+      inCity(object, tmp);
+      let hit = false;
+      for (const c of cars) {
+        const p = carAt(c), fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+        const dx = tmp.x - p.x, dz = tmp.z - p.z;
+        const along = dx * fx + dz * fz, side = dx * fz - dz * fx;
+        const hl = c.length / 2 + radius, hw = 1 + radius;
+        if (Math.abs(along) >= hl || Math.abs(side) >= hw) continue;
+        const outAlong = hl - Math.abs(along), outSide = hw - Math.abs(side);
+        if (outAlong < outSide) { const s = Math.sign(along) || 1; tmp.x += fx * outAlong * s; tmp.z += fz * outAlong * s; }
+        else { const s = Math.sign(side) || 1; tmp.x += fz * outSide * s; tmp.z -= fx * outSide * s; }
+        hit = true;
+      }
+      if (hit) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
+      return hit;
+    },
+
     update: (dt, avoid = []) => {
       if (!(dt > 0)) return;
       clock += dt;
+      frame();
       if (useLights) paintLights();
       for (const c of cars) {
         const len = edgeLength(plan, c.from, c.to);
@@ -231,7 +267,7 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
         const p = trafficPose(plan, c.from, c.to, c.along);
         const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
         for (const a of avoid) {
-          a.getWorldPosition(tmp);
+          inCity(a, tmp);
           const ahead = (tmp.x - p.x) * fx + (tmp.z - p.z) * fz;
           const side = Math.abs((tmp.x - p.x) * fz - (tmp.z - p.z) * fx);
           if (ahead > 0 && ahead < 12 && side < 1.8) limit = Math.min(limit, ahead - c.length / 2 - 2);

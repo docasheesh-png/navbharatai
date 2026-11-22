@@ -6,6 +6,7 @@ import { PART_NAMES_FILE, rememberPartNames } from './partMeaning';
 import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, MAX_PLACES } from './worldGrow';
 import { characterAsked, librarySubjectOf, modelWasAdded, setPlayerModel, characterSetHandoff, characterNotSetHandoff, PLAYER_FILE_PATH } from './characterSwap';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
+import { setLibraryCarAtTurnStart } from './carSwap';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
 
@@ -149,10 +150,11 @@ export async function setLibraryCharacterAtTurnStart(io: {
 }
 
 /**
- * The two library actions the platform does itself at the start of a turn — a map place, a character — behind ONE call and
+ * The library actions the platform does itself at the start of a turn — a map place, a character, a racer's car — behind ONE call and
  * ONE write port, so the build route carries one line for both (Q-3237: the handler only shrinks). Never throws.
  */
 export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibraryCharacterAtTurnStart>[0]): Promise<string> {
-  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io)].filter(Boolean);
+  // …and the car a racer drives (carSwap.ts, 2026-11-22).
+  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io), await setLibraryCarAtTurnStart(io)].filter(Boolean);
   return handoffs.join('\n\n---\n\n');
 }

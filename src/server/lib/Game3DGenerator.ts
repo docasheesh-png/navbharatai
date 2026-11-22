@@ -1905,7 +1905,8 @@ export let lastRaceResults: RaceResult[] | null = null;
  * Rivals are ghosts: they do not collide with the player (said, not hidden).
  */
 export interface RaceOptions {
-  stream: TrackStream;
+  /** What the rivals drive along: the streamed road, or the user's own track model (play/raceCustom.ts) — only poseAt is read. */
+  stream: Pick<TrackStream, 'poseAt'>;
   /** Rival cars, 0 to 7. Default 3. */
   opponents?: number;
   /** Where the race ends, in metres from the start line; null (default) is an endless race with a live position. */

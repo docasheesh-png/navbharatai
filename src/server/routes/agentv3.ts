@@ -521,7 +521,7 @@ import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHO
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, redTeamBudgetMs, redTeamStepMs, redTeamRunNote, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
-import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
+import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel, type BilledUsage } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd, SurplusAccountingUnavailableError } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
 import { runInBillingPhase, currentBillingPhase, PHASE_PLANNER, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, PHASE_SCOPE, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
@@ -1996,6 +1996,8 @@ export function decideBuildBilledUsd(
    * 2026-11-11 Weak/Surplus stop token floor reads this later; it does not change this function's bill.
    */
   surplusUnsettledAbsorbed?: true;
+  /** The tokens of the Surplus calls that had no valid receipt (per call, failedbr #2487) — what an estimate may be built from. */
+  surplusUnsettledUsage?: BilledUsage;
   /** Owner 2026-11-15 (BR2388): the Router One share priced by ESTIMATE, with its label. Absent unless
    * an estimated receipt was billed, so every existing equality test stays unchanged. */
   routerOneEstimated?: { calls: number; costUsd: number; billedUsd: number; label: string };
@@ -2033,15 +2035,16 @@ export function decideBuildBilledUsd(
     // the build's outer catch AFTER the app was saved and rendered, scrubbing a finished app into
     // "unavailable". Billing never decides a build's outcome: unverifiable Surplus spend is absorbed (₹0 to
     // the user, never an estimate), loudly logged for reconciliation, and the result stays what it was.
-    let surplus: { chargeUsd: string; actualUsd: string; absorbedUsd: string };
-    let surplusUnsettledAbsorbed = false;
+    let surplus: { chargeUsd: string; actualUsd: string; absorbedUsd: string; unsettled: typeof surplusEntries };
     try { surplus = surplusBuildCharges(surplusEntries, barrenPhases); }
     catch (error) {
       if (!(error instanceof SurplusAccountingUnavailableError)) throw error;
-      console.error(`[AGENTV3 BILLING] Surplus receipts unsettled for user ${userId} — ${surplusEntries.length} Surplus call(s) absorbed at ₹0; reconcile from the Surplus audit store.`);
-      surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0' };
-      surplusUnsettledAbsorbed = true;
+      surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0', unsettled: surplusEntries };
     }
+    // Per call since failedbr #2487: only the calls WITHOUT a valid receipt are set aside (their tokens go to the owner's
+    // estimate rule at the settle — surplusStopTokenFloor.ts); every settled call is charged by its own receipt.
+    const surplusUnsettledAbsorbed = surplus.unsettled.length > 0;
+    if (surplusUnsettledAbsorbed) console.error(`[AGENTV3 BILLING] Surplus receipts unsettled for user ${userId} — ${surplus.unsettled.length} of ${surplusEntries.length} Surplus call(s) set aside for the token estimate; reconcile from the Surplus audit store.`);
     const legacyEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() !== 'SURPLUS');
     const surplusTokens = surplusEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens, outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
     const legacyTotal = { inputTokens: Math.max(0, providerLedger.total().inputTokens - surplusTokens.inputTokens), outputTokens: Math.max(0, providerLedger.total().outputTokens - surplusTokens.outputTokens) };
@@ -2051,7 +2054,7 @@ export function decideBuildBilledUsd(
     return { ...legacy, effectiveBilledUsd: legacy.effectiveBilledUsd + Number(surplus.chargeUsd),
       reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal),
       realCostUsd: legacy.realCostUsd + Number(surplus.actualUsd), absorbedUnbilledUsd: legacy.absorbedUnbilledUsd + Number(surplus.absorbedUsd),
-      ...(surplusUnsettledAbsorbed ? { surplusUnsettledAbsorbed: true as const } : {}) };
+      ...(surplusUnsettledAbsorbed ? { surplusUnsettledAbsorbed: true as const, surplusUnsettledUsage: surplusTokenUsageFromLedger(surplus.unsettled) } : {}) };
   }
   const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
   const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
@@ -13801,7 +13804,7 @@ async function noteBuildOutcome(
             preseededGolden: billingCtx.preseededGolden,
             previewProven: wdPreviewProven,
             freeListed: isAgentV3FreeUser(userId, email),
-            usage: surplusTokenUsageFromLedger(billingCtx.providerLedger.entries()),
+            usage: decided.surplusUnsettledUsage ?? surplusTokenUsageFromLedger([]),
             editingExistingApp: isEditMode,
             expectsArtifacts: billingCtx.expectsArtifacts === true,
             previewVerifiedFailed: billingCtx.previewVerifiedFailed === true,
@@ -13810,9 +13813,9 @@ async function noteBuildOutcome(
           });
           if (watchdogSurplusStopFloor) {
             watchdogBilledUsd += watchdogSurplusStopFloor.usd;
-            decided.realCostUsd += watchdogSurplusStopFloor.usd;
+            decided.realCostUsd += watchdogSurplusStopFloor.costUsd;
             buildDiagRef?.record({
-              phase: 'build', severity: 'info', code: SURPLUS_STOP_COST_ESTIMATED, autoResolved: true,
+              phase: 'build', severity: 'info', code: watchdogSurplusStopFloor.code, autoResolved: true,
               message: surplusStopTokenFloorAdminMessage(watchdogSurplusStopFloor),
             });
           }
@@ -27955,6 +27958,7 @@ async function noteBuildOutcome(
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
         surplusUnsettledAbsorbed,
+        surplusUnsettledUsage,
         routerOneEstimated,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
       recordRouterOneEstimatedBill(buildDiag, routerOneEstimated);
@@ -28318,7 +28322,7 @@ async function noteBuildOutcome(
         preseededGolden,
         previewProven: appSeenRunningForBill,
         freeListed: isAgentV3FreeUser(userId, email),
-        usage: surplusTokenUsageFromLedger(providerLedger.entries()),
+        usage: surplusUnsettledUsage ?? surplusTokenUsageFromLedger([]),
         editingExistingApp: isEditMode,
         expectsArtifacts,
         previewVerifiedFailed,
@@ -28327,9 +28331,9 @@ async function noteBuildOutcome(
       });
       if (surplusStopFloor) {
         effectiveBilledUsd += surplusStopFloor.usd;
-        decidedRealCostUsd += surplusStopFloor.usd;
+        decidedRealCostUsd += surplusStopFloor.costUsd;
         buildDiag.record({
-          phase: 'build', severity: 'info', code: SURPLUS_STOP_COST_ESTIMATED, autoResolved: true,
+          phase: 'build', severity: 'info', code: surplusStopFloor.code, autoResolved: true,
           message: surplusStopTokenFloorAdminMessage(surplusStopFloor),
         });
       }

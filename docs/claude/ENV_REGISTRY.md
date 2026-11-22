@@ -4816,6 +4816,15 @@ not been independently verified. This note is not runtime authority — Admin/se
   retired — z routes like any same-tier user; only this billing waiver remains.) Remove the
   whole thing later by deleting `zTestAccount.ts` call sites.
 
+- **`AGENTV3_BILL_SURPLUS_UNSETTLED_ESTIMATE`** (NOT set in Cloud Run; **default ON**; `off` is the kill switch) —
+  owner decision 2026-11-22 (failedbr #2487, the GTA build billed ₹0: "yahi to hamara revenue hai"). Two changes:
+  (1) Surplus calls are settled PER CALL (`surplusBuildCharges`): a call with a valid receipt is charged by it; a call
+  without one is set aside with its tokens — one bad receipt no longer zeroes the whole build. (2) A COMPLETED Weak build
+  (not a user stop, preview ran, the builder's own files, not free-listed, not already zeroed) bills the unsettled calls an
+  ESTIMATE: recorded tokens × the cheapest published Surplus-universe rate (`cheapestPublishedSurplusRate`), then the
+  ordinary markup (`tieredMarkupUsd`), capped at 10× the estimated cost, recorded as `SURPLUS_UNSETTLED_COST_ESTIMATED`.
+  Both billing points use the one helper `decideSurplusStopTokenFloor` (the stop floor first, else this). `off` restores
+  ₹0 for unsettled calls (per-call settlement stays). See `surplusStopTokenFloor.ts`.
 - **`AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR`** (⚠️ NOT set in Cloud Run; **default ON**; `off` is the
   kill switch — added 2026-11-11, owner-approved BR2279 exception). When a Weak/Surplus build is
   stopped by the user after their own files were written, Surplus receipts could not be settled

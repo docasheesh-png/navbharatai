@@ -103839,3 +103839,7 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - **Q-3239 (proof card in the timeline + Dismiss) and Q-3240 (Wake up really wakes):** separate PRs.
 - **Open, queued:** Q-3244 (summary claimed "fully functional" for an unplayed game), Q-3245 (#2484: 5.4 min of preparation before any model call), Q-3246 (8 read-only turns; 32 steps after "ready").
 - Evidence that #4420's Q-3232 fix landed: #2487's seed recipes took 25.0 s (61.5 s on #2485); SEED_PREVIEW_UP 27 s after the kit, first render at 87 s.
+
+## 2026-11-22 — a completed Weak build is billed even when Surplus receipts do not settle (failedbr #2487; owner: "yahi to hamara revenue hai")
+
+- **Q-3247.** Root cause: `surplusBuildCharges` threw on ONE call without a valid receipt and the route absorbed ALL Surplus calls at ₹0; only a user Stop had an estimate (BR2279). Now: per-call settlement, and a completed Weak build (preview ran, own files, not a stop) bills the unsettled calls an estimate — recorded tokens × cheapest published Surplus rate × `tieredMarkupUsd`, capped at 10× cost, `SURPLUS_UNSETTLED_COST_ESTIMATED`. One helper for both billing points (`decideSurplusStopTokenFloor`). Kill switch `AGENTV3_BILL_SURPLUS_UNSETTLED_ESTIMATE=off`. #2487 would have been $0.64 (cost estimate $0.16). Owner decision recorded in ROUTING_AND_BILLING.md (2026-11-22). Open: why #2487's receipts did not settle.

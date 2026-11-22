@@ -329,8 +329,11 @@ describe('the route and the docs carry the same rule at both billing points', ()
   });
 
   it('#4026 still absorbs unverifiable Surplus at ₹0 inside decideBuildBilledUsd — the floor is applied later, only at stop', () => {
-    expect(route).toContain("surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0' }");
-    expect(route).toContain('surplusUnsettledAbsorbed = true');
+    // Since failedbr #2487 (owner 2026-11-22) the set-aside is PER CALL: unsettled calls are still billed ₹0 inside
+    // decideBuildBilledUsd, and their tokens reach the settle's estimate rules (this floor, or the completed-build estimate).
+    expect(route).toContain("surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0', unsettled: surplusEntries };");
+    expect(route).toContain('const surplusUnsettledAbsorbed = surplus.unsettled.length > 0;');
+    expect(route).toContain('surplusUnsettledUsage: surplusTokenUsageFromLedger(surplus.unsettled)');
   });
 
   it('ROUTING_AND_BILLING records the owner-approved 2026-11-11 exception, and the flag is a default-ON kill switch', () => {

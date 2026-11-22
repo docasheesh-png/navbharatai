@@ -53,10 +53,16 @@ export function libraryThumbPath(sha256: string, cwd = process.cwd()): string | 
  * own generated places — no file, so no picture: a plain tile, like any model whose picture is not rendered.
  */
 export const MAP_PLACE_PREFIX = 'map-place:';
-export const LIBRARY_MAP_PLACES: ReadonlyArray<{ kind: 'city' | 'town' | 'village'; name: string; subjects: readonly string[] }> = [
+export const LIBRARY_MAP_PLACES: ReadonlyArray<{ kind: 'city' | 'town' | 'village' | 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach'; name: string; subjects: readonly string[] }> = [
   { kind: 'city', name: 'New city (streets, towers, traffic)', subjects: ['city', 'shehar', 'downtown', 'map', 'place'] },
   { kind: 'town', name: 'New town (shops, low buildings)', subjects: ['town', 'kasba', 'market', 'map', 'place'] },
   { kind: 'village', name: 'New village (a few houses, parks)', subjects: ['village', 'gaon', 'gaanv', 'map', 'place'] },
+  // Lands (failedbr #2488): the ground itself becomes that land — no buildings.
+  { kind: 'desert', name: 'New desert (sand, dunes)', subjects: ['desert', 'registan', 'ret', 'sand', 'map', 'land'] },
+  { kind: 'jungle', name: 'New jungle (dense trees)', subjects: ['jungle', 'forest', 'van', 'trees', 'map', 'land'] },
+  { kind: 'mountain', name: 'New mountains (peaks, rock)', subjects: ['mountain', 'pahad', 'parvat', 'hills', 'map', 'land'] },
+  { kind: 'snow', name: 'New snow land', subjects: ['snow', 'baraf', 'ice', 'map', 'land'] },
+  { kind: 'beach', name: 'New beach', subjects: ['beach', 'samundar kinara', 'sea', 'sand', 'map', 'land'] },
 ];
 export function mapPlaceRows(): LibraryBrowseRow[] {
   return LIBRARY_MAP_PLACES.map((p) => ({ id: `${MAP_PLACE_PREFIX}${p.kind}`, name: p.name, category: 'map-places', subjects: p.subjects, animations: [], thumb: null }));

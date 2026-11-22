@@ -27,6 +27,8 @@
 // PURE builder → the caller writes the files.
 
 import { kitTypeContract } from './kitTypeContract';
+import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerator';
+import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
   files: Record<string, string>;
@@ -59,6 +61,7 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
+import { applyPlayerChoice, resolvePlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -69,9 +72,10 @@ import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 // NavBharatAI's recorded sounds when this game was seeded with them; otherwise a stand-in that keeps built-in voices.
 import { loadSoundLibrary } from './fx/soundLibrary';
 import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
+import type { MinimapOptions } from './ui/worldMap';
 // Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
 // (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
-export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey };
+export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions };
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -134,6 +138,14 @@ export interface GameOptions {
    */
   playerLook?: HumanoidOptions;
   /**
+   * WHO THE PLAYER IS — the kit person's look, a library character (model) or the user's own model file (file). Left
+   * out, the shell reads src/game/player.ts BY ITSELF, so every game on the kit changes its character in that one file
+   * and nothing has to wire it. The model takes the default body's place, plays its own clips for the way it moves and
+   * for every pose (ctx.hero.act), and says on screen which move it lacks. A game with no default body (first-person, or
+   * playerBody given) says so when a model is asked.
+   */
+  player?: PlayerChoice;
+  /**
    * Which POSE the default body plays when an action button is pressed — so every button is SEEN doing its thing
    * (admin 2026-11-19: "jump, action, fight, fire etc me action ke movement dikhne chahiye"). Default:
    * { attack: 'auto', interact: 'use' } — 'auto' is the gun's recoil when a Weapon fired, a sword sweep when a
@@ -168,8 +180,13 @@ export interface GameOptions {
    * (a game with a gun), with a hit marker when a shot lands. true shows it from the start; false never.
    */
   crosshair?: boolean;
-  /** The minimap in a corner. Default: shown by itself as soon as something carries a map marker; true always; false never. */
-  minimap?: boolean;
+  /**
+   * The minimap in a corner. Default: shown by itself as soon as something carries a map marker (or the game has a world
+   * map); true always; false never. Pass options to shape it — they are the user's to choose:
+   * { corner: 'right', size: 200, names: false, range: 400, fullMap: false } (ui/worldMap.ts). With a world map (the open
+   * world registers one) it draws the roads and named places, and a tap on it (or M) opens the whole map full screen.
+   */
+  minimap?: boolean | MinimapOptions;
   /**
    * Keep the player's progress between visits: the kit's state (level, score, lives, the bag, unlocks) is saved when the
    * game pauses, a round ends or the page is hidden, and the start screen offers Continue / New game. Turn it on when the
@@ -307,6 +324,9 @@ export class Game {
   private setupDone = false;
   /** The default body (createHumanoid), when the game did not bring its own. */
   private hero: Humanoid | null = null;
+  /** Who the player is (options.player, or src/game/player.ts), and the model standing in the default body's place. */
+  private readonly playerChoice: PlayerChoice | undefined;
+  private playerModel: PlayerBody | null = null;
   /** A gun fired / a sword swung during this step — what an 'auto' attack pose becomes. */
   private firedThisStep = false;
   private swungThisStep = false;
@@ -363,11 +383,12 @@ export class Game {
     // third-person game the hero was invisible unless the model happened to add a mesh, and the player
     // saw a camera drifting over the ground. (Found by PLAYING the shell: gamePlaytest.ts.)
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
+    this.playerChoice = resolvePlayerChoice(options.player);
     // true means "the default body", the same as leaving it out (failedbr #1334: a boolean was passed and failed to compile).
     if (options.playerBody && typeof options.playerBody === 'object') {
       this.player.object.add(options.playerBody);
     } else if (options.playerBody !== false && !firstPerson) {
-      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || {}) });
+      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) });
       this.player.object.add(this.hero.root);
     }
     // BOTH blend layers. Adding one is how half the effects end up invisible.
@@ -528,6 +549,8 @@ export class Game {
     audio.unlock();
     loadSoundLibrary();
 
+    // The player's own character (src/game/player.ts) takes the default body's place before the game's setup runs.
+    this.playerModel = applyPlayerChoice(this.context, this.playerChoice);
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
@@ -715,6 +738,7 @@ export class Game {
         // In a vehicle the camera follows the vehicle; a body standing at the spawn point would read as a bug.
         this.hero.root.visible = !this.chased;
       }
+      this.playerModel?.update(delta);
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
@@ -959,7 +983,10 @@ export class Game {
   }
   /** The crosshair setting the Hud reads. */
   get crosshairOption(): boolean | undefined { return this.options.crosshair; }
-  get minimapOption(): boolean | undefined { return this.options.minimap; }
+  /** true / false when the game said; options count as true (shown). undefined: shown once something is on the map. */
+  get minimapOption(): boolean | undefined { const m = this.options.minimap; return m === undefined ? undefined : m !== false; }
+  /** The minimap's look as the game asked for it (corner, size, names, range, fullMap); {} for the defaults. */
+  get minimapStyle(): MinimapOptions { const m = this.options.minimap; return m && typeof m === 'object' ? m : {}; }
 
   /**
    * What the minimap draws: where the player (or the vehicle it drives) is, which way the camera looks (screen up),
@@ -1078,6 +1105,7 @@ export class Game {
     if (this.input) safe(() => this.input.dispose());
     safe(() => audio.stopAll());
     safe(() => this.particles.dispose());
+    safe(() => this.playerModel?.dispose());
     safe(() => this.hero?.dispose());
     safe(() => clearBreakables());   // a reloaded game starts with no breakables or debris from this one
     this.scene.traverse((obj: THREE.Object3D) => {
@@ -1199,6 +1227,11 @@ import { economy, type ShopEntry } from '../core/economy';
 import { powerUps, type ActivePowerUp } from '../core/powerups';
 import { leaderboard } from '../core/leaderboard';
 import { crafting, type RecipeView } from '../core/crafting';
+import {
+  worldMapSource, readWorldMap, minimapStyle, cornerPoint, roadsNear, shortName, formatDistance, placeColour, getWaypoint, setWaypoint,
+  boundsOf, fitCamera, clampCamera, zoomAt, panBy, worldToMap, mapToWorld, gridStep, WAYPOINT_COLOUR, WAYPOINT_COLOUR_SAFE,
+  type MinimapStyle, type MapCamera, type WorldMapPoint, type WorldMapPlace,
+} from './worldMap';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1477,49 +1510,324 @@ export const HEALTH_COLOURS = { ok: '#4ade80', low: '#f87171' } as const;
 export const HEALTH_COLOURS_SAFE = { ok: '#56b4e9', low: '#e69f00' } as const;
 export function markerColour(kind: string, safe: boolean): string { return (safe ? MARKER_COLOUR_SAFE : MARKER_COLOUR)[kind] ?? '#fff'; }
 
-/** The round minimap: the player's arrow in the middle, markers around it, turning with the camera. */
-export function Minimap({ game }: { game: Game }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [visible, setVisible] = useState(game.minimapOption === true);
+/** Whether the game has a world map (play/openWorld.ts registers one — ui/worldMap.ts), live. */
+function useWorldMap(): boolean {
+  const [on, setOn] = useState(() => worldMapSource() !== null);
   useEffect(() => {
-    if (game.minimapOption === false) return;
-    const size = 128, radius = 60;
+    setOn(worldMapSource() !== null);
+    return events.on('WORLD_MAP_CHANGED', () => setOn(worldMapSource() !== null));
+  }, []);
+  return on;
+}
+
+const pixelRatio = (): number => Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+
+/** What the maps see: the player (or the vehicle it drives) and the markers, moved into WORLD metres, with the world's places and roads. */
+function worldView(game: Game) {
+  const view = game.mapView();
+  const data = readWorldMap();
+  const o = data.origin;
+  return {
+    data, facing: view.facing,
+    me: { x: view.x + o.x, z: view.z + o.z, forward: view.forward },
+    markers: view.markers.map((m) => ({ x: m.x + o.x, z: m.z + o.z, kind: m.kind })),
+  };
+}
+
+/** A place's outline: a square for a place on a grid (turned with the map), a circle for a land. */
+function tracePlace(c: CanvasRenderingContext2D, p: WorldMapPlace, at: (q: WorldMapPoint) => { x: number; y: number }, scale: number): void {
+  c.beginPath();
+  if (p.shape === 'square') {
+    const r = p.radius;
+    const pts = [at({ x: p.x - r, z: p.z - r }), at({ x: p.x + r, z: p.z - r }), at({ x: p.x + r, z: p.z + r }), at({ x: p.x - r, z: p.z + r })];
+    c.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < 4; i++) c.lineTo(pts[i].x, pts[i].y);
+    c.closePath();
+  } else {
+    const q = at(p);
+    c.arc(q.x, q.y, Math.max(2, p.radius * scale), 0, Math.PI * 2);
+  }
+}
+/** A road: a dark edge with a light surface, as wide as the real road (9 m) or at least visible. */
+function strokeRoad(c: CanvasRenderingContext2D, line: ReadonlyArray<WorldMapPoint>, at: (q: WorldMapPoint) => { x: number; y: number }, scale: number): void {
+  c.beginPath();
+  line.forEach((q, i) => { const a = at(q); if (i) c.lineTo(a.x, a.y); else c.moveTo(a.x, a.y); });
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.strokeStyle = 'rgba(20,22,26,0.95)'; c.lineWidth = Math.max(3.5, 9 * scale + 2); c.stroke();
+  c.strokeStyle = '#cbd5e1'; c.lineWidth = Math.max(1.5, 9 * scale); c.stroke();
+}
+function mapLabel(c: CanvasRenderingContext2D, text: string, x: number, y: number, px: number): void {
+  c.font = '700 ' + px + 'px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.lineWidth = 3; c.strokeStyle = 'rgba(0,0,0,0.8)'; c.strokeText(text, x, y);
+  c.fillStyle = '#fff'; c.fillText(text, x, y);
+}
+/** The player: an arrow pointing the way it faces (angle on the canvas, 0 = up). */
+function mapArrow(c: CanvasRenderingContext2D, x: number, y: number, angle: number, s: number): void {
+  c.save(); c.translate(x, y); c.rotate(angle);
+  c.beginPath(); c.moveTo(0, -s); c.lineTo(s * 0.75, s * 0.75); c.lineTo(0, s * 0.375); c.lineTo(-s * 0.75, s * 0.75); c.closePath();
+  c.fillStyle = '#fff'; c.fill(); c.lineWidth = 1.5; c.strokeStyle = 'rgba(0,0,0,0.7)'; c.stroke();
+  c.restore();
+}
+/** The waypoint: a pin standing on the marked spot. */
+function mapPin(c: CanvasRenderingContext2D, x: number, y: number, colour: string, s: number): void {
+  c.beginPath(); c.moveTo(x, y); c.lineTo(x - s * 0.6, y - s * 1.3); c.arc(x, y - s * 1.6, s * 0.7, Math.PI * 0.85, Math.PI * 2.15); c.closePath();
+  c.fillStyle = colour; c.fill(); c.lineWidth = 1.5; c.strokeStyle = 'rgba(0,0,0,0.7)'; c.stroke();
+  c.beginPath(); c.arc(x, y - s * 1.6, s * 0.28, 0, Math.PI * 2); c.fillStyle = '#fff'; c.fill();
+}
+
+/**
+ * The round minimap: the player's arrow in the middle, markers around it, turning with the camera. With a world map (the open
+ * world registers one) it also draws the roads and the places near the player with their names, and a tap opens the full map.
+ * Its corner, size, range and names are the game's options (GameOptions.minimap); the player may hide it in Settings.
+ */
+export function Minimap({ game, onOpen }: { game: Game; onOpen?: () => void }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const prefs = useSettings();
+  const hasWorld = useWorldMap();
+  const [visible, setVisible] = useState(game.minimapOption === true);
+  const [distance, setDistance] = useState('');
+  const off = game.minimapOption === false || prefs.showMinimap === false;
+  const style = minimapStyle(off ? {} : game.minimapStyle, hasWorld);
+  const { size, range, names } = style;
+  const tappable = !off && style.fullMap && !!onOpen;
+  useEffect(() => {
+    if (off) return;
+    let shown = visible, said = '';
     const draw = () => {
-      const view = game.mapView();
-      if (!visible && view.markers.length > 0) setVisible(true);
-      const c = canvas.current?.getContext('2d');
-      if (!c) return;
+      const w = worldView(game);
+      const wp = getWaypoint();
+      if (!shown && (w.markers.length > 0 || hasWorld || wp)) { shown = true; setVisible(true); }
+      // How far the marked spot is, under the map — set only when it changes (never a re-render per frame).
+      const far = wp ? formatDistance(Math.hypot(wp.x - w.me.x, wp.z - w.me.z)) : '';
+      if (far !== said) { said = far; setDistance(far); }
+      const el = canvas.current;
+      const c = el?.getContext('2d');
+      if (!el || !c) return;
+      const dpr = el.width / size || 1, half = size / 2, k = (half - 6) / range, safe = settings.get().colourSafe;
+      const at = (q: WorldMapPoint) => cornerPoint(w.me, q, range, size);
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
       c.clearRect(0, 0, size, size);
-      c.fillStyle = 'rgba(0,0,0,0.5)'; c.beginPath(); c.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = 'rgba(255,255,255,0.6)'; c.lineWidth = 2; c.stroke();
-      for (const m of view.markers) {
-        const at = minimapPoint(view, m, radius, size);
-        c.fillStyle = markerColour(m.kind, settings.get().colourSafe);
-        c.beginPath(); c.arc(at.x, at.y, at.edge ? 3 : 4, 0, Math.PI * 2); c.fill();
+      c.save();
+      c.beginPath(); c.arc(half, half, half - 1, 0, Math.PI * 2); c.fillStyle = 'rgba(0,0,0,0.5)'; c.fill(); c.clip();
+      // The world near the player: places and lands as coloured shapes, then the roads, then the names on top.
+      const near = w.data.places.filter((p) => Math.hypot(p.x - w.me.x, p.z - w.me.z) - p.radius * 1.42 < range * 1.1);
+      for (const p of near) { tracePlace(c, p, at, k); c.globalAlpha = 0.45; c.fillStyle = placeColour(p.kind); c.fill(); c.globalAlpha = 1; }
+      for (const line of roadsNear(w.data.roads, w.me, range * 1.5)) strokeRoad(c, line, at, k);
+      if (names) for (const p of near) {
+        if (!p.name || Math.hypot(p.x - w.me.x, p.z - w.me.z) > range) continue;
+        const q = at(p); mapLabel(c, shortName(p.name), q.x, q.y, 10);
       }
-      // The player's arrow, pointing where they face (relative to the camera).
-      const face = minimapPoint(view, { x: view.x + Math.sin(view.facing), z: view.z + Math.cos(view.facing) }, radius, size);
-      const ang = Math.atan2(face.x - size / 2, -(face.y - size / 2));
-      c.save(); c.translate(size / 2, size / 2); c.rotate(ang);
-      c.fillStyle = '#fff'; c.beginPath(); c.moveTo(0, -8); c.lineTo(6, 6); c.lineTo(0, 3); c.lineTo(-6, 6); c.closePath(); c.fill();
       c.restore();
+      c.beginPath(); c.arc(half, half, half - 1, 0, Math.PI * 2); c.strokeStyle = 'rgba(255,255,255,0.6)'; c.lineWidth = 2; c.stroke();
+      for (const m of w.markers) {
+        const q = minimapPoint(w.me, m, range, size);
+        c.fillStyle = markerColour(m.kind, safe);
+        c.beginPath(); c.arc(q.x, q.y, q.edge ? 3 : 4, 0, Math.PI * 2); c.fill();
+      }
+      if (wp) { const q = minimapPoint(w.me, wp, range, size); mapPin(c, q.x, q.y, safe ? WAYPOINT_COLOUR_SAFE : WAYPOINT_COLOUR, q.edge ? 5 : 6); }
+      // The player's arrow, pointing where they face (relative to the camera).
+      const face = minimapPoint(w.me, { x: w.me.x + Math.sin(w.facing), z: w.me.z + Math.cos(w.facing) }, range, size);
+      mapArrow(c, half, half, Math.atan2(face.x - half, -(face.y - half)), 8);
+      // A tappable map says so: a small "open" mark at its lower right.
+      if (tappable) {
+        const x = half + (half - 14) * 0.7071, y = half + (half - 14) * 0.7071;
+        c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 1.6; c.beginPath();
+        c.moveTo(x - 5, y - 1); c.lineTo(x - 5, y - 5); c.lineTo(x - 1, y - 5);
+        c.moveTo(x + 5, y + 1); c.lineTo(x + 5, y + 5); c.lineTo(x + 1, y + 5);
+        c.stroke();
+      }
     };
     const timer = setInterval(draw, 100);
     draw();
     return () => clearInterval(timer);
-  }, [game, visible]);
-  if (game.minimapOption === false || !visible) return null;
-  return <canvas ref={canvas} width={128} height={128} aria-label="Minimap" role="img"
-    style={{ position: 'absolute', left: 'max(12px, env(safe-area-inset-left))', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', width: 128, height: 128, pointerEvents: 'none', zIndex: 5 }} />;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game, off, hasWorld, size, range, names, tappable]);
+  if (off || !visible) return null;
+  const px = Math.round(size * pixelRatio());
+  const side = style.corner === 'right' ? { right: 'max(12px, env(safe-area-inset-right))' } : { left: 'max(12px, env(safe-area-inset-left))' };
+  const picture = <canvas ref={canvas} width={px} height={px} aria-label="Minimap" role="img" style={{ display: 'block', width: size, height: size }} />;
+  return (
+    <div style={{ position: 'absolute', ...side, top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', width: size, pointerEvents: 'none', zIndex: 5 }}>
+      {tappable ? (
+        <button type="button" aria-label={t('openMap')} title={t('openMap') + ' (M)'} onClick={onOpen}
+          style={{ display: 'block', width: size, height: size, padding: 0, margin: 0, border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer', pointerEvents: 'auto', touchAction: 'manipulation' }}>
+          {picture}
+        </button>
+      ) : picture}
+      {distance ? <div style={{ marginTop: 4, textAlign: 'center', color: '#fff', fontWeight: 700, fontSize: 13, textShadow: '0 1px 2px rgba(0,0,0,.9)' }}>{distance}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * THE FULL MAP (a tap on the corner map, or M — admin 2026-11-22, "jaise PUBG/Free Fire me"): the whole world, north up —
+ * every place and land as a coloured area with its name, the roads, the user's own maps, the player and its heading, and the
+ * markers. Drag to move, pinch or scroll to zoom, tap to mark a spot (tap it again to clear it). The world waits while it is
+ * open (the Hud pauses the game), so no move meant for the map ever walks the player.
+ */
+export function FullMap({ game, style, onClose }: { game: Game; style: MinimapStyle; onClose: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const cam = useRef<MapCamera | null>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ x: number; y: number; t: number; moved: boolean; pinch: number } | null>(null);
+  const [marked, setMarked] = useState<WorldMapPoint | null>(getWaypoint());
+  useEffect(() => { closeButton.current?.focus(); }, []);
+  useEffect(() => events.on('WAYPOINT_CHANGED', () => setMarked(getWaypoint())), []);
+
+  /** What is on the map now, how big the screen is, and the view (opened on the player, zoomed out to show the world). */
+  const frame = () => {
+    const w = worldView(game);
+    const wp = getWaypoint();
+    const bounds = w.data.bounds ?? boundsOf(w.data.places, w.data.roads, [w.me, ...w.markers, ...(wp ? [wp] : [])]);
+    const width = box.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 0) || 800;
+    const height = box.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 0) || 600;
+    if (!cam.current) cam.current = { ...fitCamera(bounds, width, height), cx: w.me.x, cz: w.me.z };
+    cam.current = clampCamera(cam.current, bounds, width, height);
+    return { w, wp, bounds, width, height, cam: cam.current };
+  };
+  const draw = () => {
+    const el = canvas.current;
+    const c = el?.getContext('2d');
+    if (!el || !c) return;
+    const f = frame();
+    const dpr = pixelRatio(), pw = Math.round(f.width * dpr), ph = Math.round(f.height * dpr);
+    if (el.width !== pw || el.height !== ph) { el.width = pw; el.height = ph; }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const s = f.cam.scale, safe = settings.get().colourSafe;
+    const at = (q: WorldMapPoint) => worldToMap(f.cam, f.width, f.height, q);
+    c.fillStyle = '#14231a'; c.fillRect(0, 0, f.width, f.height);
+    // A grid of round distances, so the map reads as a size.
+    const step = gridStep(s), tl = mapToWorld(f.cam, f.width, f.height, { x: 0, y: 0 }), br = mapToWorld(f.cam, f.width, f.height, { x: f.width, y: f.height });
+    c.strokeStyle = 'rgba(255,255,255,0.07)'; c.lineWidth = 1; c.beginPath();
+    for (let x = Math.ceil(tl.x / step) * step; x <= br.x; x += step) { const sx = at({ x, z: 0 }).x; c.moveTo(sx, 0); c.lineTo(sx, f.height); }
+    for (let z = Math.ceil(tl.z / step) * step; z <= br.z; z += step) { const sy = at({ x: 0, z }).y; c.moveTo(0, sy); c.lineTo(f.width, sy); }
+    c.stroke();
+    for (const p of f.w.data.places) {
+      tracePlace(c, p, at, s);
+      c.globalAlpha = 0.55; c.fillStyle = placeColour(p.kind); c.fill(); c.globalAlpha = 1;
+      c.strokeStyle = placeColour(p.kind); c.lineWidth = 2; if (p.kind === 'custom') c.setLineDash([6, 4]); c.stroke(); c.setLineDash([]);
+    }
+    for (const line of f.w.data.roads) strokeRoad(c, line, at, s);
+    if (style.names) for (const p of f.w.data.places) {
+      if (!p.name) continue;
+      const q = at(p); mapLabel(c, p.name, q.x, q.y, Math.round(Math.max(11, Math.min(22, p.radius * s * 0.3))));
+    }
+    for (const m of f.w.markers) { const q = at(m); c.fillStyle = markerColour(m.kind, safe); c.beginPath(); c.arc(q.x, q.y, 5, 0, Math.PI * 2); c.fill(); }
+    if (f.wp) {
+      const q = at(f.wp);
+      mapPin(c, q.x, q.y, safe ? WAYPOINT_COLOUR_SAFE : WAYPOINT_COLOUR, 10);
+      mapLabel(c, formatDistance(Math.hypot(f.wp.x - f.w.me.x, f.wp.z - f.w.me.z)), q.x, q.y - 32, 12);
+    }
+    const me = at(f.w.me);
+    c.beginPath(); c.arc(me.x, me.y, 16, 0, Math.PI * 2); c.fillStyle = 'rgba(253,224,71,0.25)'; c.fill();
+    mapArrow(c, me.x, me.y, Math.atan2(Math.sin(f.w.facing), -Math.cos(f.w.facing)), 11);
+    // A scale bar at the lower left.
+    const bar = gridStep(s, 60), len = bar * s, bx = 16, by = f.height - 64;
+    c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.moveTo(bx, by - 5); c.lineTo(bx, by); c.lineTo(bx + len, by); c.lineTo(bx + len, by - 5); c.stroke();
+    mapLabel(c, formatDistance(bar), bx + len / 2, by - 12, 11);
+  };
+  const drawRef = useRef(draw); drawRef.current = draw;
+  const frameRef = useRef(frame); frameRef.current = frame;
+  useEffect(() => {
+    const redraw = () => drawRef.current();
+    redraw();
+    const timer = setInterval(redraw, 250);
+    window.addEventListener('resize', redraw);
+    // Scroll zooms around the mouse. Bound by hand: React's wheel listener is passive, and the page must not scroll instead.
+    const el = canvas.current;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const f = frameRef.current(); const r = el!.getBoundingClientRect();
+      cam.current = zoomAt(f.cam, f.bounds, f.width, f.height, Math.exp(-e.deltaY * 0.0015), { x: e.clientX - r.left, y: e.clientY - r.top });
+      redraw();
+    };
+    el?.addEventListener('wheel', onWheel, { passive: false });
+    return () => { clearInterval(timer); window.removeEventListener('resize', redraw); el?.removeEventListener('wheel', onWheel); };
+  }, []);
+
+  const local = (e: { clientX: number; clientY: number }) => {
+    const r = canvas.current?.getBoundingClientRect();
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
+  };
+  /** A tap marks the spot under it — or clears the marked spot when it lands on it. */
+  const tap = (q: { x: number; y: number }) => {
+    const f = frame();
+    if (f.wp) {
+      const s = worldToMap(f.cam, f.width, f.height, f.wp);
+      if (Math.hypot(s.x - q.x, s.y - q.y - 16) < 26) { setWaypoint(null); draw(); return; }
+    }
+    setWaypoint(mapToWorld(f.cam, f.width, f.height, q)); draw();
+  };
+  const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* not capturable: moves still arrive while over the map */ }
+    const p = local(e);
+    pointers.current.set(e.pointerId, p);
+    if (pointers.current.size === 1) gesture.current = { x: p.x, y: p.y, t: Date.now(), moved: false, pinch: 0 };
+    else if (gesture.current) { gesture.current.moved = true; gesture.current.pinch = 0; }
+  };
+  const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const prev = pointers.current.get(e.pointerId);
+    if (!prev) return;
+    const p = local(e);
+    pointers.current.set(e.pointerId, p);
+    const f = frame(), g = gesture.current;
+    if (pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (g && g.pinch > 0 && d > 0) cam.current = zoomAt(f.cam, f.bounds, f.width, f.height, d / g.pinch, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      if (g) g.pinch = d;
+    } else {
+      cam.current = panBy(f.cam, f.bounds, f.width, f.height, p.x - prev.x, p.y - prev.y);
+      if (g && Math.hypot(p.x - g.x, p.y - g.y) > 8) g.moved = true;
+    }
+    draw();
+  };
+  const onUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const had = pointers.current.delete(e.pointerId);
+    const g = gesture.current;
+    if (had && pointers.current.size === 0 && g && !g.moved && Date.now() - g.t < 500 && e.type === 'pointerup') tap(local(e));
+    if (pointers.current.size === 0) gesture.current = null; else if (g) g.pinch = 0;
+  };
+  const zoomBy = (factor: number) => { const f = frame(); cam.current = zoomAt(f.cam, f.bounds, f.width, f.height, factor, { x: f.width / 2, y: f.height / 2 }); draw(); };
+  const centre = () => { const f = frame(); cam.current = clampCamera({ ...f.cam, cx: f.w.me.x, cz: f.w.me.z }, f.bounds, f.width, f.height); draw(); };
+  const corner = { position: 'absolute' as const, top: 'max(12px, env(safe-area-inset-top))' };
+  return (
+    <div ref={box} role="dialog" aria-modal="true" aria-label={t('map')} style={{ position: 'absolute', inset: 0, zIndex: 30, background: '#14231a', color: '#fff', touchAction: 'none', userSelect: 'none' }}>
+      <canvas ref={canvas} role="img" aria-label={t('map')} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', touchAction: 'none', cursor: 'grab' }} />
+      <div style={{ ...corner, left: 'max(16px, env(safe-area-inset-left))', fontWeight: 800, fontSize: 22, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none' }}>{t('map')}</div>
+      <button ref={closeButton} type="button" aria-label={t('close')} onClick={onClose} style={{ ...roundIcon, ...corner, right: 'max(12px, env(safe-area-inset-right))', fontSize: 24 }}>×</button>
+      {marked ? (
+        <button type="button" onClick={() => { setWaypoint(null); draw(); }}
+          style={{ ...secondary, ...corner, left: '50%', transform: 'translateX(-50%)', marginTop: 0, minWidth: 0, minHeight: 40, padding: '6px 14px', fontSize: 14 }}>
+          {t('clearMarker')}
+        </button>
+      ) : null}
+      <div style={{ position: 'absolute', right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(56px, calc(env(safe-area-inset-bottom) + 48px))', display: 'grid', gap: 10 }}>
+        <button type="button" aria-label={t('zoomIn')} onClick={() => zoomBy(1.6)} style={{ ...roundIcon, fontSize: 22 }}>+</button>
+        <button type="button" aria-label={t('zoomOut')} onClick={() => zoomBy(1 / 1.6)} style={{ ...roundIcon, fontSize: 22 }}>−</button>
+        <button type="button" aria-label={t('centreMap')} onClick={centre} style={roundIcon}>
+          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="10" cy="10" r="2" fill="currentColor" /><path d="M10 0v4M10 16v4M0 10h4M16 10h4" stroke="currentColor" strokeWidth="2" /></svg>
+        </button>
+      </div>
+      <div style={{ position: 'absolute', left: '50%', bottom: 'max(14px, env(safe-area-inset-bottom))', transform: 'translateX(-50%)', maxWidth: '86vw', textAlign: 'center', fontSize: 13, opacity: 0.85, textShadow: '0 1px 2px rgba(0,0,0,.9)', pointerEvents: 'none' }}>
+        {t('mapHint')}
+      </div>
+    </div>
+  );
 }
 
 /** What the player is trying to do (core/quests.ts), with progress — under the score. */
-export function ObjectiveList() {
+export function ObjectiveList({ below = 0 }: { below?: number }) {
   const [list, setList] = useState<readonly Objective[]>(objectives.list);
   useEffect(() => events.on('OBJECTIVES_CHANGED', () => setList(objectives.list)), []);
   if (list.length === 0) return null;
+  // below: pixels to move down — the minimap stands in the right corner (minimap: { corner: 'right' }).
+  const top = 'max(64px, calc(env(safe-area-inset-top) + 56px))';
   return (
-    <ul aria-label="Objectives" style={{ position: 'absolute', right: 'max(12px, env(safe-area-inset-right))', top: 'max(64px, calc(env(safe-area-inset-top) + 56px))', listStyle: 'none', margin: 0, padding: '8px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 14, maxWidth: 'min(46vw, 260px)', pointerEvents: 'none', zIndex: 5, textShadow: '0 1px 2px rgba(0,0,0,.8)' }}>
+    <ul aria-label="Objectives" style={{ position: 'absolute', right: 'max(12px, env(safe-area-inset-right))', top: below > 0 ? 'calc(' + top + ' + ' + below + 'px)' : top, listStyle: 'none', margin: 0, padding: '8px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 14, maxWidth: 'min(46vw, 260px)', pointerEvents: 'none', zIndex: 5, textShadow: '0 1px 2px rgba(0,0,0,.8)' }}>
       {list.map((o) => (
         <li key={o.id} style={{ opacity: o.done ? 0.65 : 1, textDecoration: o.done ? 'line-through' : 'none', marginTop: 2 }}>
           {(o.done ? '✓ ' : '• ') + o.text + (o.target > 1 ? ' ' + o.progress + '/' + o.target : '')}
@@ -1936,6 +2244,7 @@ function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
       <Toggle label={t('largeText')} on={s.largeText} onChange={(v) => settings.set({ largeText: v })} />
       <Toggle label={t('colourSafe')} on={s.colourSafe} onChange={(v) => settings.set({ colourSafe: v })} />
       <Toggle label={t('captions')} on={s.captions} onChange={(v) => settings.set({ captions: v })} />
+      {game.minimapOption !== false ? <Toggle label={t('minimap')} on={s.showMinimap} onChange={(v) => settings.set({ showMinimap: v })} /> : null}
       <div style={row}>
         <span>{t('difficulty')}</span>
         <div role="radiogroup" aria-label={t('difficulty')} style={{ display: 'flex', gap: 6 }}>
@@ -1991,7 +2300,13 @@ export function Hud({ game }: { game: Game }) {
   const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
   const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
   const nextLevel = () => { if (levels.next()) game.restart(); };
-  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | 'credits' | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | 'credits' | 'map' | null>(null);
+  // 🗺️ THE MAP (admin 2026-11-22): a tap on the corner map, or M, opens the whole map; the world waits while it is open.
+  const hasWorld = useWorldMap();
+  const mapStyle = minimapStyle(game.minimapOption === false ? {} : game.minimapStyle, hasWorld);
+  const canOpenMap = game.minimapOption !== false && mapStyle.fullMap;
+  const openMap = () => { if (state.status !== 'playing') return; game.pause(); setPanel('map'); };
+  const closeMap = () => { setPanel(null); game.resume(); };
   const bag = useInventory();
   const shop = useShop();
   const again = useRef<HTMLButtonElement>(null);
@@ -2034,15 +2349,20 @@ export function Hud({ game }: { game: Game }) {
         if (s.status === 'playing') { game.pause(); setPanel('inventory'); return; }
         if (panel === 'inventory') { setPanel(null); game.resume(); return; }
       }
+      // M opens the whole map during play (and closes it again) — the corner map's tap, on a keyboard.
+      if ((e.key === 'm' || e.key === 'M') && !dialogue.active && canOpenMap) {
+        if (s.status === 'playing') { openMap(); return; }
+        if (panel === 'map') { closeMap(); return; }
+      }
       if (e.key !== 'Escape') return;
-      if (panel === 'inventory') { setPanel(null); game.resume(); return; }
+      if (panel === 'inventory' || panel === 'map') { setPanel(null); game.resume(); return; }
       if (panel) { setPanel(null); return; }
       if (s.status === 'playing') game.pause();
       else if (s.status === 'paused') game.resume();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [game, s.status, panel]);
+  }, [game, s.status, panel, canOpenMap]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
     <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel game={game} onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : panel === 'credits' ? <CreditsPanel list={game.creditsList} onBack={() => setPanel(null)} /> : screen}</div></div>
@@ -2090,8 +2410,8 @@ export function Hud({ game }: { game: Game }) {
       <LoadingBar state={load} />
       {prefs.showFps && s.status !== 'menu' ? <FpsCounter game={game} /> : null}
       {s.status === 'playing' ? <HintBar /> : null}
-      {s.status === 'playing' || s.status === 'paused' ? <Minimap game={game} /> : null}
-      {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
+      {s.status === 'playing' || (s.status === 'paused' && panel !== 'map') ? <Minimap game={game} onOpen={canOpenMap ? openMap : undefined} /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList below={mapStyle.corner === 'right' && game.minimapOption !== false && prefs.showMinimap !== false ? mapStyle.size + 12 : 0} /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' ? <DialogueBox /> : null}
       {s.status === 'playing' ? <SeatPrompt game={game} /> : null}
@@ -2134,7 +2454,8 @@ export function Hud({ game }: { game: Game }) {
         </div>,
       ) : null}
 
-      {s.status === 'paused' ? settingsOrScreen(
+      {s.status === 'paused' && panel === 'map' ? <FullMap game={game} style={mapStyle} onClose={closeMap} /> : null}
+      {s.status === 'paused' && panel !== 'map' ? settingsOrScreen(
         <div>
           <h2 style={{ fontSize: 30, fontWeight: 800 }}>{t('paused')}</h2>
           <div style={{ display: 'grid', gap: 0, justifyItems: 'center' }}>
@@ -3391,18 +3712,28 @@ import * as THREE from 'three';
 import { Game } from './Game';
 import { events } from './core/events';
 import { state } from './core/state';
-import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState } from './three/objects';
+import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
 import { createRace, type Race } from './three/race';
+import { applyCarChoice, loadModelTrack, projectRaceChoices, type CarChoice, type CarModelHandle, type ModelTrack, type TrackChoice } from './play/raceCustom';
 
 /** Original racing starter. New plan identity restarts the game (all settings apply).
- * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan. */
-export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }: {
+ * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan.
+ * THE CAR AND THE TRACK ARE THE USER'S: src/game/car.ts (export const CAR) and src/game/track.ts (export const TRACK) are
+ * read by themselves when they exist (play/raceCustom.ts); the car and track props win over them. */
+export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, car: carProp, track: trackProp }: {
   plan?: TrackPlan; onReady?: (stream: TrackStream) => void;
   /** Rival cars on the road (0 to 7); 0 is a solo drive. */
   opponents?: number;
   /** A finish line this many km from the start; null (default) keeps the endless road endless. */
   finishKm?: number | null;
+  /** The player's car: colour, size, how it drives, or a 3D model. Default: src/game/car.ts, else the kit car. */
+  car?: CarChoice;
+  /** Race on a 3D track model instead of the road library (laps, its own racing line). Default: src/game/track.ts. */
+  track?: TrackChoice;
 } = {}) {
+  const own = projectRaceChoices();
+  const carChoice = carProp ?? own.car ?? undefined;
+  const trackChoice = trackProp ?? own.track ?? undefined;
   const host = useRef<HTMLDivElement>(null);
   const hud = useRef<HTMLDivElement>(null);
   const live = useRef<Game | null>(null);
@@ -3411,11 +3742,14 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
   const [failure, setFailure] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [call, setCall] = useState<string | null>(null);
+  // What the player must be told about their own car or track (loading, scaled, or why it could not be used).
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!host.current) return;
-    setFailure(null);
-    let game: Game | null = null, stream: TrackStream | null = null;
-    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null;
+    setFailure(null); setNotice(null);
+    let game: Game | null = null, stream: TrackStream | null = null, course: ModelTrack | null = null;
+    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null, look: CarModelHandle | null = null;
+    const tuning: VehicleTuning = { ...(carChoice?.tuning ?? {}) };
     // 3-2-1-GO! big in the middle; GO! clears itself.
     let callTimer: ReturnType<typeof setTimeout> | undefined;
     const offCount = events.on('RACE_COUNTDOWN', (p: { n?: number }) => {
@@ -3433,58 +3767,119 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
       if (released) return; released = true;
       for (const off of offs) off();
       offCount(); offGo(); clearTimeout(callTimer);
-      race?.dispose(); stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
+      look?.dispose(); race?.dispose(); stream?.dispose(); course?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
     };
-    try {
-      game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
-        setup: (ctx) => {
-          stream = createTrackStream(config.current.plan, { detail: 'lite' });
-          car = createCar({ color: 0xb42b2b, detail: 'lite' });
-          car.position.set(stream.startPose.x, stream.startPose.y, stream.startPose.z);
-          car.rotation.y = stream.startPose.heading;
-          drive = createVehicleState(car);
-          ctx.scene.add(stream.root, car); ctx.follow(car);
-          race = createRace(ctx.scene, { stream, opponents, finishDistance: finishKm != null && finishKm > 0 ? finishKm * 1000 : null });
-        },
-        update: (ctx, dt) => {
-          if (!stream || !car) return;
-          // Held at the line through the countdown; the car keeps its starting speed for the moment GO comes.
-          if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt);
-          const status = stream.update(car);
-          const standing = race?.update(dt, status.distance);
-          if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
-          const piece = status.segment?.piece;
-          const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
-          if (id !== lastMap) {
-            lastMap = id;
-            ctx.scene.background = new THREE.Color(skies[id - 1] ?? skies[0]);
-            ctx.scene.fog = new THREE.Fog(skies[id - 1] ?? skies[0], 70, 450);
-            ctx.lights.key.intensity = map?.lighting === 'night' ? 0.6 : 2.2;
-            ctx.lights.hemisphere.intensity = map?.lighting === 'night' ? 0.6 : 1;
-            ctx.lights.ambient.intensity = map?.lighting === 'night' ? 0.35 : 0.2;
-          }
-          hudTime += dt;
-          if (hud.current && hudTime >= 0.2) {
-            hudTime = 0;
-            const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
-            const place = standing && standing.total > 1 ? 'P' + standing.position + '/' + standing.total + ' · ' : '';
-            const clock = standing ? Math.floor(standing.time / 60) + ':' + (standing.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
-            hud.current.textContent = place + clock + (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
-          }
-        },
+    const begin = (custom: ModelTrack | null) => {
+      if (released || !host.current) return;
+      course = custom;
+      if (custom) tuning.ground = custom.heightAt;
+      try {
+        game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
+          setup: (ctx) => {
+            if (!custom) stream = createTrackStream(config.current.plan, { detail: 'lite' });
+            const start = custom ? custom.startPose : stream!.startPose;
+            car = createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
+            car.position.set(start.x, start.y, start.z);
+            car.rotation.y = start.heading;
+            drive = createVehicleState(car, tuning);
+            ctx.scene.add(custom ? custom.root : stream!.root, car); ctx.follow(car);
+            // The user's own car model, when they chose one: the kit car keeps driving, the model is its look.
+            look = applyCarChoice(car, carChoice, undefined, setNotice);
+            if (custom) {
+              ctx.scene.background = new THREE.Color(skies[0]);
+              ctx.scene.fog = new THREE.Fog(skies[0], 120, 900);
+              race = createRace(ctx.scene, { stream: custom, opponents, finishDistance: custom.laps * custom.length });
+            } else {
+              race = createRace(ctx.scene, { stream: stream!, opponents, finishDistance: finishKm != null && finishKm > 0 ? finishKm * 1000 : null });
+            }
+          },
+          update: (ctx, dt) => {
+            if (!car) return;
+            if (course) {
+              // A lap race on the user's own track: the race holds the car at the line, then laps count to the finish.
+              if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt, tuning);
+              const lapStatus = course.update(car);
+              const lapStanding = race?.update(dt, lapStatus.distance);
+              hudTime += dt;
+              if (hud.current && hudTime >= 0.2) {
+                hudTime = 0;
+                const place = lapStanding && lapStanding.total > 1 ? 'P' + lapStanding.position + '/' + lapStanding.total + ' · ' : '';
+                const clock = lapStanding ? Math.floor(lapStanding.time / 60) + ':' + (lapStanding.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
+                hud.current.textContent = place + clock + course.name + ' · Lap ' + Math.min(course.laps, lapStatus.lap + 1) + '/' + course.laps + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+              }
+              return;
+            }
+            if (!stream) return;
+            // Held at the line through the countdown; the car keeps its starting speed for the moment GO comes.
+            if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt, tuning);
+            const status = stream.update(car);
+            const standing = race?.update(dt, status.distance);
+            if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
+            const piece = status.segment?.piece;
+            const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
+            if (id !== lastMap) {
+              lastMap = id;
+              ctx.scene.background = new THREE.Color(skies[id - 1] ?? skies[0]);
+              ctx.scene.fog = new THREE.Fog(skies[id - 1] ?? skies[0], 70, 450);
+              ctx.lights.key.intensity = map?.lighting === 'night' ? 0.6 : 2.2;
+              ctx.lights.hemisphere.intensity = map?.lighting === 'night' ? 0.6 : 1;
+              ctx.lights.ambient.intensity = map?.lighting === 'night' ? 0.35 : 0.2;
+            }
+            hudTime += dt;
+            if (hud.current && hudTime >= 0.2) {
+              hudTime = 0;
+              const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
+              const place = standing && standing.total > 1 ? 'P' + standing.position + '/' + standing.total + ' · ' : '';
+              const clock = standing ? Math.floor(standing.time / 60) + ':' + (standing.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
+              hud.current.textContent = place + clock + (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+            }
+          },
+        });
+        live.current = game; game.start();
+        if (stream) {
+          // Play again: the race has laid the road again from its first piece (race.ts calls stream.reset()); the car
+          // goes back to the start line on it.
+          const road = stream;
+          road.onReset = () => {
+            if (!car) return;
+            car.position.set(road.startPose.x, road.startPose.y, road.startPose.z);
+            car.rotation.y = road.startPose.heading;
+            drive = createVehicleState(car, tuning);
+            lastMap = -1;
+          };
+        }
+        if (custom) {
+          // Play again after the finish starts the same lap race from the line.
+          offs.push(events.on('GAME_STARTED', () => {
+            if (!car || !course) return;
+            course.reset();
+            car.position.set(course.startPose.x, course.startPose.y, course.startPose.z);
+            car.rotation.y = course.startPose.heading;
+            drive = createVehicleState(car, tuning);
+          }));
+        }
+        if (stream) config.current.onReady?.(stream);
+      } catch (error) {
+        release();
+        setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
+      }
+    };
+    const trackName = typeof trackChoice?.model === 'string' ? trackChoice.model.trim() : '';
+    if (trackChoice && trackName) {
+      // The user's own track: loaded and read first, then raced on — or the reason it cannot be, said on screen.
+      setNotice('Loading your track...');
+      void loadModelTrack(trackChoice).then((built) => {
+        if (released) { if (built.ok) built.track.dispose(); return; }
+        if (built.ok) { setNotice(built.notes.length ? built.notes.join(' ') : null); begin(built.track); }
+        else { setNotice('Your track "' + trackName + '" cannot be raced on: ' + built.reason + '. This race runs on the road library instead.'); begin(null); }
       });
-      live.current = game; game.start();
-      const ready = () => { if (stream) config.current.onReady?.(stream); }; ready();
-    } catch (error) {
-      release();
-      setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
-    }
+    } else begin(null);
     return () => { live.current = null; release(); };
-  }, [plan, opponents, finishKm]);
+  }, [plan, opponents, finishKm, carChoice, trackChoice]);
   return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
     <div ref={host} style={{ position: 'absolute', inset: 0 }} />
     <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
-      <div ref={hud}>01/12 · Highway Straight · 0/10 km · Loop 1</div>
+      <div ref={hud}>{trackChoice?.model ? 'Your track' : '01/12 · Highway Straight · 0/10 km · Loop 1'}</div>
       <small>W/S or arrows: gas/brake · A/D: steer · Touch controls on phones</small>
     </div>
     <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {
@@ -3496,6 +3891,7 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
       } else live.current.pause();
     }}>{paused ? 'Resume' : 'Pause'}</button>
     {call && <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 96, fontWeight: 900, textShadow: '0 4px 12px rgba(0,0,0,.8)', pointerEvents: 'none' }}>{call}</div>}
+    {notice && <div role="status" aria-live="polite" style={{ position: 'absolute', left: 16, right: 16, bottom: 16, color: 'white', background: '#7f1d1dd9', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>{notice}</div>}
     {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}
   </div>;
 }
@@ -3511,6 +3907,7 @@ import { LaneRunner, runnerInput, type RunnerOptions } from './core/runner';
 import { bindSwipe } from './core/swipe';
 import { tunable } from './core/tuning';
 import { createHumanoid } from './three/humanoid';
+import { createPlayerCharacter, resolvePlayerChoice, type PlayerChoice } from './play/playerBody';
 
 /**
  * ORIGINAL ENDLESS-RUNNER STARTER (admin 2026-11-20 engine plan: a complete, working game per genre, so the builder
@@ -3535,6 +3932,12 @@ export interface LaneRunnerGameProps {
   skyColor?: number;
   /** The same seed gives the same course (default: a new course every run). */
   seed?: number;
+  /**
+   * WHO RUNS: the kit runner's look, a library character or the user's own model (see play/playerBody.ts). Left out, the
+   * runner reads src/game/player.ts by itself — change the character there. The model runs, jumps, slides and falls with
+   * its own clips, and says on screen which of those moves it lacks.
+   */
+  player?: PlayerChoice;
 }
 
 /** World x for a runner x: the camera looks down +Z, so the screen's right is world -X. */
@@ -3589,8 +3992,14 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
   const POSTS = 30, SPACING = 8;
   const posts: THREE.Mesh[] = [];
   for (let i = 0; i < POSTS * 2; i++) { const p = new THREE.Mesh(post.geo, post.mat); posts.push(p); root.add(p); }
-  const runner = createHumanoid({ height: 1.7, shirt: props.runnerColor ?? 0x2563eb });
+  const choice = resolvePlayerChoice(props.player);
+  const runner = createHumanoid({ height: 1.7, shirt: 0x2563eb, ...(choice?.look || {}), ...(props.runnerColor !== undefined ? { shirt: props.runnerColor } : {}) });
   root.add(runner.root);
+  // The player's own character (src/game/player.ts) runs in the kit runner's place once it has loaded.
+  const body = new THREE.Group();
+  body.name = 'Player character';
+  root.add(body);
+  const character = createPlayerCharacter(body, choice, () => { runner.root.visible = false; });
   const obstacleMeshes = new Map<number, THREE.Mesh | THREE.Group>();
   const coinMeshes = new Map<number, THREE.Mesh>();
   let scored = 0;
@@ -3605,6 +4014,7 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     clearPieces();
     scored = 0;
     runner.revive();
+    character.revive();
     runner.root.scale.set(1, 1, 1);
   };
   const offStart = events.on('GAME_STARTED', restart);
@@ -3623,6 +4033,10 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     const x = runnerWorldX(run.x);
     runner.root.position.set(x, run.y, run.distance);
     runner.root.scale.y = run.sliding ? 0.55 : 1;
+    // The character takes the move the run is in; it is squashed for a slide only when it has no slide clip of its own.
+    const own = character.move(!run.alive ? 'idle' : run.sliding ? 'slide' : run.jumping ? 'jump' : state.status === 'playing' ? 'run' : 'idle');
+    body.position.copy(runner.root.position);
+    body.scale.y = run.sliding && !own ? 0.55 : 1;
     track.position.z = run.distance + 150;
     for (let i = 0; i < posts.length; i++) {
       const side = i % 2 === 0 ? -1 : 1;
@@ -3660,15 +4074,16 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
       ctx.follow(runner.root);
     },
     update: (ctx, dt) => {
-      if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); return; }
+      if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); character.update(dt); return; }
       const t = dt * pace.value;
       for (const ev of run.update(t, runnerInput(ctx.input))) {
         const at = { x: runnerWorldX(run.x), y: run.y + 1, z: run.distance };
-        if (ev.type === 'jump') { runner.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
+        if (ev.type === 'jump') { runner.act('jump'); character.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
         else if (ev.type === 'coin') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.coin.lane)), y: 0.8, z: ev.coin.z } });
-        else if (ev.type === 'crash') { runner.die(); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
+        else if (ev.type === 'crash') { runner.die(); character.act('die'); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
       }
       runner.update(t, run.alive ? run.speed * pace.value : 0, !run.jumping);
+      character.update(t);
       const score = run.score;
       if (score > scored) { addScore(score - scored); scored = score; }
       sync();
@@ -3677,6 +4092,7 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
       offStart();
       clearPieces();
       root.removeFromParent();
+      character.dispose();
       runner.dispose();
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();
@@ -3820,18 +4236,260 @@ export function withFeatures<O extends { setup?: (ctx: GameContext) => unknown; 
 }
 `;
 
+const WORLD_MAP = String.raw`// THE WORLD MAP — what the corner map and the full map draw beyond the markers (admin 2026-11-22: "jaise PUBG/Free Fire me
+// location map aa jata hai box me corner par — kya battle ground game me navigation par tap kar kar pura map aur location
+// dikha sakte hai?" and "yeh sab user ke control me rahe, user jo kahe woh ho jaye").
+//
+// A game with a WORLD hands the map its places, lands and roads in WORLD metres with setWorldMapSource() — the open-world
+// starter (play/openWorld.ts) does it by itself. The Hud then draws the roads and named places in the corner map, and a tap
+// on it (or M) opens the whole world full screen, with pan, zoom and a waypoint. A game without a source keeps the
+// markers-only minimap. Everything here is plain arithmetic, so it is tested without a screen.
+import { events } from '../core/events';
+
+export interface WorldMapPoint { x: number; z: number }
+export interface WorldMapBounds { minX: number; minZ: number; maxX: number; maxZ: number }
+/** A place on the map: a city, a town, a village, a land (desert, jungle …) or a user's own map, in WORLD metres. */
+export interface WorldMapPlace {
+  id: string;
+  /** What the map writes on it; '' writes nothing (a tile of a bigger city). */
+  name: string;
+  kind: string;
+  x: number;
+  z: number;
+  /** How far it reaches from its centre, in metres. */
+  radius: number;
+  /** 'square' for a place built on a grid (a city), 'circle' for a land. Default 'circle'. */
+  shape?: 'square' | 'circle';
+}
+export interface WorldMapSource {
+  places: () => ReadonlyArray<WorldMapPlace>;
+  /** Road centre lines, in WORLD metres. */
+  roads?: () => ReadonlyArray<ReadonlyArray<WorldMapPoint>>;
+  /** The edge of the world the full map may show; left out, it is worked out from the places and roads. */
+  bounds?: () => WorldMapBounds;
+  /**
+   * WORLD = render position + origin(). A world with a floating origin (the big map re-bases far from the start) says where
+   * its origin is now, so the player, the vehicle and every marker land in the right place. Left out: 0, 0.
+   */
+  origin?: () => WorldMapPoint;
+}
+
+/**
+ * How the minimap looks — every field is the USER's choice, said in chat and written into the game's options:
+ * "map right corner me" (corner: 'right'), "bada minimap" (size: 200), "naam mat dikhao" (names: false),
+ * "map band karo" (minimap: false), "full map nahi chahiye" (fullMap: false).
+ */
+export interface MinimapOptions {
+  /** Which top corner: 'left' (default) or 'right'. */
+  corner?: 'left' | 'right';
+  /** Width of the round map in pixels, 80 to 240. Default 128. */
+  size?: number;
+  /** Write the names of places on the maps. Default true. */
+  names?: boolean;
+  /** Metres from the middle of the corner map to its edge, 20 to 2000. Default 220 with a world map, 60 without. */
+  range?: number;
+  /** A tap on the corner map (or M) opens the whole map full screen. Default true when the game has a world map. */
+  fullMap?: boolean;
+}
+export interface MinimapStyle { corner: 'left' | 'right'; size: number; names: boolean; range: number; fullMap: boolean }
+
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+
+/** The minimap's options, checked: anything unknown or out of range falls back to its default. */
+export function minimapStyle(raw: unknown, hasWorld: boolean): MinimapStyle {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  return {
+    corner: o.corner === 'right' ? 'right' : 'left',
+    size: finite(o.size) ? Math.round(clamp(o.size, 80, 240)) : 128,
+    names: o.names !== false,
+    range: finite(o.range) ? clamp(o.range, 20, 2000) : hasWorld ? 220 : 60,
+    fullMap: typeof o.fullMap === 'boolean' ? o.fullMap : hasWorld,
+  };
+}
+
+let source: WorldMapSource | null = null;
+/**
+ * Give the maps a world. Returns a function that takes it away again — only if it is still the one given (a remounted game
+ * that registered a new world is never wiped by the old one's cleanup).
+ */
+export function setWorldMapSource(next: WorldMapSource | null): () => void {
+  source = next;
+  events.emit('WORLD_MAP_CHANGED', { on: next !== null });
+  return () => { if (source === next && next !== null) { source = null; events.emit('WORLD_MAP_CHANGED', { on: false }); } };
+}
+export function worldMapSource(): WorldMapSource | null { return source; }
+
+export interface WorldMapData { places: WorldMapPlace[]; roads: WorldMapPoint[][]; origin: WorldMapPoint; bounds: WorldMapBounds | null }
+/** Read the world now. A game callback that throws or returns junk gives an empty map, never a broken HUD. */
+export function readWorldMap(from: WorldMapSource | null = source): WorldMapData {
+  const out: WorldMapData = { places: [], roads: [], origin: { x: 0, z: 0 }, bounds: null };
+  if (!from) return out;
+  try {
+    for (const p of from.places() || []) {
+      if (!p || !finite(p.x) || !finite(p.z)) continue;
+      out.places.push({ id: String(p.id ?? ''), name: typeof p.name === 'string' ? p.name : placeName(String(p.id ?? '')), kind: String(p.kind ?? ''), x: p.x, z: p.z, radius: finite(p.radius) && p.radius > 0 ? p.radius : 50, shape: p.shape === 'square' ? 'square' : 'circle' });
+    }
+  } catch { /* no places */ }
+  try {
+    for (const line of from.roads?.() || []) {
+      const pts = (line || []).filter((q) => q && finite(q.x) && finite(q.z)).map((q) => ({ x: q.x, z: q.z }));
+      if (pts.length > 1) out.roads.push(pts);
+    }
+  } catch { /* no roads */ }
+  try { const o = from.origin?.(); if (o && finite(o.x) && finite(o.z)) out.origin = { x: o.x, z: o.z }; } catch { /* origin 0, 0 */ }
+  try { const b = from.bounds?.(); if (b && finite(b.minX) && finite(b.minZ) && finite(b.maxX) && finite(b.maxZ) && b.maxX > b.minX && b.maxZ > b.minZ) out.bounds = { minX: b.minX, minZ: b.minZ, maxX: b.maxX, maxZ: b.maxZ }; } catch { /* worked out */ }
+  return out;
+}
+
+/** A readable name from an id: 'old-town' is "Old Town", 'hill_village2' is "Hill Village 2". */
+export function placeName(id: string): string {
+  const words = String(id || '').replace(/([a-z])([A-Z0-9])/g, '$1 $2').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').slice(0, 40);
+}
+/** A name short enough for the corner map. */
+export function shortName(name: string, max = 12): string {
+  const n = String(name || '').trim();
+  return n.length <= max ? n : n.slice(0, Math.max(1, max - 1)).trimEnd() + '…';
+}
+/** '85 m', '1.2 km', '14 km'. */
+export function formatDistance(metres: number): string {
+  const m = Math.max(0, finite(metres) ? metres : 0);
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000))) + ' km';
+}
+
+const PLACE_COLOURS: Record<string, string> = {
+  city: '#94a3b8', town: '#a8a29e', village: '#c8a97e', custom: '#c084fc',
+  desert: '#e9c46a', jungle: '#2d6a4f', mountain: '#8d7b68', snow: '#e8f1ff', beach: '#f4dca2',
+};
+export function placeColour(kind: string): string { return PLACE_COLOURS[kind] ?? '#9ca3af'; }
+export const WAYPOINT_COLOUR = '#f472b6';
+export const WAYPOINT_COLOUR_SAFE = '#cc79a7';
+
+// ── THE WAYPOINT: a spot the player marked on the full map, shown on the corner map with its distance ──────────────────
+let waypoint: WorldMapPoint | null = null;
+/** Mark a spot (WORLD metres), or null to clear it. Announced as WAYPOINT_CHANGED, so a game can react to it. */
+export function setWaypoint(p: WorldMapPoint | null): void {
+  waypoint = p && finite(p.x) && finite(p.z) ? { x: p.x, z: p.z } : null;
+  events.emit('WAYPOINT_CHANGED', { waypoint });
+}
+export function getWaypoint(): WorldMapPoint | null { return waypoint; }
+
+// ── THE CORNER MAP: centred on the player, turned so the camera's forward is up ─────────────────────────────────────────
+/** Where a WORLD point lands on the corner map (not pinned to the edge — shapes and roads are clipped by the circle). */
+export function cornerPoint(view: { x: number; z: number; forward: WorldMapPoint }, p: WorldMapPoint, range: number, size: number): { x: number; y: number } {
+  const dx = p.x - view.x, dz = p.z - view.z, fx = view.forward.x, fz = view.forward.z;
+  const right = -dx * fz + dz * fx, up = dx * fx + dz * fz;
+  const half = size / 2, k = (half - 6) / range;
+  return { x: half + right * k, y: half - up * k };
+}
+
+/** The part of a segment inside the box (Liang–Barsky), or null. */
+export function clipSegment(a: WorldMapPoint, b: WorldMapPoint, box: WorldMapBounds): [WorldMapPoint, WorldMapPoint] | null {
+  let t0 = 0, t1 = 1;
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const edges: Array<[number, number]> = [[-dx, a.x - box.minX], [dx, box.maxX - a.x], [-dz, a.z - box.minZ], [dz, box.maxZ - a.z]];
+  for (const [p, q] of edges) {
+    if (p === 0) { if (q < 0) return null; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; } else { if (r < t0) return null; if (r < t1) t1 = r; }
+  }
+  return [{ x: a.x + dx * t0, z: a.z + dz * t0 }, { x: a.x + dx * t1, z: a.z + dz * t1 }];
+}
+
+/** A road cut to the box: the pieces of it inside (a road that leaves and comes back is two pieces). */
+export function clipRoad(line: ReadonlyArray<WorldMapPoint>, box: WorldMapBounds): WorldMapPoint[][] {
+  const out: WorldMapPoint[][] = [];
+  let cur: WorldMapPoint[] = [];
+  const same = (p: WorldMapPoint, q: WorldMapPoint) => Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.z - q.z) < 1e-6;
+  for (let i = 1; i < line.length; i++) {
+    const s = clipSegment(line[i - 1], line[i], box);
+    if (!s) { if (cur.length > 1) out.push(cur); cur = []; continue; }
+    if (cur.length && same(cur[cur.length - 1], s[0])) cur.push(s[1]);
+    else { if (cur.length > 1) out.push(cur); cur = [s[0], s[1]]; }
+    if (!same(s[1], line[i])) { out.push(cur); cur = []; }
+  }
+  if (cur.length > 1) out.push(cur);
+  return out;
+}
+
+/** The roads within range of a point, cut to the square around it (what the corner map draws). */
+export function roadsNear(roads: ReadonlyArray<ReadonlyArray<WorldMapPoint>>, at: WorldMapPoint, range: number): WorldMapPoint[][] {
+  const box = { minX: at.x - range, minZ: at.z - range, maxX: at.x + range, maxZ: at.z + range };
+  const out: WorldMapPoint[][] = [];
+  for (const line of roads) for (const piece of clipRoad(line, box)) out.push(piece);
+  return out;
+}
+
+// ── THE FULL MAP: north up (north is −z, east is +x), panned and zoomed by the player ───────────────────────────────────
+export interface MapCamera { cx: number; cz: number; scale: number }
+/** Everything worth showing, with room around it: places (with their reach), roads and any extra points (the player, markers). */
+export function boundsOf(places: ReadonlyArray<WorldMapPlace>, roads: ReadonlyArray<ReadonlyArray<WorldMapPoint>>, points: ReadonlyArray<WorldMapPoint>, pad = 150): WorldMapBounds {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  const take = (x: number, z: number, r = 0) => { if (!finite(x) || !finite(z)) return; minX = Math.min(minX, x - r); maxX = Math.max(maxX, x + r); minZ = Math.min(minZ, z - r); maxZ = Math.max(maxZ, z + r); };
+  for (const p of places) take(p.x, p.z, p.radius);
+  for (const line of roads) for (const q of line) take(q.x, q.z);
+  for (const q of points) take(q.x, q.z);
+  if (!finite(minX)) { minX = 0; maxX = 0; minZ = 0; maxZ = 0; }
+  return { minX: minX - pad, minZ: minZ - pad, maxX: maxX + pad, maxZ: maxZ + pad };
+}
+export function worldToMap(cam: MapCamera, w: number, h: number, p: WorldMapPoint): { x: number; y: number } {
+  return { x: w / 2 + (p.x - cam.cx) * cam.scale, y: h / 2 + (p.z - cam.cz) * cam.scale };
+}
+export function mapToWorld(cam: MapCamera, w: number, h: number, q: { x: number; y: number }): WorldMapPoint {
+  return { x: cam.cx + (q.x - w / 2) / cam.scale, z: cam.cz + (q.y - h / 2) / cam.scale };
+}
+/** How far the player may zoom: out to a little more than the whole world, in to 4 pixels a metre. */
+export function zoomLimits(b: WorldMapBounds, w: number, h: number): { min: number; max: number } {
+  const fit = Math.min(Math.max(1, w) / Math.max(1, b.maxX - b.minX), Math.max(1, h) / Math.max(1, b.maxZ - b.minZ));
+  return { min: fit * 0.8, max: Math.max(fit * 2, 4) };
+}
+/** The whole world in view, centred. */
+export function fitCamera(b: WorldMapBounds, w: number, h: number): MapCamera {
+  return { cx: (b.minX + b.maxX) / 2, cz: (b.minZ + b.maxZ) / 2, scale: zoomLimits(b, w, h).min / 0.8 };
+}
+/** Keep the zoom within its limits and the middle of the view on the world (the map can never be lost off screen). */
+export function clampCamera(cam: MapCamera, b: WorldMapBounds, w: number, h: number): MapCamera {
+  const z = zoomLimits(b, w, h);
+  return { cx: clamp(finite(cam.cx) ? cam.cx : 0, b.minX, b.maxX), cz: clamp(finite(cam.cz) ? cam.cz : 0, b.minZ, b.maxZ), scale: clamp(finite(cam.scale) ? cam.scale : z.min, z.min, z.max) };
+}
+/** Zoom by factor around a screen point that stays under the finger (or the mouse). */
+export function zoomAt(cam: MapCamera, b: WorldMapBounds, w: number, h: number, factor: number, anchor: { x: number; y: number }): MapCamera {
+  const before = mapToWorld(cam, w, h, anchor);
+  const z = zoomLimits(b, w, h);
+  const scale = clamp(cam.scale * (finite(factor) && factor > 0 ? factor : 1), z.min, z.max);
+  return clampCamera({ scale, cx: before.x - (anchor.x - w / 2) / scale, cz: before.z - (anchor.y - h / 2) / scale }, b, w, h);
+}
+/** Drag the map by dx, dy pixels. */
+export function panBy(cam: MapCamera, b: WorldMapBounds, w: number, h: number, dx: number, dy: number): MapCamera {
+  return clampCamera({ ...cam, cx: cam.cx - dx / cam.scale, cz: cam.cz - dy / cam.scale }, b, w, h);
+}
+/** A round grid step (100 m, 250 m, 500 m, 1 km …) at least minPx apart on screen at this zoom. */
+export function gridStep(scale: number, minPx = 70): number {
+  for (const s of [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000]) if (s * scale >= minPx) return s;
+  return 50000;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/Game.ts': GAME,
   'src/game/RacingRoadGame.tsx': RACING_ROAD_GAME,
+  // The race's car and track are the user's to change (car.ts / track.ts, models included): read by the starter (2026-11-22).
+  [RACE_CUSTOM_PATH]: RACE_CUSTOM,
   'src/game/LaneRunnerGame.tsx': LANE_RUNNER_GAME,
   'src/game/GameCanvas.tsx': GAME_CANVAS,
   'src/game/ui/Hud.tsx': HUD,
   'src/game/ui/touchControls.ts': TOUCH_CONTROLS,
+  // What the corner map and the full map draw beyond the markers: a world's places and roads, and the waypoint (2026-11-22).
+  'src/game/ui/worldMap.ts': WORLD_MAP,
   // How a game grows: a list of small features, each guarded, added one file at a time (2026-11-21).
   'src/game/play/features.ts': GAME_FEATURES,
+  // Who the player is, for every game on the shell: src/game/player.ts swaps the character (2026-11-22).
+  [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'features', 'racingroadgame', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -3915,13 +4573,19 @@ export function generateGameShell(include?: string[]): GameShellResult {
     }
     // GameCanvas constructs Game and renders Hud; Hud imports Game's type. Neither compiles alone.
     if (files['src/game/LaneRunnerGame.tsx']) files['src/game/GameCanvas.tsx'] = FILES['src/game/GameCanvas.tsx'];
+    // The race starter reads the user's own car and track through play/raceCustom.ts; it never compiles without it.
+    if (files['src/game/RacingRoadGame.tsx']) files[RACE_CUSTOM_PATH] = FILES[RACE_CUSTOM_PATH];
     if (files['src/game/GameCanvas.tsx'] || files['src/game/ui/Hud.tsx'] || files['src/game/RacingRoadGame.tsx']) {
       files['src/game/Game.ts'] = FILES['src/game/Game.ts'];
     }
     // Game draws the touch controls, so it never ships without them (and they are useless alone).
     if (files['src/game/Game.ts']) files['src/game/ui/touchControls.ts'] = FILES['src/game/ui/touchControls.ts'];
+    // Game's options name the minimap's look, and the Hud draws the world map: both read ui/worldMap.ts.
+    if (files['src/game/Game.ts']) files['src/game/ui/worldMap.ts'] = FILES['src/game/ui/worldMap.ts'];
     // The feature host types against Game's context, and every game on the shell may grow by features.
     if (files['src/game/Game.ts']) files['src/game/play/features.ts'] = FILES['src/game/play/features.ts'];
+    // Game reads who the player is (src/game/player.ts) through it, so the two always ship together.
+    if (files['src/game/Game.ts']) files[GAME_PLAYER_BODY_PATH] = FILES[GAME_PLAYER_BODY_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -3939,6 +4603,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
+      (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +
       (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +
       // 🔴 THE TYPES FIRST, AND FIRST ON PURPOSE (Q-909, autopsy 50378049). The example below touches
       // three of GameContext's nine members, so for the rest the reported build GUESSED — ctx.canvas,

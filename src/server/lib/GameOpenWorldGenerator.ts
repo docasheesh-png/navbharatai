@@ -12,6 +12,8 @@
 /** The shape every game recipe returns (gameRecipeLayers.RecipeOutput), with its instructions. */
 interface RecipeOutput { files: Record<string, string>; dependencies?: Array<{ name: string; version: string }>; instructions: string }
 
+import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from './GamePlayerBodyGenerator';
+
 export const GAME_OPEN_WORLD_BRIDGE = String.raw`// THE BRIDGE BETWEEN THE BIG MAP AND THE GAME — the player, the camera and everything the game adds stand ON the Athree
 // world. The map streams terrain around the player and re-bases its render origin far from the start; the character
 // controller walks on collider meshes. This module joins the two: a small invisible ground mesh, sampled from the map's own
@@ -29,6 +31,7 @@ import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../th
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
+import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /** Side of the walkable ground patch kept under the player, in metres. Default 96. */
@@ -62,6 +65,8 @@ export type Compass = 'north' | 'north-east' | 'east' | 'south-east' | 'south' |
 export interface WorldRegion {
   /** A short unique name: 'old-town', 'harbour', 'hill-village'. */
   id: string;
+  /** The name the map writes on it ("Mumbai", "Rampur"). Left out: made from the id ('old-town' is "Old Town"). */
+  name?: string;
   kind: RegionKind;
   /** Which way from the first place. Left out: the places spread around by themselves. */
   toward?: Compass;
@@ -440,6 +445,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
   };
+  // 🗺️ THE MAP KNOWS THE WORLD (admin 2026-11-22: "jaise PUBG/Free Fire me location map … tap kar kar pura map aur location").
+  // Every place, land and user map with its name, and every highway, handed to the Hud's corner map and full map in WORLD
+  // metres. origin() turns the render positions the shell reads (the player, the vehicle it drives, every marker) into WORLD
+  // metres, so the map stays right across origin shifts. A tile of a grown city is drawn but not named (its city is).
+  const named = (region: WorldRegion): string => (typeof region.name === 'string' && region.name.trim() ? region.name.trim().slice(0, 40) : placeName(region.id));
+  const regionOf = (id: string, kind: RegionKind): WorldRegion => wanted.find((r) => r && r.id === id) ?? { id, kind };
+  const mapPlaces: WorldMapPlace[] = [
+    ...planned.map((p): WorldMapPlace => ({ id: p.region.id, name: p.cluster && !p.region.name ? '' : named(p.region), kind: p.region.kind, x: p.centre.x, z: p.centre.z, radius: p.reach, shape: 'square' })),
+    ...landList.map((l): WorldMapPlace => ({ id: l.id, name: named(regionOf(l.id, l.kind)), kind: l.kind, x: l.centre.x, z: l.centre.z, radius: l.radius, shape: 'circle' })),
+    ...userMaps.map((m): WorldMapPlace => ({ id: m.id, name: named(regionOf(m.id, 'custom')), kind: 'custom', x: m.centre.x, z: m.centre.z, radius: m.size / 2, shape: 'square' })),
+  ];
+  const unregisterMap = setWorldMapSource({ places: () => mapPlaces, roads: () => roadLines, origin: () => ({ x: chunks.origin.x, z: chunks.origin.z }) });
   return {
     map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
@@ -500,6 +517,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         locals[i].position.set(at.x - t.centre.x, at.y - t.centre.y, at.z - t.centre.z);
         t.traffic?.update(delta, seated ? [locals[i], seated] : [locals[i]]);
         t.people?.update(delta, [locals[i]]);
+        // ⛔ NOTHING PASSES THROUGH A VEHICLE (admin 2026-11-22: "jab bhi 2 object takrayenge to aar paar nahi jane chahiye"):
+        // the player on foot — or the car they drive — is pushed out of any traffic car it ran into, every frame.
+        if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
       });
     },
     dispose() {
@@ -507,100 +527,15 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
+      unregisterMap();
     },
   };
 }
 `;
 
-export const GAME_PLAYER_BODY_PATH = 'src/game/play/playerBody.ts';
-export const GAME_PLAYER_BODY = String.raw`// WHO THE PLAYER IS — and how it is changed (admin 2026-11-21: "yeh jo character banta hai, isko user jab chahe replace
-// karwa de, text se ya game library se chun ke").
-//
-// The player's body is the kit's own animated person by default. It is changed in ONE place, src/game/player.ts:
-//   • look  — the same person with other colours, height or build (still walks, runs, jumps and plays every action pose);
-//   • model — a character from the game library, by its subject ("knight", "farmer"). It is loaded from the game's own
-//             saved models; while it loads, and if it cannot be loaded, the kit person stays — the player is never missing.
-// Nothing else in the game refers to the body, so replacing the character touches nothing else.
-import * as THREE from 'three';
-import type { GameContext } from '../Game';
-import type { HumanoidOptions } from '../three/humanoid';
-
-export interface PlayerChoice {
-  /** The kit person's look: { height, build, skin, hair, shirt, trousers, shoes } (colours as 0xRRGGBB). */
-  look?: HumanoidOptions;
-  /** A library character's subject (it must be one of the game's saved models), or null for the kit person. */
-  model?: string | null;
-  /** How tall the model stands, in metres. Default 1.75. */
-  modelHeight?: number;
-}
-
-export interface PlayerModelHandle { root: THREE.Object3D; source?: string; update(dt: number): void; dispose?(): void; play?(role: string, fade?: number): boolean }
-export type PlayerAssetModule = { loadRequestedAsset?: (subject: string, fallback: () => PlayerModelHandle) => Promise<PlayerModelHandle> };
-
-/** The game's saved library models, when it has any. A game without the file simply has none — never a broken build. */
-function assetModule(): Promise<PlayerAssetModule | null> {
-  try {
-    const found = import.meta.glob('../three/assetModels.ts') as Record<string, () => Promise<PlayerAssetModule>>;
-    const load = Object.values(found)[0];
-    return load ? load().catch(() => null) : Promise.resolve(null);
-  } catch { return Promise.resolve(null); }
-}
-
-/** Which clip a moving body plays. */
-export function locomotionRole(speed: number, grounded: boolean): 'idle' | 'walk' | 'run' | 'jump' {
-  if (!grounded) return 'jump';
-  return speed > 4.2 ? 'run' : speed > 0.25 ? 'walk' : 'idle';
-}
-
-export interface PlayerBody {
-  /** Call every step. */
-  update(delta: number): void;
-  /** 'person' while the kit person is shown; 'model' once the library character has taken its place. */
-  readonly showing: 'person' | 'model';
-  dispose(): void;
-}
-
-/** Apply the choice to the running game. The second loader argument exists for tests; a game reads its own saved models. */
-export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null, load: () => Promise<PlayerAssetModule | null> = assetModule): PlayerBody {
-  let model: PlayerModelHandle | null = null;
-  let role = '';
-  let gone = false;
-  const subject = typeof choice?.model === 'string' ? choice.model.trim() : '';
-  if (subject && ctx.hero) {
-    const empty = (): PlayerModelHandle => ({ root: new THREE.Group(), source: 'procedural', update() { /* nothing to move */ } });
-    void load().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(subject, empty) : null)).then((handle) => {
-      if (gone || !handle || handle.source !== 'model' || !ctx.hero) {
-        if (!gone) console.error('[player] the character "' + subject + '" is not one of this game\'s saved models; the default person is shown.');
-        handle?.dispose?.();
-        return;
-      }
-      // Stand it at the asked height, feet on the ground, where the kit person stands.
-      const box = new THREE.Box3().setFromObject(handle.root);
-      const tall = box.max.y - box.min.y;
-      if (Number.isFinite(tall) && tall > 0.01) { const k = (choice?.modelHeight ?? 1.75) / tall; handle.root.scale.multiplyScalar(k); handle.root.position.y -= box.min.y * k; }
-      ctx.player.object.add(handle.root);
-      ctx.hero.root.scale.setScalar(0.0001);       // the kit person steps aside (the shell still drives it)
-      model = handle;
-    }).catch((error) => { console.error('[player] the character could not be loaded: ' + String(error)); });
-  }
-  return {
-    get showing() { return model ? 'model' as const : 'person' as const; },
-    update(delta) {
-      if (!model || !ctx.hero) return;
-      model.root.rotation.y = ctx.hero.root.rotation.y;
-      model.root.visible = ctx.hero.root.visible;
-      const next = locomotionRole(ctx.player.speed, ctx.player.isGrounded);
-      if (next !== role) { role = next; if (!model.play?.(next)) model.play?.(next === 'run' ? 'walk' : 'idle'); }
-      model.update(delta);
-    },
-    dispose() {
-      gone = true;
-      if (model) { model.root.removeFromParent(); model.dispose?.(); model = null; }
-      if (ctx.hero) ctx.hero.root.scale.setScalar(1);
-    },
-  };
-}
-`;
+// The player's body now ships with the shell (every game on the kit swaps its character in src/game/player.ts); the open
+// world still lists it so its recipe stays complete on its own.
+export { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH };
 
 export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — a character on NavBharatAI's big map, playable as it stands: the kit's own animated person,
 // the follow camera, the joystick and keys, terrain that streams as you walk, roads, plants, rivers, the sea and the sky.
@@ -608,10 +543,10 @@ export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — 
 // update() runs your rules — never replace the world, the player or the camera.
 import React, { useMemo, useRef } from 'react';
 import { GameCanvas } from './GameCanvas';
-import type { GameContext, GameOptions } from './Game';
+import type { GameContext, GameOptions, MinimapOptions } from './Game';
 import { createOpenWorld, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
 import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
-import { applyPlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
+import type { PlayerChoice } from './play/playerBody';
 
 export interface OpenWorldGameProps {
   title?: string;
@@ -624,32 +559,38 @@ export interface OpenWorldGameProps {
    */
   features?: ReadonlyArray<GameFeature<OpenWorld>>;
   /**
-   * WHO THE PLAYER IS: the kit person's look (colours, height, build), or a character model from the game library.
-   * Keep it in src/game/player.ts — changing the character is changing that one file.
+   * WHO THE PLAYER IS: the kit person's look (colours, height, build), a character model from the game library, or the
+   * user's own model file. Keep it in src/game/player.ts — changing the character is changing that one file. The shell
+   * applies it (and reads that file by itself when this is left out).
    */
   player?: PlayerChoice;
   /** Add your game to the world. Runs once, after the player is standing on the map. */
   setup?: (ctx: GameContext, world: OpenWorld) => void;
   /** Your rules, at a fixed 60 Hz, after the world has streamed for this step. */
   update?: (ctx: GameContext, world: OpenWorld, delta: number) => void;
+  /**
+   * THE MAP, the user's to shape (like PUBG / Free Fire): a round map in a corner with the roads and the names of places, and a
+   * tap on it (or M) opens the whole world with pan, zoom and a waypoint. { corner: 'right' } moves it, { size: 200 } makes it
+   * bigger (80–240), { names: false } hides the names, { range: 400 } shows more around the player, { fullMap: false } keeps it
+   * small only; false turns the map off. The player can also hide the corner map in Settings → Minimap.
+   */
+  map?: MinimapOptions | boolean;
   /** Any other shell option (camera, touch buttons, language, music …). */
   options?: Omit<GameOptions, 'container' | 'setup' | 'update'>;
 }
 
-export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, setup, update, options }: OpenWorldGameProps) {
+export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, map = true, setup, update, options }: OpenWorldGameProps) {
   const world = useRef<OpenWorld | null>(null);
   const host = useRef<FeatureHost<OpenWorld> | null>(null);
   const listed = useRef(features); listed.current = features;
-  const body = useRef<PlayerBody | null>(null);
   const hooks = useRef({ setup, update }); hooks.current = { setup, update };
   const gameOptions = useMemo<Omit<GameOptions, 'container'>>(() => ({
-    camera: 'third-person', gameId: 'open-world', minimap: true,
+    camera: 'third-person', gameId: 'open-world', minimap: map,
     startScreen: { title, ...(subtitle ? { subtitle } : {}) },
-    ...(player?.look ? { playerLook: player.look } : {}),
+    ...(player ? { player } : {}),
     ...options,
     setup(ctx) {
       world.current = createOpenWorld(ctx, worldOptions);
-      body.current = applyPlayerChoice(ctx, player);
       hooks.current.setup?.(ctx, world.current);
       host.current = createFeatureHost<OpenWorld>(listed.current || []);
       host.current.setup(ctx, world.current);
@@ -657,7 +598,6 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     update(ctx, delta) {
       if (!world.current) return;
       world.current.frame(ctx, delta);
-      body.current?.update(delta);
       hooks.current.update?.(ctx, world.current, delta);
       host.current?.update(ctx, world.current, delta);
     },
@@ -706,20 +646,7 @@ export const GAME_FEATURES_INDEX = [
   '',
 ].join('\n');
 
-export const GAME_PLAYER_FILE_PATH = 'src/game/player.ts';
-/** The game's own player — the user's file (never a kit file): created once; changing the character is changing this. */
-export const GAME_PLAYER_FILE = [
-  "// THIS GAME'S PLAYER. To change how the character looks, edit look (colours are 0xRRGGBB; height in metres; build 0.85 slight to 1.2 heavy).",
-  "// To use a character from the game library instead, add it to the game first, then set model to its subject (for example 'knight').",
-  '// Set model back to null for the default person. Nothing else in the game needs to change.',
-  "import type { PlayerChoice } from './play/playerBody';",
-  '',
-  'export const PLAYER: PlayerChoice = {',
-  '  look: { shirt: 0x2e5a87 },',
-  '  model: null,',
-  '};',
-  '',
-].join('\n');
+export { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH };
 
 export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
 /** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
@@ -770,6 +697,13 @@ export function generateOpenWorld(): RecipeOutput {
       'parks), with traffic that obeys the lights, people who cross on the zebras, and parked cars the player gets into with Use (E). world.city',
       'gives the city, its traffic, its people, the parked cars and toWorld(x, z) for its lots and routes. Pass city options',
       '({ blocksX, blocksZ, style, traffic: { count }, people: { count }, parkedCars }) to change it, or leave city out for open country.',
+      'THE MAP IS ALREADY THERE (like PUBG / Free Fire): a round map in the top-left corner shows the highways and the places near the',
+      'player with their names, and a tap on it (or M) opens the WHOLE world full screen — every place and land named, the roads, the player',
+      'and its heading; drag to pan, pinch or scroll to zoom, tap to drop a waypoint that the corner map then shows with its distance. Never',
+      'draw your own minimap or map screen. Do what the user says through the map prop of <OpenWorldGame>: "map right corner me" →',
+      'map={{ corner: \'right\' }}; "bada minimap" → map={{ size: 200 }} (80–240 px); "naam mat dikhao" → map={{ names: false }}; "aur door tak',
+      'dikhao" → map={{ range: 400 }} (metres); "full map nahi chahiye" → map={{ fullMap: false }}; "map band karo" → map={false}. A place\'s',
+      'name on the map is its region name in src/game/world.ts ({ id: \'old-town\', kind: \'town\', name: \'Rampur\' }), else made from its id.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

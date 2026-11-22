@@ -43,6 +43,9 @@ const knight = () => {
   return { played, handle: { root, source: 'model', update: vi.fn(), dispose: vi.fn(), play: (role: string) => { played.push(role); return role !== 'run'; } } };
 };
 const settle = () => new Promise((r) => setTimeout(r, 0));
+/** The model stands inside the player (a sizing pivot and a facing wrapper sit between them). */
+const under = (o: any, ancestor: any): boolean => { for (let p = o?.parent; p; p = p.parent) if (p === ancestor) return true; return false; };
+const wrapperOf = (g: ReturnType<typeof game>) => g.player.object.children.find((c: any) => c !== g.hero.root);
 
 describe('🧍 a library character takes the place of the kit person', () => {
   it('stands where the player stands, at a person\'s height, feet on the ground — and the kit person steps aside', async () => {
@@ -53,7 +56,8 @@ describe('🧍 a library character takes the place of the kit person', () => {
     await settle();
     expect(asked).toEqual(['knight']);
     expect(body.showing).toBe('model');
-    expect(k.handle.root.parent).toBe(g.player.object);
+    expect(under(k.handle.root, g.player.object)).toBe(true);
+    g.player.object.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(k.handle.root);
     expect(box.max.y - box.min.y).toBeCloseTo(1.75, 2);
     expect(box.min.y).toBeCloseTo(g.player.object.position.y, 2);
@@ -66,7 +70,7 @@ describe('🧍 a library character takes the place of the kit person', () => {
     await settle();
     g.hero.root.rotation.y = 1.2;
     body.update(0.016);
-    expect(k.handle.root.rotation.y).toBeCloseTo(1.2);
+    expect(wrapperOf(g).rotation.y).toBeCloseTo(1.2);
     expect(k.handle.update).toHaveBeenCalledWith(0.016);
     expect(k.played.at(-1)).toBe(PB.locomotionRole(g.player.speed, g.player.isGrounded));
     expect(PB.locomotionRole(0, true)).toBe('idle');
@@ -111,11 +115,14 @@ describe('🎨 the look of the kit person', () => {
   it('the shell builds its hero from the game\'s own look, and the starter passes it through', () => {
     const shell = pool.get('src/game/Game.ts')!.content;
     expect(shell).toMatch(/playerLook\?: HumanoidOptions/);
-    expect(shell).toMatch(/createHumanoid\(\{[^}]*\.\.\.\(options\.playerLook \|\| \{\}\)/);
+    expect(shell).toContain('...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) })');
+    // The shell applies the choice itself (every game on it), and the open-world starter hands its player to the shell.
+    expect(shell).toMatch(/this\.playerChoice = resolvePlayerChoice\(options\.player\)/);
+    expect(shell).toMatch(/this\.playerModel = applyPlayerChoice\(this\.context, this\.playerChoice\)/);
+    expect(shell).toMatch(/this\.playerModel\?\.update\(delta\)/);
     const starter = pool.get(OPEN_WORLD_STARTER_PATH)!.content;
-    expect(starter).toMatch(/player\?\.look \? \{ playerLook: player\.look \}/);
-    expect(starter).toMatch(/applyPlayerChoice\(ctx, player\)/);
-    expect(starter).toMatch(/body\.current\?\.update\(delta\)/);
+    expect(starter).toMatch(/\.\.\.\(player \? \{ player \} : \{\}\)/);
+    expect(starter).not.toMatch(/applyPlayerChoice\(/);
     const red = HU.createHumanoid({ height: 1.75, shirt: 0x2e5a87, ...{ shirt: 0xff0000, height: 2 } });
     const colours: number[] = [];
     red.root.traverse((o: any) => { if (o.material?.color) colours.push(o.material.color.getHex()); });
@@ -136,9 +143,10 @@ describe('📄 one file is the character — the user\'s, written once', () => {
   });
   it('the mount creates it only when it is not there', () => {
     const src = read('src/server/AgentV3/ToolDispatcher.ts');
-    const at = src.indexOf('GAME_PLAYER_FILE_PATH); cast = true;');
+    const at = src.indexOf('private async ensurePlayerFile(');
     expect(at).toBeGreaterThan(0);
-    expect(src.slice(at, at + 400)).toMatch(/if \(!cast\) \{\s*const playerFile = await this\.guardedWrite\(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE,/);
+    expect(src.slice(at, at + 500)).toMatch(/readFile\(this\.workspaceId, GAME_PLAYER_FILE_PATH\); return false; \}\s*catch \(error\) \{ if \(!isNotFoundError\(error\)\) throw error; \}\s*const playerFile = await this\.guardedWrite\(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE,/);
+    expect(src).toMatch(/await this\.ensurePlayerFile\(agent, 'generate_open_world'\)/);
   });
   it('the builder is told where the character lives on every turn of a game that has the file — and never otherwise', () => {
     expect(projectGrowthRules({ [GAME_PLAYER_FILE_PATH]: GAME_PLAYER_FILE })).toContain(GAME_PLAYER_RULE);

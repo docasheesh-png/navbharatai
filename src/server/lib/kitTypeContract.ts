@@ -48,6 +48,22 @@ export function extractExportedDeclaration(source: string | null | undefined, na
   return extractDeclaration(source, name);
 }
 
+/**
+ * Many names out of ONE source, parsing it at most once for this call (the parse is dropped when the call returns —
+ * no AST outlives it, kitTypeContractParsing.test.ts). Asking extractExportedDeclaration for each name re-parsed the
+ * whole file per name: the contract's ~100 names over the ~40 kit files took 2 s, 4 s once the racing kit grew, and
+ * past 20 s under CI coverage (2026-11-22). Same answers, name for name, as the single-name helper.
+ */
+export function extractExportedDeclarations(source: string | null | undefined, names: readonly string[]): Map<string, string> {
+  const parsed = new Map<string, ts.SourceFile>();
+  const out = new Map<string, string>();
+  for (const name of names) {
+    const declaration = extractDeclaration(source, name, parsed);
+    if (declaration) out.set(name, declaration);
+  }
+  return out;
+}
+
 function extractDeclaration(source: string | null | undefined, name: string, parsedSources?: Map<string, ts.SourceFile>): string | null {
   const src = String(source ?? '');
   if (!src || src.length > 1_000_000 || !/^[A-Za-z_$][\w$]*$/.test(name)) return null;

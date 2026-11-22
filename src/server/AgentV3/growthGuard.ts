@@ -18,7 +18,7 @@
 // (its words), a request about everything ("sab", "poora game"), or a repair ("fix", "theek karo") for edits; removing a
 // thing always needs a removal word AND its name. Kill switch: AGENTV3_GROWTH_GUARD=off.
 import { recipeFilePool } from '../lib/gameRecipeLayers';
-import { PART_NAMES_FILE, partKnowledge, requestMeans, type PartKnowledge } from './partMeaning';
+import { PART_NAMES_FILE, partKnowledge, requestMeans, kitPartVocabulary, kitPartOwnName, type PartKnowledge } from './partMeaning';
 
 export const FEATURES_INDEX = 'src/game/features/index.ts';
 export const WORLD_FILE = 'src/game/world.ts';
@@ -81,14 +81,95 @@ const REMOVAL = /\b(?:remove|removes|removed|delete|deletes|deleted|drop|hata\w*
  * do", "allow"). That is a decision the user makes knowingly, once, for that turn.
  */
 const PERMIT = /\b(?:allow|allowed|permit|permission|go\s+ahead|ijaz+at|anumati|badal(?:ne)?\s+do|badal\s+sakte|chhed\s+sakte|jo\s+(?:bhi\s+)?zar+oo?ri|zar+oo?rat\s+ho\s+to|whatever\s+(?:is\s+)?need\w*|as\s+needed|if\s+needed)\b/i;
+/**
+ * 🔓 A FREE HAND, IN THE USER'S OWN WORDS (admin 2026-11-22: "user koi bhi game banaye kuch bhi edit/update karwa sake").
+ * "jo chahe badlo", "jaisa theek lage waisa karo", "apne hisaab se", "change whatever you want", "feel free" hand the
+ * builder the choice of WHAT to change — PERMIT only knew "allow" and "jo zaroori ho". Before 2026-11-22 these opened
+ * nothing (or, for "theek lage", only by the accident that "theek" is also a repair word). A free hand opens EDITS
+ * everywhere, the kit included; it never opens a removal (that still takes a removal word and a name, or a whole-game
+ * replacement below). What to change is still the builder's to ask when the request says nothing (GAME_NO_GUESS_RULE).
+ */
+const FREE_HAND = /(?:\bjo\s+(?:bhi\s+)?(?:chahe|chaho|chahiye\s+wo|marzi|man\s+kare|theek\s+lage|thik\s+lage|sahi\s+lage|accha\s+lage|achha\s+lage|acha\s+lage)\b|\bjaisa\s+(?:bhi\s+|aapko\s+|tumhe\s+)?(?:chahe|chaho|theek|thik|sahi|accha|achha|acha)\b|\bapne\s+(?:hisaab|hisab|man|tareeke|tarike)\s+se\b|\bkuch\s+bhi\s+(?:badal|change|edit|kar)\w*|\bfree\s+hand\b|\bfeel\s+free\b|\b(?:change|edit|do|modify)\s+(?:whatever|anything)\b|\bwhatever\s+you\s+(?:want|like|think|feel)\b|\banything\s+you\s+(?:want|like)\b|\bup\s+to\s+you\b|\byour\s+(?:choice|call)\b)/i;
+
+/**
+ * 🔄 THE WHOLE GAME (OR THE WHOLE MAP) REPLACED — "poora game badal do, ab racing game banao", "sab kuch hata ke naya game
+ * banao", "redo the whole game from scratch", "poora world badal do". Before 2026-11-22 a removal needed a removal word AND
+ * the name of every part, so a request to replace the whole game had every old feature, place and the old mount PUT BACK
+ * at the end of the turn: the one request that is about everything was the one the guard never let through. A whole-scope
+ * word + a replace verb, or "from scratch", is that request; anything less (a "sab" about a quantity — "sab cars ko lal
+ * karo") is not. PURE.
+ */
+const WHOLE = String.raw`(?:poora|poori|pura|puri|pure|poore|saara|sara|saari|sari|whole|entire|complete|full)`;
+const REPLACE_VERB = String.raw`(?:badal\w*|change\w*|replace\w*|redo|rewrite\w*|remake|rebuild|dobara\s+bana\w*|phir\s+se\s+bana\w*|hata\w*|remove\w*|delete\w*|scrap\w*)`;
+/** The scope noun must be the OBJECT of the verb, never a possessive ("poore game KA colour badlo" changes a colour). */
+const NOT_POSSESSED = String.raw`(?!\s*'s\b|\s+(?:ka|ki|ke|me|mein|main|par|pe|of|for|in)\b)`;
+const FROM_SCRATCH = /\b(?:from\s+scratch|scratch\s+se|start\s+over|shuru\s+se\s+(?:bana|likh)\w*|naye\s+sire\s+se)\b/i;
+const EVERYTHING_REPLACED = /\b(?:sab\s+kuch|sabkuch|har\s+cheez|har\s+chiz|everything)\s+(?:ko\s+)?(?:badal\w*|change\w*|replace\w*|hata\w*|remove\w*|delete\w*|redo|rewrite\w*)\b|\b(?:change|replace|redo|rewrite|remove|delete)\s+everything\b(?!\s+(?:about|in|of)\b)/i;
+const NEW_GAME_INSTEAD = /\b(?:naya|nayi|new|dusra|doosra|another|different)\s+(?:\w+\s+){0,2}(?:game|khel)\b[\s\S]{0,40}?\b(?:ki\s+jagah|instead)\b|\b(?:purana|old)\s+(?:wala\s+)?(?:game|khel)\s+(?:\w+\s+)?(?:hata\w*|remove\w*|delete\w*|band)\b/i;
+function wholeScopeReplaced(request: string, scope: string): boolean {
+  const hindi = new RegExp(String.raw`\b${WHOLE}\s+(?:ka\s+(?:poora|pura)\s+)?${scope}\b${NOT_POSSESSED}\s+(?:\w+\s+){0,2}?(?:ko\s+)?${REPLACE_VERB}\b`, 'i');
+  const english = new RegExp(String.raw`\b${REPLACE_VERB}\s+(?:the\s+|my\s+|this\s+)?${WHOLE}\s+${scope}\b${NOT_POSSESSED}`, 'i');
+  return hindi.test(request) || english.test(request);
+}
+/** Does the request replace the WHOLE game — its features, its map and the way it starts? PURE. */
+export function replacesWholeGame(request: string): boolean {
+  const r = String(request ?? '');
+  return FROM_SCRATCH.test(r) || EVERYTHING_REPLACED.test(r) || NEW_GAME_INSTEAD.test(r) || wholeScopeReplaced(r, String.raw`(?:game|project|app|khel)`);
+}
+/** Does the request replace the WHOLE map (every place on it)? A whole game replaced replaces its map too. PURE. */
+export function replacesWholeMap(request: string): boolean {
+  return replacesWholeGame(request) || wholeScopeReplaced(String(request ?? ''), String.raw`(?:world|map|duniya|duniyan|naksha|zameen|jameen)`);
+}
 
 /** May this turn EDIT an existing feature / place? PURE. */
 export function mayEdit(request: string, id: string, known?: PartsKnown): boolean {
-  return requestIsAbout(request, id, known) || ABOUT_EVERYTHING.test(request) || REPAIR.test(request) || PERMIT.test(request);
+  return requestIsAbout(request, id, known) || ABOUT_EVERYTHING.test(request) || REPAIR.test(request) || PERMIT.test(request) || FREE_HAND.test(request);
 }
-/** May this turn REMOVE it? Only when the user asks to remove, and the request is about it. PURE. */
+/** May this turn REMOVE it? When the user asks to remove it by name or meaning, or replaces the whole game. PURE. */
 export function mayRemove(request: string, id: string, known?: PartsKnown): boolean {
-  return REMOVAL.test(request) && requestIsAbout(request, id, known);
+  return (REMOVAL.test(request) && requestIsAbout(request, id, known)) || replacesWholeGame(request);
+}
+/** May this turn remove a PLACE of the map? As a feature, or when the whole map is replaced. PURE. */
+export function mayRemovePlace(request: string, id: string): boolean {
+  return mayRemove(request, id) || replacesWholeMap(request);
+}
+
+/**
+ * 🔓 THE KIT IS THE USER'S TOO, WHEN THEY ASK (admin 2026-11-22). Before, a kit file was refused for EVERY request — "apna
+ * camera chahiye", "joystick bada karo", "traffic kam karo" were refused at the write and put back at the end of the turn,
+ * and the user was told "the game engine itself is never edited". The kit files of a game are copies in that game's own
+ * project (an edited one is never overwritten by a kit refresh: gameRecipeLayers.ts keeps "somebody's code"), so changing
+ * one changes that game only. A kit part opens when the request is about it (partMeaning.kitPartVocabulary: its name, or
+ * what it does), on a free hand or an explicit permission, or when the whole game is replaced. It stays shut for a request
+ * that does not touch it — a repair ("fix karo") or "sab" alone never opens the engine under every feature. PURE.
+ */
+export function mayEditKit(request: string, path: string): boolean {
+  return requestMeans(request, kitPartVocabulary(path)) || PERMIT.test(request) || FREE_HAND.test(request) || replacesWholeGame(request);
+}
+/** May this turn DELETE a kit file? Only when the request removes that part by name, or replaces the whole game. PURE. */
+export function mayRemoveKit(request: string, path: string): boolean {
+  return (REMOVAL.test(request) && requestMeans(request, kitPartVocabulary(path))) || replacesWholeGame(request);
+}
+
+/**
+ * 🔓 THE WAY THE GAME STARTS (src/App.tsx's <OpenWorldGame … />) may stop being the open world only when the user asks for
+ * that: the whole game replaced, or the open world / big map itself removed or swapped for their own ("OpenWorldGame hata
+ * do, apna 2D game likho", "map hatao", "mera khud ka world banao"). Before 2026-11-22 the mount was put back whatever the
+ * request said. PURE.
+ */
+const MOUNT = String.raw`(?:open\s*world(?:\s*game)?|openworldgame|big\s+map|bada\s+map|map|world|duniya|naksha|engine)`;
+const UNMOUNT = [
+  // "map hata do", "OpenWorldGame ko hatao", "open world band karo"
+  new RegExp(String.raw`\b${MOUNT}\s+(?:ko\s+|bhi\s+|wala\s+)?(?:hata\w*|nikal\w*|band\s+kar\w*|remove\w*|delete\w*)`, 'i'),
+  // "remove the open world", "delete the map"
+  new RegExp(String.raw`\b(?:remove|delete|drop|replace)\s+(?:the\s+|this\s+)?(?:big\s+)?${MOUNT}\b`, 'i'),
+  // "apna khud ka world", "my own world / engine", "custom map", "map ki jagah …", "instead of the open world"
+  new RegExp(String.raw`\b(?:apna|apni|khud\s+ka|khud\s+ki|my\s+own|our\s+own|custom)\s+(?:khud\s+ka\s+)?${MOUNT}\b${NOT_POSSESSED}`, 'i'),
+  new RegExp(String.raw`\b${MOUNT}\s+ki\s+jagah\b|\binstead\s+of\s+(?:the\s+)?(?:big\s+)?${MOUNT}\b`, 'i'),
+];
+export function mayUnmount(request: string): boolean {
+  const r = String(request ?? '');
+  return replacesWholeGame(r) || UNMOUNT.some((re) => re.test(r));
 }
 
 const featureIdOf = (path: string): string => (path.split('/').pop() || '').replace(/\.tsx?$/, '');
@@ -165,7 +246,7 @@ export function repairWorld(before: string, after: string | null, request: strin
   if (!b) return null;
   const a = after === null ? null : parseRegions(after);
   if (!a) return before;
-  const missing = b.filter((r) => !a.some((x) => x.id === r.id) && !mayRemove(request, r.id));
+  const missing = b.filter((r) => !a.some((x) => x.id === r.id) && !mayRemovePlace(request, r.id));
   if (missing.length === 0) return null;
   return (after as string).replace(/(\bregions\s*:\s*\[)/, (_all, open: string) => `${open}\n${missing.map((r) => `    ${r.text},`).join('\n')}`);
 }
@@ -213,7 +294,8 @@ export function growthVerdict(input: { path: string; before: string | undefined;
   if (path === PLAYER_FILE && after === null) return { allow: false, restore: before, reason: 'src/game/player.ts was deleted; the game reads its player character from it (set model: null for the default person instead)' };
   if (path === APP_FILE) {
     const lost = lostMount(before, after);
-    return lost.length === 0 ? { allow: true } : { allow: false, restore: before, reason: `src/App.tsx no longer mounts the game as it did (${lost.join(', ')})` };
+    // The user asked for the open world to go (or for a whole new game): the mount is theirs to change.
+    return lost.length === 0 || (after !== null && mayUnmount(request)) ? { allow: true } : { allow: false, restore: before, reason: `src/App.tsx no longer mounts the game as it did (${lost.join(', ')})` };
   }
   if (FEATURE_FILE.test(path)) {
     const id = featureIdOf(path);
@@ -223,8 +305,11 @@ export function growthVerdict(input: { path: string; before: string | undefined;
   if (isKitFile(path)) {
     // The kit's own current version is the platform's write whoever carried it (a recipe run again, a layer brought up to date).
     if (after !== null && recipeFilePool().get(path)?.content === after) return { allow: true };
-    // The kit is the platform's: a game is extended through a feature, never by editing the engine under every feature.
-    return { allow: false, restore: before, reason: 'a game-kit file was changed; a game is extended through a feature, not by editing the kit' };
+    // 🔓 The user asked for THIS part of the kit to change ("apna camera chahiye", "joystick bada karo") or gave a free hand:
+    // this game's own copy of it is theirs (an edited kit file is never overwritten by a kit refresh).
+    if (after === null ? mayRemoveKit(request, path) : mayEditKit(request, path)) return { allow: true };
+    // Otherwise the kit is the engine under every feature: a request that does not touch it never changes it.
+    return { allow: false, restore: before, reason: 'a game-kit file was changed, and the request is not about that part of the game' };
   }
   return { allow: true };
 }
@@ -257,8 +342,9 @@ export function growthRestores(input: {
 export function growthRefusal(path: string, reason: string): string {
   return `REFUSED (growth guard): ${path} was not changed — ${reason}. This game grows by ADDING: create a NEW file under src/game/features/ `
     + 'with defineFeature({ id, needs?, setup, update }) and add ONE line to src/game/features/index.ts; build on another feature with needs + '
-    + 'api.get(id), never by editing it. A new place is ONE more entry in src/game/world.ts. If the user really asked to change or remove this '
-    + 'one, say which in your reply and ask them to name it.';
+    + 'api.get(id), never by editing it. A new place is ONE more entry in src/game/world.ts. This file opens the moment the user\'s own words '
+    + 'ask for it — its name or what it does ("camera badlo", "police hatao"), "jo chahe badlo", or "poora game badal do" — so if you believe the '
+    + 'user asked for exactly this change, do everything else, then say in your reply which part it needs and ask them to say so.';
 }
 
 /** The feature or place a protected path stands for, in the user's words; '' for the mount and the kit. PURE. */
@@ -272,6 +358,7 @@ export function partNameOf(path: string): string {
  */
 export function growthAskNote(blockedPaths: readonly string[]): string {
   const parts = [...new Set(blockedPaths.map(partNameOf).filter(Boolean))];
+  const engineParts = [...new Set(blockedPaths.filter((p) => isKitFile(p)).map(kitPartName).filter(Boolean))];
   const engine = blockedPaths.some((p) => isKitFile(p));
   if (parts.length === 0 && !engine) return '';
   const lines: string[] = [];
@@ -279,8 +366,18 @@ export function growthAskNote(blockedPaths: readonly string[]): string {
     lines.push(`🔒 To do this the way it was first planned, I would also have changed ${parts.length === 1 ? 'a part of your game that already works' : 'parts of your game that already work'}: ${parts.slice(0, 6).join(', ')}. I did not touch ${parts.length === 1 ? 'it' : 'them'}, because you did not ask me to.`);
     lines.push(`If you want that, say so by name — for example "${parts[0]} bhi badlo" — or say "jo zaroori ho badal do" to let me change what is needed this once.`);
   }
-  if (engine) lines.push('The game engine itself is never edited for one game. If something in it is wrong, tell me what you see and it will be fixed for every game.');
+  // 🔓 The engine is this game's too (admin 2026-11-22): it is opened by the user's words, never closed for good.
+  if (engine) {
+    const named = engineParts.slice(0, 4);
+    lines.push(`I also left the game engine${named.length ? ` (${named.join(', ')})` : ''} as it was, because you did not ask me to change it.`
+      + ` If you want that part of the engine changed for this game, say so by name — for example "${named[0] || 'camera'} badlo" — or say "jo chahe badlo".`);
+  }
   return `\n\n${lines.join(' ')}`;
+}
+
+/** A kit file in the user's words ("camera", "touch controls"); '' when its name says nothing. PURE. */
+export function kitPartName(path: string): string {
+  return kitPartOwnName(path);
 }
 
 /** What the user is told when something was put back. Plain words, no file paths. */
@@ -294,4 +391,18 @@ export function growthUserNote(restores: readonly GrowthRestore[]): string {
   if (restores.some((r) => r.path === APP_FILE)) parts.push('the way the game starts');
   if (restores.some((r) => isKitFile(r.path))) parts.push('the game engine itself');
   return `\n\n🛡️ I kept what already worked: this change had also altered ${parts.join(', ')}. I put that back exactly as it was. Tell me by name if you want one of those changed.`;
+}
+
+/**
+ * What the user is told when a change they did not ask for could NOT be put back (the write failed). Before 2026-11-22 only
+ * the report said so: the user heard "I kept what already worked" for the parts that were restored and nothing at all about
+ * the ones that were not — an unasked change surviving silently. Plain words, no file paths. PURE.
+ */
+export function growthNotRestoredNote(failed: readonly GrowthRestore[]): string {
+  if (failed.length === 0) return '';
+  const nameOf = (r: GrowthRestore): string => partNameOf(r.path) || (isKitFile(r.path) ? kitPartName(r.path) : '')
+    || (r.path === WORLD_FILE ? 'the map' : r.path === APP_FILE ? 'the way the game starts' : r.path === FEATURES_INDEX ? 'the list of parts' : 'a part of the game');
+  const names = [...new Set(failed.map(nameOf).filter(Boolean))];
+  const it = failed.length === 1 ? 'it' : 'them';
+  return `\n\n⚠️ This change also altered ${names.slice(0, 5).join(', ')}, which you did not ask for, and I could not put ${it} back, so ${failed.length === 1 ? 'it is' : 'they are'} still changed. Tell me if you want ${it} changed back.`;
 }

@@ -35,7 +35,7 @@ const MEANINGS: readonly string[][] = [
   ['gun', 'guns', 'bandook', 'banduk', 'pistol', 'rifle', 'weapon', 'weapons', 'hathiyar', 'shoot', 'shooting', 'fire', 'goli', 'bullet', 'ammo', 'बंदूक', 'गोली'],
   ['sword', 'talwar', 'knife', 'chaku', 'melee', 'तलवार'],
   ['bomb', 'bum', 'blast', 'explosion', 'dhamaka', 'grenade', 'बम', 'धमाका'],
-  ['mission', 'missions', 'task', 'tasks', 'quest', 'quests', 'kaam', 'objective', 'मिशन'],
+  ['mission', 'missions', 'task', 'tasks', 'quest', 'quests', 'kaam', 'objective', 'job', 'jobs', 'naukri', 'मिशन'],
   ['delivery', 'deliver', 'parcel', 'courier', 'saman', 'डिलीवरी'],
   ['shop', 'shops', 'store', 'dukaan', 'dukan', 'market', 'bazaar', 'bazar', 'दुकान', 'बाज़ार'],
   ['timer', 'time', 'clock', 'samay', 'waqt', 'countdown', 'ghadi', 'समय'],
@@ -71,7 +71,9 @@ const MEANINGS: readonly string[][] = [
   ['shield', 'kavach', 'dhal', 'armor', 'armour', 'कवच'],
   ['win', 'jeet', 'victory', 'jeetna', 'जीत'], ['lose', 'haar', 'gameover', 'harna', 'हार'],
   ['menu', 'pause', 'settings', 'setting', 'मेन्यू'],
-  ['camera', 'view', 'nazara', 'कैमरा'],
+  ['camera', 'view', 'nazara', 'firstperson', 'thirdperson', 'topdown', 'कैमरा'],
+  ['controls', 'control', 'joystick', 'keyboard', 'button', 'buttons', 'touch', 'input', 'keybind', 'keybinds', 'कंट्रोल'],
+  ['hud', 'healthbar', 'display', 'overlay'],
   ['player', 'character', 'hero', 'aadmi', 'insaan', 'kirdar', 'avatar', 'खिलाड़ी'],
   ['clothes', 'kapde', 'dress', 'outfit', 'shirt', 'कपड़े'],
   ['colour', 'color', 'colours', 'colors', 'rang', 'रंग'],
@@ -173,6 +175,49 @@ export function partKnowledge(filesAtTurnStart: Readonly<Record<string, string>>
     out.set(m[1], { vocabulary: [camelWords(m[1]), ...aboutWordsIn(source), ...(names[m[1]] ?? [])] });
   }
   return out;
+}
+
+/**
+ * 🔓 THE KIT'S PARTS, BY WHAT THEY DO (admin 2026-11-22: "user koi bhi game banaye kuch bhi edit/update karwa sake"). A game's
+ * kit files (the camera, the controls, the HUD, the city's traffic …) are copies in the user's own project, and a user who
+ * asks for one of them to change — "apna camera chahiye", "joystick bada karo", "traffic kam karo" — is talking about that
+ * file whether or not they know its name. A file's own name says most of it; the few files whose name does not say what
+ * they carry are listed here with the words that do. Read by the growth guard to open exactly the kit part a request names.
+ */
+const KIT_PART_ABOUT: Readonly<Record<string, readonly string[]>> = {
+  'src/game/core/input.ts': ['controls', 'keyboard'],
+  'src/game/core/keybinds.ts': ['controls', 'keyboard'],
+  'src/game/ui/touchControls.ts': ['controls', 'joystick', 'touch buttons'],
+  'src/game/2d/touch.ts': ['controls', 'joystick', 'touch buttons'],
+  'src/game/ui/Hud.tsx': ['hud', 'health bar', 'minimap', 'score display'],
+  'src/game/three/healthbar.ts': ['health bar'],
+  'src/game/OpenWorldGame.tsx': ['camera', 'controls', 'hud'],
+  'src/game/play/openWorld.ts': ['camera', 'ground'],
+  'src/game/GameCanvas.tsx': ['camera', 'controls', 'hud'],
+  'src/game/Game.ts': ['camera', 'controls', 'hud'],
+  'src/game/play/motor.ts': ['movement', 'walking', 'running', 'jump', 'speed'],
+  'src/game/play/character.ts': ['movement', 'walking', 'running', 'jump'],
+  'src/game/three/lighting.ts': ['light', 'day', 'night', 'sun'],
+  'src/game/three/atmosphere.ts': ['weather', 'fog', 'sky'],
+  'src/game/three/citytraffic.ts': ['city traffic', 'traffic'],
+  'src/game/three/citypeople.ts': ['city people', 'people', 'pedestrians'],
+  'src/game/systems/projectile.ts': ['bullet', 'shooting'],
+  'src/game/fx/audio.ts': ['sound'],
+  'src/game/fx/synth.ts': ['sound'],
+  'src/game/fx/soundLibrary.ts': ['sound'],
+};
+/** Words a kit file's path carries that name no part of it ("index"; "world" is every map's; "game" every game's). */
+const KIT_PATH_SAYS_NOTHING = new Set(['index', 'world', 'game', 'values', 'open']);
+
+/** The words that say what a kit file IS: its file name's words and, for the files listed above, what they carry. PURE. */
+export function kitPartVocabulary(path: string): string[] {
+  const own = kitPartOwnName(path);
+  return [...(own ? [own] : []), ...(KIT_PART_ABOUT[path] ?? [])];
+}
+/** A kit file's own name in words ("touch controls", "camera"); '' when its name says nothing ("index", "Game"). PURE. */
+export function kitPartOwnName(path: string): string {
+  const base = (String(path ?? '').split('/').pop() || '').replace(/\.[a-z]+$/i, '').replace(/\.values$/, '');
+  return camelWords(base).split(/\s+/).filter((w) => w && !KIT_PATH_SAYS_NOTHING.has(w.toLowerCase())).join(' ').toLowerCase();
 }
 
 /**

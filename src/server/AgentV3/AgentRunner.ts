@@ -781,6 +781,13 @@ export class AgentRunner {
     if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
     /** Changes the dispatcher had made before this run — so a repair pass can ask about ITSELF (repairClaim.ts). */
     const changesAtRunStart = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : 0;
+    /**
+     * Did THIS run write anything — the builder's own work, not the platform's seed laid before the run began (failedbr #2487,
+     * Q-3246: "judged finished at step 3 (100/100)" before the builder had written one file; the seeded game kit is a complete
+     * app structurally, so the done check and the readiness mark measured OUR seed and could tell the builder to stop before
+     * it built a single thing the user asked for). Falls back to `wroteAnything()` for a dispatcher that cannot count.
+     */
+    const wroteThisRunNow = (): boolean => (typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() - changesAtRunStart > 0 : dispatcher.wroteAnything());
     let explorationProgress = initialExplorationProgress(changesAtRunStart);
     let explorationNarrated = false;
     /**
@@ -1496,7 +1503,7 @@ export class AgentRunner {
                 readyMark = endOfTurnReadyMark({
                   existing: readyMark, readiness,
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
-                  editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
+                  editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: wroteThisRunNow(),
                   projectModule: this.opts.projectModule?.() ?? null,
                   requestGaps: (() => { try { return this.opts.requestGaps?.() ?? []; } catch { return []; } })(),
                   step: steps, elapsedMs: Date.now() - buildStartMs, at: Date.now(),
@@ -1991,9 +1998,9 @@ export class AgentRunner {
           let renderedAt = 0;
           try { renderedAt = Number(this.opts.appRenderedAt?.() ?? 0) || 0; } catch { renderedAt = 0; }
           const renderedUnchecked = renderedAt > 0 && doneLastCheckedAt < renderedAt;
-          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked });
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: wroteThisRunNow(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked });
           if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: wroteThisRunNow(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked })) {
             doneMissedAt = undefined;
             doneLastCheckedAt = Date.now();
             const readiness = await dispatcher.assessBuildReadiness();

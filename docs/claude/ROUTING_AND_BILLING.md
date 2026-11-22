@@ -829,6 +829,24 @@ labelled estimated, and never above the verified Surplus policy (10× the same e
 switch `AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off` restores today's ₹0 absorb; unset or empty
 means ON. See `src/server/AgentV3/surplusStopTokenFloor.ts`.
 
+### Owner decision — 2026-11-22: completed Weak builds with unsettled Surplus receipts (failedbr #2487)
+
+The GTA build ran 36 Surplus calls (2.76 M input tokens), its preview ran, and it was billed ₹0: one unsettled receipt made
+the whole build's Surplus spend absorbed. The owner, asked with the numbers, chose "Tokens se andaaza × niyam":
+- **Per call, not all-or-nothing.** `surplusBuildCharges` charges every call with a valid receipt and sets aside only the
+  calls without one (with their recorded tokens). A repeated identity with different evidence is set aside, never trusted.
+- **A completed build estimates the set-aside calls.** Recorded tokens × the cheapest published Surplus-universe rate (the
+  same rate the 2026-11-11 stop floor uses), then the ORDINARY markup (`tieredMarkupUsd`), capped at 10× the estimated cost,
+  labelled estimated and recorded as `SURPLUS_UNSETTLED_COST_ESTIMATED`. Gates: Weak, unsettled calls with real tokens,
+  NOT a user stop (the stop floor owns that, unchanged, at cost), a preview that ran, the builder's own files, not
+  free-listed, not already zeroed. The Stop / failed-build rules applied after it can only reduce it.
+- **One helper for both billing points** (`decideSurplusStopTokenFloor`: stop floor first, else this estimate), so the
+  settle and the deadline finalizer cannot disagree. Kill switch `AGENTV3_BILL_SURPLUS_UNSETTLED_ESTIMATE=off`.
+- **Honest scale, said to the owner:** the published rate is far above Surplus's real price (≈95% cheaper), so the estimate
+  is higher than a settled receipt would have been (#2487: ~$0.16 cost estimated vs an expected few tenths of a cent). The
+  real fix for revenue accuracy is receipts that settle; why #2487's did not is open (the server log line
+  `[AGENTV3 BILLING] Surplus receipts unsettled …` now names how many calls of how many).
+
 ALL Pro bands replace measured sandbox billing with a SERVICE FEE equal to 2.5%
 of the pre-sandbox user subtotal AFTER existing waiver/stop/free rules and build
 discount with the AI-cost floor. Total = discounted subtotal × 1.025. The measured

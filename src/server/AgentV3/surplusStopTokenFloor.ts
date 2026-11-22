@@ -22,7 +22,7 @@
 
 import { SURPLUS_OBSERVATION_CANDIDATES } from '../AI/SurplusRegistry/config';
 import { envFlag, parseEnvFlag } from '../lib/envFlag';
-import { realRateCard } from './providerRates';
+import { realRateCard, tieredMarkupUsd } from './providerRates';
 import type { BilledUsage, TokenRate } from './pricing';
 import { builderWrittenCount } from './gameKitSeed';
 import { preseededUnchangedCount } from './cancelledBuildBilling';
@@ -161,7 +161,14 @@ export interface SurplusStopTokenFloorFacts {
 }
 
 export interface SurplusStopTokenFloorDecision {
+  /** What the user is billed. */
   usd: number;
+  /** The estimated real cost behind it (equal to `usd` for the at-cost stop floor). */
+  costUsd: number;
+  /** The diagnostic code the settle records. */
+  code: typeof SURPLUS_STOP_COST_ESTIMATED | typeof SURPLUS_UNSETTLED_COST_ESTIMATED;
+  /** 'stop-floor' (BR2279, at cost) or 'completed-estimate' (failedbr #2487, with the ordinary markup). */
+  kind: 'stop-floor' | 'completed-estimate';
   ceilingUsd: number;
   usage: BilledUsage;
   rateModel: string;
@@ -193,6 +200,9 @@ export function maybeApplySurplusStopTokenFloor(
   if (!(charged > 0)) return null;
   return {
     usd: charged,
+    costUsd: charged,
+    code: SURPLUS_STOP_COST_ESTIMATED,
+    kind: 'stop-floor',
     ceilingUsd,
     usage: {
       inputTokens: Math.max(0, facts.usage.inputTokens || 0),
@@ -210,6 +220,16 @@ export function maybeApplySurplusStopTokenFloor(
 /** Admin-only diagnostic. Names the rate and the tokens; never shown to an end user. */
 export function surplusStopTokenFloorAdminMessage(d: SurplusStopTokenFloorDecision): string {
   const u = d.usage;
+  if (d.kind === 'completed-estimate') {
+    return (
+      `Estimated charge for Surplus calls whose receipts did not settle: cost $${d.costUsd.toFixed(6)} from recorded tokens at ${d.rateModel} `
+      + `(in $${d.rate.inputPerMTok}/M, out $${d.rate.outputPerMTok}/M`
+      + (typeof d.rate.cacheReadPerMTok === 'number' ? `, cache $${d.rate.cacheReadPerMTok}/M` : ', cache not billed')
+      + `) · tokens input=${u.inputTokens} output=${u.outputTokens} cacheRead=${u.cacheReadInputTokens ?? 0}`
+      + (d.fallback ? ' · fallback open-model rate' : '')
+      + ` · billed $${d.usd.toFixed(6)} with the ordinary markup (never above $${d.ceilingUsd.toFixed(6)}). Labelled estimated.`
+    );
+  }
   return (
     `Estimated Surplus stop charge from recorded token counts (receipts unsettled): `
     + `$${d.usd.toFixed(6)} at ${d.rateModel} `
@@ -222,6 +242,56 @@ export function surplusStopTokenFloorAdminMessage(d: SurplusStopTokenFloorDecisi
 }
 
 export const SURPLUS_STOP_COST_ESTIMATED = 'SURPLUS_STOP_COST_ESTIMATED';
+export const SURPLUS_UNSETTLED_COST_ESTIMATED = 'SURPLUS_UNSETTLED_COST_ESTIMATED';
+
+/** Kill switch for the completed-build estimate (owner 2026-11-22). ON unless `off`. */
+export const SURPLUS_UNSETTLED_ESTIMATE_FLAG = 'AGENTV3_BILL_SURPLUS_UNSETTLED_ESTIMATE';
+export function isSurplusUnsettledEstimateOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env[SURPLUS_UNSETTLED_ESTIMATE_FLAG] ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * A COMPLETED WEAK BUILD WHOSE SURPLUS RECEIPTS DID NOT SETTLE IS STILL BILLED (owner decision 2026-11-22, failedbr #2487:
+ * "yahi to hamara revenue hai, yaha 0 charge galat hai" - chosen option: "Tokens se andaaza x niyam").
+ *
+ * The GTA build ran 36 Surplus calls (2.76 M input tokens), its preview ran, and it was billed nothing because the receipts did
+ * not settle. Under the owner's rule the calls WITHOUT a receipt are estimated from their RECORDED tokens at the cheapest
+ * published Surplus-universe rate (the same rate the BR2279 stop floor uses), and the ordinary markup applies (tieredMarkupUsd,
+ * the markup every non-Surplus Weak call carries), labelled estimated. Only when every gate holds: Weak, unsettled calls with
+ * real token counts, NOT a user stop (the stop floor owns that), a preview that ran (the markup is earned by a preview), the
+ * builder's own files, not free-listed, not already zeroed. Never above the Surplus policy ceiling (10x the estimated cost).
+ * The Stop / failed-build rules applied after it can only reduce it. PURE apart from the kill switch.
+ */
+export function maybeApplySurplusUnsettledEstimate(
+  facts: SurplusStopTokenFloorFacts,
+  env: NodeJS.ProcessEnv = process.env,
+): SurplusStopTokenFloorDecision | null {
+  if (!isSurplusUnsettledEstimateOn(env)) return null;
+  if (String(facts.powerLevel ?? '') !== 'weak') return null;
+  if (facts.surplusUnsettledAbsorbed !== true) return null;
+  if (facts.abortCause === 'user-stop') return null;
+  if (!(facts.builderWroteCount > 0)) return null;
+  if (facts.previewProven !== true) return null;
+  if (facts.freeListed === true) return null;
+  if (String(facts.alreadyZeroedReason ?? '').trim()) return null;
+  if (!hasRealTokenCounts(facts.usage)) return null;
+  const pick = cheapestPublishedSurplusRate(facts.usage);
+  if (!pick || !(pick.usd > 0)) return null;
+  const costUsd = roundUsd(pick.usd);
+  const ceilingUsd = roundUsd(pick.usd * SURPLUS_VERIFIED_POLICY_MULTIPLIER);
+  const usd = roundUsd(Math.min(tieredMarkupUsd(costUsd), ceilingUsd));
+  if (!(usd > 0)) return null;
+  return {
+    usd, costUsd, code: SURPLUS_UNSETTLED_COST_ESTIMATED, kind: 'completed-estimate', ceilingUsd,
+    usage: {
+      inputTokens: Math.max(0, facts.usage.inputTokens || 0),
+      outputTokens: Math.max(0, facts.usage.outputTokens || 0),
+      cacheReadInputTokens: Math.max(0, facts.usage.cacheReadInputTokens ?? 0),
+      cacheCreationInputTokens: Math.max(0, facts.usage.cacheCreationInputTokens ?? 0),
+    },
+    rateModel: pick.model, candidate: pick.candidate, rate: pick.rate, fallback: pick.fallback,
+  };
+}
 
 /** Same wording the normal settle writes when `zeroBillForUnrenderedPreview` fires (including a dead preview server). */
 export const UNRENDERED_PREVIEW_ZERO_REASON =
@@ -292,7 +362,7 @@ export function decideSurplusStopTokenFloor(
   env: NodeJS.ProcessEnv = process.env,
 ): SurplusStopTokenFloorDecision | null {
   const builderWrote = builderWrittenCount(facts.writtenFiles, facts.kitSeededFiles ?? new Map());
-  return maybeApplySurplusStopTokenFloor({
+  const shared: SurplusStopTokenFloorFacts = {
     enabled: facts.enabled,
     powerLevel: facts.powerLevel,
     surplusUnsettledAbsorbed: facts.surplusUnsettledAbsorbed,
@@ -309,5 +379,7 @@ export function decideSurplusStopTokenFloor(
       stoppedByUser: facts.stoppedByUser,
     }),
     editingExistingApp: facts.editingExistingApp,
-  }, env);
+  };
+  // The stop floor first (a user stop, at cost); otherwise the completed-build estimate (owner 2026-11-22). Never both.
+  return maybeApplySurplusStopTokenFloor(shared, env) ?? maybeApplySurplusUnsettledEstimate(shared, env);
 }

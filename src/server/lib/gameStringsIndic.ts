@@ -53,6 +53,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "கட்டுப்பாடுகளை மீட்டமை", up: "மேலே", down: "கீழே", reload: "ரீலோட்",
     crouch: "குனி / மூழ்கு",
     language: "மொழி",
+    map: "வரைபடம்",
+    minimap: "சிறு வரைபடம்",
+    openMap: "வரைபடத்தைத் திற",
+    mapHint: "நகர்த்த இழுக்கவும் · பெரிதாக்க பிஞ்ச் அல்லது ஸ்க்ரோல் செய்யவும் · இடத்தைக் குறிக்கத் தட்டவும்",
+    clearMarker: "குறியை நீக்கு",
+    zoomIn: "பெரிதாக்கு",
+    zoomOut: "சிறிதாக்கு",
+    centreMap: "என் இடம்",
   },
   // Telugu
   te: {
@@ -86,6 +94,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "కంట్రోల్స్ రీసెట్ చేయండి", up: "పైకి", down: "కిందికి", reload: "రీలోడ్",
     crouch: "వంగు / మునుగు",
     language: "భాష",
+    map: "మ్యాప్",
+    minimap: "చిన్న మ్యాప్",
+    openMap: "మ్యాప్ తెరువు",
+    mapHint: "కదపడానికి లాగండి · జూమ్ చేయడానికి పించ్ లేదా స్క్రోల్ చేయండి · చోటు గుర్తించడానికి తట్టండి",
+    clearMarker: "గుర్తు తీసివేయి",
+    zoomIn: "పెద్దది చేయి",
+    zoomOut: "చిన్నది చేయి",
+    centreMap: "నా స్థానం",
   },
   // Bangla
   bn: {
@@ -119,6 +135,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "কন্ট্রোল রিসেট করুন", up: "উপরে", down: "নিচে", reload: "রিলোড",
     crouch: "নিচু হন / ডুব দিন",
     language: "ভাষা",
+    map: "মানচিত্র",
+    minimap: "ছোট মানচিত্র",
+    openMap: "মানচিত্র খুলুন",
+    mapHint: "সরাতে টানুন · জুম করতে পিঞ্চ বা স্ক্রোল করুন · জায়গা চিহ্নিত করতে ট্যাপ করুন",
+    clearMarker: "চিহ্ন মুছুন",
+    zoomIn: "বড় করুন",
+    zoomOut: "ছোট করুন",
+    centreMap: "আমার জায়গা",
   },
   // Marathi
   mr: {
@@ -152,6 +176,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "कंट्रोल्स रीसेट करा", up: "वर", down: "खाली", reload: "रीलोड",
     crouch: "वाका / सूर मारा",
     language: "भाषा",
+    map: "नकाशा",
+    minimap: "छोटा नकाशा",
+    openMap: "नकाशा उघडा",
+    mapHint: "हलवण्यासाठी ओढा · झूमसाठी पिंच किंवा स्क्रोल करा · जागा खूण करण्यासाठी टॅप करा",
+    clearMarker: "खूण काढा",
+    zoomIn: "मोठे करा",
+    zoomOut: "लहान करा",
+    centreMap: "माझी जागा",
   },
   // Gujarati
   gu: {
@@ -185,6 +217,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "કંટ્રોલ્સ રીસેટ કરો", up: "ઉપર", down: "નીચે", reload: "રીલોડ",
     crouch: "નમો / ડૂબકી",
     language: "ભાષા",
+    map: "નકશો",
+    minimap: "નાનો નકશો",
+    openMap: "નકશો ખોલો",
+    mapHint: "ખસેડવા ખેંચો · ઝૂમ માટે પિંચ અથવા સ્ક્રોલ કરો · જગ્યા ચિહ્નિત કરવા ટૅપ કરો",
+    clearMarker: "નિશાન હટાવો",
+    zoomIn: "મોટું કરો",
+    zoomOut: "નાનું કરો",
+    centreMap: "મારી જગ્યા",
   },
   // Kannada
   kn: {
@@ -218,6 +258,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "ನಿಯಂತ್ರಣಗಳನ್ನು ಮರುಹೊಂದಿಸಿ", up: "ಮೇಲೆ", down: "ಕೆಳಗೆ", reload: "ರೀಲೋಡ್",
     crouch: "ಬಾಗಿ / ಮುಳುಗಿ",
     language: "ಭಾಷೆ",
+    map: "ನಕ್ಷೆ",
+    minimap: "ಸಣ್ಣ ನಕ್ಷೆ",
+    openMap: "ನಕ್ಷೆ ತೆರೆಯಿರಿ",
+    mapHint: "ಸರಿಸಲು ಎಳೆಯಿರಿ · ಜೂಮ್ ಮಾಡಲು ಪಿಂಚ್ ಅಥವಾ ಸ್ಕ್ರೋಲ್ ಮಾಡಿ · ಜಾಗ ಗುರುತಿಸಲು ತಟ್ಟಿ",
+    clearMarker: "ಗುರುತು ತೆಗೆಯಿರಿ",
+    zoomIn: "ದೊಡ್ಡದು ಮಾಡಿ",
+    zoomOut: "ಚಿಕ್ಕದು ಮಾಡಿ",
+    centreMap: "ನನ್ನ ಜಾಗ",
   },
   // Malayalam
   ml: {
@@ -251,6 +299,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "നിയന്ത്രണങ്ങൾ പുനഃക്രമീകരിക്കൂ", up: "മുകളിലേക്ക്", down: "താഴേക്ക്", reload: "റീലോഡ്",
     crouch: "കുനിയൂ / മുങ്ങൂ",
     language: "ഭാഷ",
+    map: "ഭൂപടം",
+    minimap: "ചെറിയ ഭൂപടം",
+    openMap: "ഭൂപടം തുറക്കൂ",
+    mapHint: "നീക്കാൻ വലിക്കൂ · സൂം ചെയ്യാൻ പിഞ്ച് അല്ലെങ്കിൽ സ്ക്രോൾ ചെയ്യൂ · സ്ഥലം അടയാളപ്പെടുത്താൻ തൊടൂ",
+    clearMarker: "അടയാളം നീക്കൂ",
+    zoomIn: "വലുതാക്കൂ",
+    zoomOut: "ചെറുതാക്കൂ",
+    centreMap: "എന്റെ സ്ഥലം",
   },
   // Punjabi (Gurmukhi)
   pa: {
@@ -284,6 +340,14 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "ਕੰਟਰੋਲ ਰੀਸੈੱਟ ਕਰੋ", up: "ਉੱਪਰ", down: "ਹੇਠਾਂ", reload: "ਰੀਲੋਡ",
     crouch: "ਝੁਕੋ / ਡੁਬਕੀ",
     language: "ਭਾਸ਼ਾ",
+    map: "ਨਕਸ਼ਾ",
+    minimap: "ਛੋਟਾ ਨਕਸ਼ਾ",
+    openMap: "ਨਕਸ਼ਾ ਖੋਲ੍ਹੋ",
+    mapHint: "ਹਿਲਾਉਣ ਲਈ ਖਿੱਚੋ · ਜ਼ੂਮ ਲਈ ਪਿੰਚ ਜਾਂ ਸਕ੍ਰੋਲ ਕਰੋ · ਜਗ੍ਹਾ ਨਿਸ਼ਾਨ ਲਾਉਣ ਲਈ ਟੈਪ ਕਰੋ",
+    clearMarker: "ਨਿਸ਼ਾਨ ਹਟਾਓ",
+    zoomIn: "ਵੱਡਾ ਕਰੋ",
+    zoomOut: "ਛੋਟਾ ਕਰੋ",
+    centreMap: "ਮੇਰੀ ਜਗ੍ਹਾ",
   },
   // Odia
   or: {
@@ -317,5 +381,13 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "କଣ୍ଟ୍ରୋଲ ରିସେଟ କରନ୍ତୁ", up: "ଉପରକୁ", down: "ତଳକୁ", reload: "ରିଲୋଡ",
     crouch: "ନଇଁ ପଡ଼ନ୍ତୁ / ବୁଡ଼ନ୍ତୁ",
     language: "ଭାଷା",
+    map: "ମାନଚିତ୍ର",
+    minimap: "ଛୋଟ ମାନଚିତ୍ର",
+    openMap: "ମାନଚିତ୍ର ଖୋଲନ୍ତୁ",
+    mapHint: "ଘୁଞ୍ଚାଇବାକୁ ଟାଣନ୍ତୁ · ଜୁମ୍ ପାଇଁ ପିଞ୍ଚ କିମ୍ବା ସ୍କ୍ରୋଲ୍ କରନ୍ତୁ · ସ୍ଥାନ ଚିହ୍ନିତ କରିବାକୁ ଟ୍ୟାପ୍ କରନ୍ତୁ",
+    clearMarker: "ଚିହ୍ନ ହଟାନ୍ତୁ",
+    zoomIn: "ବଡ଼ କରନ୍ତୁ",
+    zoomOut: "ଛୋଟ କରନ୍ତୁ",
+    centreMap: "ମୋ ସ୍ଥାନ",
   },
 };

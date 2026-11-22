@@ -402,7 +402,9 @@ export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP
   + ' WorldSetup, no characterController of your own). ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
   + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
   + ' world.city gives the city, its traffic, people, parked cars and'
-  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0.';
+  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. The corner map (roads, named places; tap or M for the full'
+  + ' map with pan, zoom and a waypoint) is the kit\'s: never draw your own — change it with <OpenWorldGame map={{ corner: \'right\','
+  + ' size: 200, names: false, range: 400, fullMap: false }} /> as the user asks, or map={false} to turn it off.';
 
 /** The builder's instruction for the preview's Tune panel (kit core/tuning.ts). */
 export const TUNING_RULE = '🎚️ TUNABLE NUMBERS: declare the numbers a creator will want to adjust by playing — player speed, jump height, '

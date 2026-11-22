@@ -657,6 +657,8 @@ const EN = {
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
   controls: 'Controls', pressKey: 'Press a key (Esc to cancel)', resetControls: 'Reset controls', up: 'Up', down: 'Down', reload: 'Reload',
   crouch: 'Crouch / dive', language: 'Language',
+  map: 'Map', minimap: 'Minimap', openMap: 'Open map', mapHint: 'Drag to move · pinch or scroll to zoom · tap to mark a spot',
+  clearMarker: 'Clear marker', zoomIn: 'Zoom in', zoomOut: 'Zoom out', centreMap: 'My position',
   editControls: 'Edit controls', editControlsHint: 'Drag a control to move it', smaller: 'Smaller', bigger: 'Bigger', controlsOpacity: 'Opacity', done: 'Done',
 };
 
@@ -689,6 +691,8 @@ const HI: Record<StringKey, string> = {
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
   controls: 'कंट्रोल्स', pressKey: 'कोई कुंजी दबाएँ (रद्द करने के लिए Esc)', resetControls: 'कंट्रोल्स रीसेट करें', up: 'ऊपर', down: 'नीचे', reload: 'रीलोड',
   crouch: 'झुकें / गोता', language: 'भाषा',
+  map: 'नक्शा', minimap: 'छोटा नक्शा', openMap: 'नक्शा खोलें', mapHint: 'खींचकर घुमाएँ · पिंच या स्क्रॉल से ज़ूम करें · टैप करके जगह चिह्नित करें',
+  clearMarker: 'निशान हटाएँ', zoomIn: 'ज़ूम इन', zoomOut: 'ज़ूम आउट', centreMap: 'मेरी जगह',
   editControls: 'कंट्रोल्स बदलें', editControlsHint: 'कंट्रोल को खींचकर नई जगह रखें', smaller: 'छोटा', bigger: 'बड़ा', controlsOpacity: 'पारदर्शिता', done: 'हो गया',
 };
 
@@ -1642,6 +1646,8 @@ export interface GameSettings {
   colourSafe: boolean;
   /** Short text for important sounds (a hit, an enemy down, a boss…). */
   captions: boolean;
+  /** Show the corner minimap (the full map still opens with M). */
+  showMinimap: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -1658,7 +1664,7 @@ export function difficultyScale(d: Difficulty = current.difficulty): { enemyDama
 }
 
 export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
-  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false, reduceMotion: false, largeText: false, colourSafe: false, captions: false,
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false, reduceMotion: false, largeText: false, colourSafe: false, captions: false, showMinimap: true,
 };
 
 const KEY = 'nb-game-settings-v1';
@@ -1683,6 +1689,7 @@ export function sanitizeSettings(raw: unknown): GameSettings {
     largeText: typeof r.largeText === 'boolean' ? r.largeText : DEFAULT_SETTINGS.largeText,
     colourSafe: typeof r.colourSafe === 'boolean' ? r.colourSafe : DEFAULT_SETTINGS.colourSafe,
     captions: typeof r.captions === 'boolean' ? r.captions : DEFAULT_SETTINGS.captions,
+    showMinimap: typeof r.showMinimap === 'boolean' ? r.showMinimap : DEFAULT_SETTINGS.showMinimap,
   };
 }
 

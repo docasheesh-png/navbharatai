@@ -15,7 +15,8 @@
 
 import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
 import { withoutNonObjectSenses } from '../lib/heroObjectSpec';
-import { BATTLE_ROYALE_REFERENCE } from '../lib/wellKnownGameTitles';
+import { largeWorldIntent } from './largeWorldIntent';
+import { findGameTitles, mentionsBattleRoyale, ROYALE_GENRE_PHRASE, unrecognisedGameReference, type GameTitleKind } from '../lib/wellKnownGameTitles';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
   | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'simulator' | 'unknown';
@@ -58,6 +59,12 @@ export interface GameScopeContract {
   externalAssets?: boolean;
   /** The well-known game the user named as the reference ("PUBG", "BGMI", "GTA 5"); absent when none. */
   reference?: string;
+  /**
+   * A name the user held up as the model for the game ("zorbix jaisa game") that is none of our titles, read only when the
+   * request names no genre and no vehicle either. The builder is told not to guess what it is and to ask (failedbr #2497:
+   * an unread title must never silently become a 2D game). Absent when none.
+   */
+  unrecognisedReference?: string;
   /** BR1954: named actions/economy survive the contract, including on existing-game edits. */
   runnerMechanics?: RunnerMechanic[];
   collectibles?: GameCollectible[];
@@ -106,32 +113,76 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
  * (athreeMapIntent) and the royale starter's guard (ToolDispatcher) used private copies that had already
  * drifted apart (one knew Fortnite, the other Battlefield) — both read this one now.
  */
-/** Moved to lib/wellKnownGameTitles (the domain classifier needs it and cannot import this module); re-exported. */
-export { BATTLE_ROYALE_REFERENCE };
-
-/** Does the request ask for a royale-style game (by genre or by a named royale title)? PURE. */
+/**
+ * Does the request ask for a royale-style game (by genre or by a named royale title, in ANY spelling — "bubg", "pabji",
+ * "bgmii", "frie fire": failedbr #2497)? The shared tolerant matcher in lib/wellKnownGameTitles decides. PURE.
+ */
 export function asksForBattleRoyale(text: string | null | undefined): boolean {
-  return BATTLE_ROYALE_REFERENCE.test(String(text ?? '').normalize('NFKC'));
+  return mentionsBattleRoyale(text);
 }
 
 interface NamedGameReference { name: string; genre: GameGenre; dimension: GameDimension; camera: GameCamera }
 
-/** Well-known titles → what naming one asks for. First match wins; the request's own explicit words still win.
- * GTA is deliberately absent: its titles already take the 3D open-world kit through their own reader (#4151). */
-const NAMED_GAMES: ReadonlyArray<[RegExp, Omit<NamedGameReference, 'name'>]> = [
-  [BATTLE_ROYALE_REFERENCE, { genre: 'shooter', dimension: '3d', camera: 'third-person' }],
-  [/\b(?:call\s+of\s+duty|cod\s+mobile|counter[\s-]*strike|cs\s*:?\s*go|valorant|halo|doom)\b/i, { genre: 'shooter', dimension: '3d', camera: 'first-person' }],
-  [/\b(?:temple\s+run|subway\s+surfers?)\b/i, { genre: 'runner', dimension: '3d', camera: 'third-person' }],
-];
+/** Title kinds → what naming one asks for. The request's own explicit words still win.
+ * GTA is deliberately absent: its titles already take the 3D open-world kit through their own reader (#4151). Minecraft and
+ * the 'other' kind name no genre the contract can promise. */
+const ROYALE_SPEC: Omit<NamedGameReference, 'name'> = { genre: 'shooter', dimension: '3d', camera: 'third-person' };
+const NAMED_KINDS: Partial<Record<GameTitleKind, Omit<NamedGameReference, 'name'>>> = {
+  royale: ROYALE_SPEC,
+  fps: { genre: 'shooter', dimension: '3d', camera: 'first-person' },
+  runner: { genre: 'runner', dimension: '3d', camera: 'third-person' },
+};
 
-/** The well-known game the request names as its reference, with what that asks for, or null. PURE. */
+/**
+ * The well-known game the request names as its reference, with what that asks for, or null. The title is read by the ONE
+ * tolerant matcher (failedbr #2497: "bubg" is PUBG), and the reference is its proper name ("PUBG"), never the typo. A royale
+ * named by genre words alone ("battle royale", "FF max jaisa") is a royale reference too. PURE.
+ */
 export function namedGameReference(text: string | null | undefined): NamedGameReference | null {
   const t = String(text ?? '').normalize('NFKC');
-  for (const [re, spec] of NAMED_GAMES) {
-    const m = re.exec(t);
-    if (m) return { name: m[0].trim(), ...spec };
+  const titles = findGameTitles(t);
+  // A royale wins over the other kinds, as it always has ("a battle royale like Call of Duty" is a royale).
+  const royale = titles.find((m) => m.kind === 'royale');
+  if (royale) return { name: royale.name, ...ROYALE_SPEC };
+  const phrase = ROYALE_GENRE_PHRASE.exec(t);
+  if (phrase) return { name: phrase[0].trim(), ...ROYALE_SPEC };
+  for (const m of titles) {
+    const spec = NAMED_KINDS[m.kind];
+    if (spec) return { name: m.name, ...spec };
   }
   return null;
+}
+
+/** 2D games that MOVE a body on screen — the platform draws these flat, with the 2D kit (gameKitSeed). */
+export const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
+
+const NAMES_2D_WORLD = /\b(?:2d|two[\s-]?d)\s+(?:world|map|open[\s-]?world)\b|\btop[\s-]?down\s+(?:world|map|rpg|game|adventure)\b|\btile[\s-]?map\b|\b(?:rpg|zelda[\s-]?like|pokemon[\s-]?like)\s+(?:world|map)\b/i;
+/** Does the request name the 2D world itself — a 2D map, a top-down world, a tile map? PURE. */
+export function names2DWorld(text: string | null | undefined): boolean {
+  return NAMES_2D_WORLD.test(String(text ?? ''));
+}
+
+/**
+ * 🗺️ A BIG MAP IS DRAWN IN 3D UNLESS 2D WAS ASKED (failedbr #2497, 2026-11-22 — "ek bahut bada map par bubg jaisa game
+ * banao!!", admin: "ye pubg ki jagah kya bana diya").
+ *
+ * 🔑 THE DISAGREEMENT. Readers answered "what does a big-map game with no stated view get?" differently: the map profile
+ * (athreeMapIntent.mapProfileFor) read the wish as an open world — the 3D Athree map — while the kit seed, finding no 3D
+ * word, laid the 2D kit and the 2D world (world2dIntent) under it, and this contract said "unspecified". Every positive case
+ * the 2D world was built for says 2D or top-down in so many words ("2D game banao jiska map bahut bada ho", "top-down RPG
+ * with a huge world"), so an unstated view was never its intended input.
+ *
+ * THE RULE (explicit, ONE place — the contract's view, the kit seed and the 2D world all read it): a game whose request asks
+ * for a BIG WORLD (largeWorldIntent: a big space, free roam or a distance) is drawn in 3D on the platform's big map — UNLESS
+ * the request says a top-down view or a 2D world, or names a genre this platform draws flat (platformer, runner, arcade,
+ * fighting, shooting, snake). The caller has already checked the words "2D" / "3D". A complaint about an existing world's
+ * size ("map chhota hai") and a road that never ends are left out: they describe a game already built, or a lane. PURE.
+ */
+export function bigWorldWantsThreeD(text: string, genre: GameGenre, camera: GameCamera): boolean {
+  const wish = largeWorldIntent(text);
+  if (!wish.wants || (wish.wish !== 'big-space' && wish.wish !== 'free-roam' && wish.wish !== 'distance')) return false;
+  if (camera === 'top-down' || names2DWorld(text)) return false;
+  return !MOVING_2D_GENRES.has(genre) && genre !== 'snake';
 }
 
 const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
@@ -235,7 +286,6 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   const text = withoutDeclinedSentences(String(prompt ?? ''));
   const reference = namedGameReference(text);
   const genre = GENRES.find(([, re]) => re.test(text))?.[0] ?? reference?.genre ?? 'unknown';
-  const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d' : reference?.dimension ?? 'unspecified';
   const requiredFeatures = FEATURES.filter(([, re]) => re.test(text)).map(([f]) => f);
   // The vehicle is read with the hero contract's own non-object senses removed (one reader of "is this word the object"),
   // so a "ground plane" is never an aircraft here while the hero contract says otherwise (failedbr #2478).
@@ -253,8 +303,13 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   const camera: GameCamera = /\b(first[- ]person|cockpit|cab view|fps)\b/i.test(text) ? 'first-person'
     : /\b(top[- ]down|bird'?s[- ]eye|overhead)\b/i.test(text) ? 'top-down'
       : /\b(third[- ]person|chase cam(era)?|behind the)\b/i.test(text) || vehicle ? 'third-person' : reference?.camera ?? 'unspecified';
+  // The view: the request's own words, then a named title's, then the big-world rule (failedbr #2497), else unspecified.
+  const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d'
+    : reference?.dimension ?? (bigWorldWantsThreeD(text, genre, camera) ? '3d' : 'unspecified');
+  const unrecognisedReference = !reference && genre === 'unknown' && !vehicle ? unrecognisedGameReference(text) : null;
   return {
     ...(reference ? { reference: reference.name } : {}),
+    ...(unrecognisedReference ? { unrecognisedReference } : {}),
     genre,
     dimension,
     controls: CONTROLS.filter(([, re]) => re.test(text)).map(([c]) => c),
@@ -270,11 +325,12 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
 
 /** The block the builder reads in the kit handoff. '' when the contract adds nothing. PURE. */
 export function gameContractBlock(c: GameScopeContract): string {
-  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference) return '';
+  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference && !c.unrecognisedReference) return '';
   const lines = [
     '[GAME SCOPE CONTRACT — read from the request, checked after the build]',
     `Genre: ${c.genre}. View: ${c.dimension}.`,
     c.reference ? `The user named "${c.reference}" as the reference: build an ORIGINAL ${c.dimension === '3d' ? '3D ' : ''}${c.genre} game in that style (never its name, characters, art or maps). The PLAYABLE game itself — ${c.dimension === '3d' ? 'a 3D world drawn on a canvas, ' : ''}a character or vehicle the player controls${c.camera && c.camera !== 'unspecified' ? `, a ${c.camera} camera` : ''} — must be the first screen or one press away. A map, a menu, a list or a picture standing in for the game is not the game; if the project already holds such a screen, replace it.` : '',
+    c.unrecognisedReference ? `The user wants a game like "${c.unrecognisedReference}", and NavBharatAI does not recognise that name as a game it knows. Do NOT guess what it is and do NOT invent its genre or rules on your own idea: build only what the request makes clear (the kit already laid down follows the request's own words), then ask ONE short question in the user's language that names the choices (for example: "${c.unrecognisedReference} kaisa game hai — shooting, racing ya puzzle? 3D ya 2D?").` : '',
     c.vehicle ? `The player drives: a ${c.vehicle} — it must speed up, slow down and stop under the player's control, on keys AND touch.` : '',
     c.camera === 'third-person' && c.vehicle ? `Camera: a chase view from OUTSIDE the ${c.vehicle} — CameraRig({ kind: 'chase' }) and rig.follow(${c.vehicle === 'train' ? 'train' : 'vehicle'}, dt) every frame. The rig sizes itself to the model, so never hand it a fixed offset and never place the camera yourself.`
       : c.camera && c.camera !== 'unspecified' ? `Camera: ${c.camera}.` : '',

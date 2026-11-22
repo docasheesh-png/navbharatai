@@ -52,12 +52,12 @@
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
-import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
+import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
-import { GTA_TITLE } from '../lib/wellKnownGameTitles';
+import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
@@ -71,8 +71,8 @@ import { ACTION_VISIBLE_RULE } from './actionVisibility';
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d'
   | 'generate_game_2d' | 'generate_board_games' | 'generate_athree_map' | 'generate_open_world';
 
-/** 2D games that MOVE a body on screen — they get the 2D kit (sprites, platformer physics, camera, tilemap, particles). */
-const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
+// 2D games that MOVE a body on screen get the 2D kit (sprites, platformer physics, camera, tilemap, particles): MOVING_2D_GENRES,
+// in gameIntent beside the big-world rule that reads it.
 /** Cricket is in the India games pack's rules engines, in English or Hindi. */
 /** A match-3 request in its usual words (it reads as genre 'puzzle'). */
 const MATCH3 = /\bmatch[-\s]?(?:3|three)\b|\bcandy\s*crush\b|\bbejewell?ed\b|\b(?:gems?|jewels?|candies|candy|tiles?)\b[^.!?\n]{0,40}\bmatch(?:ing)?\b|\bmatch(?:ing)?\b[^.!?\n]{0,40}\b(?:gems?|jewels?|candies|candy|tiles?)\b/i;
@@ -165,7 +165,7 @@ export function openWorldWantsCity(prompt: string | null | undefined): boolean {
   try {
     const c = buildGameContract(text);
     if ((c.subjects ?? []).some((s) => s === 'building' || s === 'road')) return true;
-    if (GTA_TITLE.test(text)) return true;   // the ONE GTA reader (glued "gta5" too)
+    if (namesGtaTitle(text)) return true;   // the ONE GTA reader ("gta5", "gtaa", "g.t.a" too)
   } catch { /* no contract: the words below still decide */ }
   return CITY_HINGLISH.test(text);
 }
@@ -192,6 +192,14 @@ export function gameKitOwnsTheBuild(prompt: string | null | undefined, framework
   try { return gameKitPlan(prompt, framework).length > 0; } catch { return false; }
 }
 
+/** The turn text without the lines the platform itself writes into a game's milestone turn (gameIdentityLines). PURE. */
+function withoutPlatformLines(text: string): string {
+  return text.split(/\r?\n/).filter((l) => {
+    const t = l.trim();
+    return t !== ON_FOOT_LINE && t !== CITY_LINE && t !== GAME_MILESTONE_LINE && !t.startsWith('The user\'s game needs a big map') && !t.startsWith('The game the user named:');
+  }).join('\n');
+}
+
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
 const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
 /**
@@ -199,10 +207,24 @@ const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
  * 2026-09-14 bike-racing report and build 46e2d74b are this kind. Precision-first on purpose: a game this
  * misses keeps the 2D-safe layers and its builder may still run the 3D recipes, exactly as before the seed
  * existed; a game this wrongly matches gets three.js laid down under it.
- * BR1966: glued GTA titles (gta5 / gtav / gta-5) match the same 3D kit as spaced "gta 5"; a bare
- * "gta" word-boundary misses them.
+ * The GTA and Minecraft titles are read by the shared tolerant title matcher (lib/wellKnownGameTitles), never by a private
+ * spelling here: BR1966 found glued "gta5" missed, failedbr #2497 found every typo missed ("gtaa", "maincraft").
  */
-const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta(?:\s*[-_]?\s*[5v])?|minecraft|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+
+/**
+ * 🗺️ A big map is drawn in 3D unless 2D was asked (failedbr #2497). The rule itself is gameIntent.bigWorldWantsThreeD — the
+ * contract's view reads it too, so the kit and the contract cannot disagree; this reads the turn the kit seed is handed. PURE.
+ */
+export function bigWorldIsDrawnIn3D(prompt: string | null | undefined): boolean {
+  // The USER's words decide, never the identity lines the platform writes into a milestone turn ("The player is on foot on
+  // the big map."): a milestone keeps its own view (BR1958 F3), and our own sentence is not a wish.
+  const text = withoutPlatformLines(String(prompt ?? ''));
+  try {
+    const c = buildGameContract(text);
+    return c.dimension !== '2d' && bigWorldWantsThreeD(text, c.genre, c.camera ?? 'unspecified');
+  } catch { return false; }
+}
 
 /**
  * Does the REQUEST say this game is drawn in 3D? PURE.
@@ -221,6 +243,11 @@ export function gameKitWants3D(prompt: string | null | undefined): boolean {
   if (namedNonSmartphone(text)) return false;
   // A royale is drawn in 3D — the ONE royale reader (failedbr #2475: the private list here had no "bgmi").
   if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text) || asksForBattleRoyale(text)) return true;
+  // A named title read by the shared tolerant matcher (failedbr #2497): GTA, Minecraft, and a first-person shooter title
+  // (Valorant, Call of Duty, Counter-Strike — the contract already says 3D first-person for those, and the kit must agree).
+  // A runner title stays with its genre's 2D kit, as the 2D kit was designed ("temple run jaisa").
+  if (namesGtaTitle(text) || namesGameTitleOfKind(text, 'sandbox') || findGameTitles(text).some((m) => m.kind === 'fps' && !m.plainWord)) return true;
+  if (bigWorldIsDrawnIn3D(text)) return true;
   try {
     return heroObjectContract(text).categories.some((c) => c === 'vehicle-land' || c === 'vehicle-water');
   } catch { return false; }

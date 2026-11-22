@@ -55,6 +55,8 @@ import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/Temp
 import { seededForms } from './strictTrial';
 import { recipeFilePool, isKnownKitVersion } from '../lib/gameRecipeLayers';
 import { isKnownSeedVersion } from './seedVersions';
+import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GamePlayerBodyGenerator';
+import { GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -109,6 +111,14 @@ function buildSeededIndex(): Map<string, Set<string>> {
   // The moment one byte of a kit file changes, it is the user's again — the safe direction, unchanged.
   try {
     for (const [p, f] of recipeFilePool()) add(p, f.content);
+  } catch { /* same */ }
+  // 🧍 THE STARTER FILES A RECIPE WRITES BESIDE ITS KIT (2026-11-22, character in every game): the shell recipe now
+  // creates src/game/player.ts (the default person) and the open world its features list. They are not recipe OUTPUT
+  // (written once, never refreshed — they are the user's from then on), so the pool above never held them, and an
+  // untouched player.ts read as the user's code. Byte-exact only: the moment the user changes their character it is theirs.
+  try {
+    add(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE);
+    add(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX);
   } catch { /* same */ }
   return index;
 }

@@ -187,6 +187,12 @@ const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
     why: 'an explicit change order ("badal do" — edit_existing), and the growth guard\'s PERMIT opens the parts it had kept shut for this one turn',
     proof: () => reachesConfirmedWork('jo zaroori ho badal do') && read('src/server/AgentV3/growthGuard.ts').includes('jo\\s+(?:bhi\\s+)?zar+oo?ri'),
   },
+  // The growth guard's ask for an engine part (growthAskNote, 2026-11-22): the user hands the builder a free hand.
+  'jo chahe badlo': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/growthGuard.ts (FREE_HAND)`,
+    why: 'an explicit change order ("badlo" — edit_existing), and the growth guard\'s FREE_HAND opens edits to the parts it had kept shut, the kit included, for this one turn',
+    proof: () => reachesConfirmedWork('jo chahe badlo') && read('src/server/AgentV3/growthGuard.ts').includes('jo\\s+(?:bhi\\s+)?(?:chahe'),
+  },
   undo: {
     handler: 'src/lib/versionUndoIntent.ts; src/components/agentv3/AgentV3Panel.tsx (VersionUndoCard)',
     why: 'typing undo in Pro chat opens the in-chat version picker (wantsVersionUndo), where one tap restores any saved version',

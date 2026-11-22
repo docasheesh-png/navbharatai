@@ -629,6 +629,8 @@ export const VEHICLE_CAMERA_RULE_LINES: readonly string[] = [
   '+X (car.rotation.y increases), which is SCREEN-left when the camera is behind; up/W moves it along',
   '+forward. To drive into the screen, turn the model (rotation.y = Math.PI); never flip a control or',
   'mirror a model to make it "look right".',
+  'This is the DEFAULT view. A view the user asks for (first-person, cockpit, top-down, side, front) is built',
+  'exactly as asked; this rule exists to stop a wrong default, never to refuse an asked-for view.',
 ];
 
 /**
@@ -683,6 +685,8 @@ export const GAME_KIT_RULE = [
   'or meta. Otherwise call run_recipe({ name: "generate_game_runtime" }) first, and the other',
   'run_recipe({ name: "generate_game_…" }) recipes the game needs. A player\'s vehicle has a NON-ZERO',
   'starting speed unless the user asked for a standing start.',
+  'A different camera, controls or HUD the user clearly asks for is DONE, by changing the kit\'s own (its',
+  'options first, e.g. options={{ camera: \'first-person\' }}; else that kit file in this game).',
   '3D WORLD CONTACT: the kit already makes its buildings, terrain and trunks physical. Put custom solid',
   'walls, stairs and platforms in the same world with markWorldCollider from src/game/three/collision.ts.',
   'Use the kit character controller and driveVehicle for movement. For custom movers, apply the result',

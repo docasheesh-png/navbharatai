@@ -61,6 +61,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "பெரிதாக்கு",
     zoomOut: "சிறிதாக்கு",
     centreMap: "என் இடம்",
+    editControls: "கட்டுப்பாடுகளைத் திருத்து", editControlsHint: "நகர்த்த ஒரு கட்டுப்பாட்டை இழுக்கவும்", smaller: "சிறியது", bigger: "பெரியது", controlsOpacity: "ஒளிபுகுதன்மை", done: "முடிந்தது",
   },
   // Telugu
   te: {
@@ -102,6 +103,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "పెద్దది చేయి",
     zoomOut: "చిన్నది చేయి",
     centreMap: "నా స్థానం",
+    editControls: "కంట్రోల్స్ మార్చండి", editControlsHint: "జరపడానికి కంట్రోల్‌ను లాగండి", smaller: "చిన్నది", bigger: "పెద్దది", controlsOpacity: "పారదర్శకత", done: "పూర్తయింది",
   },
   // Bangla
   bn: {
@@ -143,6 +145,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "বড় করুন",
     zoomOut: "ছোট করুন",
     centreMap: "আমার জায়গা",
+    editControls: "কন্ট্রোল সাজান", editControlsHint: "সরাতে কন্ট্রোলটি টেনে আনুন", smaller: "ছোট", bigger: "বড়", controlsOpacity: "স্বচ্ছতা", done: "হয়ে গেছে",
   },
   // Marathi
   mr: {
@@ -184,6 +187,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "मोठे करा",
     zoomOut: "लहान करा",
     centreMap: "माझी जागा",
+    editControls: "कंट्रोल्स बदला", editControlsHint: "हलवण्यासाठी कंट्रोल ओढा", smaller: "लहान", bigger: "मोठे", controlsOpacity: "पारदर्शकता", done: "झाले",
   },
   // Gujarati
   gu: {
@@ -225,6 +229,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "મોટું કરો",
     zoomOut: "નાનું કરો",
     centreMap: "મારી જગ્યા",
+    editControls: "કંટ્રોલ્સ બદલો", editControlsHint: "ખસેડવા માટે કંટ્રોલને ખેંચો", smaller: "નાનું", bigger: "મોટું", controlsOpacity: "પારદર્શકતા", done: "થઈ ગયું",
   },
   // Kannada
   kn: {
@@ -266,6 +271,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "ದೊಡ್ಡದು ಮಾಡಿ",
     zoomOut: "ಚಿಕ್ಕದು ಮಾಡಿ",
     centreMap: "ನನ್ನ ಜಾಗ",
+    editControls: "ಕಂಟ್ರೋಲ್‌ಗಳನ್ನು ಬದಲಿಸಿ", editControlsHint: "ಸರಿಸಲು ಕಂಟ್ರೋಲ್ ಅನ್ನು ಎಳೆಯಿರಿ", smaller: "ಚಿಕ್ಕದು", bigger: "ದೊಡ್ಡದು", controlsOpacity: "ಪಾರದರ್ಶಕತೆ", done: "ಮುಗಿಯಿತು",
   },
   // Malayalam
   ml: {
@@ -307,6 +313,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "വലുതാക്കൂ",
     zoomOut: "ചെറുതാക്കൂ",
     centreMap: "എന്റെ സ്ഥലം",
+    editControls: "കൺട്രോളുകൾ മാറ്റുക", editControlsHint: "നീക്കാൻ കൺട്രോൾ വലിക്കുക", smaller: "ചെറുത്", bigger: "വലുത്", controlsOpacity: "സുതാര്യത", done: "കഴിഞ്ഞു",
   },
   // Punjabi (Gurmukhi)
   pa: {
@@ -348,6 +355,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "ਵੱਡਾ ਕਰੋ",
     zoomOut: "ਛੋਟਾ ਕਰੋ",
     centreMap: "ਮੇਰੀ ਜਗ੍ਹਾ",
+    editControls: "ਕੰਟਰੋਲ ਬਦਲੋ", editControlsHint: "ਹਿਲਾਉਣ ਲਈ ਕੰਟਰੋਲ ਨੂੰ ਖਿੱਚੋ", smaller: "ਛੋਟਾ", bigger: "ਵੱਡਾ", controlsOpacity: "ਪਾਰਦਰਸ਼ਤਾ", done: "ਹੋ ਗਿਆ",
   },
   // Odia
   or: {
@@ -389,5 +397,6 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     zoomIn: "ବଡ଼ କରନ୍ତୁ",
     zoomOut: "ଛୋଟ କରନ୍ତୁ",
     centreMap: "ମୋ ସ୍ଥାନ",
+    editControls: "କଣ୍ଟ୍ରୋଲ ବଦଳାନ୍ତୁ", editControlsHint: "ଘୁଞ୍ଚାଇବାକୁ କଣ୍ଟ୍ରୋଲକୁ ଟାଣନ୍ତୁ", smaller: "ଛୋଟ", bigger: "ବଡ଼", controlsOpacity: "ସ୍ୱଚ୍ଛତା", done: "ହୋଇଗଲା",
   },
 };

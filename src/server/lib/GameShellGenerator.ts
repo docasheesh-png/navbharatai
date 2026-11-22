@@ -422,7 +422,8 @@ export class Game {
     const touchOptions = options.touchControls || {};
     this.touchLayoutIsOurs = !touchOptions.buttons && !touchOptions.layout;
     if (options.touchControls !== false) {
-      const touch = new TouchControls(options.container, this.input, touchOptions);
+      // The player's own layout (Settings → Edit controls) is saved per game, under the same id as its leaderboard.
+      const touch = new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions });
       this.touch = touch;
       this.disposers.push(() => touch.dispose());
     }
@@ -1027,6 +1028,9 @@ export class Game {
     if (this.lights?.key) this.lights.key.castShadow = q !== 'low';
     events.emit('PERF_CHANGED', { fps: Math.round(this.perf.fps), quality: q, chosen: this.chosenQuality, auto: this.autoQuality });
   }
+
+  /** The on-screen touch controls, or null when the game turned them off. Settings → Edit controls opens their editor. */
+  get touchControls(): TouchControls | null { return this.touch; }
 
   /** The key this game's leaderboard is saved under (the gameId option, or 'game'). */
   get leaderboardId(): string { return this.options.gameId ?? 'game'; }
@@ -2178,6 +2182,18 @@ function ControlsSection({ game }: { game: Game }) {
   );
 }
 
+/**
+ * EDIT CONTROLS — on a touch screen the player moves and resizes every on-screen control (each action button, the
+ * joystick, the drive pads) and sets how see-through they are; saved for this game on this device (ui/touchControls.ts).
+ */
+function TouchLayoutSection({ game, onBack }: { game: Game; onBack: () => void }) {
+  const touch = game.touchControls;
+  if (!touch || !touch.visible) return null;
+  return (
+    <button type="button" style={secondary} onClick={() => { onBack(); touch.editLayout(); }}>{t('editControls')}</button>
+  );
+}
+
 function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
   const s = useSettings();
   const lang = useLanguage();
@@ -2229,6 +2245,7 @@ function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
         </select>
       </div>
       <ControlsSection game={game} />
+      <TouchLayoutSection game={game} onBack={onBack} />
       <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
   );
@@ -2514,6 +2531,145 @@ export interface TouchControlsOptions {
   lookSensitivity?: number;
   /** Show even on a device with no touch screen — for testing on a desktop. */
   force?: boolean;
+  /** From the prompt: side 'right' swaps halves (buttons go left); size 0.6..2; 'fixed' or 'floating' (default); position x/y 0..1. */
+  joystick?: TouchJoystickOptions;
+  /** By action name, or 'steer' / 'pedals': CENTRE x/y as a fraction of the screen (0..1), size 0.6..2. */
+  buttonPositions?: Record<string, TouchPlacement>;
+  /** How see-through the controls are, 0.2..1 (default 1). */
+  opacity?: number;
+  /** The player's Settings → Edit controls layout is saved per gameId and always wins over the three options above. */
+  gameId?: string;
+}
+
+/** Where a control sits: its CENTRE as a fraction of the game area (0..1), and a size multiplier (1 = the kit's size). */
+export interface TouchPlacement {
+  x: number;
+  y: number;
+  size?: number;
+}
+
+export interface TouchJoystickOptions {
+  side?: 'left' | 'right';
+  size?: number;
+  mode?: 'floating' | 'fixed';
+  position?: { x: number; y: number };
+}
+
+/** The layout a player saved in Settings → Edit controls. Each field is optional: a missing one keeps the default. */
+export interface SavedTouchLayout {
+  controls: Record<string, { x?: number; y?: number; size?: number }>;
+  opacity?: number;
+}
+
+/** A control's place after the defaults, the prompt's options and the player's layout are merged. No x/y = the kit's spot. */
+export interface ResolvedTouchPlacement {
+  x?: number;
+  y?: number;
+  size: number;
+}
+
+export interface ResolvedTouchLayout {
+  controls: Record<string, ResolvedTouchPlacement>;
+  opacity: number;
+}
+
+/** The joystick's id in a layout. The drive pads are 'steer' and 'pedals'; every action button is its action name. */
+export const JOYSTICK_CONTROL = 'joystick';
+export const TOUCH_SIZE_MIN = 0.6;
+export const TOUCH_SIZE_MAX = 2;
+export const TOUCH_OPACITY_MIN = 0.2;
+
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const clampNum = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+
+/** Anything read from storage (or written by a builder) is untrusted: bad numbers are dropped, good ones kept in range. */
+export function sanitizeTouchLayout(raw: unknown): SavedTouchLayout {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: SavedTouchLayout = { controls: {} };
+  const controls = (r.controls && typeof r.controls === 'object' ? r.controls : {}) as Record<string, unknown>;
+  for (const id of Object.keys(controls).slice(0, 40)) {
+    const c = controls[id];
+    if (!c || typeof c !== 'object') continue;
+    const p = c as Record<string, unknown>;
+    const entry: { x?: number; y?: number; size?: number } = {};
+    // A position is a pair: half of one is no position at all.
+    if (finite(p.x) && finite(p.y)) { entry.x = clampNum(p.x, 0, 1); entry.y = clampNum(p.y, 0, 1); }
+    if (finite(p.size)) entry.size = clampNum(p.size, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX);
+    if (entry.x !== undefined || entry.size !== undefined) out.controls[id] = entry;
+  }
+  if (finite(r.opacity)) out.opacity = clampNum(r.opacity, TOUCH_OPACITY_MIN, 1);
+  return out;
+}
+
+/**
+ * The layout the controls are drawn with: the kit's defaults, then what the BUILDER chose from the user's prompt
+ * (joystick, buttonPositions, opacity), then what the PLAYER saved — the player always has the last word.
+ */
+export function resolveTouchLayout(options: TouchControlsOptions, saved: SavedTouchLayout | null): ResolvedTouchLayout {
+  const prompt: SavedTouchLayout = { controls: {} };
+  for (const [id, p] of Object.entries(options.buttonPositions ?? {})) prompt.controls[id] = { ...p };
+  const j = options.joystick;
+  if (j) prompt.controls[JOYSTICK_CONTROL] = { ...(j.position ?? {}), size: j.size };
+  prompt.opacity = options.opacity;
+  const clean = sanitizeTouchLayout(prompt);
+  const mine = saved ? sanitizeTouchLayout(saved) : { controls: {} } as SavedTouchLayout;
+  const controls: Record<string, ResolvedTouchPlacement> = {};
+  for (const id of new Set([...Object.keys(clean.controls), ...Object.keys(mine.controls)])) {
+    const a = clean.controls[id] ?? {};
+    const b = mine.controls[id] ?? {};
+    const at = b.x !== undefined ? b : a.x !== undefined ? a : null;
+    controls[id] = { size: b.size ?? a.size ?? 1, ...(at ? { x: at.x, y: at.y } : {}) };
+  }
+  return { controls, opacity: mine.opacity ?? clean.opacity ?? 1 };
+}
+
+/** Space the device keeps for itself at each edge (notch, home bar), in pixels. */
+export interface ScreenInset { left: number; top: number; right: number; bottom: number }
+
+/**
+ * Keep a control's centre where the WHOLE control stays on screen and outside the safe-area inset. halfW / halfH are
+ * half the control's size in pixels. A control bigger than the screen is centred. An unmeasured screen (0 × 0) only
+ * keeps the fraction inside 0..1.
+ */
+export function clampTouchPlacement(x: number, y: number, halfW: number, halfH: number, w: number, h: number, inset: ScreenInset = { left: 0, top: 0, right: 0, bottom: 0 }): { x: number; y: number } {
+  const axis = (v: number, half: number, size: number, lo: number, hi: number): number => {
+    if (!(size > 0)) return clampNum(v, 0, 1);
+    const min = (lo + half) / size;
+    const max = (size - hi - half) / size;
+    return min > max ? 0.5 : clampNum(v, min, max);
+  };
+  return { x: axis(x, halfW, w, inset.left, inset.right), y: axis(y, halfH, h, inset.top, inset.bottom) };
+}
+
+/** A fraction of the game area to pixels inside it, and back. */
+export function touchFractionToPixels(x: number, y: number, w: number, h: number): { x: number; y: number } {
+  return { x: x * w, y: y * h };
+}
+export function touchPixelsToFraction(px: number, py: number, w: number, h: number): { x: number; y: number } {
+  return { x: w > 0 ? clampNum(px / w, 0, 1) : 0.5, y: h > 0 ? clampNum(py / h, 0, 1) : 0.5 };
+}
+
+/** Where a game's layout is kept on this device. */
+export function touchLayoutStorageKey(gameId: string): string {
+  return 'nbg-touch-layout-v1:' + (gameId || 'game');
+}
+
+export function loadTouchLayout(gameId: string): SavedTouchLayout | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(touchLayoutStorageKey(gameId));
+    return raw ? sanitizeTouchLayout(JSON.parse(raw)) : null;
+  } catch { return null; /* private mode or a corrupt value: the defaults */ }
+}
+
+/** Save (or, with null, forget) a game's layout. Never throws: an unsaved layout still applies until the page closes. */
+export function saveTouchLayout(gameId: string, layout: SavedTouchLayout | null): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const key = touchLayoutStorageKey(gameId);
+    if (!layout || (Object.keys(layout.controls).length === 0 && layout.opacity === undefined)) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(sanitizeTouchLayout(layout)));
+  } catch { /* not saved, still applied */ }
 }
 
 /** The kit's own button labels and the word each one is in the game's language (core/strings.ts). */
@@ -2575,14 +2731,46 @@ const CSS = [
   '.nbg-tc.drive .nbg-tc-pedals{display:grid;grid-template-columns:76px 76px;gap:12px 16px}',
   '.nbg-tc-pedals .nbg-tc-btn[data-action="drift"]{grid-column:1/span 2;grid-row:1;width:auto;height:46px}',
   '.nbg-tc.drive .nbg-tc-move,.nbg-tc.drive .nbg-tc-look,.nbg-tc.drive .nbg-tc-buttons{display:none}',
+  // The joystick under the RIGHT thumb (options.joystick.side, or the player dragged it there): the halves swap.
+  '.nbg-tc.stick-right .nbg-tc-move{left:auto;right:0}',
+  '.nbg-tc.stick-right .nbg-tc-look{right:auto;left:0}',
+  // The builder asked for the joystick on the right: the action buttons move to the left, out of its way.
+  '.nbg-tc.mirror .nbg-tc-buttons{right:auto;left:max(16px,env(safe-area-inset-left))}',
+  // Reads the device's safe-area inset in pixels, so a dragged control can be kept out of the notch.
+  '.nbg-tc-safe{position:absolute;inset:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);visibility:hidden;pointer-events:none}',
+  // Settings → Edit controls: every control can be dragged, the game behind it is dimmed and the camera drag is off.
+  '.nbg-tc.editing{z-index:40;pointer-events:auto;background:rgba(0,0,0,0.35)}',
+  '.nbg-tc.editing .nbg-tc-look,.nbg-tc.editing .nbg-tc-hint{display:none}',
+  '.nbg-tc.editing .nbg-tc-move{pointer-events:none;outline:2px dashed rgba(255,255,255,0.25);outline-offset:-2px}',
+  '.nbg-tc.editing .nbg-tc-base{pointer-events:auto;opacity:1;cursor:move}',
+  '.nbg-tc.editing .nbg-tc-btn{cursor:move}',
+  '.nbg-tc.editing .nbg-tc-sel{outline:3px solid #fde047;outline-offset:3px}',
+  '.nbg-tc-edit{position:absolute;left:50%;top:max(12px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:8px 12px;border-radius:12px;background:rgba(0,0,0,0.78);color:#fff;font:600 14px/1.2 system-ui,sans-serif;pointer-events:auto;width:max-content;max-width:calc(100% - 24px);z-index:1}',
+  '.nbg-tc-edit button{min-height:40px;padding:8px 12px;border-radius:8px;border:2px solid rgba(255,255,255,0.55);background:rgba(255,255,255,0.14);color:#fff;font:inherit;cursor:pointer}',
+  '.nbg-tc-edit button.nbg-tc-done{background:#fde047;color:#111;border-color:#fde047}',
+  '.nbg-tc-edit label{display:flex;gap:8px;align-items:center}',
+  '.nbg-tc-edit p{margin:0;width:100%;text-align:center;font-weight:500;opacity:0.85}',
 ].join('');
 
 export class TouchControls {
   private readonly root: HTMLDivElement;
   private readonly base: HTMLDivElement;
   private readonly knob: HTMLDivElement;
+  private readonly moveZone: HTMLDivElement;
+  private readonly probe: HTMLDivElement;
+  private readonly steer: HTMLDivElement;
+  private readonly pedals: HTMLDivElement;
   private readonly detach: Array<() => void> = [];
   private readonly buttonsDown = new Map<number, { action: string; el: HTMLElement }>();
+  /** Each movable control by its layout id: an action button, 'joystick' (its base), 'steer', 'pedals'. */
+  private readonly controls = new Map<string, HTMLElement>();
+  /** The action buttons in the order they were drawn, with the grid they live in when they are not placed. */
+  private readonly homes: Array<{ id: string; el: HTMLElement; home: HTMLElement }> = [];
+  private readonly placed = new Set<HTMLElement>();
+  private readonly gameId: string;
+  private saved: SavedTouchLayout;
+  private layoutNow: ResolvedTouchLayout;
+  private radius = STICK_RADIUS;
   private stickId = -1;
   private stickX = 0;
   private stickY = 0;
@@ -2591,6 +2779,9 @@ export class TouchControls {
   private lookY = 0;
   private shown = false;
   private current: TouchLayout = 'move';
+  private editor: { el: HTMLDivElement; wasShown: boolean; off: () => void } | null = null;
+  private selected: string | null = null;
+  private drag: { id: string; pointerId: number } | null = null;
 
   constructor(
     // A plain parameter, not a field: it is only used here, and an unread field fails an app whose tsconfig has
@@ -2601,12 +2792,18 @@ export class TouchControls {
   ) {
     // The overlay is positioned against the game's own container, never the page.
     if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+    this.gameId = options.gameId || 'game';
+    this.saved = loadTouchLayout(this.gameId) ?? { controls: {} };
+    this.layoutNow = resolveTouchLayout(options, this.saved);
 
     const style = document.createElement('style');
     style.textContent = CSS;
     this.root = document.createElement('div');
     this.root.className = 'nbg-tc';
     this.root.appendChild(style);
+    this.probe = document.createElement('div');
+    this.probe.className = 'nbg-tc-safe';
+    this.root.appendChild(this.probe);
 
     const look = document.createElement('div');
     look.className = 'nbg-tc-look';
@@ -2614,6 +2811,7 @@ export class TouchControls {
 
     const move = document.createElement('div');
     move.className = 'nbg-tc-move';
+    this.moveZone = move;
     this.base = document.createElement('div');
     this.base.className = 'nbg-tc-base';
     this.knob = document.createElement('div');
@@ -2621,22 +2819,29 @@ export class TouchControls {
     this.base.appendChild(this.knob);
     move.appendChild(this.base);
     this.root.appendChild(move);
-    this.restStick();
+    this.controls.set(JOYSTICK_CONTROL, this.base);
 
     const buttons = document.createElement('div');
     buttons.className = 'nbg-tc-buttons';
-    for (const b of options.buttons ?? DEFAULT_TOUCH_BUTTONS) this.addButton(buttons, b);
+    for (const b of options.buttons ?? DEFAULT_TOUCH_BUTTONS) {
+      const id = this.controls.has(b.action) ? b.action + '#' + this.controls.size : b.action;
+      const el = this.addButton(buttons, b, id);
+      this.controls.set(id, el);
+      this.homes.push({ id, el, home: buttons });
+    }
     this.root.appendChild(buttons);
 
     // The 'drive' pads exist from the start (hidden by CSS) so switching layout is one class, not a rebuild.
-    const steer = document.createElement('div');
-    steer.className = 'nbg-tc-steer';
-    for (const b of DRIVE_TOUCH_BUTTONS.steer) this.addButton(steer, b);
-    this.root.appendChild(steer);
-    const pedals = document.createElement('div');
-    pedals.className = 'nbg-tc-pedals';
-    for (const b of DRIVE_TOUCH_BUTTONS.pedals) this.addButton(pedals, b);
-    this.root.appendChild(pedals);
+    this.steer = document.createElement('div');
+    this.steer.className = 'nbg-tc-steer';
+    for (const b of DRIVE_TOUCH_BUTTONS.steer) this.addButton(this.steer, b, 'steer');
+    this.root.appendChild(this.steer);
+    this.controls.set('steer', this.steer);
+    this.pedals = document.createElement('div');
+    this.pedals.className = 'nbg-tc-pedals';
+    for (const b of DRIVE_TOUCH_BUTTONS.pedals) this.addButton(this.pedals, b, 'pedals');
+    this.root.appendChild(this.pedals);
+    this.controls.set('pedals', this.pedals);
     if (options.layout === 'drive') this.setLayout('drive');
 
     const hint = document.createElement('div');
@@ -2650,17 +2855,31 @@ export class TouchControls {
     this.on(look, 'pointerdown', (e) => this.startLook(e, look));
     this.on(look, 'pointermove', (e) => this.moveLook(e));
     for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(look, t, (e) => this.endLook(e));
+    // While editing, the joystick is picked up by its base — never started.
+    this.on(this.base, 'pointerdown', (e) => {
+      if (!this.editor) return;
+      e.stopPropagation();
+      this.startDrag(e, JOYSTICK_CONTROL, this.base);
+    });
+    // A dragged control follows the pointer that picked it up (pointer capture brings its events here).
+    this.on(this.root, 'pointermove', (e) => this.moveDrag(e));
+    for (const t of ['pointerup', 'pointercancel']) this.on(this.root, t, (e) => this.endDrag(e));
     // A long press must not open the browser's menu over the game.
     this.on(this.root, 'contextmenu', (e) => e.preventDefault());
 
     const releaseAll = () => this.releaseAll();
     const onVisibility = () => { if (document.hidden) this.releaseAll(); };
+    // A turned phone is a new screen: every placed control is put back inside it.
+    const relayout = () => this.applyLayout();
     window.addEventListener('blur', releaseAll);
+    window.addEventListener('resize', relayout);
     document.addEventListener('visibilitychange', onVisibility);
     this.detach.push(() => window.removeEventListener('blur', releaseAll));
+    this.detach.push(() => window.removeEventListener('resize', relayout));
     this.detach.push(() => document.removeEventListener('visibilitychange', onVisibility));
 
     container.appendChild(this.root);
+    this.applyLayout();
 
     if (options.force || prefersTouch()) this.show();
     else {
@@ -2677,6 +2896,15 @@ export class TouchControls {
   /** Which set is up: 'move' (joystick + actions) or 'drive' (Left/Right + Brake/Gas). */
   get layout(): TouchLayout { return this.current; }
 
+  /** Is the layout editor (Settings → Edit controls) open? */
+  get editing(): boolean { return this.editor !== null; }
+
+  /** The layout being drawn: defaults, then the game's options, then the player's own saved layout. */
+  get placement(): ResolvedTouchLayout { return { controls: { ...this.layoutNow.controls }, opacity: this.layoutNow.opacity }; }
+
+  /** The player's own layout, as saved for this game. */
+  get playerLayout(): SavedTouchLayout { return sanitizeTouchLayout(this.saved); }
+
   /**
    * Switch sets. Everything held is released first — a thumb that was on the joystick must not keep the
    * car steering after the pads change under it.
@@ -2687,9 +2915,19 @@ export class TouchControls {
     this.current = layout;
     if (layout === 'drive') this.root.classList.add('drive');
     else this.root.classList.remove('drive');
+    // The pads were hidden until now, so their size is only known from here on.
+    if (this.root.parentElement) this.applyLayout();
   }
 
-  private addButton(parent: HTMLElement, b: TouchButton): void {
+  /** Replace the player's layout (and save it for this game). null goes back to the game's own layout. */
+  setPlayerLayout(layout: SavedTouchLayout | null): void {
+    this.saved = layout ? sanitizeTouchLayout(layout) : { controls: {} };
+    saveTouchLayout(this.gameId, layout ? this.saved : null);
+    this.layoutNow = resolveTouchLayout(this.options, this.saved);
+    this.applyLayout();
+  }
+
+  private addButton(parent: HTMLElement, b: TouchButton, id: string): HTMLButtonElement {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'nbg-tc-btn';
@@ -2698,9 +2936,14 @@ export class TouchControls {
     const label = KIT_LABEL_KEYS[b.label] ? t(KIT_LABEL_KEYS[b.label]) : b.label;
     el.textContent = label;
     el.setAttribute('aria-label', label);
-    this.on(el, 'pointerdown', (e) => this.pressButton(e, b.action, el));
+    this.on(el, 'pointerdown', (e) => {
+      // While editing, a press picks the control up instead of pressing it (a drive pad moves as one piece).
+      if (this.editor) { e.stopPropagation(); this.startDrag(e, id, el); return; }
+      this.pressButton(e, b.action, el);
+    });
     for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(el, t, (e) => this.releaseButton(e));
     parent.appendChild(el);
+    return el;
   }
 
   show(): void {
@@ -2710,6 +2953,227 @@ export class TouchControls {
     const t = setTimeout(() => this.root.classList.remove('hinting'), 4000);
     this.detach.push(() => clearTimeout(t));
   }
+
+  // ── Layout ──────────────────────────────────────────────────────────────────────────────────────
+
+  /** The game area in pixels (0 × 0 before it is on a page). */
+  private screen(): { w: number; h: number; left: number; top: number } {
+    const r = typeof this.root.getBoundingClientRect === 'function' ? this.root.getBoundingClientRect() : null;
+    return r ? { w: r.width || 0, h: r.height || 0, left: r.left || 0, top: r.top || 0 } : { w: 0, h: 0, left: 0, top: 0 };
+  }
+
+  /** The safe-area inset in pixels, plus a small margin so no control touches the very edge. */
+  private inset(): ScreenInset {
+    const cs = getComputedStyle(this.probe) as Partial<CSSStyleDeclaration>;
+    const px = (v: string | undefined) => (parseFloat(v ?? '') || 0) + 8;
+    return { left: px(cs.paddingLeft), top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom) };
+  }
+
+  /** The pixel size a control is drawn at before its size multiplier. */
+  private basePx(id: string): number {
+    if (id === JOYSTICK_CONTROL) return STICK_RADIUS * 2;
+    if (id === 'steer' || id === 'pedals') {
+      const el = id === 'steer' ? this.steer : this.pedals;
+      return Math.max(el.offsetWidth || 0, el.offsetHeight || 0) || 168;
+    }
+    return 64;
+  }
+
+  /** Draw every control where the resolved layout puts it. Called on start, on every edit, on resize and on a layout switch. */
+  private applyLayout(): void {
+    const L = this.layoutNow;
+    const scr = this.screen();
+    const inset = this.inset();
+    const opacity = String(L.opacity);
+    const at = (id: string): ResolvedTouchPlacement | undefined => L.controls[id];
+    const isPlaced = (p: ResolvedTouchPlacement | undefined): p is ResolvedTouchPlacement & { x: number; y: number } => !!p && p.x !== undefined && p.y !== undefined;
+
+    // The action buttons: a placed one leaves the grid for the overlay; an unplaced one goes back, in its first order.
+    if (this.homes.some(({ id, el }) => this.placed.has(el) && !isPlaced(at(id)))) {
+      for (const { id, el, home } of this.homes) {
+        if (isPlaced(at(id))) continue;
+        this.placed.delete(el);
+        this.clearPlace(el);
+        home.appendChild(el);
+      }
+    }
+    for (const { id, el } of this.homes) {
+      el.style.opacity = opacity;
+      const p = at(id);
+      if (!isPlaced(p)) { el.style.transform = p && p.size !== 1 ? 'scale(' + p.size + ')' : ''; continue; }
+      if (!this.placed.has(el)) { this.placed.add(el); this.root.appendChild(el); }
+      this.place(el, p, this.basePx(id), scr, inset);
+    }
+
+    // The drive pads move as one piece each.
+    for (const [id, el] of [['steer', this.steer], ['pedals', this.pedals]] as const) {
+      el.style.opacity = opacity;
+      const p = at(id);
+      if (!isPlaced(p)) { this.clearPlace(el); if (p && p.size !== 1) el.style.transform = 'scale(' + p.size + ')'; continue; }
+      this.place(el, p, this.basePx(id), scr, inset);
+    }
+
+    // The joystick: its size changes its reach, so it is drawn by radius, not scaled.
+    const j = at(JOYSTICK_CONTROL);
+    this.radius = Math.round(STICK_RADIUS * (j ? j.size : 1));
+    const knob = Math.round(48 * (this.radius / STICK_RADIUS));
+    this.base.style.width = this.radius * 2 + 'px';
+    this.base.style.height = this.radius * 2 + 'px';
+    this.base.style.margin = '-' + this.radius + 'px 0 0 -' + this.radius + 'px';
+    this.knob.style.width = knob + 'px';
+    this.knob.style.height = knob + 'px';
+    this.knob.style.margin = '-' + knob / 2 + 'px 0 0 -' + knob / 2 + 'px';
+    this.moveZone.style.opacity = opacity;
+    const right = isPlaced(j) ? j.x > 0.5 : this.options.joystick?.side === 'right';
+    if (right) this.root.classList.add('stick-right');
+    else this.root.classList.remove('stick-right');
+    if (this.options.joystick?.side === 'right') this.root.classList.add('mirror');
+    else this.root.classList.remove('mirror');
+    // A joystick placed high up needs its half of the screen to reach that high.
+    this.moveZone.style.height = isPlaced(j) ? '100%' : '';
+    if (this.stickId === -1) this.restStick();
+  }
+
+  private place(el: HTMLElement, p: { x: number; y: number; size: number }, basePx: number, scr: { w: number; h: number }, inset: ScreenInset): void {
+    const half = (basePx * p.size) / 2;
+    const c = clampTouchPlacement(p.x, p.y, half, half, scr.w, scr.h, inset);
+    el.style.position = 'absolute';
+    el.style.left = c.x * 100 + '%';
+    el.style.top = c.y * 100 + '%';
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+    el.style.transform = 'translate(-50%, -50%) scale(' + p.size + ')';
+  }
+
+  private clearPlace(el: HTMLElement): void {
+    el.style.position = '';
+    el.style.left = '';
+    el.style.top = '';
+    el.style.right = '';
+    el.style.bottom = '';
+    el.style.transform = '';
+  }
+
+  // ── The layout editor (Settings → Edit controls) ────────────────────────────────────────────────
+
+  /**
+   * Open the editor over the game: drag any control to move it, Smaller / Bigger resize the one picked, the slider
+   * sets how see-through the controls are, Reset goes back to the game's layout, Done (or Esc) closes it. Every
+   * change is saved for this game at once. Works with a finger and with a mouse.
+   */
+  editLayout(): void {
+    if (this.editor) return;
+    this.releaseAll();
+    const wasShown = this.shown;
+    this.root.classList.add('on', 'editing');
+    const el = document.createElement('div');
+    el.className = 'nbg-tc-edit';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', t('editControls'));
+    // The toolbar's own presses must never reach the drag handlers behind it.
+    el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    const hint = document.createElement('p');
+    hint.textContent = t('editControlsHint');
+    el.appendChild(hint);
+    const button = (label: string, fn: () => void, cls = ''): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      if (cls) b.className = cls;
+      b.addEventListener('click', fn);
+      el.appendChild(b);
+      return b;
+    };
+    button(t('smaller'), () => this.resizeSelected(-0.15), 'nbg-tc-smaller');
+    button(t('bigger'), () => this.resizeSelected(0.15), 'nbg-tc-bigger');
+    const label = document.createElement('label');
+    label.textContent = t('controlsOpacity');
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = String(TOUCH_OPACITY_MIN);
+    range.max = '1';
+    range.step = '0.05';
+    range.value = String(this.layoutNow.opacity);
+    range.setAttribute('aria-label', t('controlsOpacity'));
+    range.addEventListener('input', () => this.setOpacity(Number(range.value)));
+    label.appendChild(range);
+    el.appendChild(label);
+    button(t('resetControls'), () => { this.setPlayerLayout(null); range.value = String(this.layoutNow.opacity); }, 'nbg-tc-reset');
+    button(t('done'), () => this.finishEditing(), 'nbg-tc-done');
+    this.root.appendChild(el);
+    // Esc closes the editor first — before the game's own Esc (pause / resume) sees it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.finishEditing();
+    };
+    window.addEventListener('keydown', onKey, true);
+    this.editor = { el, wasShown, off: () => window.removeEventListener('keydown', onKey, true) };
+    this.select(this.current === 'drive' ? 'steer' : JOYSTICK_CONTROL);
+  }
+
+  /** Close the editor. The layout was already saved by every change. */
+  finishEditing(): void {
+    const ed = this.editor;
+    if (!ed) return;
+    this.editor = null;
+    this.drag = null;
+    ed.off();
+    ed.el.parentElement?.removeChild(ed.el);
+    this.select(null);
+    this.root.classList.remove('editing');
+    if (!ed.wasShown) this.root.classList.remove('on');
+  }
+
+  /** How see-through the controls are (0.2..1), saved for this game. */
+  setOpacity(value: number): void {
+    if (!Number.isFinite(value)) return;
+    this.setPlayerLayout({ ...this.saved, opacity: clampNum(value, TOUCH_OPACITY_MIN, 1) });
+  }
+
+  private select(id: string | null): void {
+    if (this.selected) this.controls.get(this.selected)?.classList.remove('nbg-tc-sel');
+    this.selected = id;
+    if (id) this.controls.get(id)?.classList.add('nbg-tc-sel');
+  }
+
+  private resizeSelected(step: number): void {
+    const id = this.selected;
+    if (!id) return;
+    const now = this.layoutNow.controls[id]?.size ?? 1;
+    const size = Math.round(clampNum(now + step, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX) * 100) / 100;
+    this.setPlayerLayout({ ...this.saved, controls: { ...this.saved.controls, [id]: { ...this.saved.controls[id], size } } });
+  }
+
+  private startDrag(e: PointerEvent, id: string, el: HTMLElement): void {
+    this.capture(el, e);
+    this.select(id);
+    this.drag = { id, pointerId: e.pointerId };
+  }
+
+  private moveDrag(e: PointerEvent): void {
+    if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+    const scr = this.screen();
+    const f = touchPixelsToFraction(e.clientX - scr.left, e.clientY - scr.top, scr.w, scr.h);
+    const id = this.drag.id;
+    const half = (this.basePx(id) * (this.layoutNow.controls[id]?.size ?? 1)) / 2;
+    // What is saved is already on screen, so a layout made on a big tablet still opens inside a small phone.
+    const c = clampTouchPlacement(f.x, f.y, half, half, scr.w, scr.h, this.inset());
+    const x = Math.round(c.x * 1000) / 1000;
+    const y = Math.round(c.y * 1000) / 1000;
+    this.saved = { ...this.saved, controls: { ...this.saved.controls, [id]: { ...this.saved.controls[id], x, y } } };
+    this.layoutNow = resolveTouchLayout(this.options, this.saved);
+    this.applyLayout();
+  }
+
+  private endDrag(e: PointerEvent): void {
+    if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+    this.drag = null;
+    saveTouchLayout(this.gameId, this.saved);
+  }
+
+  // ── Playing ─────────────────────────────────────────────────────────────────────────────────────
 
   private on(el: EventTarget, type: string, fn: (e: PointerEvent) => void): void {
     const h = (e: Event) => fn(e as PointerEvent);
@@ -2725,35 +3189,64 @@ export class TouchControls {
   }
 
   private restStick(): void {
+    const R = this.radius;
     this.base.classList.remove('live');
-    this.base.style.left = 'calc(max(16px, env(safe-area-inset-left)) + ' + STICK_RADIUS + 'px)';
-    this.base.style.top = 'calc(100% - max(16px, env(safe-area-inset-bottom)) - ' + STICK_RADIUS + 'px)';
+    const j = this.layoutNow.controls[JOYSTICK_CONTROL];
+    if (j && j.x !== undefined && j.y !== undefined) {
+      // A placed joystick rests where it was put, kept whole on screen; its zone is the half of the screen it sits in.
+      const scr = this.screen();
+      const c = clampTouchPlacement(j.x, j.y, R, R, scr.w, scr.h, this.inset());
+      const zone = typeof this.moveZone.getBoundingClientRect === 'function' ? this.moveZone.getBoundingClientRect() : null;
+      if (scr.w > 0 && zone) {
+        this.base.style.left = c.x * scr.w - ((zone.left || 0) - scr.left) + 'px';
+        this.base.style.top = c.y * scr.h - ((zone.top || 0) - scr.top) + 'px';
+      } else {
+        // Not measured yet: the zone is half the screen wide and the whole height.
+        this.base.style.left = (c.x > 0.5 ? c.x - 0.5 : c.x) * 200 + '%';
+        this.base.style.top = c.y * 100 + '%';
+      }
+    } else if (this.root.classList.contains('stick-right')) {
+      this.base.style.left = 'calc(100% - max(16px, env(safe-area-inset-right)) - ' + R + 'px)';
+      this.base.style.top = 'calc(100% - max(16px, env(safe-area-inset-bottom)) - ' + R + 'px)';
+    } else {
+      this.base.style.left = 'calc(max(16px, env(safe-area-inset-left)) + ' + R + 'px)';
+      this.base.style.top = 'calc(100% - max(16px, env(safe-area-inset-bottom)) - ' + R + 'px)';
+    }
     this.knob.style.transform = 'translate(0px, 0px)';
   }
 
   private startStick(e: PointerEvent, zone: HTMLElement): void {
-    if (this.stickId !== -1) return;
+    if (this.stickId !== -1 || this.editor) return;
     this.capture(zone, e);
     this.stickId = e.pointerId;
-    const r = zone.getBoundingClientRect();
-    // The joystick appears under the thumb, kept whole inside its zone.
-    this.stickX = Math.min(Math.max(e.clientX, r.left + STICK_RADIUS), r.right - STICK_RADIUS);
-    this.stickY = Math.min(Math.max(e.clientY, r.top + STICK_RADIUS), r.bottom - STICK_RADIUS);
-    this.base.style.left = this.stickX - r.left + 'px';
-    this.base.style.top = this.stickY - r.top + 'px';
+    const R = this.radius;
+    if (this.options.joystick?.mode === 'fixed') {
+      // A fixed joystick never moves: the thumb steers from its resting centre.
+      const b = this.base.getBoundingClientRect();
+      this.stickX = b.left + b.width / 2;
+      this.stickY = b.top + b.height / 2;
+    } else {
+      const r = zone.getBoundingClientRect();
+      // The joystick appears under the thumb, kept whole inside its zone.
+      this.stickX = Math.min(Math.max(e.clientX, r.left + R), r.right - R);
+      this.stickY = Math.min(Math.max(e.clientY, r.top + R), r.bottom - R);
+      this.base.style.left = this.stickX - r.left + 'px';
+      this.base.style.top = this.stickY - r.top + 'px';
+    }
     this.base.classList.add('live');
     this.moveStick(e);
   }
 
   private moveStick(e: PointerEvent): void {
     if (e.pointerId !== this.stickId) return;
+    const R = this.radius;
     let dx = e.clientX - this.stickX;
     let dy = e.clientY - this.stickY;
     const len = Math.hypot(dx, dy);
-    if (len > STICK_RADIUS) { dx = (dx / len) * STICK_RADIUS; dy = (dy / len) * STICK_RADIUS; }
+    if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
     this.knob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
-    const nx = dx / STICK_RADIUS;
-    const ny = dy / STICK_RADIUS;
+    const nx = dx / R;
+    const ny = dy / R;
     // Screen-down is +y, which is exactly what Input.axis() calls "down": no sign flip.
     if (Math.hypot(nx, ny) < DEAD_ZONE) this.input.setAnalogueMove(0, 0);
     else this.input.setAnalogueMove(nx, ny);
@@ -3689,6 +4182,15 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drag on the right, Attack/Jump/Use/Run buttons bottom-right, and a Pause button in the HUD. They\n' +
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
+      '- WHEN THE USER ASKS WHERE THE CONTROLS GO, set it in touchControls — never move them with your own CSS:\n' +
+      "  \"joystick on the right\" / \"buttons on the left\" → joystick: { side: 'right' } (the buttons and camera drag swap\n" +
+      "  sides with it); \"bigger joystick\" → joystick: { size: 1.4 } (0.6..2); \"fixed joystick\" → joystick: { mode: 'fixed' }\n" +
+      '  (default floating: it appears under the thumb); a spot → joystick: { position: { x: 0.2, y: 0.75 } }.\n' +
+      "  One button somewhere, or bigger → buttonPositions: { attack: { x: 0.88, y: 0.7, size: 1.4 } } (keys are action\n" +
+      "  names, or 'steer' / 'pedals' for the car pads; x/y are the CENTRE as a fraction of the screen, 0..1).\n" +
+      '  "see-through controls" → opacity: 0.6 (0.2..1). These are the DEFAULTS: every player can also open\n' +
+      '  Settings → Edit controls in the game to drag and resize each control and set its opacity, saved per game\n' +
+      '  (gameId) on their device, and the player\'s own layout always wins. Do not build another layout editor.\n' +
       "- A CAR THE PLAYER DRIVES with driveVehicle(car, state, ctx.input.axis(), dt) is recognised by the\n" +
       "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase' and a\n" +
       "  single car, from the first frame; with rivals or a parked car, call ctx.follow(car)), and a phone\n" +

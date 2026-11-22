@@ -41,7 +41,8 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /**
    * MORE PLACES ON THE MAP — how the world grows. Each entry is a city, a town or a village standing on its own levelled
    * ground, spread out across the map with open country between them. Add an entry to make the map bigger; never edit
-   * the others. The first place (city, or regions[0]) is where the player starts. Up to 12.
+   * the others. The first place (city, or regions[0]) is where the player starts. Up to 100 (places and lands together):
+   * only the cities near the player are built, so a long list is a big universe, not a slow start.
    */
   regions?: WorldRegion[];
 }
@@ -52,6 +53,10 @@ export type RegionKind = 'city' | 'town' | 'village' | LandKind;
 export type LandKind = 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
 const LAND_BIOME: Record<LandKind, LandBiome> = { desert: 'desert', jungle: 'forest', mountain: 'mountain', snow: 'snow', beach: 'beach' };
 export function isLandKind(kind: unknown): kind is LandKind { return typeof kind === 'string' && kind in LAND_BIOME; }
+/** How many places and lands one map holds (admin 2026-11-22: "10—100 maps … bahut bada universe"). */
+export const MAX_REGIONS = 100;
+/** A planned place's city is built when the player comes this many metres from its edge. */
+export const BUILD_AHEAD = 1500;
 export type Compass = 'north' | 'north-east' | 'east' | 'south-east' | 'south' | 'south-west' | 'west' | 'north-west';
 export interface WorldRegion {
   /** A short unique name: 'old-town', 'harbour', 'hill-village'. */
@@ -103,10 +108,15 @@ export interface OpenWorld {
   readonly map: AthreeMap;
   /** The first place (where the player starts), or null in open country. */
   readonly city: OpenWorldCity | null;
-  /** Every place on the map, in the order listed. */
+  /** The places whose city is built so far (see places for all of them). */
   readonly regions: OpenWorldCity[];
   /** Every land on the map (desert, jungle, mountain, snow, beach regions), in the order listed. */
   readonly lands: OpenWorldLand[];
+  /**
+   * EVERY place on the map, built or not, in the order listed. regions holds the places whose city has been built so far:
+   * the first at once, the others as the player comes near (so a map of a hundred places starts as fast as a map of one).
+   */
+  readonly places: ReadonlyArray<{ id: string; kind: RegionKind; centre: { x: number; z: number }; radius: number; readonly built: boolean }>;
   /** The place the player is in or nearest to, and how far its centre is. null in a world with no places. */
   nearestRegion(): { region: OpenWorldCity; distance: number } | null;
   /** Where the player starts: WORLD metres. */
@@ -173,17 +183,26 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const seenIds = new Set<string>();
   const landList: OpenWorldLand[] = [];
   const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
+  // 🌌 A UNIVERSE OF PLACES (admin 2026-11-22: "mujhe chahiye 10—100 maps jod kar bahut bada universe bhi bana sake"). Up to
+  // MAX_REGIONS places and lands. Every place is PLANNED up front — its spot on the map and its levelled ground, which are cheap
+  // and must exist before the first terrain is drawn — but its CITY (buildings, traffic, people, parked cars) is built only when
+  // the player comes within BUILD_AHEAD metres of it, one place per frame, so a hundred places cost what the nearest few cost.
+  // The places spread out on a golden-angle spiral (the n-th one about √n spacings from the first), never stacked, always
+  // reachable; a place asked to lie toward a direction keeps that direction.
+  interface PlannedPlace { region: WorldRegion; preset: (typeof REGION_PRESETS)['city']; cityOptions: CityOptions; centre: { x: number; y: number; z: number }; reach: number; built: number }
+  const planned: PlannedPlace[] = [];
   for (const region of wanted) {
-    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || towns.length + landList.length >= 12) continue;
+    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
+    const n = planned.length + landList.length;
     // A LAND, not a place to build: laid on the map the way it was asked (toward, distance), clear of the places already there.
     if (isLandKind(region.kind)) {
       const r = Math.min(2000, Math.max(150, Number(region.radius) || 450));
-      const base = towns[0]?.centre ?? spawn;
-      const angle = region.toward !== undefined ? COMPASS[region.toward] : ((towns.length + landList.length) * 2.399963);
-      let far = Math.max(region.distance ?? 0, (towns[0]?.radius ?? 0) + r + 300);
+      const base = planned[0]?.centre ?? spawn;
+      const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
+      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 300, (r * 2 + 400) * Math.sqrt(n));
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
-      for (let tries = 0; tries < 6 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+      for (let tries = 0; tries < 8 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
       map.world.setLand(at.x, at.z, r, LAND_BIOME[region.kind]);
@@ -192,38 +211,54 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       continue;
     }
     const preset = REGION_PRESETS[region.kind] || REGION_PRESETS.city;
-    const { traffic: trafficOption, people: peopleOption, parkedCars = preset.parkedCars, ...own } = region.city || {};
-    const cityOptions: CityOptions = { ...preset.city, seed: 11 + towns.length * 17, ...own };
+    const { traffic: _t, people: _p, parkedCars: _c, ...own } = region.city || {};
+    const cityOptions: CityOptions = { ...preset.city, seed: 11 + planned.length * 17, ...own };
     const plan = planCity(cityOptions);
     const hx = plan.width / 2 + 8, hz = plan.depth / 2 + 8, reach = Math.max(hx, hz);
     // Where to look: the first place is at the start; the others go the way they were asked, clear of what is there.
-    const first = towns.length === 0;
-    const angle = region.toward !== undefined ? COMPASS[region.toward] : (towns.length * 2.399963);   // the golden angle: spread, never stacked
-    const far = Math.max(region.distance ?? 0, first ? 0 : reach * 2 + 400 + towns.length * 250);
-    const home = first ? { x: spawn.x, z: spawn.z } : { x: towns[0].centre.x + Math.sin(angle) * far, z: towns[0].centre.z - Math.cos(angle) * far };
-    let best = { x: home.x, z: home.z, cost: Number.POSITIVE_INFINITY };
+    const first = planned.length === 0;
+    const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);   // the golden angle: spread, never stacked
+    const spacing = reach * 2 + 400;
+    let far = Math.max(region.distance ?? 0, first ? 0 : spacing * Math.max(1, Math.sqrt(n)));
+    let best = { x: spawn.x, z: spawn.z, cost: Number.POSITIVE_INFINITY };
+    const samples = first ? 3 : 2;                                                                       // 7×7 for the start, 5×5 after
+    // Water or roads where it was asked: look a little further out (and, for a spread place, a little to either side), before
+    // leaving a place out (a map of a hundred places must not lose the ones that happened to point at the sea).
+    for (let attempt = 0; attempt < (first ? 1 : 10) && !Number.isFinite(best.cost); attempt++, far += spacing * 0.5) {
+    // A place asked to lie toward a direction keeps it; a spread place may also turn a little to find dry ground.
+    const turn = region.toward !== undefined ? 0 : (attempt % 2 ? 1 : -1) * Math.ceil(attempt / 2) * 0.35;
+    const home = first ? { x: spawn.x, z: spawn.z } : { x: planned[0].centre.x + Math.sin(angle + turn) * far, z: planned[0].centre.z - Math.cos(angle + turn) * far };
+    best = { x: home.x, z: home.z, cost: Number.POSITIVE_INFINITY };
     for (const ring of [0, 1, 2, 3, 4]) for (let k = 0; k < (ring ? 8 : 1); k++) {
       const a = (k / 8) * Math.PI * 2, r = ring * reach * 0.9;
       const cx = home.x + Math.cos(a) * r, cz = home.z + Math.sin(a) * r;
       if (taken.some((t) => Math.hypot(cx - t.x, cz - t.z) < t.r + reach + 140)) continue;   // never on top of another place
       let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
-      for (let i = -3; i <= 3 && !wet; i++) for (let j = -3; j <= 3; j++) {
-        const x = cx + (i / 3) * hx, z = cz + (j / 3) * hz, h = map.world.heightAt(x, z);
+      for (let i = -samples; i <= samples && !wet; i++) for (let j = -samples; j <= samples; j++) {
+        const x = cx + (i / samples) * hx, z = cz + (j / samples) * hz, h = map.world.heightAt(x, z);
         if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) { wet = true; break; }
         low = Math.min(low, h); high = Math.max(high, h);
       }
       const cost = wet ? Number.POSITIVE_INFINITY : (high - low) + r * 0.01;
       if (cost < best.cost) best = { x: cx, z: cz, cost };
+      if (!first && cost < 1.5) break;                                                                  // flat enough: stop looking
+    }
     }
     if (!Number.isFinite(best.cost) && !first) { console.error('[world] no dry ground was found for "' + region.id + '" in that direction; it was left out.'); continue; }
     const y = map.world.levelGround(best.x, best.z, hx, hz, 60);
     taken.push({ x: best.x, z: best.z, r: reach });
-    const city = createCity(cityOptions);
-    const root = new THREE.Group(); root.name = 'Region ' + region.id;
+    planned.push({ region, preset, cityOptions, centre: { x: best.x, y, z: best.z }, reach, built: -1 });
+  }
+  /** Build one planned place's city now (buildings, traffic, people, parked cars) and put it on the map. */
+  const buildPlace = (p: PlannedPlace): OpenWorldCity => {
+    const { traffic: trafficOption, people: peopleOption, parkedCars = p.preset.parkedCars } = p.region.city || {};
+    const city = createCity(p.cityOptions);
+    const plan = city.plan;
+    const root = new THREE.Group(); root.name = 'Region ' + p.region.id;
     root.add(city.root);
-    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: preset.traffic, ...(trafficOption || {}) });
+    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: p.preset.traffic, ...(trafficOption || {}) });
     if (traffic) root.add(traffic.root);
-    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: preset.people, ...(peopleOption || {}) });
+    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, ...(peopleOption || {}) });
     if (people) root.add(people.root);
     const local = new THREE.Object3D(); root.add(local);
     const parked: THREE.Object3D[] = [];
@@ -237,14 +272,23 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       car.rotation.y = i % 2 ? Math.PI : 0;
       root.add(car); parked.push(car); ctx.vehicles.add(car);
     }
-    const centre = { x: best.x, y, z: best.z };
-    towns.push({ id: region.id, kind: region.kind, city, traffic, people, parked, centre, radius: reach, toWorld: (x, z) => ({ x: centre.x + x, z: centre.z + z }) });
-    roots.push(root); locals.push(local);
-    if (first) { spawn.x = best.x + city.spawn.x; spawn.z = best.z + city.spawn.z; spawn.y = y + city.spawn.y; }   // start on one of its streets
+    const centre = p.centre;
+    const built: OpenWorldCity = { id: p.region.id, kind: p.region.kind, city, traffic, people, parked, centre, radius: p.reach, toWorld: (x, z) => ({ x: centre.x + x, z: centre.z + z }) };
+    p.built = towns.length;
+    towns.push(built); roots.push(root); locals.push(local);
+    root.position.set(centre.x - chunks.origin.x, centre.y, centre.z - chunks.origin.z);
+    ctx.scene.add(root); root.updateMatrixWorld(true);
+    return built;
+  };
+  // The first place is where the player starts: built now, and the player stands on one of its streets.
+  if (planned[0]) {
+    const home = buildPlace(planned[0]);
+    spawn.x = home.centre.x + home.city.spawn.x; spawn.z = home.centre.z + home.city.spawn.z; spawn.y = home.centre.y + home.city.spawn.y;
   }
   const town: OpenWorldCity | null = towns[0] || null;
   map.update(spawn.x, spawn.z, 0, spawn.y);
-  towns.forEach((t, i) => { roots[i].position.set(t.centre.x - chunks.origin.x, t.centre.y, t.centre.z - chunks.origin.z); ctx.scene.add(roots[i]); roots[i].updateMatrixWorld(true); });
+  // The first place was put on the map before map.update() moved the origin: line it up again.
+  towns.forEach((t, i) => { roots[i].position.set(t.centre.x - chunks.origin.x, t.centre.y, t.centre.z - chunks.origin.z); roots[i].updateMatrixWorld(true); });
   layGround(spawn.x, spawn.z);
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
   ctx.player.setWater(map.world.seaLevel);
@@ -257,6 +301,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   };
   return {
     map, spawn, playerWorld, city: town, regions: towns, lands: landList,
+    places: planned.map((p) => ({ id: p.region.id, kind: p.region.kind, centre: { x: p.centre.x, z: p.centre.z }, radius: p.reach, get built() { return p.built >= 0; } })),
     nearestRegion() {
       const at = playerWorld();
       let found: { region: OpenWorldCity; distance: number } | null = null;
@@ -282,6 +327,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         for (const root of roots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
       }
       layGround(at.x, at.z);
+      // A place still only planned is built when the player comes near it — at most one per frame, so walking towards a
+      // cluster of places never stalls a frame on several cities at once.
+      for (const p of planned) {
+        if (p.built >= 0) continue;
+        if (Math.hypot(at.x - p.centre.x, at.z - p.centre.z) < p.reach + BUILD_AHEAD) { buildPlace(p); break; }
+      }
       // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
       const seated = ctx.vehicles.seated;
       towns.forEach((t, i) => {

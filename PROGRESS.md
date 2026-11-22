@@ -103848,3 +103848,8 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 
 - `setLand` in the Athree world (biome override inside a ragged-edged area; mountains rise from dry land), land region kinds in `play/openWorld.ts` (`OpenWorld.lands`), the map rule, worldGrow and five new Game Library map places. Places and lands share the 12-region limit. `tests/aDesertIsReallyADesert.test.ts` runs the real kit with the #2488 request; Chromium shows the mountain beside the city, 0 console errors.
 - Also in flight: #4426 (Weak billing estimate), #4427 (correction at the top), #4428 (build start bounded; the seed is not the builder's work).
+
+## 2026-11-22 — a universe of maps: up to 100 places and lands, cities built as the player nears them (failedbr #2490, Q-3248)
+
+- `play/openWorld.ts`: MAX_REGIONS 100; every place planned at once (spot + levelled ground), its city built only within BUILD_AHEAD (1.5 km), one per frame; golden-angle √n spiral with dry-ground search; `OpenWorld.places` lists all. The rule: bigger = more regions (never sizeMeters), duplicate = copies. `MAX_PLACES` 100. Tests: aUniverseOfMaps, the 100-region headless test; Chromium: 60-place universe, start screen 2.1 s, 0 errors.
+- Q-3249 queued: the claim audit called a typechecked build "no typecheck ran".

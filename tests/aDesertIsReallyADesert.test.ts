@@ -35,7 +35,7 @@ describe('🏜️ lands on the map', () => {
       { id: 'south-jungle', kind: 'jungle', toward: 'south' },
       { id: 'west-mountains', kind: 'mountain', toward: 'west' },
     ] });
-    expect(world.regions.map((r: any) => r.id)).toEqual(['main-city', 'village-1']);           // places have buildings
+    expect(world.places.map((r: any) => r.id)).toEqual(['main-city', 'village-1']);            // places have buildings
     expect(world.lands.map((l: any) => l.kind)).toEqual(['desert', 'jungle', 'mountain']);     // lands do not
     const at = (id: string) => world.lands.find((l: any) => l.id === id)!.centre;
     const d = at('east-desert'), j = at('south-jungle'), m = at('west-mountains');
@@ -51,10 +51,10 @@ describe('🏜️ lands on the map', () => {
     // The first place keeps its level ground.
     expect(world.map.world.clearAt(c.x, c.z)).toBe(true);
   });
-  it('places and lands share the 12-region limit', () => {
-    const regions = Array.from({ length: 14 }, (_, i) => ({ id: `d${i}`, kind: 'desert' }));
+  it('places and lands share the region limit (100 since 2026-11-22)', () => {
+    const regions = Array.from({ length: 104 }, (_, i) => ({ id: `d${i}`, kind: 'desert' }));
     const world = OW.createOpenWorld(context(), { seed: 3, regions });
-    expect(world.regions.length + world.lands.length).toBe(12);
+    expect(world.places.length + world.lands.length).toBe(100);
   });
 });
 

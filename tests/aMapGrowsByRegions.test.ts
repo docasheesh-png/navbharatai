@@ -42,49 +42,77 @@ describe('🗺️ several places on one map', () => {
       { id: 'old-town', kind: 'town', toward: 'east', city: small },
       { id: 'hill-village', kind: 'village', city: small },
     ] });
-    expect(world.regions.map((r: any) => r.id)).toEqual(['main-city', 'old-town', 'hill-village']);
+    // Since the universe change (2026-11-22) every place is PLANNED at once and its city is BUILT when the player comes near.
+    expect(world.places.map((p: any) => p.id)).toEqual(['main-city', 'old-town', 'hill-village']);
+    expect(world.regions.map((r: any) => r.id)).toEqual(['main-city']);
     expect(world.city).toBe(world.regions[0]);
-    for (const r of world.regions) {
-      const plan = r.city.plan, hs: number[] = [];
-      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) hs.push(world.heightAt(r.centre.x + (i / 2) * plan.width / 2, r.centre.z + (j / 2) * plan.depth / 2));
-      expect(Math.max(...hs) - Math.min(...hs), r.id).toBeLessThan(0.01);          // level under every place
-      expect(world.map.world.clearAt(r.centre.x, r.centre.z), r.id).toBe(true);
+    for (const p of world.places) {
+      const hs: number[] = [];
+      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) hs.push(world.heightAt(p.centre.x + (i / 2) * p.radius * 0.6, p.centre.z + (j / 2) * p.radius * 0.6));
+      expect(Math.max(...hs) - Math.min(...hs), p.id).toBeLessThan(0.01);          // level under every place, built or not
+      expect(world.map.world.clearAt(p.centre.x, p.centre.z), p.id).toBe(true);
     }
     // Spread apart: no two places touch, with open country between them.
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      const A = world.regions[a], B = world.regions[b];
+    for (let x = 0; x < 3; x++) for (let y = x + 1; y < 3; y++) {
+      const A = world.places[x], B = world.places[y];
       expect(Math.hypot(A.centre.x - B.centre.x, A.centre.z - B.centre.z)).toBeGreaterThan(A.radius + B.radius + 100);
     }
     // The town was asked for to the EAST of the first place (+x), and is a journey away.
-    expect(world.regions[1].centre.x - world.regions[0].centre.x).toBeGreaterThan(300);
+    expect(world.places[1].centre.x - world.places[0].centre.x).toBeGreaterThan(300);
     const near = world.nearestRegion();
     expect(near.region.id).toBe('main-city');
     world.dispose();
   }, 120_000);
 
-  it('a place far away is not drawn and does not run its streets; the near one does', () => {
+  it('a far place is not built until the player comes near it — then it is, and it runs its streets', () => {
     const c = context();
     const world = OW.createOpenWorld(c.ctx, { seed: 7, regions: [
       { id: 'a', kind: 'village', city: small },
       { id: 'b', kind: 'village', toward: 'north', distance: 6000, city: small },
     ] });
-    const far = world.regions[1];
-    const before = far.traffic.cars.map((car: any) => car.along);
+    for (let i = 0; i < 10; i++) world.frame(c.ctx, 1 / 60);
+    expect(world.places.map((p: any) => [p.id, p.built])).toEqual([['a', true], ['b', false]]);
+    expect(c.scene.children.filter((o: any) => /^Region /.test(o.name)).map((o: any) => o.name)).toEqual(['Region a']);
+    // Walk (teleport) to b: it is built on the next frame, and only then.
+    const b = world.places[1];
+    const origin = world.map.chunks.origin;
+    c.player.reset(b.centre.x - origin.x, world.heightAt(b.centre.x, b.centre.z) + 1, b.centre.z - origin.z);
+    world.frame(c.ctx, 1 / 60);
+    expect(world.places[1].built).toBe(true);
+    expect(world.regions.map((r: any) => r.id)).toEqual(['a', 'b']);
+    const town = world.regions[1];
+    const before = town.traffic.cars.map((car: any) => car.along);
     for (let i = 0; i < 30; i++) world.frame(c.ctx, 1 / 60);
-    expect(far.traffic.cars.map((car: any) => car.along)).toEqual(before);        // frozen while nobody is there
-    const roots = c.scene.children.filter((o: any) => /^Region /.test(o.name));
-    expect(roots.map((o: any) => [o.name, o.visible])).toEqual([['Region a', true], ['Region b', false]]);
+    expect(town.traffic.cars.map((car: any) => car.along)).not.toEqual(before);    // its streets run while the player is there
     world.dispose();
   }, 120_000);
 
-  it('twelve at most, an id only once, and the old city option is still the first place', () => {
+  it('an id only once, and the old city option is still the first place', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const c = context();
     const world = OW.createOpenWorld(c.ctx, { seed: 7, city: { blocksX: 2, blocksZ: 2, ...small }, regions: [{ id: 'x', kind: 'village', city: small }, { id: 'x', kind: 'town', city: small }] });
-    expect(world.regions.map((r: any) => r.id)).toEqual(['city', 'x']);
+    expect(world.places.map((p: any) => p.id)).toEqual(['city', 'x']);
     world.dispose();
     errors.mockRestore();
   }, 120_000);
+
+  it('🌌 a universe: 100 places and lands on one map, planned at once, started fast, only the first city built', () => {
+    const c = context();
+    const kinds = ['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach'];
+    const regions = Array.from({ length: 110 }, (_, i) => ({ id: `r${i}`, kind: kinds[i % kinds.length], city: small }));
+    const t0 = Date.now();
+    const world = OW.createOpenWorld(c.ctx, { seed: 5, regions });
+    const took = Date.now() - t0;
+    expect(world.places.length + world.lands.length).toBe(100);                        // the limit is 100, not 12
+    expect(world.regions.length).toBe(1);                                               // one city built; the rest when reached
+    expect(took).toBeLessThan(20_000);
+    // Spread over the land, never stacked: every pair of places stands apart.
+    const all = [...world.places.map((p: any) => ({ ...p.centre, r: p.radius })), ...world.lands.map((l: any) => ({ ...l.centre, r: l.radius }))];
+    let overlaps = 0;
+    for (let x = 0; x < all.length; x++) for (let y = x + 1; y < all.length; y++) if (Math.hypot(all[x].x - all[y].x, all[x].z - all[y].z) < all[x].r * 0.5 + all[y].r * 0.5) overlaps++;
+    expect(overlaps).toBe(0);
+    world.dispose();
+  }, 180_000);
 });
 
 describe('🗺️ the game\'s own map file, and the rule that grows it', () => {

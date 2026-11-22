@@ -10,7 +10,8 @@ import { parseRegions } from './growthGuard';
 export type PlaceKind = 'city' | 'town' | 'village' | 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
 const KINDS: readonly PlaceKind[] = ['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach'];
 /** The most places a map holds (play/openWorld.ts). */
-export const MAX_PLACES = 12;
+/** The most places and lands a map holds (play/openWorld.ts MAX_REGIONS — admin 2026-11-22: "10—100 maps … universe"). */
+export const MAX_PLACES = 100;
 
 /** The request the library's "Add to game" sends for a map place (libraryThumbnails.addToGamePrompt). Exactly that shape. PURE. */
 export function mapPlaceAsked(prompt: string | null | undefined): PlaceKind | null {

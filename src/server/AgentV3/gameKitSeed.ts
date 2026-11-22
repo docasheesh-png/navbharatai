@@ -352,9 +352,14 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
   + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','
   + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). NEVER add a'
-  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 12 regions (places and lands'
-  + ' together): at 12, say so and offer to make one bigger instead. Never build a place by hand beside the list, and never replace'
-  + ' the map to make it bigger.';
+  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 100 regions (places and lands'
+  + ' together) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
+  // failedbr #2490: "is map ko 50x bigger banao … isi ko duplicate kar ke merge karo" — the builder stretched sizeMeters (the SAME
+  // terrain, 7× wider) to the 1000 km cap and stopped at 12 places, all near the start. Bigger means MORE places, not a stretch.
+  + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
+  + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land). "Isi map ko'
+  + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
+  + ' the original. Never build a place by hand beside the list, and never replace the map to make it bigger.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

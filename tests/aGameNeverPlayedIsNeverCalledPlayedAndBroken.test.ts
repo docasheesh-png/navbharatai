@@ -82,9 +82,9 @@ describe('source guard: every reader states the evidence it was given', () => {
     expect(route).toContain("played: gameProof.outcome !== 'not-run'");
   });
   it('the playtest\'s defect and scope readers use the map completed from the sandbox', () => {
-    expect(route).toContain('const playtestFiles = await withKitLayersFromDisk(playtestFilesKnown,');
-    const at = route.indexOf('const playtestFiles = await withKitLayersFromDisk(');
-    const known = route.lastIndexOf('const playtestFilesKnown =', at);
+    expect(route).toContain('const playedFiles = await withKitLayersFromDisk(playtestFiles,');
+    const at = route.indexOf('const playedFiles = await withKitLayersFromDisk(');
+    const known = route.lastIndexOf('const playtestFiles =', at);
     expect(known).toBeGreaterThan(0);
     // No reader between the known map and the completed one judges kit layers or scope from the partial map.
     expect(route.slice(known, at)).not.toMatch(/missingKitLayerPaths\(|scopeMatch\(|replayFromCode\(/);

@@ -24797,18 +24797,18 @@ async function noteBuildOutcome(
       const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
         gamePlaytestDone = true;
-        const playtestFilesKnown = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+        const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
           && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
-          && isCanvasGameProject(playtestFilesKnown, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
+          && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
           && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
             const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
             const playRun = parsePlaytest(out.stdout);
-            const playtestFiles = await withKitLayersFromDisk(playtestFilesKnown, (p) => actuator.readFile(workspaceId, p));
-            const verdict = playtestVerdict(playRun, replayFromCode(playtestFiles));
+            const playedFiles = await withKitLayersFromDisk(playtestFiles, (p) => actuator.readFile(workspaceId, p));
+            const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
             if (gameProof.outcome === 'not-run') gameProof.unplayed = true; // the runner's own "never played" answer
@@ -24816,8 +24816,8 @@ async function noteBuildOutcome(
             gateEvidence.game = gameProof.outcome;
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
-              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles), replayFromCode(playtestFiles));
-              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [], played: gameProof.outcome !== 'not-run' };
+              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playedFiles), replayFromCode(playedFiles));
+              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playedFiles).missing : [], played: gameProof.outcome !== 'not-run' };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
               // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
@@ -24838,7 +24838,7 @@ async function noteBuildOutcome(
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
             try {
-              const scope = gameContract ? gameScopeVerdict(gameContract, playtestFiles) : null;
+              const scope = gameContract ? gameScopeVerdict(gameContract, playedFiles) : null;
               if (scope) buildDiag.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
             } catch { /* observation only */ }
           } catch (err) {
@@ -24864,7 +24864,7 @@ async function noteBuildOutcome(
             const why = playtestSkipReason({
               enabled: gamePlaytestEnabled(),
               buildOk: result?.ok === true,
-              isCanvasGame: isCanvasGameProject(playtestFilesKnown, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }),
+              isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }),
               isImportTurn,
               aborted: abort.signal.aborted,
               hasRunCommand: !!actuator.runCommand,
@@ -24881,7 +24881,7 @@ async function noteBuildOutcome(
           } catch { /* an honest line is best-effort and must never touch a build */ }
           // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
           try {
-            const domKind = gamePlaytestEnabled() && result?.ok && !isImportTurn && !abort.signal.aborted && !isCanvasGameProject(playtestFilesKnown) ? domGameKind(playtestFilesKnown, gameContract) : null;
+            const domKind = gamePlaytestEnabled() && result?.ok && !isImportTurn && !abort.signal.aborted && !isCanvasGameProject(playtestFiles) ? domGameKind(playtestFiles, gameContract) : null;
             if (domKind) {
               const dom = domGameNotPlayedVerdict(domKind);
               buildDiag.record({ phase: 'preview', severity: dom.severity, code: dom.code, message: dom.message, autoResolved: dom.autoResolved });

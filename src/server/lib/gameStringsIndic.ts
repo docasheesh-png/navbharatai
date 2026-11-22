@@ -53,6 +53,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "கட்டுப்பாடுகளை மீட்டமை", up: "மேலே", down: "கீழே", reload: "ரீலோட்",
     crouch: "குனி / மூழ்கு",
     language: "மொழி",
+    editControls: "கட்டுப்பாடுகளைத் திருத்து", editControlsHint: "நகர்த்த ஒரு கட்டுப்பாட்டை இழுக்கவும்", smaller: "சிறியது", bigger: "பெரியது", controlsOpacity: "ஒளிபுகுதன்மை", done: "முடிந்தது",
   },
   // Telugu
   te: {
@@ -86,6 +87,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "కంట్రోల్స్ రీసెట్ చేయండి", up: "పైకి", down: "కిందికి", reload: "రీలోడ్",
     crouch: "వంగు / మునుగు",
     language: "భాష",
+    editControls: "కంట్రోల్స్ మార్చండి", editControlsHint: "జరపడానికి కంట్రోల్‌ను లాగండి", smaller: "చిన్నది", bigger: "పెద్దది", controlsOpacity: "పారదర్శకత", done: "పూర్తయింది",
   },
   // Bangla
   bn: {
@@ -119,6 +121,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "কন্ট্রোল রিসেট করুন", up: "উপরে", down: "নিচে", reload: "রিলোড",
     crouch: "নিচু হন / ডুব দিন",
     language: "ভাষা",
+    editControls: "কন্ট্রোল সাজান", editControlsHint: "সরাতে কন্ট্রোলটি টেনে আনুন", smaller: "ছোট", bigger: "বড়", controlsOpacity: "স্বচ্ছতা", done: "হয়ে গেছে",
   },
   // Marathi
   mr: {
@@ -152,6 +155,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "कंट्रोल्स रीसेट करा", up: "वर", down: "खाली", reload: "रीलोड",
     crouch: "वाका / सूर मारा",
     language: "भाषा",
+    editControls: "कंट्रोल्स बदला", editControlsHint: "हलवण्यासाठी कंट्रोल ओढा", smaller: "लहान", bigger: "मोठे", controlsOpacity: "पारदर्शकता", done: "झाले",
   },
   // Gujarati
   gu: {
@@ -185,6 +189,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "કંટ્રોલ્સ રીસેટ કરો", up: "ઉપર", down: "નીચે", reload: "રીલોડ",
     crouch: "નમો / ડૂબકી",
     language: "ભાષા",
+    editControls: "કંટ્રોલ્સ બદલો", editControlsHint: "ખસેડવા માટે કંટ્રોલને ખેંચો", smaller: "નાનું", bigger: "મોટું", controlsOpacity: "પારદર્શકતા", done: "થઈ ગયું",
   },
   // Kannada
   kn: {
@@ -218,6 +223,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "ನಿಯಂತ್ರಣಗಳನ್ನು ಮರುಹೊಂದಿಸಿ", up: "ಮೇಲೆ", down: "ಕೆಳಗೆ", reload: "ರೀಲೋಡ್",
     crouch: "ಬಾಗಿ / ಮುಳುಗಿ",
     language: "ಭಾಷೆ",
+    editControls: "ಕಂಟ್ರೋಲ್‌ಗಳನ್ನು ಬದಲಿಸಿ", editControlsHint: "ಸರಿಸಲು ಕಂಟ್ರೋಲ್ ಅನ್ನು ಎಳೆಯಿರಿ", smaller: "ಚಿಕ್ಕದು", bigger: "ದೊಡ್ಡದು", controlsOpacity: "ಪಾರದರ್ಶಕತೆ", done: "ಮುಗಿಯಿತು",
   },
   // Malayalam
   ml: {
@@ -251,6 +257,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "നിയന്ത്രണങ്ങൾ പുനഃക്രമീകരിക്കൂ", up: "മുകളിലേക്ക്", down: "താഴേക്ക്", reload: "റീലോഡ്",
     crouch: "കുനിയൂ / മുങ്ങൂ",
     language: "ഭാഷ",
+    editControls: "കൺട്രോളുകൾ മാറ്റുക", editControlsHint: "നീക്കാൻ കൺട്രോൾ വലിക്കുക", smaller: "ചെറുത്", bigger: "വലുത്", controlsOpacity: "സുതാര്യത", done: "കഴിഞ്ഞു",
   },
   // Punjabi (Gurmukhi)
   pa: {
@@ -284,6 +291,7 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "ਕੰਟਰੋਲ ਰੀਸੈੱਟ ਕਰੋ", up: "ਉੱਪਰ", down: "ਹੇਠਾਂ", reload: "ਰੀਲੋਡ",
     crouch: "ਝੁਕੋ / ਡੁਬਕੀ",
     language: "ਭਾਸ਼ਾ",
+    editControls: "ਕੰਟਰੋਲ ਬਦਲੋ", editControlsHint: "ਹਿਲਾਉਣ ਲਈ ਕੰਟਰੋਲ ਨੂੰ ਖਿੱਚੋ", smaller: "ਛੋਟਾ", bigger: "ਵੱਡਾ", controlsOpacity: "ਪਾਰਦਰਸ਼ਤਾ", done: "ਹੋ ਗਿਆ",
   },
   // Odia
   or: {
@@ -317,5 +325,6 @@ export const INDIC_GAME_STRINGS: Readonly<Record<IndicGameLanguage, Readonly<Rec
     resetControls: "କଣ୍ଟ୍ରୋଲ ରିସେଟ କରନ୍ତୁ", up: "ଉପରକୁ", down: "ତଳକୁ", reload: "ରିଲୋଡ",
     crouch: "ନଇଁ ପଡ଼ନ୍ତୁ / ବୁଡ଼ନ୍ତୁ",
     language: "ଭାଷା",
+    editControls: "କଣ୍ଟ୍ରୋଲ ବଦଳାନ୍ତୁ", editControlsHint: "ଘୁଞ୍ଚାଇବାକୁ କଣ୍ଟ୍ରୋଲକୁ ଟାଣନ୍ତୁ", smaller: "ଛୋଟ", bigger: "ବଡ଼", controlsOpacity: "ସ୍ୱଚ୍ଛତା", done: "ହୋଇଗଲା",
   },
 };

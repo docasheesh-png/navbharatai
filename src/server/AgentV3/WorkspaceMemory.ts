@@ -889,16 +889,30 @@ export async function warmIndexFiles(
   // at a time; indexing still walks `targets` in order, so the graph is exactly what the loop built.
   const contents: Array<string | null> = new Array(targets.length).fill(null);
   let next = 0;
+  // ⏱️ THE DEADLINE BOUNDS THE WAIT, NOT ONLY THE STARTS (failedbr #2484: "indexing is capped at 8000ms" — and it took 76.7 s;
+  // the second fill, with no deadline at all, took 78.4 s for 27 files). A read in flight on a sandbox that has stalled
+  // (reconnecting, paused) never settled, so "stop STARTING reads" still waited for it. Each read now races the time left
+  // (and never waits longer than WARM_READ_MAX_MS on one file); a read that loses is simply not indexed — the file stays a
+  // stub, counted by GRAPH_RESTORED_STUBS — and the build starts. Late answers are dropped, never written into the graph.
+  let timedOut = 0;
   const worker = async () => {
     while (next < targets.length && Date.now() < stopAt) {
       const i = next++;
+      const budget = Math.max(0, Math.min(WARM_READ_MAX_MS, stopAt - Date.now()));
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const content = await read(targets[i]);
+        const content = await Promise.race([
+          read(targets[i]),
+          new Promise<typeof WARM_READ_TIMED_OUT>((resolve) => { timer = setTimeout(() => resolve(WARM_READ_TIMED_OUT), budget); }),
+        ]);
+        if (content === WARM_READ_TIMED_OUT) { timedOut++; continue; }
         if (typeof content === 'string' && content.length <= maxBytes) contents[i] = content;
       } catch { /* unreadable file — skip, never block the build */ }
+      finally { if (timer) clearTimeout(timer); }
     }
   };
   await Promise.all(Array.from({ length: Math.min(WARM_READ_CONCURRENCY, targets.length) }, worker));
+  lastWarmTimedOut = timedOut;
   const indexed: string[] = [];
   targets.forEach((file, i) => {
     const content = contents[i];
@@ -908,8 +922,14 @@ export async function warmIndexFiles(
   return indexed;
 }
 
-/** How long the build-start graph fill may keep starting reads (Q-116). Reads in flight still finish. */
+/** How long the build-start graph fill may take (Q-116; since failedbr #2484 this bounds the WAIT, not only the starts). */
 export const WARM_INDEX_BUILD_START_MS = 8_000;
+/** The longest one file's read is waited for, even with time left (a stalled sandbox answers nothing). */
+export const WARM_READ_MAX_MS = 5_000;
+const WARM_READ_TIMED_OUT = Symbol('warm-read-timed-out');
+let lastWarmTimedOut = 0;
+/** How many reads the last `warmIndexFiles` gave up waiting for — for the setup-timing line. */
+export function warmIndexTimedOutCount(): number { return lastWarmTimedOut; }
 
 /** How many sandbox reads `warmIndexFiles` keeps in flight at once. */
 export const WARM_READ_CONCURRENCY = 8;

@@ -205,6 +205,7 @@ import {
   agentLifecycle,
   getWorkspaceMemory,
   warmIndexFiles,
+  warmIndexTimedOutCount,
   WARM_INDEX_BUILD_START_MS,
   reflectOnBuild,
   reflectionNote,
@@ -18628,13 +18629,14 @@ async function noteBuildOutcome(
         const ctxT1 = Date.now();
         const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
         const ctxT2 = Date.now();
-        const ctxIndexed = await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        // Bounded like the first fill (failedbr #2484: this one had no deadline and took 78.4 s for 27 files).
+        const ctxIndexed = await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200, deadlineMs: WARM_INDEX_BUILD_START_MS });
         const ctxT3 = Date.now();
         try {
           buildDiag.recordSetupTiming({
             startMs: ctxT0, endMs: ctxT3,
             message: `Project context prepared in ${Math.round((ctxT3 - ctxT0) / 100) / 10}s`,
-            detail: `memory restore ${ctxT1 - ctxT0}ms · file listing ${ctxT2 - ctxT1}ms (${tree.length} path(s)) · indexed ${ctxIndexed.length} file(s) in ${ctxT3 - ctxT2}ms`,
+            detail: `memory restore ${ctxT1 - ctxT0}ms · file listing ${ctxT2 - ctxT1}ms (${tree.length} path(s)) · indexed ${ctxIndexed.length} file(s) in ${ctxT3 - ctxT2}ms · ${warmIndexTimedOutCount()} read(s) not answered within the cap`,
           });
         } catch { /* diagnostics are best-effort */ }
         const ctxEpisodes = ctxMem.snapshot().episodes;

@@ -41,7 +41,8 @@ describe('the game shell draws touch controls and wires them in', () => {
     // The shell keeps the controls (this.touch) since 2026-10-11, so a game that drives a vehicle can be
     // switched to the Left/Right + Brake/Gas layout (tests/theCarIsSeenFromBehind.test.ts runs it).
     expect(game).toContain('const touchOptions = options.touchControls || {};');
-    expect(game).toMatch(/if \(options\.touchControls !== false\) \{\s*const touch = new TouchControls\(options\.container, this\.input, touchOptions\);\s*this\.touch = touch;\s*this\.disposers\.push\(\(\) => touch\.dispose\(\)\);/);
+    // The gameId goes in too since 2026-11-22: the player's own layout (Settings → Edit controls) is saved per game.
+    expect(game).toMatch(/if \(options\.touchControls !== false\) \{\s*(?:\/\/[^\n]*\n\s*)*const touch = new TouchControls\(options\.container, this\.input, \{ gameId: options\.gameId, \.\.\.touchOptions \}\);\s*this\.touch = touch;\s*this\.disposers\.push\(\(\) => touch\.dispose\(\)\);/);
   });
 
   it('a subset that includes Game always carries the controls', () => {

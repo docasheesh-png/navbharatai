@@ -657,6 +657,7 @@ const EN = {
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
   controls: 'Controls', pressKey: 'Press a key (Esc to cancel)', resetControls: 'Reset controls', up: 'Up', down: 'Down', reload: 'Reload',
   crouch: 'Crouch / dive', language: 'Language',
+  editControls: 'Edit controls', editControlsHint: 'Drag a control to move it', smaller: 'Smaller', bigger: 'Bigger', controlsOpacity: 'Opacity', done: 'Done',
 };
 
 export type StringKey = keyof typeof EN;
@@ -688,6 +689,7 @@ const HI: Record<StringKey, string> = {
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
   controls: 'कंट्रोल्स', pressKey: 'कोई कुंजी दबाएँ (रद्द करने के लिए Esc)', resetControls: 'कंट्रोल्स रीसेट करें', up: 'ऊपर', down: 'नीचे', reload: 'रीलोड',
   crouch: 'झुकें / गोता', language: 'भाषा',
+  editControls: 'कंट्रोल्स बदलें', editControlsHint: 'कंट्रोल को खींचकर नई जगह रखें', smaller: 'छोटा', bigger: 'बड़ा', controlsOpacity: 'पारदर्शिता', done: 'हो गया',
 };
 
 const INDIC: Record<Exclude<GameLanguage, 'en' | 'hi'>, Record<StringKey, string>> = {

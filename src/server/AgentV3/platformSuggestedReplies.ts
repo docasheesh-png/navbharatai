@@ -143,6 +143,8 @@ export const PLATFORM_SUGGESTED_REPLIES: readonly PlatformSuggestedReply[] = [
   ...phrasesInTails().map((phrase) => ({ phrase, intent: 'edit_existing' as const, composedBy: 'fakeFeatureScan.ts' })),
   // The character swap's reply (characterSetHandoff): the default person back — GAME_PLAYER_RULE sets PLAYER.model to null.
   { phrase: 'wapas purana character', intent: 'edit_existing', composedBy: 'characterSwap.ts' },
+  // The racing car swap's reply (carSetHandoff): the standard car back — RACE_ROAD_RULE sets CAR.model to null.
+  { phrase: 'wapas purani gaadi', intent: 'edit_existing', composedBy: 'carSwap.ts' },
 ];
 
 /**

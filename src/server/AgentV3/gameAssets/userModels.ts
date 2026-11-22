@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { validateGlb, type GlbLimits } from './assetPolicy';
 import { bundleGltf, safeGltfResourcePath } from './gltfBundle';
 import type { GameAssetPersistence } from './assetProject';
+import { playerMovesOf, playerMovesLine } from '../../lib/playerMoves';
 
 export const USER_MODEL_LIMITS: GlbLimits = Object.freeze({
   // 8 MB: the workspace store keeps a file this size durably (a 12 MB data URI ≈ 9 MB of bytes); a larger limit would
@@ -395,6 +396,9 @@ export function userModelNote(models: readonly UserModel[], refused: readonly Us
         + `${m.materials.length ? `; materials: ${m.materials.slice(0, 16).join(', ')}` : ''}${m.parts.length ? `; parts: ${m.parts.slice(0, 16).join(', ')}` : ''}${m.warnings.length ? `; tell the user: ${m.warnings.slice(0, 4).join('; ')}` : ''})`);
     }
     lines.push(`HOW: in a game with src/game/three/assetCustomizations.ts, add an entry per model, e.g. ${models[0].subject}: { source: { file: '${models[0].path}', sha256: '${models[0].sha256}' } }, then load it with loadRequestedAsset('${models[0].subject}', fallback) like any other model; recolour a part with colors: { <material>: '#rrggbb' }, hide one with hide: [<part>], pick a clip with animation / roles. In any other three.js game, load '/${models[0].path.replace(/^public\//, '')}' with GLTFLoader. Never rewrite these files; if the user asks for a change, change it in code.`);
+    // 🧍 As the PLAYER, in any game (2026-11-22: "Use as my character" in ALL games): one line in src/game/player.ts, which
+    // every game on the kit reads by itself — and the moves it really has, so the user is told what it cannot do.
+    lines.push(`AS THE PLAYER (the user says it is their character — "mera character ye wala", "boxer ko ye model do", "use this as my player"): in a game with src/game/player.ts set PLAYER.file = '/${models[0].path.replace(/^public\//, '')}' and PLAYER.model = null — nothing else; the game swaps the body by itself. As the player, ${models.map((m) => { const moves = playerMovesOf(m.animations); return `"${m.subject}": ${playerMovesLine(moves.has.map((h) => `${h.move} ("${h.clip}")`), moves.lacks)}`; }).join(' · ')}.`);
   }
   if (refused.length) lines.push(`[USER MODELS NOT ADDED] Tell the user plainly, in their language, which file and why: ${refused.slice(0, 12).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}`);
   return lines.join('\n');

@@ -5,7 +5,7 @@ import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 
 // Execute the emitted component, not a duplicate starter implementation. WebGL is
 // intentionally replaced; the real road geometry/stream is exercised separately.
-function mountStarter(props: Record<string, unknown> = {}) {
+function mountStarter(props: Record<string, unknown> = {}, raceCustom?: Record<string, unknown>) {
   let effect: (() => (() => void)) | undefined;
   const handlers = new Map<string, () => void>();
   const state = { status: 'playing' };
@@ -17,6 +17,7 @@ function mountStarter(props: Record<string, unknown> = {}) {
   const stream = { setPlan: vi.fn(() => true), root: new THREE.Group(), startPose: { x: 0, y: 0, z: 0, heading: 0 },
     update: vi.fn(), dispose: vi.fn() };
   const create = vi.fn(() => stream);
+  const createRace = vi.fn((_scene: unknown, _options: unknown) => ({ canDrive: () => true, update: () => ({ position: 1, total: 4, time: 0 }), dispose: () => {} }));
   const game = { start: vi.fn(), pause: vi.fn(), resume: vi.fn(), dispose: vi.fn() };
   const context = { scene: new THREE.Scene(), follow: vi.fn(), input: { axis: () => ({ x: 0, y: -1 }) },
     player: { object: new THREE.Object3D(), reset(x: number, y: number, z: number) { this.object.position.set(x, y, z); } }, camera: new THREE.PerspectiveCamera(),
@@ -29,7 +30,9 @@ function mountStarter(props: Record<string, unknown> = {}) {
     './core/events': { events: { on: (event: string, fn: () => void) => { handlers.set(event, fn); return () => handlers.delete(event); } } },
     './core/state': { state },
     './Game': { Game: class { constructor(o: unknown) { options = o; options.setup(context); return game; } } },
-    './three/race': { createRace: () => ({ canDrive: () => true, update: () => ({ position: 1, total: 1, time: 0 }), dispose: () => {} }) },
+    './three/race': { createRace },
+    './play/raceCustom': raceCustom ?? { projectRaceChoices: () => ({ car: null, track: null }), applyCarChoice: () => ({ showing: 'kit', error: null, ready: Promise.resolve(), dispose: () => {} }),
+      loadModelTrack: async () => ({ ok: false, reason: 'not used here' }) },
     './three/objects': { createTrackStream: create, createCar: () => new THREE.Group(), createVehicleState: () => ({ speed: 20, heading: 0 }),
       driveVehicle: (_car: unknown, drive: unknown) => drive,
       RACING_ROAD_MAPS: Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Map ${i + 1}`, lengthKm: 10, lighting: i === 11 ? 'night' : 'day' })) },
@@ -53,7 +56,7 @@ function mountStarter(props: Record<string, unknown> = {}) {
     if (deps.some((dep, i) => !Object.is(dep, previous[i]))) { cleanup(); cleanup = effect!(); }
   };
   const dispose = () => cleanup();
-  return { rerender, tree, state, handlers, setters, refs, options, context, stream, create, game, canvas, dispose };
+  return { rerender, tree, state, handlers, setters, refs, get options() { return options; }, context, stream, create, createRace, game, canvas, dispose };
 }
 
 describe('generated racing starter actually consumes the reusable library', () => {
@@ -149,4 +152,58 @@ it('plan identity changes restart with all settings; stable plans do not silentl
   expect(ready).toHaveBeenCalledWith(m.stream);
   expect(m.game.start).toHaveBeenCalledTimes(2);
   m.dispose();
+});
+
+describe("the user's own car and track reach the running starter", () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const ownTrack = () => {
+    const root = new THREE.Group();
+    let distance = 0;
+    return { root, name: 'My Oval', length: 400, laps: 3, startPose: { x: 55, y: 0, z: 0, heading: 0 }, heightAt: () => 0, line: [],
+      update: vi.fn(() => ({ distance: (distance += 10), lap: Math.floor(distance / 400), segment: null, ended: false, rebased: null })),
+      poseAt: () => null, reset: vi.fn(), dispose: vi.fn() };
+  };
+  it('a track model: no road library is streamed, the race runs its laps on it, and the HUD shows the laps', async () => {
+    const track = ownTrack();
+    const applied: unknown[] = [];
+    const m = mountStarter({ track: { model: 'public/models/oval.glb', laps: 3 }, car: { model: 'public/models/my-car.glb', color: 0x00ff00 } }, {
+      projectRaceChoices: () => ({ car: null, track: null }),
+      applyCarChoice: (_car: unknown, choice: unknown) => { applied.push(choice); return { dispose: () => {} }; },
+      loadModelTrack: vi.fn(async (choice: { model: string }) => { expect(choice.model).toBe('public/models/oval.glb'); return { ok: true, track, notes: [] }; }),
+    });
+    // Loading is said on screen first; the game starts once the track is read.
+    expect(m.setters[3]).toHaveBeenCalledWith('Loading your track...');
+    expect(m.game.start).not.toHaveBeenCalled();
+    await flush();
+    expect(m.game.start).toHaveBeenCalledOnce();
+    expect(m.create).not.toHaveBeenCalled();
+    expect(m.createRace).toHaveBeenCalledWith(m.context.scene, { stream: track, opponents: 3, finishDistance: 1200 });
+    expect(m.context.scene.children).toContain(track.root);
+    expect(applied).toEqual([{ model: 'public/models/my-car.glb', color: 0x00ff00 }]);
+    m.options.update(m.context, 0.25);
+    expect(m.refs[1].current.textContent).toContain('My Oval · Lap 1/3');
+    expect(m.setters[3]).toHaveBeenLastCalledWith(null);
+    m.dispose();
+    expect(track.dispose).toHaveBeenCalledOnce();
+  });
+  it('🔴 a track that cannot be raced on is SAID on screen with its reason, and the race runs on the road library', async () => {
+    const m = mountStarter({ track: { model: 'public/models/flat.glb' } }, {
+      projectRaceChoices: () => ({ car: null, track: null }),
+      applyCarChoice: () => ({ dispose: () => {} }),
+      loadModelTrack: async () => ({ ok: false, reason: 'the whole model is one open flat surface' }),
+    });
+    await flush();
+    expect(m.setters[3]).toHaveBeenLastCalledWith('Your track "public/models/flat.glb" cannot be raced on: the whole model is one open flat surface. This race runs on the road library instead.');
+    expect(m.create).toHaveBeenCalledOnce();
+    expect(m.game.start).toHaveBeenCalledOnce();
+    m.dispose();
+  });
+  it('the game\'s own car.ts and track.ts are used when no prop is given', async () => {
+    const track = ownTrack();
+    const loadModelTrack = vi.fn(async () => ({ ok: true, track, notes: [] }));
+    const m = mountStarter({}, { projectRaceChoices: () => ({ car: { color: 1 }, track: { model: 'public/models/oval.glb' } }), applyCarChoice: () => ({ dispose: () => {} }), loadModelTrack });
+    await flush();
+    expect(loadModelTrack).toHaveBeenCalledWith({ model: 'public/models/oval.glb' });
+    m.dispose();
+  });
 });

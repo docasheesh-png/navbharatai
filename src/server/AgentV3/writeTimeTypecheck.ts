@@ -381,6 +381,15 @@ export function noWriteTypecheckVerdict(): WriteTypecheckRunOutcome {
   return { errors: null, silent: false, neverRan: false, notReady: false, notReadyWhy: null };
 }
 
+/**
+ * Did a write-time compile really look at the project this build (failedbr #2490, Q-3249)? The claim audit read only the gate's
+ * own evidence, which the write-time typecheck never moves, and told the user "no typecheck ran on this build" beside a report
+ * showing 5 write-time runs (the last clean) and a clean tsc. A compile that never looked (a missing binary) is not a run. PURE.
+ */
+export function writeTimeTypecheckRan(stats: Pick<WriteTypecheckStats, 'runs' | 'notRunRuns'> | null | undefined): boolean {
+  return !!stats && Math.max(0, (stats.runs || 0) - (stats.notRunRuns || 0)) > 0;
+}
+
 export interface WriteTypecheckStats {
   /**
    * Files that were handed a write-time label/design note (writeTimeQualityCheck.ts), across every lane

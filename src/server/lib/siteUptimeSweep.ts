@@ -17,6 +17,7 @@ import { autoPublishToNewDomain, realAutoPublishDeps, type AutoPublishOutcome } 
 import { activeDomainLinks, type DomainLinkRecord } from './firebaseDomainLink';
 import { saveNotification } from './AdminNotificationStore';
 import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
+import { prepareNotificationEmail } from './emailUnsubscribe';
 import { siteUptimeStore } from './siteUptimeStore';
 import {
   decideUptime, outcomeFromServing, downMessage, upMessage, sweepEnabled, maxDomainsPerSweep,
@@ -60,8 +61,12 @@ export const realDeps: SweepDeps = {
     if (!cfg.configured) return false;
     const to = await ownerEmail(userId);
     if (!to) return false;
+    // Unsubscribed, unreadable preference, or no way to sign an unsubscribe link ⇒ no email (the bell still rings).
+    const unsub = await prepareNotificationEmail(userId, 'site-status');
+    if (!unsub) return false;
     const r = await sendAlertEmail({ ...cfg, to: [to] }, message, {
-      footer: '— NavBharatAI\nOpen your app → Publish to see the live status, or reply to this email for help.',
+      footer: `— NavBharatAI\nOpen your app → Publish to see the live status, or reply to this email for help.\n\n${unsub.footerLine}`,
+      headers: unsub.headers,
     }).catch(() => ({ sent: false }));
     return r.sent === true;
   },

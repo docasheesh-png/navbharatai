@@ -14,6 +14,7 @@
 import * as admin from 'firebase-admin';
 import { saveNotification } from './AdminNotificationStore';
 import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
+import { prepareNotificationEmail } from './emailUnsubscribe';
 
 export type StoreAppKind = 'apk' | 'web';
 
@@ -59,18 +60,23 @@ async function ownerEmail(uid: string): Promise<string | null> {
 export interface NotifyApprovalDeps {
   notify: (uid: string, message: string) => Promise<unknown>;
   resolveEmail: (uid: string) => Promise<string | null>;
-  email: (to: string, subject: string, body: string) => Promise<boolean>;
+  /** `uid` is whose mail it is — the unsubscribe link and preference belong to that account. */
+  email: (to: string, subject: string, body: string, uid: string) => Promise<boolean>;
 }
 
 export const realNotifyApprovalDeps: NotifyApprovalDeps = {
   notify: (uid, message) => saveNotification({ message, target: { type: 'user', userId: uid }, createdBy: 'system' }),
   resolveEmail: (uid) => ownerEmail(uid),
-  email: async (to, subject, body) => {
+  email: async (to, subject, body, uid) => {
     const cfg = resolveEmailConfig();
     if (!cfg.configured) return false;
+    // Unsubscribed, unreadable preference, or no way to sign an unsubscribe link ⇒ no email (the bell still rings).
+    const unsub = await prepareNotificationEmail(uid, 'store-updates');
+    if (!unsub) return false;
     const r = await sendAlertEmail({ ...cfg, to: [to] }, body, {
       subject,
-      footer: '— NavBharatAI\nOpen the app → Nav App Store to see it live.',
+      footer: `— NavBharatAI\nOpen the app → Nav App Store to see it live.\n\n${unsub.footerLine}`,
+      headers: unsub.headers,
     }).catch(() => ({ sent: false }));
     return r.sent === true;
   },
@@ -94,7 +100,7 @@ export async function notifyStoreApproval(
     await d.notify(uid, approvalBellMessage(name, kind)).catch(() => null);
     const to = await d.resolveEmail(uid).catch(() => null);
     if (to) {
-      await d.email(to, approvalEmailSubject(name), approvalEmailBody(name, kind)).catch(() => false);
+      await d.email(to, approvalEmailSubject(name), approvalEmailBody(name, kind), uid).catch(() => false);
     }
   } catch { /* congratulating a creator must never break the approval it is celebrating */ }
 }

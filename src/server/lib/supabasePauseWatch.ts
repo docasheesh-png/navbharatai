@@ -17,6 +17,7 @@ import { databasesInVault } from './databaseReuse';
 import { projectRefFromUrl } from './supabaseData';
 import { saveNotification } from './AdminNotificationStore';
 import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
+import { prepareNotificationEmail } from './emailUnsubscribe';
 import {
   getProjectState, projectStateMessage, stateNeedsOwner, type ProjectState,
 } from './supabaseProjectState';
@@ -142,8 +143,12 @@ export const realPauseWatchDeps: PauseWatchDeps = {
     if (!cfg.configured) return false;
     const to = await ownerEmail(userId);
     if (!to) return false;
+    // Unsubscribed, unreadable preference, or no way to sign an unsubscribe link ⇒ no email (the bell still rings).
+    const unsub = await prepareNotificationEmail(userId, 'database-status');
+    if (!unsub) return false;
     const r = await sendAlertEmail({ ...cfg, to: [to] }, message, {
-      footer: '— NavBharatAI\nOpen NavBharatAI → Settings → App Settings → Database to wake it.',
+      footer: `— NavBharatAI\nOpen NavBharatAI → Settings → App Settings → Database to wake it.\n\n${unsub.footerLine}`,
+      headers: unsub.headers,
     }).catch(() => ({ sent: false }));
     return r.sent === true;
   },

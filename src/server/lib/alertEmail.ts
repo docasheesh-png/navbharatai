@@ -138,6 +138,12 @@ export interface SendDeps {
    * every mail-list preview. A one-time code belongs in the body only.
    */
   subject?: string;
+  /**
+   * Extra mail headers, sent as the provider's `headers` field. A user-facing notification passes its
+   * `List-Unsubscribe` / `List-Unsubscribe-Post` pair here (emailUnsubscribe.ts), which is what makes Gmail
+   * and Yahoo show their own one-click unsubscribe button.
+   */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -167,6 +173,7 @@ export async function sendAlertEmail(
         to: cfg.to,
         subject: deps.subject?.trim() || alertSubject(message),
         text: `${message}\n\n${deps.footer ?? '— NavBharatAI Monitor\nOpen Admin → Monitor for the live charts.'}`,
+        ...(deps.headers && Object.keys(deps.headers).length ? { headers: deps.headers } : {}),
       }),
       signal: controller.signal,
     });

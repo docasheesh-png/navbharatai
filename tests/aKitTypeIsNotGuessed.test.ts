@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  extractExportedDeclaration, kitTypeContract, KIT_CONTRACT_NAMES, KIT_CONTRACT_HEADING,
+  extractExportedDeclaration, extractExportedDeclarations, kitTypeContract, KIT_CONTRACT_NAMES, KIT_CONTRACT_HEADING,
 } from '../src/server/lib/kitTypeContract';
 import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
@@ -109,8 +109,13 @@ describe('the kit\'s types are handed over, not guessed (Q-909, autopsy 50378049
     it('every name the contract claims to cover is really declared where it says', () => {
       const f = files();
       const block = kitTypeContract(f);
-      const present = KIT_CONTRACT_NAMES.filter((n) =>
-        Object.values(f).some((src) => extractExportedDeclaration(src, n)));
+      // One parse per file for all the names (extractExportedDeclarations), not one per name per file.
+      const declared = new Set<string>();
+      for (const src of Object.values(f)) for (const n of extractExportedDeclarations(src, KIT_CONTRACT_NAMES).keys()) declared.add(n);
+      const present = KIT_CONTRACT_NAMES.filter((n) => declared.has(n));
+      // …and the batch answers exactly what the one-name helper answers.
+      const objects = f['src/game/three/objects.ts'];
+      for (const [n, d] of extractExportedDeclarations(objects, KIT_CONTRACT_NAMES)) expect(d).toBe(extractExportedDeclaration(objects, n));
       expect(present.length).toBeGreaterThan(0);
       for (const n of present) expect(block).toContain(n);
     });

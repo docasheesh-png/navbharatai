@@ -49,6 +49,8 @@ describe('the done check waits for this run to change something', () => {
   });
   it('🔒 the runner asks it', () => {
     const runner = readFileSync(join(__dirname, '..', 'src/server/AgentV3/AgentRunner.ts'), 'utf8');
-    expect(runner).toContain('wroteThisRun: dispatcher.wroteAnything()');
+    // Since failedbr #2487 (Q-3246) "this run" excludes the platform seed laid before the run: changeCount() − changesAtRunStart.
+    expect(runner).toContain('wroteThisRun: wroteThisRunNow()');
+    expect(runner).toContain('const wroteThisRunNow = (): boolean => (typeof dispatcher.changeCount === \'function\' ? dispatcher.changeCount() - changesAtRunStart > 0 : dispatcher.wroteAnything());');
   });
 });

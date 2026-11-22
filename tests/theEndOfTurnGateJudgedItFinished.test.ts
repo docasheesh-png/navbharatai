@@ -46,6 +46,6 @@ describe('the end-of-turn gate records when the app was first finished', () => {
     const after = runner.slice(gate, gate + 900);
     expect(after).toContain('readyMark = endOfTurnReadyMark({');
     expect(after).toContain('existing: readyMark, readiness,');
-    expect(after).toContain("editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),");
+    expect(after).toContain("editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: wroteThisRunNow(),");
   });
 });

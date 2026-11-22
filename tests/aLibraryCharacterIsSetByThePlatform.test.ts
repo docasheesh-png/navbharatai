@@ -100,13 +100,20 @@ describe('the turn', () => {
     expect(await setLibraryCharacterAtTurnStart(t.io)).toContain('NOT DONE');
     expect(t.disk.get(PLAYER_FILE_PATH)).toBe(odd);
   });
-  it('any other turn, and a game with no player file, are not this step\'s business', async () => {
+  it('any other turn is not this step\'s business', async () => {
     const other = turn({ prompt: 'add coins' });
     expect(await setLibraryCharacterAtTurnStart(other.io)).toBe('');
-    const none = turn({}, null);
-    expect(await setLibraryCharacterAtTurnStart(none.io)).toBe('');
     expect(other.addModel).not.toHaveBeenCalled();
+  });
+  it('a game with no player file and no shell that reads one is TOLD so — never silence, nothing added', async () => {
+    // 2026-11-22: this used to return '' and hand the request to the builder unanswered (the gate that kept "Use as my
+    // character" to the open world). Every game on the kit's shell has a character now; one without it hears why.
+    const none = turn({}, null);
+    const handoff = await setLibraryCharacterAtTurnStart(none.io);
+    expect(handoff).toContain('NOT DONE');
+    expect(handoff).toMatch(/not built on the NavBharatAI game kit's shell/);
     expect(none.addModel).not.toHaveBeenCalled();
+    expect(none.write).not.toHaveBeenCalled();
   });
   it('the build route runs it at the start of the turn, through the real library tool', () => {
     const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');

@@ -4088,6 +4088,19 @@ export class ToolDispatcher {
   /** How many of a recipe's files are in flight at once. Read by tests. */
   static readonly RECIPE_WRITE_CONCURRENCY = RECIPE_WRITE_CONCURRENCY;
 
+  /**
+   * The game's own player file (src/game/player.ts): created once when absent, never replaced — it is the user's from then
+   * on. True when it was created now. Every game on the kit's shell reads it by itself (play/playerBody.ts).
+   */
+  private async ensurePlayerFile(agent: AgentRole, source: string): Promise<boolean> {
+    try { await this.actuator.readFile(this.workspaceId, GAME_PLAYER_FILE_PATH); return false; }
+    catch (error) { if (!isNotFoundError(error)) throw error; }
+    const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE, { agent, source });
+    this.state?.recordFileChange({ path: GAME_PLAYER_FILE_PATH, kind: playerFile.kind }, agent);
+    getWorkspaceMemory(this.workspaceId).indexFile(GAME_PLAYER_FILE_PATH, playerFile.content);
+    return true;
+  }
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
@@ -10471,14 +10484,7 @@ export class ToolDispatcher {
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }
             // The game's own player (look, or a library character): created once, never replaced.
-            let cast = false;
-            try { await this.actuator.readFile(this.workspaceId, GAME_PLAYER_FILE_PATH); cast = true; }
-            catch (error) { if (!isNotFoundError(error)) throw error; }
-            if (!cast) {
-              const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE, { agent, source: 'generate_open_world' });
-              this.state?.recordFileChange({ path: GAME_PLAYER_FILE_PATH, kind: playerFile.kind }, agent);
-              getWorkspaceMemory(this.workspaceId).indexFile(GAME_PLAYER_FILE_PATH, playerFile.content);
-            }
+            await this.ensurePlayerFile(agent, 'generate_open_world');
             // The game's own list of features: created once, never replaced (it is the user's game from then on).
             let listed = false;
             try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
@@ -10622,8 +10628,11 @@ export class ToolDispatcher {
         const gsh = generateGameShell(gshInclude);
         const gshWritten = await this.writeRecipeFiles(gsh.files, agent);
         const gshLayers = await this.addMissingRecipeLayers(gsh.files, agent);
+        // 🧍 Every game on the shell swaps its character in src/game/player.ts, which the shell reads by itself (2026-11-22:
+        // "Use as my character" in ALL games) — so the file exists from the first build, created once, never replaced.
+        const gshPlayer = gsh.files['src/game/Game.ts'] ? await this.ensurePlayerFile(agent, 'generate_game_shell') : false;
         this.scheduleCheckpoint('game shell');
-        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}${gshLayers}`;
+        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}\n\n${gsh.instructions}${gshLayers}`;
       }
 
       case 'generate_melody': {

@@ -23,6 +23,8 @@ export interface LibraryResponse {
   prompts: Record<string, string>;
   /** Per model: the instruction that makes it the character the user plays as. Absent for a map place. */
   characterPrompts: Record<string, string>;
+  /** Per model: the instruction that makes it the car the user drives in a racing game (carSwap.ts). Absent for a map place. */
+  carPrompts: Record<string, string>;
 }
 
 /** The one place a server body enters this screen: anything not shaped like a library answer is an error, never data. */
@@ -37,7 +39,7 @@ export function parseLibraryResponse(body: unknown): LibraryResponse | null {
   const texts = (v: unknown) => Object.fromEntries(Object.entries(v && typeof v === 'object' ? v as Record<string, unknown> : {}).filter(([, t]) => typeof t === 'string')) as Record<string, string>;
   const prompts = texts(b.prompts);
   const categories = b.categories.filter((c): c is { category: string; count: number } => !!c && typeof (c as { category: unknown }).category === 'string' && typeof (c as { count: unknown }).count === 'number');
-  return { enabled: b.enabled, rows, total: b.total, categories, prompts, characterPrompts: texts(b.characterPrompts) };
+  return { enabled: b.enabled, rows, total: b.total, categories, prompts, characterPrompts: texts(b.characterPrompts), carPrompts: texts(b.carPrompts) };
 }
 
 const label = (category: string) => category.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -50,7 +52,7 @@ interface Props {
 export function GameLibraryPicker({ onPick }: Props) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
-  const [use, setUse] = useState<'add' | 'character'>('add');
+  const [use, setUse] = useState<'add' | 'character' | 'car'>('add');
   const [data, setData] = useState<LibraryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,10 +84,10 @@ export function GameLibraryPicker({ onPick }: Props) {
     <div className="flex flex-col gap-2 p-2" data-testid="game-library-picker">
       <div className="text-xs font-semibold text-ink">Game library</div>
       <p className="text-[11px] leading-snug text-muted">
-        {use === 'add' ? 'Ready 3D models for your game. Tap one to add it to your message, then send.' : 'Tap a model to make it the character you play as, then send.'}
+        {use === 'add' ? 'Ready 3D models for your game. Tap one to add it to your message, then send.' : use === 'car' ? 'Tap a model to make it the car you drive in your racing game, then send.' : 'Tap a model to make it the character you play as in your game, then send. To use your own model, attach its file and say it is your character.'}
       </p>
       <div className="flex gap-1" role="group" aria-label="What a tapped model does">
-        {([['add', 'Add to my game'], ['character', 'Use as my character']] as const).map(([mode, text]) => (
+        {([['add', 'Add to my game'], ['character', 'Use as my character'], ['car', 'Use as my car']] as const).map(([mode, text]) => (
           <button
             key={mode}
             type="button"
@@ -133,12 +135,12 @@ export function GameLibraryPicker({ onPick }: Props) {
         <p className="text-[11px] text-muted">Nothing in the library matches “{query}”. Describe it in your message and the builder will make it.</p>
       )}
       <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto overscroll-contain" aria-busy={loading}>
-        {data?.rows.filter((row) => use === 'add' || !!data.characterPrompts[row.id]).map((row) => (
+        {data?.rows.filter((row) => use === 'add' || !!(use === 'car' ? data.carPrompts : data.characterPrompts)[row.id]).map((row) => (
           <button
             key={row.id}
             type="button"
             title={row.animations.length ? `${row.name} — moves: ${row.animations.join(', ')}` : row.name}
-            onClick={() => { const text = use === 'character' ? data.characterPrompts[row.id] : data.prompts[row.id]; if (text) onPick(text); }}
+            onClick={() => { const text = use === 'car' ? data.carPrompts[row.id] : use === 'character' ? data.characterPrompts[row.id] : data.prompts[row.id]; if (text) onPick(text); }}
             className="flex flex-col items-center gap-0.5 rounded-lg border border-line bg-surface p-1 text-center hover:border-accent"
           >
             {row.thumb

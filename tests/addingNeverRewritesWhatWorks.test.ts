@@ -158,7 +158,7 @@ describe('🧱 lock 2: the end of the turn puts back whatever was changed withou
     expect(issues).toEqual(['GROWTH_GUARD_RESTORED', 'GROWTH_GUARD_ASKED']);
     expect(said.join(' ')).toMatch(/I kept what already worked/);
     expect(said.join(' ')).toMatch(/"coins bhi badlo"|"police bhi badlo"/);
-    expect(said.join(' ')).toMatch(/game engine itself is never edited/);   // the refused kit write is named too
+    expect(said.join(' ')).toMatch(/left the game engine as it was, because you did not ask me to change it/);   // the refused kit write is named too, with the words that open it (2026-11-22)
     // Nothing to do → silent, and a guard that throws leaves the turn alone.
     const quiet: string[] = [];
     await enforceGrowthAtTurnEnd({ filesAtTurnStart: PROJECT, request: 'x', read: async (p) => PROJECT[p], write: async () => { throw new Error('no'); }, platformWrote: new Map(), refused: [], record: () => undefined, say: (t) => { quiet.push(t); } });
@@ -185,7 +185,7 @@ describe('🔓 when a change really IS needed, the user decides — and is never
     expect(note).toMatch(/"police bhi badlo"/);
     expect(note).toMatch(/"jo zaroori ho badal do"/);
     expect(note).not.toMatch(/src\//);
-    expect(growthAskNote([KIT])).toMatch(/The game engine itself is never edited for one game/);
+    expect(growthAskNote([KIT])).toMatch(/left the game engine as it was.*"jo chahe badlo"/);   // opened by the user's words since 2026-11-22, never closed for good
     expect(growthAskNote(['src/pages/About.tsx'])).toBe('');
     expect(partNameOf('src/game/features/missionDelivery.ts')).toBe('missionDelivery');
   });

@@ -194,7 +194,7 @@ const CONTRACT: readonly ContractEntry[] = [
   // What `setup(ctx)` and `update(ctx, dt)` are handed. The reported build guessed three members of it.
   { file: 'src/game/Game.ts', names: ['GameContext', 'GameOptions'] },
   // What `touchControls: { buttons: [...] }` takes. The reported build passed strings.
-  { file: 'src/game/ui/touchControls.ts', names: ['TouchButton', 'TouchLayout', 'TouchControlsOptions'] },
+  { file: 'src/game/ui/touchControls.ts', names: ['TouchButton', 'TouchLayout', 'TouchControlsOptions', 'TouchJoystickOptions', 'TouchPlacement'] },
   // 1b38d662: livery/color were guessed and Motorcycle was passed as an Object3D instead of .root.
   // failedbr #1298 (2026-11-20): `createCar(...).root` (it returns the Group itself), createVehicleState(vehicle, tuning) and
   // driveVehicle's fifth parameter were guessed — 41 type errors and 2.5 minutes of fixes.

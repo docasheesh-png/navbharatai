@@ -94,7 +94,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "7850bb8b2e57c9aabba497084e464a9a147e6e1386d60855e07e52fb9e5e72a2",
     "208b5632ac19f6ebc448dc232716c0a906052e86859288775ea8fa64b870346d",
     "b2140860692d7ab032fd23b05223143d255ac4ae073119a686ba884f184b48b2",
-    "89ef1e4ccd41878c6c708ba48ad7be6bb15ecc38d9a4901b2bcac4780e5b83cb"
+    "89ef1e4ccd41878c6c708ba48ad7be6bb15ecc38d9a4901b2bcac4780e5b83cb",
+    "2cc185473f60c59d834ca91a55eb879d633743b729d788171c929520e5c1f076"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -372,7 +373,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "ad218f39f6a20fcb2e26158a5fef567b2378578a783e6ad72cafd923089525e7",
     "89b605f2878fdbb8f020440ee5d2671174d9a54bd6a52227bf9c1bfcb163ebdb",
     "91add2f6fb4a3a53aa8c211eef4207e6e66019e8aaa64c16887dab5579672a5a",
-    "64527f2013bf8fc45d4025926de0dcb9c2990b39187eee1ced5a9e7bda28c88c"
+    "64527f2013bf8fc45d4025926de0dcb9c2990b39187eee1ced5a9e7bda28c88c",
+    "2d383896e653553b51df791673858bf920bfa45adcabf52082f6b29accebbed4"
   ],
   "src/game/core/swipe.ts": [
     "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
@@ -651,7 +653,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "167c79590f85cfb4a893762073efc2b25f3f4b8bfedd6ca7f42e0d69ab8d8797",
     "990c374fda9df5bd5482ae8e8cefcd1863e2483fd7ac86e15194e8fd362135dd",
     "673ad345f05c90b87c7f736ed9a10aed79344cb98fca8eb377b301a6d0272c16",
-    "c921a6669aa6b988cbf9f74039a7364c0a0f1253310f114a591b536f9f10184d"
+    "c921a6669aa6b988cbf9f74039a7364c0a0f1253310f114a591b536f9f10184d",
+    "bb78d8204a9757abf17692e115790e9d585dfd8af35edec8a24adb87225dbab7"
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",
@@ -660,7 +663,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "9ed85b5c584048f50b94701dbf2aa7a7cec2516e478122d77cdad0dae21eabc2",
     "2871c2d0b8d02e1f9adcef7aabdfe4624d71cd2b28f1c9341c5c1a81c52fe513",
     "6dac5b20d3be57d8952df9896aed138a2ddf62c73531b69d0bfd8651c110b0ab",
-    "94152bbea352e9ad6187e970552601e373e8b596c3bd9cd17c41b8d56a6c19fe"
+    "94152bbea352e9ad6187e970552601e373e8b596c3bd9cd17c41b8d56a6c19fe",
+    "16592f66e9cc3e26f4fe02b2cf2977c50651aefb1f607b360b7f677a2b0e12b5",
+    "6b13c9d45a13c23737c404940f42cd26b22c4e338edfb48ce492d1bc862fd443"
   ],
   "src/game/world2d/index.ts": [
     "b294ff67e14198e9b23c99563f6c683d2626b416ca5c64b828dd37baec015291"

@@ -117,7 +117,7 @@ describe('the turn', () => {
   });
   it('the build route runs it at the start of the turn, through the real library tool', () => {
     const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toMatch(/await libraryActionsAtTurnStart\(\{[\s\S]{0,700}name: 'add_library_models', input: \{ models: \[\{ id \}\] \}/);
+    expect(route).toMatch(/await libraryActionsForTurn\(\{[\s\S]{0,700}name: 'add_library_models', input: \{ models: \[\{ id \}\] \}/);
     const growth = readFileSync(join(__dirname, '..', 'src/server/AgentV3/growthTurn.ts'), 'utf8');
     expect(growth).toMatch(/await addLibraryPlaceAtTurnStart\(io\), await setLibraryCharacterAtTurnStart\(io\)/);
   });

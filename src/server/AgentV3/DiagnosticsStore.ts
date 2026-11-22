@@ -20,6 +20,7 @@ import { summarizeModelPerformance, type ModelPerformanceSummary } from './model
 import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 import { workaroundCountOf } from '../../lib/healIssue';
 import { GREEN_RESTORE_UNCHECKED_DETAIL } from './GreenGuard';
+import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -538,6 +539,8 @@ export interface DiagnosticsHistoryEntry {
   counts: BuildDiagnosticsReport['counts'];
   /** Time the build waited for the user's answer — taken off its duration by the ETA history (autopsy 1219c639). */
   userWaitMs?: number;
+  /** The platform completed the request with no builder (platformDoneTurn.ts) — the ETA history does not learn from it. */
+  platformDoneTurn?: true;
   /** The build's own id (the history doc is keyed by `startedAt`, which is not the same thing). */
   buildId?: string;
   /**
@@ -812,6 +815,7 @@ async function listDiagnosticsHistoryInner(
       return [{
         id: d.id, buildId: r.buildId, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok,
         ...(typeof r.userWaitMs === 'number' && r.userWaitMs > 0 ? { userWaitMs: r.userWaitMs } : {}),
+        ...(Array.isArray(r.issues) && r.issues.some((i) => i?.code === PLATFORM_DONE_TURN_CODE) ? { platformDoneTurn: true as const } : {}),
         summary: r.summary, rootCause: r.rootCause, counts: r.counts,
         // Carried so a SESSION summary can be built from the history we already read (admin 2026-08-06):
         // the guardian records every workspace wipe, but each report shows one TURN, so three wipes

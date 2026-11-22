@@ -45,28 +45,23 @@ function stripComments(src: string): string {
  * body: an interface is read to its BALANCED closing brace, so a nested object type cannot truncate it.
  */
 export function extractExportedDeclaration(source: string | null | undefined, name: string): string | null {
-  return extractDeclaration(source, name, SHARED_PARSES);
+  return extractDeclaration(source, name);
 }
 
 /**
- * Parsed kit files, shared by every caller of the public helper. Without it each lookup of a name that is not an
- * interface or a type alias re-parsed the WHOLE file with TypeScript — names × files full parses: asking for the
- * contract's ~100 names across the ~40 kit files took 2 s, then 4 s once the racing kit grew, and past 20 s under CI
- * coverage (2026-11-22). Keyed by the source text itself (a changed file is a new key, never a stale parse), and
- * bounded by total size so a long-lived server never grows it without limit; the oldest parse goes first.
+ * Many names out of ONE source, parsing it at most once for this call (the parse is dropped when the call returns —
+ * no AST outlives it, kitTypeContractParsing.test.ts). Asking extractExportedDeclaration for each name re-parsed the
+ * whole file per name: the contract's ~100 names over the ~40 kit files took 2 s, 4 s once the racing kit grew, and
+ * past 20 s under CI coverage (2026-11-22). Same answers, name for name, as the single-name helper.
  */
-const SHARED_PARSES = new Map<string, ts.SourceFile>();
-const SHARED_PARSES_MAX_CHARS = 6_000_000;
-let sharedParsesChars = 0;
-function rememberParse(source: string, sf: ts.SourceFile): void {
-  if (SHARED_PARSES.has(source)) return;
-  SHARED_PARSES.set(source, sf);
-  sharedParsesChars += source.length;
-  for (const key of SHARED_PARSES.keys()) {
-    if (sharedParsesChars <= SHARED_PARSES_MAX_CHARS) break;
-    SHARED_PARSES.delete(key);
-    sharedParsesChars -= key.length;
+export function extractExportedDeclarations(source: string | null | undefined, names: readonly string[]): Map<string, string> {
+  const parsed = new Map<string, ts.SourceFile>();
+  const out = new Map<string, string>();
+  for (const name of names) {
+    const declaration = extractDeclaration(source, name, parsed);
+    if (declaration) out.set(name, declaration);
   }
+  return out;
 }
 
 function extractDeclaration(source: string | null | undefined, name: string, parsedSources?: Map<string, ts.SourceFile>): string | null {
@@ -109,7 +104,7 @@ function extractDeclaration(source: string | null | undefined, name: string, par
 function exportedCallableOrClass(source: string, name: string, parsedSources?: Map<string, ts.SourceFile>): string | null {
   try {
     const sf = parsedSources?.get(source) ?? ts.createSourceFile('kit.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-    if (parsedSources === SHARED_PARSES) rememberParse(source, sf); else parsedSources?.set(source, sf);
+    parsedSources?.set(source, sf);
     if ((sf as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics?.length) return null;
     const exported = (node: ts.Node) => ts.canHaveModifiers(node)
       && !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);

@@ -601,7 +601,9 @@ export function gameTurnHandoff(
   const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
-  const api = kitTypeContract(producers, 12_000);
+  // 12_500 since 2026-11-22: the touch-layout options (joystick, buttonPositions) joined the contract, and at 12_000 a
+  // whole section (objects.ts) would have been dropped from every game turn rather than one field trimmed.
+  const api = kitTypeContract(producers, 12_500);
   // Read from the project itself, so it holds on the 30th turn exactly as on the first — whoever built the game.
   const grows = projectGrowthRules(files);
   return { contract, block: [

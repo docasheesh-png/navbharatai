@@ -103867,3 +103867,9 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - citytraffic.ts / citypeople.ts read positions in the city's frame; traffic.pushOut called every frame by play/openWorld.ts for the player or their car.
 - collision.ts gains keepApart(movers) for any two moving things; GAME_COLLISION_RULE (gameCollisionRule.ts) said in GAME_KIT_RULE, the seed handoff and projectGrowthRules.
 - Test: tests/twoThingsNeverPassThrough.test.ts (reversion of inCity fails 2 tests). Traffic-vs-traffic was measured already clean; locked, not changed.
+
+## 2026-11-22 — failedbr #2496: platform temp files are never the user's project (Q-3257, Q-3258)
+- Why the proof script survived: `proveAssetInSandbox` wrote `.nbai-asset-<sha>.mjs` at the project root through the dispatcher's recorded write door, so it was recorded for the durable save; the `rm -f` in `finally` only cleaned the sandbox. The saved copy was restored into later sandboxes, listed in the build manifest and graded by readiness ("hardcoded localhost URL", "hardcoded server port").
+- Class fix: `PLATFORM_SCRATCH_DIR = node_modules/.cache/nbai-scratch` + `isPlatformScratchPath` (generatedDirs.ts), enforced at toDurableFileKey (heals old stores), every listing, recordedWrites, the E2B replay cache, readEvalSnapshot and .gitignore. The proof stages model, script and log there with a nonce; all three are removed.
+- Starter tests: `generatedAssetFiles.ts` recognises unedited model-library files byte-exactly by re-running their generator; `isPlatformSeededFile` uses it; `planAutoTests` skips platform-owned files (route passes `platformOwned: isPlatformSeededFile`); narration says the suite's result is reported separately.
+- Test: tests/platformTempFilesAreNotTheProject.test.ts, each fix proven by reversion.

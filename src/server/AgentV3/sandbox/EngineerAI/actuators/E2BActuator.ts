@@ -547,6 +547,22 @@ ${attachConsoleJs('page').trimEnd()}
 })().catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
 `.trim();
 
+/**
+ * Before a browser daemon is started: reuse one that already answers on the CDP port, otherwise kill every stale
+ * daemon and every Chromium still holding that port (failedbr #2495/#2496 — a second daemon cannot bind the port, never
+ * answers and never exits, so each relaunch leaked a whole browser). Prints exactly one marker line. PURE.
+ */
+export function browserDaemonPrecheckCommand(): string {
+  return `if curl -s --max-time 3 http://localhost:${CDP_PORT}/json/version | grep -q webSocketDebuggerUrl; then echo NBAI_DAEMON_ALIVE; `
+    // The bracket in each pattern keeps pkill -f from matching THIS shell's own command line (which contains the text).
+    + `else pkill -f '${TOOLS_DIR}/daemon[.]js' ; pkill -f -- '--remote-debugging-port=[${String(CDP_PORT)[0]}]${String(CDP_PORT).slice(1)}' ; echo NBAI_DAEMON_START; fi`;
+}
+
+/** Did the precheck find a daemon that answers? Only an explicit marker counts. PURE. */
+export function browserDaemonAlive(stdout: string | null | undefined): boolean {
+  return /^NBAI_DAEMON_ALIVE$/m.test(String(stdout ?? ''));
+}
+
 // Connects to the persistent browser via CDP, performs ONE action, screenshots,
 // then exits WITHOUT closing the browser (so state survives for the next action).
 // Also emits cursorX/cursorY: the pixel coordinates of the element interacted with
@@ -3194,6 +3210,14 @@ export class E2BActuator implements IEngineerActuator {
     if (existing) return existing;
 
     const promise: Promise<boolean> = (async () => {
+      // ONE BROWSER PER SANDBOX (failedbr #2495/#2496). This cache is per server process, and a sandbox outlives it:
+      // it is paused, resumed and reached from a different Cloud Run instance on a later build, and the action retry
+      // drops the cache after one failed action. Each time, a second `daemon.js` used to start — its Chromium cannot
+      // bind the CDP port the first one holds, so it never answers, yet it never exits either (the script idles
+      // forever). One whole headless browser leaked per occurrence, for the life of the sandbox. Now: a daemon that
+      // already answers is reused, and a dead or hung one is killed before the fresh one starts.
+      const pre = await sandbox.commands.run(browserDaemonPrecheckCommand(), { timeoutMs: 10_000 }).catch(() => ({ stdout: '' } as { stdout: string }));
+      if (browserDaemonAlive(pre.stdout)) return true;
       // daemon.js is written during playwright install; rewrite defensively in case.
       await sandbox.files.write(`${TOOLS_DIR}/daemon.js`, BROWSER_DAEMON_SCRIPT).catch(() => {});
       await sandbox.commands

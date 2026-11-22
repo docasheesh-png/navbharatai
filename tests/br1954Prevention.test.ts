@@ -197,7 +197,9 @@ describe('BR1954 — known compiler API errors are prevented by a source-derived
     expect(extractExportedDeclaration('export class A {}', '[')).toBeNull();
   });
   it('bounds the API snapshot without promising an exhaustive inventory or cutting a declaration silently', () => {
-    expect(kitTypeContract(files).length).toBeLessThanOrEqual(12_000);
+    // The budget gameKitSeed passes (12_500 since the touch-layout options joined, 2026-11-22): the full contract fits it,
+    // so no section is ever dropped from a real game turn.
+    expect(kitTypeContract(files).length).toBeLessThanOrEqual(12_500);
     const small = kitTypeContract(files, 1000);
     expect(small.length).toBeLessThanOrEqual(1000);
     expect(small).toContain('INCOMPLETE API snapshot');

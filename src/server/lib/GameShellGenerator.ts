@@ -2229,26 +2229,13 @@ export interface TouchControlsOptions {
   lookSensitivity?: number;
   /** Show even on a device with no touch screen — for testing on a desktop. */
   force?: boolean;
-  /**
-   * The joystick, as the user asked for it in the prompt ("joystick on the right", "a bigger joystick", "a fixed
-   * joystick"). side 'right' swaps the halves: the joystick under the RIGHT thumb, camera drag and the action buttons
-   * on the left. size multiplies the kit's size (0.6..2, default 1). 'floating' (default) appears where the thumb lands;
-   * 'fixed' stays at its resting spot. position puts its resting spot at a fraction of the screen (see TouchPlacement).
-   */
+  /** From the prompt: side 'right' swaps halves (buttons go left); size 0.6..2; 'fixed' or 'floating' (default); position x/y 0..1. */
   joystick?: TouchJoystickOptions;
-  /**
-   * Where a button sits, by its action name ('attack', 'jump', …) — or 'steer' / 'pedals' for the two pads of the
-   * 'drive' layout. x and y are the CENTRE as a fraction of the game area (0 = left/top, 1 = right/bottom); size
-   * multiplies the kit's size (0.6..2). A button not listed stays in the kit's own spot.
-   *   buttonPositions: { attack: { x: 0.88, y: 0.72, size: 1.4 }, jump: { x: 0.12, y: 0.8 } }
-   */
+  /** By action name, or 'steer' / 'pedals': CENTRE x/y as a fraction of the screen (0..1), size 0.6..2. */
   buttonPositions?: Record<string, TouchPlacement>;
   /** How see-through the controls are, 0.2..1 (default 1). */
   opacity?: number;
-  /**
-   * Which game the player's own layout is saved for (Settings → Edit controls). The game shell passes its gameId;
-   * the player's saved layout always wins over joystick / buttonPositions / opacity, which are only the defaults.
-   */
+  /** The player's Settings → Edit controls layout is saved per gameId and always wins over the three options above. */
   gameId?: string;
 }
 
@@ -2457,9 +2444,9 @@ const CSS = [
   '.nbg-tc.editing .nbg-tc-btn{cursor:move}',
   '.nbg-tc.editing .nbg-tc-sel{outline:3px solid #fde047;outline-offset:3px}',
   '.nbg-tc-edit{position:absolute;left:50%;top:max(12px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:8px 12px;border-radius:12px;background:rgba(0,0,0,0.78);color:#fff;font:600 14px/1.2 system-ui,sans-serif;pointer-events:auto;width:max-content;max-width:calc(100% - 24px);z-index:1}',
-  '.nbg-tc-edit button{min-height:40px;padding:6px 12px;border-radius:8px;border:2px solid rgba(255,255,255,0.55);background:rgba(255,255,255,0.14);color:#fff;font:inherit;cursor:pointer}',
+  '.nbg-tc-edit button{min-height:40px;padding:8px 12px;border-radius:8px;border:2px solid rgba(255,255,255,0.55);background:rgba(255,255,255,0.14);color:#fff;font:inherit;cursor:pointer}',
   '.nbg-tc-edit button.nbg-tc-done{background:#fde047;color:#111;border-color:#fde047}',
-  '.nbg-tc-edit label{display:flex;gap:6px;align-items:center}',
+  '.nbg-tc-edit label{display:flex;gap:8px;align-items:center}',
   '.nbg-tc-edit p{margin:0;width:100%;text-align:center;font-weight:500;opacity:0.85}',
 ].join('');
 

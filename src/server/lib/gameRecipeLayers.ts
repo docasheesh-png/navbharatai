@@ -429,3 +429,54 @@ export function planKitRefresh(
   }
   return { write, refreshed: Object.keys(write).filter((p) => p in files).sort(), added: [...plan.add.keys()].sort(), blocked: null };
 }
+
+/**
+ * 🧬 THE REFRESH IS JUDGED AGAINST THE SANDBOX, NOT AGAINST A SAVED COPY THAT MISSES FILES (Q-3270 — failedbr #2494,
+ * 2026-11-22: "city size badh kyu nahi raha??"). The saved copy read back at the start of that turn was missing five kit
+ * files the sandbox had (EDIT_BASE_PARTIAL: core/crafting, dialogue, economy, events, feel). planKitRefresh, reading the
+ * saved copy, planned to ADD those five; the route then re-read the sandbox, found them already there, called that "changed
+ * in the sandbox since it was saved" and — all or nothing — refreshed NOTHING. So src/game/play/openWorld.ts stayed at a
+ * version with no lands and no joinTo, while the builder's rule described both: six to eleven type errors for minutes, the
+ * growth guard refusing world.ts five times, and workaround features that pretended to grow the map. One hour later, with a
+ * complete read-back, the same refresh ran. 🧬 THE CLASS: a refresh decided from a copy of the project instead of the
+ * project. Every target is read from the sandbox; whatever the sandbox holds is what is judged (an exact older kit version
+ * is refreshed, anything else is somebody's code and kept), and the plan is made again on that until every file it writes
+ * was read and agrees. A file is still never written over unseen. PURE apart from `read`; never throws.
+ */
+export async function planKitRefreshAgainstSandbox(
+  saved: Readonly<Record<string, string>>,
+  read: (path: string) => Promise<string | null>,
+  pool: ReadonlyMap<string, LayerFile> = recipeFilePool(),
+  reasonOf: (path: string, current: string, next: string) => 'edited' | 'drops-names' | null = staleKitReason,
+): Promise<KitRefreshPlan & { /** Paths whose sandbox copy differed from the saved one (judged as the sandbox has them). */ reconciled: string[] }> {
+  const files: Record<string, string> = { ...saved };
+  const seen = new Set<string>();
+  const reconciled: string[] = [];
+  // A kit file the saved copy lacks, in a kit folder the saved copy HAS, may simply be missing from the read-back (#2494's
+  // five): it is looked for in the sandbox once, so an older version of it is refreshed rather than never seen.
+  const dirs = new Set(Object.keys(saved).filter((p) => pool.has(p)).map((p) => p.slice(0, p.lastIndexOf('/'))));
+  const absent = dirs.size === 0 ? [] : [...pool.keys()].filter((p) => !(p in saved) && dirs.has(p.slice(0, p.lastIndexOf('/')))).slice(0, 48);
+  for (const [p, c] of await Promise.all(absent.map(async (p) => [p, await read(p).then((x) => (typeof x === 'string' ? x : null), () => null)] as const))) {
+    if (c === null) continue;   // not there (or unreadable): it stays absent, exactly as before
+    files[p] = c; reconciled.push(p); seen.add(p);
+  }
+  for (let round = 0; round < 4; round++) {
+    const plan = planKitRefresh(files, pool, reasonOf);
+    if (plan.blocked) return { ...plan, reconciled };
+    const unread = Object.keys(plan.write).filter((p) => !seen.has(p));
+    if (unread.length === 0) return { ...plan, reconciled };
+    const live = await Promise.all(unread.map(async (p) => [p, await read(p).then((c) => (typeof c === 'string' ? c : null), () => undefined)] as const));
+    let changed = false;
+    for (const [p, c] of live) {
+      // A read that FAILED is not an answer: nothing is written over a file whose content could not be seen.
+      if (c === undefined) return { write: {}, refreshed: [], added: [], blocked: `${p} could not be read from the sandbox`, reconciled };
+      seen.add(p);
+      const before = p in files ? files[p] : null;
+      if (c === before) continue;
+      changed = true; reconciled.push(p);
+      if (c === null) delete files[p]; else files[p] = c;
+    }
+    if (!changed) return { ...plan, reconciled };
+  }
+  return { write: {}, refreshed: [], added: [], blocked: `${reconciled.slice(0, 6).join(', ')} changed in the sandbox since it was saved, and kept changing while it was read`, reconciled };
+}

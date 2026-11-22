@@ -127,6 +127,9 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       if (h < 0.8) continue;
       const biome = world.biomeAt(px, pz);
       if (biome !== 'forest' && biome !== 'grassland' && biome !== 'mountain' && biome !== 'beach') continue;
+      // An open field the game laid (a maidan, a meadow) is grass to the horizon: no tree stands in it. Read through an optional
+      // member, so this file still compiles beside an older world.ts that has no open fields.
+      if (biome === 'grassland' && (world as { openFieldAt?: (x: number, z: number) => boolean }).openFieldAt?.(px, pz)) continue;
       const grove = fieldNoise(px, pz, seed + 11, 3, 140, period);
       let p = 0;
       let species: Species = 'broadleaf';

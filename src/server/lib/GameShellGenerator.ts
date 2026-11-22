@@ -3873,7 +3873,7 @@ export function formatDistance(metres: number): string {
 
 const PLACE_COLOURS: Record<string, string> = {
   city: '#94a3b8', town: '#a8a29e', village: '#c8a97e', custom: '#c084fc',
-  desert: '#e9c46a', jungle: '#2d6a4f', mountain: '#8d7b68', snow: '#e8f1ff', beach: '#f4dca2',
+  desert: '#e9c46a', jungle: '#2d6a4f', mountain: '#8d7b68', snow: '#e8f1ff', beach: '#f4dca2', grassland: '#7cb342',
 };
 export function placeColour(kind: string): string { return PLACE_COLOURS[kind] ?? '#9ca3af'; }
 export const WAYPOINT_COLOUR = '#f472b6';

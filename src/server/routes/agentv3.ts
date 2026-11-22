@@ -8,7 +8,7 @@ import { withReplyLanguage, replyVoiceForRequest, replyLanguageBinding } from '.
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
-import { planKitRefresh } from '../lib/gameRecipeLayers';
+import { planKitRefreshAgainstSandbox } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -76,6 +76,7 @@ import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { enforceGrowthAtTurnEnd, libraryActionsAtTurnStart } from '../AgentV3/growthTurn';
+import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
@@ -19498,15 +19499,13 @@ async function noteBuildOutcome(
       if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart
         && String(process.env.AGENTV3_KIT_REFRESH ?? '').trim().toLowerCase() !== 'off') {
         try {
-          const refresh = planKitRefresh(projectFilesAtTurnStart);
+          // Q-3270 (failedbr #2494): planned against the SANDBOX, not the saved copy — a read-back missing five kit files used
+          // to block the whole refresh, leaving play/openWorld.ts without the lands and joinTo the builder's rule described.
+          const refresh = await finalSteps.step('kit refresh read', () => planKitRefreshAgainstSandbox(projectFilesAtTurnStart!, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null))));
           if (refresh.blocked) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${refresh.blocked}.` });
           } else if (Object.keys(refresh.write).length > 0) {
-            const live = await finalSteps.step('kit refresh read', () => Promise.all(Object.keys(refresh.write).map(async (p) => [p, await actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)).catch(() => null)] as const)));
-            const drifted = live.filter(([p, c]) => (p in projectFilesAtTurnStart! ? c !== projectFilesAtTurnStart![p] : c !== null)).map(([p]) => p);
-            if (drifted.length > 0) {
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${drifted.join(', ')} changed in the sandbox since it was saved.` });
-            } else {
+            {
               // Several at once, like the recipes' own writes (Q-3232): one by one this was a sandbox round trip per kit file
               // before the builder's first call (failedbr #2484, "Final preparation … other 46.5 s").
               await finalSteps.step('kit refresh write', () => mapWithConcurrency(Object.entries(refresh.write), 6, ([p, c]) => actuator.writeFile(workspaceId, p, c)));
@@ -19514,7 +19513,7 @@ async function noteBuildOutcome(
                 writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,
-                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.` });
+                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
             }
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
@@ -19527,6 +19526,10 @@ async function noteBuildOutcome(
           addModel: async (id) => String((await dispatcher.dispatch({ id: 'library-character', name: 'add_library_models', input: { models: [{ id }] } }, 'architect', { signal: abort.signal })).content ?? '') });
         if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
       }
+      // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3272/Q-3273 — failedbr #2495):
+      // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
+      buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
         if (kitPlan.length === 0) {
@@ -26102,6 +26105,8 @@ async function noteBuildOutcome(
           typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
+          // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3275).
+          world: worldClaimFacts(projectFilesAtTurnStart?.[WORLD_PATH], writtenFiles.get(WORLD_PATH) ?? projectFilesAtTurnStart?.[WORLD_PATH], prompt) ?? undefined,
         });
         // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).
         // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.

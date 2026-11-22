@@ -103862,3 +103862,8 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - **Prompts:** `GAME_ASKED_CHANGE_WINS` (gameKitSeed.ts) in GAME_FEATURES_RULE, OPEN_WORLD_HANDOFF, the non-open-world kit handoff and every `projectGrowthRules` set; OPEN_WORLD_HANDOFF and GAME_KIT_RULE say "a second copy" is banned, a change the user asks for is done (camera via `options={{ camera: … }}`); VEHICLE_CAMERA_RULE_LINES is a default, not a refusal of an asked view.
 - **Kept:** protection for requests that do not ask (repair or "sab" alone never opens the kit; a quantity/possessive "whole" replaces nothing; App.tsx deletion always restored); GAME_NO_GUESS_RULE untouched.
 - **Not touched (other sessions):** RACE_ROAD_RULE ("never … shorten the road" refuses "race chhoti karo"), GAME_PLAYER_RULE, characterSwap.ts, player.ts. The kit's own file comments ("never replace the world, the player or the camera" in OpenWorldGame.tsx) were not changed (kit hash history).
+## 2026-11-22 — Nothing passes through anything (Q-3251, admin: "do object takrayenge to aar paar nahi jane chahiye")
+- Root cause: city traffic and the crowd compared world positions with plan coordinates, so on the open-world map (city away from the origin) cars drove through the hero and people walked through him.
+- citytraffic.ts / citypeople.ts read positions in the city's frame; traffic.pushOut called every frame by play/openWorld.ts for the player or their car.
+- collision.ts gains keepApart(movers) for any two moving things; GAME_COLLISION_RULE (gameCollisionRule.ts) said in GAME_KIT_RULE, the seed handoff and projectGrowthRules.
+- Test: tests/twoThingsNeverPassThrough.test.ts (reversion of inCity fails 2 tests). Traffic-vs-traffic was measured already clean; locked, not changed.

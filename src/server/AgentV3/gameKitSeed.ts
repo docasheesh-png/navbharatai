@@ -50,6 +50,7 @@
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
+import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
@@ -421,7 +422,9 @@ export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP
   + ' changing the kit\'s own, in this game. ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
   + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
   + ' world.city gives the city, its traffic, people, parked cars and'
-  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0.';
+  + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. The corner map (roads, named places; tap or M for the full'
+  + ' map with pan, zoom and a waypoint) is the kit\'s: never draw your own — change it with <OpenWorldGame map={{ corner: \'right\','
+  + ' size: 200, names: false, range: 400, fullMap: false }} /> as the user asks, or map={false} to turn it off.';
 
 /** The builder's instruction for the preview's Tune panel (kit core/tuning.ts). */
 export const TUNING_RULE = '🎚️ TUNABLE NUMBERS: declare the numbers a creator will want to adjust by playing — player speed, jump height, '
@@ -497,6 +500,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     has('generate_open_world') ? '' : GAME_ASKED_CHANGE_WINS,
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
+    // Two solid things meet and collide - never pass through each other (admin 2026-11-22).
+    has('generate_game_runtime') ? GAME_COLLISION_RULE : '',
     // The creator's Tune panel (admin 2026-11-21): numbers worth adjusting become sliders in the preview.
     has('generate_game_runtime') ? TUNING_RULE : '',
     // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
@@ -596,6 +601,9 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
+    // Every later turn of a game made on the kit: nothing passes through anything (admin 2026-11-22). A game = the kit's loop
+    // is there AND the app itself plays it (App.tsx reaches into src/game) — the kit's files alone do not make an app a game.
+    typeof files['src/game/core/loop.ts'] === 'string' && /['"]\.\/game\//.test(String(files['src/App.tsx'] ?? '')) ? GAME_COLLISION_RULE : '',
   ].filter(Boolean);
   // 🔓 Whatever rules a project calls for, their "never"s guard only what the request does not ask for — said once, always
   // (GAME_FEATURES_RULE carries it; a map, player or race rule without the features list carries it here).

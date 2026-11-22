@@ -19,6 +19,7 @@ import { EMOJI_RULE } from '../lib/responseEmoji';
 import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { DEVICE_POWERS_RULE } from './devicePowers';
+import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
@@ -690,6 +691,7 @@ export const GAME_KIT_RULE = [
   'walls, stairs and platforms in the same world with markWorldCollider from src/game/three/collision.ts.',
   'Use the kit character controller and driveVehicle for movement. For custom movers, apply the result',
   'of sweepWorldCapsules before changing position. Play against a wall and up a stair or slope where present.',
+  GAME_COLLISION_RULE,
   ...VEHICLE_CAMERA_RULE_LINES,
   ...FORWARD_DIRECTION_RULE_LINES,
 ].join('\n');

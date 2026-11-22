@@ -12,6 +12,8 @@ import { join } from 'path';
  */
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 const route = read('src/server/routes/agentv3.ts');
+// Since Q-3237 phase 2 the PREVIEW_NEVER_CAME_UP record lives in its own phase module; the route keeps the one call.
+const phase = read('src/server/AgentV3/buildPhases/previewNeverCameUp.ts');
 const dispatcher = read('src/server/AgentV3/ToolDispatcher.ts');
 
 describe('The import path records the route on success as well as failure', () => {
@@ -61,32 +63,32 @@ describe('The fresh-build path leaves evidence through the channel the report al
  */
 describe('a build that ends with no preview says so, loudly', () => {
   it('records PREVIEW_NEVER_CAME_UP as a warning on the build itself', () => {
-    expect(route).toContain("code: 'PREVIEW_NEVER_CAME_UP'");
-    const at = route.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
-    const rec = route.slice(at - 300, at + 900);
+    expect(phase).toContain("code: 'PREVIEW_NEVER_CAME_UP'");
+    const at = phase.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
+    const rec = phase.slice(at - 300, at + 900);
     expect(rec).toContain("severity: 'warning'");
     expect(rec).toContain('autoResolved: false');
   });
 
   it('explains WHY the rest of the report looks quiet', () => {
     // Without this the reader concludes the build was clean, which is the opposite of the truth.
-    const at = route.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
-    const rec = route.slice(at, at + 900);
+    const at = phase.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
+    const rec = phase.slice(at, at + 900);
     expect(rec).toContain('nothing here has been');
     expect(rec).toContain('were skipped');
   });
 
   it('fires only for a SUCCESSFUL, non-import build with no preview', () => {
     // A failed build already reports its own cause, and an import turn deliberately changes nothing.
-    expect(route).toContain('if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted');
+    expect(phase).toContain('if (!facts.ok || facts.hadPreview || facts.importTurn || facts.aborted || facts.awaitingShell) return false;');
     // …and not for a Project Mode module whose app is assembled by a later module (autopsy 6a5fb04b) —
     // read as the CORRECTED prediction since autopsy 50378049, so a module turn that DID publish a live
     // address is never told its preview never came up.
-    expect(route).toContain('if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !awaitsShellNow())');
+    expect(route).toContain('recordPreviewNeverCameUp({ ok: result.ok, hadPreview: !!lastPreviewUrl, importTurn: isImportTurn, aborted: abort.signal.aborted, awaitingShell: !!awaitsShellNow(),');
   });
 
   it('cannot affect the build — diagnostics are best-effort', () => {
-    const at = route.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
-    expect(route.slice(at, at + 1100)).toContain('catch');
+    const at = phase.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
+    expect(phase.slice(at, at + 1100)).toContain('catch');
   });
 });

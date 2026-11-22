@@ -128,6 +128,9 @@ export type AgentV3WireEvent =
       /** Real button labels. Fall back to "Approve & build" / "Reject". */
       approveLabel?: string;
       denyLabel?: string }
+  // The optional deep bug hunt, offered as a standing ❗️ row that NOTHING waits on (failedbr #2494): the turn ends when
+  // its work is done, and the row's button starts a new bug-hunt turn. Not a gate, so it never sets a pending permission.
+  | { type: 'bug_hunt_offer'; agent: AgentRole; callId: string; title: string; why: string; approveLabel: string; denyLabel: string; ts: number }
   // The build needs credentials from the user. Carries NAMES ONLY — the value is written straight to
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }

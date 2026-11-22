@@ -4390,6 +4390,10 @@ price is not. Recorded as a queue row, not done here.
   default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
+  🔴 **RETIRED 2026-11-22 (failedbr #2494, admin-approved): the key is no longer read.** No finished build waits for
+  the offer at all now — it is a standing, non-blocking ❗️ row whose "Find and fix bugs" button starts a new
+  bug-hunt turn. A value set in Cloud Run is harmless and can be deleted. Locked in
+  `tests/aFinishedTurnHoldsNoQuestion.test.ts`.
 
 - **`AGENTV3_LANE_AI_NEGATION`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18: the fast
   lane's `laneAiClient` no longer adds an in-app AI client when the prompt says "no AI" / "no API" / "offline"

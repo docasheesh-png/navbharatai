@@ -185,13 +185,14 @@ describe('BR1958 F7/F8/F9: generated files and source inventory are not a runnab
   const eligible = { ok: true, headroom: true, allowed: true, deferred: false, runProven: true, stopped: false };
   it.each(['ok', 'headroom', 'allowed', 'runProven'] as const)('no hunt offer or paid review without %s', async key => {
     const ask = vi.fn(); const result = await offerBugHunt({ eligible: completedAppReviewEligible({ ...eligible, [key]: false }), hasUser: true,
-      newCallId: () => 'x', ask, wait: async () => 'approved', say: () => {}, record: () => {}, env: {} });
+      newCallId: () => 'x', offer: ask, say: () => {}, record: () => {}, env: {} });
     expect(ask).not.toHaveBeenCalled(); expect(result.runReview).toBe(false);
   });
   it.each(['stopped', 'deferred'] as const)('Stop/module ownership still wins: %s', key => expect(completedAppReviewEligible({ ...eligible, [key]: true })).toBe(false));
   it('a genuinely eligible explicit yes still runs, a decline does not, and both route doors use the same eligibility owner', async () => {
-    const ask = vi.fn(); const r = await offerBugHunt({ eligible: completedAppReviewEligible(eligible), hasUser: true, newCallId: () => 'x', ask, wait: async () => 'approved', say: () => {}, record: () => {}, env: {} });
-    expect(ask).toHaveBeenCalledTimes(1); expect(r.runReview).toBe(true);
+    const ask = vi.fn(); const r = await offerBugHunt({ eligible: completedAppReviewEligible(eligible), hasUser: true, newCallId: () => 'x', offer: ask, say: () => {}, record: () => {}, env: {} });
+    expect(ask).toHaveBeenCalledTimes(1); expect(r.runReview).toBe(false); expect(r.offered).toBe(true); // offered, never waited on (failedbr #2494)
+    expect((await offerBugHunt({ eligible: completedAppReviewEligible(eligible), hasUser: true, newCallId: () => 'x', offer: ask, say: () => {}, record: () => {}, env: {}, preApproved: true })).runReview).toBe(true);
     expect(route().match(/completedAppReviewEligible\(\{/g)).toHaveLength(2);
     expect(route()).toContain('runProven: runProof().proven, stopped: abort.signal.aborted');
     expect(route()).toContain('packageJson: await readSummaryManifest(');

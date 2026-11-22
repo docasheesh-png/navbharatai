@@ -12,32 +12,30 @@
  *
  * These tests lock the three properties that are easy to lose later:
  *   1. the question is never asked for a pass that was not going to run (a charge for nothing);
- *   2. only an explicit YES spends the money — silence, a Stop and a decline are the same "no";
+ *   2. only an explicit YES spends the money — and since failedbr #2494 nothing WAITS for it: the offer is a
+ *      standing ❗️ row, and the yes is the user starting a bug-hunt turn from it (`preApproved`);
  *   3. a hunt that did not run is REPORTED as not run, never as passed.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  offerBugHunt, bugHuntOfferDecision, bugHuntOfferCopy, bugHuntRuns, bugHuntAskEnabled,
-  bugHuntAnswerWords, bugHuntNotRunLine, BUG_HUNT_WAIT_MS, type BugHuntGateEvent,
+  offerBugHunt, bugHuntOfferDecision, bugHuntOfferCopy, bugHuntAskEnabled, bugHuntOfferedLine,
+  type BugHuntOfferEvent,
 } from '../src/server/AgentV3/optionalBugHunt';
-import type { ApprovalOutcome } from '../src/server/AgentV3/Approvals';
 
 const read = (rel: string): string => readFileSync(join(__dirname, '..', rel), 'utf8');
-const ALL: readonly ApprovalOutcome[] = ['approved', 'denied', 'timed-out', 'stopped'];
 
 /** A harness that records every effect, so a test can assert what the user actually saw. */
 function harness(over: Partial<Parameters<typeof offerBugHunt>[0]> = {}) {
-  const asked: BugHuntGateEvent[] = [];
+  const asked: BugHuntOfferEvent[] = [];
   const said: string[] = [];
   const recorded: string[] = [];
   const io = {
     eligible: true,
     hasUser: true,
     newCallId: () => 'call-1',
-    ask: (g: BugHuntGateEvent) => { asked.push(g); },
-    wait: async () => 'approved' as ApprovalOutcome,
+    offer: (g: BugHuntOfferEvent) => { asked.push(g); },
     say: (t: string) => { said.push(t); },
     record: (m: string) => { recorded.push(m); },
     env: {} as NodeJS.ProcessEnv,
@@ -71,61 +69,44 @@ describe('the question is never asked for a pass that was not going to run', () 
   });
 });
 
-describe('only an explicit YES spends the money', () => {
-  it('approved runs it; denied, timed-out and stopped do not', () => {
-    expect(bugHuntRuns('approved')).toBe(true);
-    for (const a of ALL.filter((x) => x !== 'approved')) expect(bugHuntRuns(a)).toBe(false);
-  });
-
-  it('silence is not consent: an unanswered offer leaves the hunt unrun', async () => {
-    const h = harness({ wait: async () => 'timed-out' as ApprovalOutcome });
+describe('only an explicit YES spends the money, and nothing waits for it (failedbr #2494)', () => {
+  it('an offered hunt does not run this turn, and the turn is not held for an answer', async () => {
+    const h = harness();
     const out = await offerBugHunt(h.io);
-    expect(out.runReview).toBe(false);
-    expect(out.answer).toBe('timed-out');
+    expect(h.asked).toHaveLength(1);
+    expect(out).toEqual({ runReview: false, answer: null, offered: true });
+    // The io has no `wait` at all: there is nothing the flow could block on.
+    expect(Object.keys(h.io)).not.toContain('wait');
   });
 
-  it('a Stop while the offer is open does not start a paid pass', async () => {
-    const h = harness({ wait: async () => 'stopped' as ApprovalOutcome });
-    expect((await offerBugHunt(h.io)).runReview).toBe(false);
-  });
-
-  it('the wait is bounded, and shorter than the database offer that changes how the app is built', () => {
-    expect(BUG_HUNT_WAIT_MS).toBeGreaterThan(0);
-    expect(BUG_HUNT_WAIT_MS).toBeLessThan(120_000);
+  it('the yes is the user starting a bug-hunt turn: then it runs, and nothing is offered again', async () => {
+    const h = harness({ preApproved: true });
+    const out = await offerBugHunt(h.io);
+    expect(out).toEqual({ runReview: true, answer: 'approved' });
+    expect(h.asked).toEqual([]);
+    expect(h.said).toEqual([]);
   });
 });
 
 describe('a hunt that did not run is reported as NOT RUN, never as passed', () => {
-  it('the user is told it did not run, and is not told the app is clean', async () => {
-    for (const a of ALL.filter((x) => x !== 'approved')) {
-      const h = harness({ wait: async () => a });
-      await offerBugHunt(h.io);
-      expect(h.said).toHaveLength(1);
-      const line = h.said[0].toLowerCase();
-      expect(line).toContain('did not run');
-      // The exact failure this forbids: an app with no bug-hunt verdict shipped under a green tick.
-      for (const lie of ['passed', 'no bugs', 'no issues', 'bug-free', 'all clear', 'looks good']) {
-        expect(line).not.toContain(lie);
-      }
-      expect(h.recorded).toHaveLength(1);
-      expect(h.recorded[0]).toContain('did not run');
-    }
-  });
-
-  it('the four outcomes are told apart in the record, so a report can see which it was', () => {
-    const words = ALL.map(bugHuntAnswerWords);
-    expect(new Set(words).size).toBe(ALL.length);
-    expect(bugHuntNotRunLine('denied')).toContain('You chose not to');
-    expect(bugHuntNotRunLine('timed-out')).toContain('unanswered');
-    expect(bugHuntNotRunLine('stopped')).toContain('stopped');
-  });
-
-  it('an approved hunt says nothing extra — the review speaks for itself', async () => {
+  it('the user is told it did not run, where the choice is, and is not told the app is clean', async () => {
     const h = harness();
-    const out = await offerBugHunt(h.io);
-    expect(out.runReview).toBe(true);
-    expect(h.said).toEqual([]);
-    expect(h.recorded).toEqual([]);
+    await offerBugHunt(h.io);
+    expect(h.said).toEqual([bugHuntOfferedLine()]);
+    const line = h.said[0].toLowerCase();
+    expect(line).toContain('did not run');
+    expect(line).toContain('find and fix bugs');
+    expect(line).not.toMatch(/waiting|reply/); // the turn is over — nothing is waiting for an answer
+    for (const lie of ['passed', 'no bugs', 'no issues', 'bug-free', 'all clear', 'looks good']) {
+      expect(line).not.toContain(lie);
+    }
+    expect(h.recorded).toHaveLength(1);
+    expect(h.recorded[0]).toContain('did not run');
+    expect(h.recorded[0]).toContain('without holding the build open');
+  });
+
+  it('the offered line names the same button the ❗️ row shows', () => {
+    expect(bugHuntOfferedLine()).toContain(`"${bugHuntOfferCopy().approveLabel}"`);
   });
 });
 
@@ -174,25 +155,19 @@ describe('the kill switch turns the ASK off, never the review', () => {
 
 describe('a broken offer can never cancel the app\'s deepest check (fail-open, on purpose)', () => {
   it('a throw while asking leaves the review running, as if the feature did not exist', async () => {
-    const h = harness({ ask: () => { throw new Error('event stream gone'); } });
+    const h = harness({ offer: () => { throw new Error('event stream gone'); } });
     const out = await offerBugHunt(h.io);
     expect(out.runReview).toBe(true);
     expect(out.answer).toBeNull();
-  });
-
-  it('a throw while waiting does the same', async () => {
-    const h = harness({ wait: async () => { throw new Error('approval channel gone'); } });
-    expect((await offerBugHunt(h.io)).runReview).toBe(true);
   });
 });
 
 describe('source guards — the wiring itself, which no unit test can see', () => {
   const route = read('src/server/routes/agentv3.ts');
 
-  it('the wait goes through waitForUser, THE ONE DOOR (autopsy 1219c639)', () => {
-    // Bypassing it makes the live ETA count the user's thinking as build time and the futility
-    // breaker read a waiting build as a stalled one. That was five separate bugs once.
-    expect(route).toContain('wait: (callId) => waitForUser(callId, bugHuntWaitMs())');
+  it('the offer goes through the event stream as a standing row, and nothing waits on it (failedbr #2494)', () => {
+    expect(route).toContain("offer: (o) => events.emit({ type: 'bug_hunt_offer'");
+    expect(route).not.toContain('bugHuntWaitMs');
     expect(route).not.toContain('awaitApprovalOutcome(huntCallId');
   });
 
@@ -212,6 +187,7 @@ describe('source guards — the wiring itself, which no unit test can see', () =
     expect(call).not.toMatch(/\blet\b/);        // no mutable state
     expect(call).not.toMatch(/\bawait\b.*\bawait\b/s); // one await, not a sequence
     expect(call.match(/\btry\s*\{/g) ?? []).toHaveLength(2); // the two one-line best-effort wrappers
+    expect(call).not.toContain('waitForUser'); // the offer never holds the end of a build
   });
 
   it('the offer is turn-local, so the next edit asks again (admin decision 2026-10-13)', () => {
@@ -231,8 +207,10 @@ describe('the structured gate stays backwards compatible', () => {
     expect(tray).toContain("{action.denyLabel ?? 'Reject'}");
   });
 
-  it('the one-string form is still sent, for anything reading the old shape', () => {
-    const mod = read('src/server/AgentV3/optionalBugHunt.ts');
-    expect(mod).toContain('action: `${copy.title} ${copy.why}`');
+  it('the standing offer is a non-blocking ❗️ row with the real labels', async () => {
+    const { actionsFromEvent } = await import('../src/server/AgentV3/userActions');
+    const copy = bugHuntOfferCopy();
+    const [row] = actionsFromEvent({ type: 'bug_hunt_offer', callId: 'c-9', ...copy }, 'b', 1);
+    expect(row).toMatchObject({ kind: 'approve', title: copy.title, why: copy.why, approveLabel: copy.approveLabel, denyLabel: copy.denyLabel, blocking: false, status: 'open' });
   });
 });

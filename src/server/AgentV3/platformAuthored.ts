@@ -55,6 +55,7 @@ import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/Temp
 import { seededForms } from './strictTrial';
 import { recipeFilePool, isKnownKitVersion } from '../lib/gameRecipeLayers';
 import { isKnownSeedVersion } from './seedVersions';
+import { isUneditedGeneratedGameAssetFile } from './gameAssets/generatedAssetFiles';
 import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GamePlayerBodyGenerator';
 import { GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
 
@@ -153,6 +154,11 @@ export function isPlatformSeededFile(path: string | null | undefined, content: s
   // here graded it as the user's code. `gameKitHistory.ts` holds the hash of every version a recipe ever wrote;
   // still byte-exact, so one changed byte makes it the user's again.
   try { if (isKnownKitVersion(key, content)) return true; } catch { /* fall through */ }
+  // 🧬 THE MODEL LIBRARY'S GENERATED FILES ARE OUR ENGINE TOO (failedbr #2496). Their bytes embed the game's own
+  // model manifest, so no fixed index can hold them; the generator is re-run on the file's own parameters and only a
+  // byte-exact match counts (gameAssets/generatedAssetFiles.ts). Without it, add_library_models' loader was given
+  // a starter test as if the builder had written it.
+  if (isUneditedGeneratedGameAssetFile(key, content)) return true;
   // 🧬 AN OLDER STARTER IS STILL OUR STARTER (autopsy db07e0af) — the same class for the framework starter and the
   // starter-chip templates: before the design kit last changed, every workspace was seeded with the kit of the day,
   // and that untouched `src/index.css` was graded as the user's code. Line endings and the ends of the file are

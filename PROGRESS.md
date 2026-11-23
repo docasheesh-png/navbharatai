@@ -103876,6 +103876,11 @@ Locked by `tests/aGtaRequestIsNotABox.test.ts` (reverted ⇒ 6 + 2 fail). Admin 
 - collision.ts gains keepApart(movers) for any two moving things; GAME_COLLISION_RULE (gameCollisionRule.ts) said in GAME_KIT_RULE, the seed handoff and projectGrowthRules.
 - Test: tests/twoThingsNeverPassThrough.test.ts (reversion of inCity fails 2 tests). Traffic-vs-traffic was measured already clean; locked, not changed.
 
+## 2026-11-22 — failedbr #2496: platform temp files are never the user's project (Q-3257, Q-3258)
+- Why the proof script survived: `proveAssetInSandbox` wrote `.nbai-asset-<sha>.mjs` at the project root through the dispatcher's recorded write door, so it was recorded for the durable save; the `rm -f` in `finally` only cleaned the sandbox. The saved copy was restored into later sandboxes, listed in the build manifest and graded by readiness ("hardcoded localhost URL", "hardcoded server port").
+- Class fix: `PLATFORM_SCRATCH_DIR = node_modules/.cache/nbai-scratch` + `isPlatformScratchPath` (generatedDirs.ts), enforced at toDurableFileKey (heals old stores), every listing, recordedWrites, the E2B replay cache, readEvalSnapshot and .gitignore. The proof stages model, script and log there with a nonce; all three are removed.
+- Starter tests: `generatedAssetFiles.ts` recognises unedited model-library files byte-exactly by re-running their generator; `isPlatformSeededFile` uses it; `planAutoTests` skips platform-owned files (route passes `platformOwned: isPlatformSeededFile`); narration says the suite's result is reported separately.
+- Test: tests/platformTempFilesAreNotTheProject.test.ts, each fix proven by reversion.
 ## 2026-11-22 — a request the platform already completed runs no builder (failedbr #2496, Q-3270–Q-3273, PR #4442)
 - Report: "Use as my character" (Q7 Villager Man). The platform set PLAYER.model at 20.5 s, then the builder loop ran anyway: 16 model calls (~1 M tokens), an unasked edit put back by the growth guard, a model review, a starter test, the explorer and the playtest. Total 6.9 min, under an ETA of 7.5–23.5 min.
 - Class: a turn whose whole request a deterministic platform action satisfied still ran the builder, and its ETA was priced as a build. Covered for every action in `libraryActionsAtTurnStart`: character, car and map place.

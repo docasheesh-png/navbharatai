@@ -1,5 +1,5 @@
-// 🚗 THE CAR CONTROLS FOLLOW THE USER'S WORDS (admin 2026-11-23: "car control hardcore joystick se nahi honi chahiye, user jo
-// prompt de usse ho"). The request names how the car is driven → the game turn says touchControls: { drive } → the kit's
+// 🚗 THE CAR CONTROLS FOLLOW THE USER'S WORDS (admin 2026-11-23: no forced hardcore joystick; the
+// controls follow the prompt). The request names how the car is driven → the game turn says touchControls: { drive } → the kit's
 // pads, tilt, auto-gas or joystick. A joystick only when asked for, never when refused. PURE.
 import { describe, it, expect } from 'vitest';
 import { driveControlsFromWords, driveControlsLine, gameTurnHandoff } from '../src/server/AgentV3/gameKitSeed';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { findSyntaxErrors } from '../SyntaxCheck';
 import { checkPreviewCompiles } from '../../runtime/PreviewCompileCheck';
 import { goldenScaffoldFiles } from '../goldenScaffolds/registry';
-import { GAME_LIBRARY, gameScaffold, materializeGame } from './registry';
+import { GAME_LIBRARY, gameScaffold, materializeGame, type PlayCategory } from './registry';
 import { gameMatchPrompt, matchGameLibrary, parseGameReply, resolveBuildScaffold, type GameAsk } from './match';
 
 const reply = (id: string, confidence: number, title?: string): GameAsk => async () => ({
@@ -65,7 +65,18 @@ describe('game library matching', () => {
   });
 });
 
-describe('the first six games compile', () => {
+const CATEGORIES: PlayCategory[] = ['Action', 'Adventure', 'Arcade', 'Board', 'Card', 'Casino', 'Casual', 'Educational', 'Music', 'Puzzle', 'Racing', 'Role Playing', 'Simulation', 'Sports', 'Strategy', 'Trivia', 'Word'];
+
+describe('every category has two templates', () => {
+  it('is 34 games, two in each of the 17 categories', () => {
+    expect(GAME_LIBRARY).toHaveLength(34);
+    for (const category of CATEGORIES) {
+      expect(GAME_LIBRARY.filter((game) => game.category === category).map((game) => game.title), category).toHaveLength(2);
+    }
+  });
+});
+
+describe('the library games compile', () => {
   for (const game of GAME_LIBRARY) {
     it(game.title + ' is a complete preview app', async () => {
       const source = materializeGame(game);
@@ -74,7 +85,7 @@ describe('the first six games compile', () => {
       expect(source).toContain('localStorage');
       expect(source).toContain('AudioContext');
       expect(source.toLowerCase()).not.toMatch(/subway surfers|ludo king|candy crush|temple run/);
-      if (game.id === 'coin-wheel') expect(source).toContain('Play coins only');
+      if (game.id === 'coin-wheel' || game.id === 'coin-dice') expect(source).toContain('Play coins only');
       const files = goldenScaffoldFiles(gameScaffold(game));
       expect(await findSyntaxErrors(files)).toEqual([]);
       const preview = checkPreviewCompiles(files);

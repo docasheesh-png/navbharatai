@@ -11,9 +11,10 @@ import { OPEN_WORLD_BRIDGE_PATH } from '../src/server/lib/GameOpenWorldGenerator
 import { GAME_WORLD_RULE, OPEN_WORLD_HANDOFF } from '../src/server/AgentV3/gameKitSeed';
 
 describe('🧩 the rule: "jod ke ek world" is edge to edge, "aur maps jodo" is still spread', () => {
-  it('names the Hindi and English wishes for one joined world, and says how', () => {
-    for (const wish of ['jod ke ek (bada) map / world banao', 'aapas me jodo', 'chipka do', 'mila ke ek karo', 'join / merge the maps into one world'])
+  it('keys on the "into ONE" phrasing, Hindi and English, and says how', () => {
+    for (const wish of ['jod ke ek (bada) map / world banao', 'ek hi map bana do', 'mila ke ek karo', 'chipka ke ek kar do', 'join / merge the maps into one world'])
       expect(GAME_WORLD_RULE, wish).toContain(wish);
+    expect(GAME_WORLD_RULE).toMatch(/only when the maps are to BECOME ONE map/);
     expect(GAME_WORLD_RULE).toMatch(/EDGE TO EDGE, never kilometres apart/);
     expect(GAME_WORLD_RULE).toMatch(/joinTo: '<first region id>'/);
     expect(GAME_WORLD_RULE).toMatch(/land region with NO distance/);
@@ -21,10 +22,33 @@ describe('🧩 the rule: "jod ke ek world" is edge to edge, "aur maps jodo" is s
   });
   it('keeps the universe and 50x behaviour: more places spread out, never a stretched map; duplicates are copies', () => {
     expect(GAME_WORLD_RULE).toMatch(/"Map N guna \/ N× bada karo", "universe banao", "aur maps jodo" → ADD regions/);
-    expect(GAME_WORLD_RULE).toMatch(/"Aur maps\s+jodo" \/ "map bada karo" with no "ek" \/ "aapas me" still ADDS spread places/);
+    expect(GAME_WORLD_RULE).toMatch(/"aur maps jodo" \/ "map bada karo" ADD spread places/);
     expect(GAME_WORLD_RULE).toMatch(/NEVER raise sizeMeters to make the map bigger/);
     expect(GAME_WORLD_RULE).toMatch(/duplicate karke jodo" → add copies of the existing regions with new ids/);
     expect(GAME_WORLD_RULE).toMatch(/Up to 100 regions/);
+  });
+});
+
+// The re-review (2026-11-23): the bare Hindi word "ek" (one / a) must never turn an ADD into a JOIN, and "aapas me road se
+// jodo" (join them with roads) is roads between places, not moving them together.
+describe('🧭 "ek" alone keeps the spread behaviour', () => {
+  const join = GAME_WORLD_RULE.slice(GAME_WORLD_RULE.indexOf('JOINED INTO ONE'));
+  const wishes = join.slice(0, join.indexOf('→'));
+  const keepsSpread = join.slice(join.indexOf('The word "ek" alone NEVER means this'));
+  for (const ask of ['ek aur map jodo', 'ek naya map jodo', 'ek desert map jodo']) it(ask, () => {
+    expect(wishes).not.toContain(ask);
+    expect(keepsSpread).toMatch(new RegExp(ask.split(' ').join('\\s+')));
+    expect(keepsSpread).toMatch(/ADD one spread place or land/);
+  });
+  it('sab shehron ko aapas me road se jodo = roads between places', () => {
+    expect(wishes).not.toMatch(/aapas me/);
+    expect(keepsSpread).toMatch(/"sab shehron ko aapas me\s+road se jodo" means ROADS between the places/);
+    expect(keepsSpread).toMatch(/not moving them edge to edge/);
+  });
+  it('no JOIN wish is keyed on a bare "ek": every one says "into one" in some form', () => {
+    const listed = [...wishes.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(listed.length).toBeGreaterThanOrEqual(5);
+    for (const w of listed) expect(w, w).toMatch(/\bek\s+(?:\(bada\)\s+)?(?:hi\s+)?(?:map|world|karo|kar)|\binto one\b|ek\s*$/i);
   });
 });
 

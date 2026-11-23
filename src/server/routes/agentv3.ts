@@ -105,6 +105,7 @@ import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptR
 import { answeringModel, answerTimeOf } from '../AgentV3/answeringModel';
 import { recordedTextCall } from '../AgentV3/recordedTextCall';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { builderTrafficEnabled, orderBuilderRungs } from '../AI/ProviderHealth/builderTraffic';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
@@ -3884,6 +3885,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   // Owner Weak order applies to main, plan, heal and complex lanes; explicit retry/escalation
   // may advance past a failed rung. Other bands retain their existing transformations.
   if (level === 'weak' && !opts.afterLeadRung && !opts.fromProvider) rungs = weakGlmFirst(rungs);
+  // Health order stays inside this tier and inside one price. The owner prefix above is unchanged.
+  if (builderTrafficEnabled()) rungs = orderBuilderRungs(rungs);
   // Owner t357u + t359u: Weak is Surplus (above) → Router One → BluesMinds → the tier ladder, all default on.
   // Owner 2026-11-17: Moyi sits right after BluesMinds (moyiBuilder.ts; present once its key, model and rate are set).
   // Owner 2026-11-17 ("apke sabhi suggestion approved"): Qubax is third, right after Router One and before BluesMinds —

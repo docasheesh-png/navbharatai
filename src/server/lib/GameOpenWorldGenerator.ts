@@ -387,9 +387,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // nearest one), each road running from the edge of one to the edge of the other. The land is cut and filled to it by the map
   // itself (world.addRoad), so a car can drive from any place to every other — across a universe of a hundred places — without
   // the road running out. Laid before the first frame, like the levelled ground.
-  const stops = [...planned.map((p) => ({ x: p.centre.x, z: p.centre.z, r: p.reach })), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 }))];
+  // A place's streets fill a rectangle (±width/2, ±depth/2 around its centre; the edge street runs along its border): a road
+  // ends ON that border, so it meets the edge street — never short of it in the grass, never inside the blocks on a diagonal.
+  const stops: Array<{ x: number; z: number; r: number; hw?: number; hd?: number }> = [...planned.map((p) => { const pl = planCity(p.cityOptions); return { x: p.centre.x, z: p.centre.z, r: p.reach, hw: pl.width / 2, hd: pl.depth / 2 }; }), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 }))];
   const roadGroup = new THREE.Group(); roadGroup.name = 'Highways';
-  const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95 });
+  // Pulled a little towards the camera in the depth test (polygonOffset), so the ribbon never flickers against the carved
+  // ground under it when seen from far away.
+  const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   const roadLines: Array<Array<{ x: number; y: number; z: number }>> = [];
   if (stops.length > 1) {
     const joined = new Set<number>([0]);
@@ -405,11 +409,16 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const A0 = stops[best[0]], B0 = stops[best[1]], len = best[2] || 1;
       const ux = (B0.x - A0.x) / len, uz = (B0.z - A0.z) / len;
       if (len < A0.r + B0.r + 20) continue;                                                   // touching places need no road
-      const from = { x: A0.x + ux * (A0.r + 6), z: A0.z + uz * (A0.r + 6) }, to = { x: B0.x - ux * (B0.r + 6), z: B0.z - uz * (B0.r + 6) };
+      // How far from a stop's centre, along the road, its edge is: the street rectangle's border for a place, the old ring else.
+      const edge = (s: (typeof stops)[number]): number => (s.hw !== undefined && s.hd !== undefined
+        ? Math.min(s.hw / Math.max(1e-6, Math.abs(ux)), s.hd / Math.max(1e-6, Math.abs(uz))) : s.r + 6);
+      let ea = edge(A0), eb = edge(B0);
+      if (ea + eb + 20 > len) { ea = A0.r + 6; eb = B0.r + 6; }                                // too close on a diagonal: the old ends
+      const from = { x: A0.x + ux * ea, z: A0.z + uz * ea }, to = { x: B0.x - ux * eb, z: B0.z - uz * eb };
       roadLines.push(map.world.addRoad([from, to], 9));
     }
   }
-  /** One asphalt ribbon per road, a little above the carved ground, with a white centre line. */
+  /** One asphalt ribbon per road, a little above the carved ground, its faces pointing up. */
   for (const line of roadLines) {
     if (line.length < 2) continue;
     const pos: number[] = [], idx: number[] = [];
@@ -417,7 +426,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
       const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * 4.5, nz = dx / l * 4.5;
       pos.push(line[i].x + nx, line[i].y + 0.08, line[i].z + nz, line[i].x - nx, line[i].y + 0.08, line[i].z - nz);
-      if (i > 0) { const k = i * 2; idx.push(k - 2, k - 1, k, k - 1, k + 1, k); }
+      // Wound so every face points UP (+Y): a face pointing down is culled from above, and the road was invisible from the sky.
+      if (i > 0) { const k = i * 2; idx.push(k - 2, k, k - 1, k - 1, k, k + 1); }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();

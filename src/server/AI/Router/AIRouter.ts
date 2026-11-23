@@ -12,6 +12,7 @@ import { getBreaker, allBreakerNames } from './CircuitBreaker';
 import { tracer } from '../../observability/Tracer';
 import { shouldRaceStreams } from './streamRacePolicy';
 import { noteProviderCall, providerInFlight, shouldSkipProvider } from '../ProviderHealth/trafficHealth';
+import { orderProfessionalProviders, professionalPriceIn, professionalTrafficEnabled } from '../ProviderHealth/professionalTraffic';
 import { familyOfEngineName, legacyPathAllows } from '../TrafficRegistry/legacyControl';
 
 /**
@@ -195,6 +196,19 @@ export class AIRouter {
   private slotKey(name: string): string { return `${this.universe}:${name}`; }
   private trafficSurface(): 'chat' | 'professional' {
     return this.universe.includes('professional') ? 'professional' : 'chat';
+  }
+
+  /** Professional turns may start with a healthier equal-price rung. Other universes keep registration order. */
+  private providersForTurn(): AIProvider[] {
+    if (!this.universe.includes('professional') || !professionalTrafficEnabled()) return this.providers;
+    const facts = this.providers.map((provider) => ({
+      item: provider,
+      id: `${provider.name}:${provider.pinnedModel ?? ''}:${provider.priority}`,
+      provider: provider.name,
+      priceIn: professionalPriceIn(provider.name, provider.pinnedModel),
+      lastResort: provider.lastResort === true,
+    }));
+    return orderProfessionalProviders(facts).map((fact) => fact.item);
   }
   private managedTrafficHealth(name: string): boolean { return this.providers.some(p => p.name === name && p.managesTrafficHealth); }
   private acquire(name: string): boolean {
@@ -512,8 +526,9 @@ export class AIRouter {
     if (signal?.aborted) return { ok: false, reason: 'aborted' };
 
     // Get available providers (skip cooldowns on first pass)
-    const available = this.providers.filter(p => !isOnCooldown(p.name) && p.executeStream);
-    const allProviders = available.length > 0 ? available : this.providers.filter(p => p.executeStream);
+    const registered = this.providersForTurn();
+    const available = registered.filter(p => !isOnCooldown(p.name) && p.executeStream);
+    const allProviders = available.length > 0 ? available : registered.filter(p => p.executeStream);
 
     if (allProviders.length === 0) {
       if (!signal?.aborted) onChunk('AI service temporarily unavailable. 🙏', 'notice');
@@ -661,8 +676,9 @@ export class AIRouter {
     // Pass 1: skip providers on cooldown — try fast path first
     // Pass 2: if all on cooldown, try them anyway (better than error) — but never a provider we
     //         already attempted (and failed) in pass 1.
+    const turnProviders = this.providersForTurn();
     for (const pass of [1, 2]) {
-      for (const provider of this.providers) {
+      for (const provider of turnProviders) {
         signal?.throwIfAborted();
         if (pass === 2 && attempted.has(provider.name)) continue;
 

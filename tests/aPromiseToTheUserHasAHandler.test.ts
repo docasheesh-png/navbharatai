@@ -35,6 +35,7 @@ import { raceWorldYes } from '../src/server/AgentV3/mapGrowthIntent';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
 import { reviewNotReadyUserLine, formatPartialReview, salvageReview } from '../src/server/AgentV3/partialReview';
 import { PLATFORM_SUGGESTED_REPLIES, platformSuggestedReply } from '../src/server/AgentV3/platformSuggestedReplies';
+import { worldUpgradeAsked } from '../src/server/AgentV3/worldUpgrade';
 
 const root = process.cwd();
 const read = (rel: string): string => readFileSync(join(root, rel), 'utf8');
@@ -200,6 +201,13 @@ const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
     why: 'an explicit change order ("badlo" — edit_existing), and the growth guard\'s FREE_HAND opens edits to the parts it had kept shut, the kit included, for this one turn',
     proof: () => reachesConfirmedWork('jo chahe badlo') && read('src/server/AgentV3/growthGuard.ts').includes('jo\\s+(?:bhi\\s+)?(?:chahe'),
   },
+  // Map expansion item 11: the builder offers these exact words; only they start the one-backup upgrade.
+  'world upgrade karo': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/worldUpgrade.ts (upgradeWorldAtTurnStart); src/server/AgentV3/worldTurn.ts (worldWishAtTurnStart)`,
+    why: 'on these exact words at turn start the platform keeps one backup of a hand-edited open-world bridge and writes the current kit version, or changes nothing if it cannot; a negation or a bare haan does not upgrade',
+    proof: () => worldUpgradeAsked('world upgrade karo') && !worldUpgradeAsked('world upgrade mat karo') && !worldUpgradeAsked('haan') && read('src/server/AgentV3/worldTurn.ts').includes('upgradeWorldAtTurnStart'),
+  },
+
   undo: {
     handler: 'src/lib/versionUndoIntent.ts; src/components/agentv3/AgentV3Panel.tsx (VersionUndoCard)',
     why: 'typing undo in Pro chat opens the in-chat version picker (wantsVersionUndo), where one tap restores any saved version',

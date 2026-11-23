@@ -9,6 +9,7 @@ import { GAME_PLAYER_FILE } from '../lib/GamePlayerBodyGenerator';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
 import { setLibraryCarAtTurnStart } from './carSwap';
 import { mapGrowthNote } from './mapGrowthIntent';
+import { editedBridgeNote, bridgeState, worldUpgradeEnabled, BRIDGE_PATH } from './worldUpgrade';
 
 /** The game's own open-world bridge (GameOpenWorldGenerator OPEN_WORLD_BRIDGE_PATH — a test keeps the two equal). */
 export const OPEN_WORLD_FILE = 'src/game/play/openWorld.ts';
@@ -198,7 +199,9 @@ export function mapGrowthNoteEnabled(env: NodeJS.ProcessEnv = process.env): bool
 export function mapGrowthNoteAtTurnStart(io: { prompt: string; filesAtTurnStart: Readonly<Record<string, string>> | null; record: (issue: Issue) => void; env?: NodeJS.ProcessEnv }): string {
   try {
     if (!mapGrowthNoteEnabled(io.env ?? process.env) || !io.filesAtTurnStart || String(io.prompt ?? '').length > 600) return '';
-    const note = mapGrowthNote(io.prompt, io.filesAtTurnStart);
+    let note = mapGrowthNote(io.prompt, io.filesAtTurnStart);
+    // An edited bridge never takes the newer map features by itself: the builder asks the user before an upgrade (item 11).
+    if (note && worldUpgradeEnabled(io.env ?? process.env)) { const edited = editedBridgeNote(bridgeState(io.filesAtTurnStart[BRIDGE_PATH])); if (edited) note = `${note}\n\n${edited}`; }
     if (note) io.record({ phase: 'build', severity: 'info', code: 'MAP_GROWTH_ROUTED', autoResolved: true, message: note.slice(0, 400) });
     return note;
   } catch { return ''; }

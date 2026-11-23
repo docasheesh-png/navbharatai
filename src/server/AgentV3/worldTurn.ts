@@ -11,6 +11,7 @@
 // for byte — and the builder is told it is done. Where the request is NOT unambiguous (several cities and none named; a city
 // grown AND separate cities asked for), nothing is changed on a guess: the builder is told to ask (GAME_NO_GUESS_RULE).
 // PURE apart from the small ports the route passes in; never throws.
+import { upgradeWorldAtTurnStart } from './worldUpgrade';
 import { parseRegions } from './growthGuard';
 import { appendRegionEntries, MAX_PLACES } from './worldGrow';
 import { worldCapabilities, GAME_OPEN_WORLD_FILE } from './gameKitSeed';
@@ -213,6 +214,8 @@ export async function worldWishAtTurnStart(io: {
   record: (issue: Issue) => void;
 }): Promise<string> {
   try {
+    // 🧬 An old hand-edited world upgraded, only on the user's explicit words (worldUpgrade.ts, map expansion item 11).
+    if (!io.skip) { const up = await upgradeWorldAtTurnStart(io); if (up) return up; }
     if (io.skip || !io.filesAtTurnStart || typeof io.filesAtTurnStart[WORLD_PATH] !== 'string') return '';
     const wantsGrowth = cityGrowthAsked(io.prompt) !== null;
     const km = mapSizeAskedKm(io.prompt);

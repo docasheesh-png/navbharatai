@@ -25,7 +25,7 @@ describe('🧩 the rule: "jod ke ek world" is edge to edge, "aur maps jodo" is s
     expect(GAME_WORLD_RULE).toMatch(/"aur maps jodo" \/ "map bada karo" ADD spread places/);
     expect(GAME_WORLD_RULE).toMatch(/NEVER raise sizeMeters to make the map bigger/);
     expect(GAME_WORLD_RULE).toMatch(/duplicate karke jodo" → add copies of the existing regions with new ids/);
-    expect(GAME_WORLD_RULE).toMatch(/Up to 100 regions/);
+    expect(GAME_WORLD_RULE).toMatch(/Up to 1000 regions/);
   });
 });
 

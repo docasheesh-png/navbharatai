@@ -3,11 +3,14 @@
 // a call is a call).
 import { growthGuardEnabled, growsByLists, growthProtectedPaths, growthRestores, growthUserNote, growthAskNote, growthNotRestoredNote, WORLD_FILE, FEATURES_INDEX, partsKnown, requestIsAbout } from './growthGuard';
 import { PART_NAMES_FILE, rememberPartNames } from './partMeaning';
-import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, MAX_PLACES } from './worldGrow';
+import { mapPlaceAsked, appendPlace, placeAddedHandoff, placeNotAddedHandoff, placesTheMapHolds } from './worldGrow';
 import { characterAsked, librarySubjectOf, libraryMovesOf, characterNotSwappable, modelWasAdded, setPlayerModel, characterSetHandoff, characterNotSetHandoff, PLAYER_FILE_PATH, GAME_SHELL_PATH, SHELL_READS_PLAYER_FILE } from './characterSwap';
 import { GAME_PLAYER_FILE } from '../lib/GamePlayerBodyGenerator';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
 import { setLibraryCarAtTurnStart } from './carSwap';
+
+/** The game's own open-world bridge (GameOpenWorldGenerator OPEN_WORLD_BRIDGE_PATH — a test keeps the two equal). */
+export const OPEN_WORLD_FILE = 'src/game/play/openWorld.ts';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
 
@@ -104,15 +107,18 @@ export async function addLibraryPlaceAtTurnStart(io: {
     if (!kind || !io.filesAtTurnStart || typeof io.filesAtTurnStart[WORLD_FILE] !== 'string') return '';
     const live = await io.read(WORLD_FILE).then((c) => (typeof c === 'string' ? c : null), () => null);
     if (live === null) return '';
-    const added = appendPlace(live, kind);
+    // The game's own map file says how many entries it reads (an older, edited copy reads 100).
+    const bridge = await io.read(OPEN_WORLD_FILE).then((c) => (typeof c === 'string' ? c : null), () => null);
+    const cap = placesTheMapHolds(bridge);
+    const added = appendPlace(live, kind, cap);
     if (added.ok) {
       await io.write(WORLD_FILE, added.source);
       io.record({ phase: 'build', severity: 'info', code: 'MAP_PLACE_ADDED', autoResolved: true, message: `The platform added the ${kind} "${added.id}" the user picked in the library to the game's map (${added.count} place(s) now) — no model call made this change.` });
       return placeAddedHandoff(kind, added.id, added.count);
     }
     if (added.reason === 'full') {
-      io.record({ phase: 'build', severity: 'info', code: 'MAP_PLACE_NOT_ADDED', autoResolved: true, message: `The map already holds its ${MAX_PLACES} places, so the ${kind} picked in the library was not added; the user is told.` });
-      return placeNotAddedHandoff(kind);
+      io.record({ phase: 'build', severity: 'info', code: 'MAP_PLACE_NOT_ADDED', autoResolved: true, message: `The map already holds its ${cap} places, so the ${kind} picked in the library was not added; the user is told.` });
+      return placeNotAddedHandoff(kind, cap);
     }
     return '';
   } catch { return ''; }   // the builder still has the request and the rule

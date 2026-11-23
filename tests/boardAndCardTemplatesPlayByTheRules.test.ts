@@ -93,12 +93,15 @@ describe('🏯 Courtyard', () => {
     expect(C().chooseMove([[0, 0, 0], [0, 0, 0]], 1, 4)).toBeNull();
   });
   it('a smart computer beats a random one most of the time', () => {
+    // A fixed seed: unseeded rolls used to fail when the smart side won exactly 33 of 60.
+    let a = 777;
+    const rnd = () => { a = (Math.imul(a, 1664525) + 1013904223) >>> 0; return a / 0x100000000; };
     const o = C().OPTIONS; let smart = 0;
     for (let g = 0; g < 60; g++) {
       let tk = [[0, 0, 0], [0, 0, 0]], side = g % 2, turns = 0;
       for (;;) {
-        const roll = 1 + Math.floor(Math.random() * 6);
-        const pick = C().chooseMove(tk, side, roll, { ...o, smartComputer: side === 0 });
+        const roll = 1 + Math.floor(rnd() * 6);
+        const pick = C().chooseMove(tk, side, roll, { ...o, smartComputer: side === 0 }, rnd);
         if (pick === null) { side = 1 - side; continue; }
         const r = C().moveToken(tk, side, pick, roll, o); tk = r.tokens;
         if (r.won) { if (side === 0) smart++; break; }

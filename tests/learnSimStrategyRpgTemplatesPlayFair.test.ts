@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-learn-sim-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['count-garden', 'shape-yard', 'tea-stall', 'river-ferry', 'seed-row', 'tower-line', 'camp-quest'];
+const IDS = ['count-garden', 'shape-yard', 'tea-stall', 'river-ferry', 'seed-row', 'tower-line', 'camp-quest', 'road-tale'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -287,6 +287,35 @@ describe('🏕️ Camp Quest', () => {
     const mash = (b: any) => ({ kind: 'attack', target: Q().living(b, 'foe')[0] });
     for (let s = 1; s <= 40; s++) if (campaign(rng(s), mash) === Q().CAMPS.length) mashed++;
     expect(finished).toBeGreaterThanOrEqual(28); expect(mashed).toBeLessThanOrEqual(finished / 2);
+  });
+});
+
+describe('📖 Road Tale', () => {
+  const R = () => M['road-tale'];
+  it('the story has no broken links, unreachable scenes or dead ends, and every ending can be reached', () => {
+    expect(R().validate()).toEqual([]);
+    const reached = new Set(R().explore().map((w: any) => w.at));
+    for (const id of R().endingIds()) expect(reached.has(id)).toBe(true);
+    expect(R().endingIds().length).toBeGreaterThanOrEqual(4);
+  });
+  it('the checker catches a broken link, a dead end and a lonely scene', () => {
+    const bad = JSON.parse(JSON.stringify(R().STORY));
+    bad.crossroads.choices[0].to = 'nowhere';
+    expect(R().validate(bad).join(' ')).toContain('missing nowhere');
+    const trap = JSON.parse(JSON.stringify(R().STORY));
+    trap.late.choices = trap.late.choices.filter((c: any) => c.needs);
+    expect(R().validate(trap).join(' ')).toContain('dead end');
+    const lonely = { ...JSON.parse(JSON.stringify(R().STORY)), attic: { icon: '?', en: 'x', hi: 'x', choices: [], ending: { en: 'x', hi: 'x', stars: 1 } } };
+    expect(R().validate(lonely)).toContain('attic can never be reached');
+  });
+  it('choices that need an item only show when it is in the bag, and items are kept along the way', () => {
+    let w = R().begin();
+    w = R().choose(w, R().choicesAt(w).find((c: any) => c.gives === 'mango'));
+    w = R().choose(w, R().choicesAt(w).find((c: any) => c.to === 'river'));
+    w = R().choose(w, R().choicesAt(w).find((c: any) => c.to === 'ferry'));
+    const tos = R().choicesAt(w).map((c: any) => c.en);
+    expect(tos.some((e: string) => /mango/.test(e))).toBe(true); expect(tos.some((e: string) => /tune/.test(e))).toBe(false);
+    expect(w.bag).toEqual(['mango']); expect(w.path[0]).toBe(R().OPTIONS.start);
   });
 });
 

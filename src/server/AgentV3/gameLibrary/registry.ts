@@ -24,6 +24,7 @@ import { riverFerryAppTsx } from './games/riverFerry';
 import { seedRowAppTsx } from './games/seedRow';
 import { towerLineAppTsx } from './games/towerLine';
 import { campQuestAppTsx } from './games/campQuest';
+import { roadTaleAppTsx } from './games/roadTale';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -70,7 +71,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'coin-dice', title: 'Coin Dice', category: 'Casino', accent: '#a16207', appTsx: gapScreen('coin-dice', 'coin-dice-best-v1') },
   { id: 'shape-yard', title: 'Shape Yard', category: 'Educational', accent: '#0f766e', appTsx: shapeYardAppTsx },
   { id: 'drum-row', title: 'Drum Row', category: 'Music', accent: '#6d28d9', appTsx: gapScreen('drum-row', 'drum-row-best-v1') },
-  { id: 'road-tale', title: 'Road Tale', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('road-tale', 'road-tale-best-v1') },
+  { id: 'road-tale', title: 'Road Tale', category: 'Role Playing', accent: '#3f6212', appTsx: roadTaleAppTsx },
   { id: 'river-ferry', title: 'River Ferry', category: 'Simulation', accent: '#92400e', appTsx: riverFerryAppTsx },
   { id: 'seed-row', title: 'Seed Row', category: 'Strategy', accent: '#334155', appTsx: seedRowAppTsx },
   { id: 'rhyme-pair', title: 'Rhyme Pair', category: 'Word', accent: '#4338ca', appTsx: gapScreen('rhyme-pair', 'rhyme-pair-best-v1') },

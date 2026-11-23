@@ -33,7 +33,7 @@ export function matchSportOf(files: Readonly<Record<string, string>> | null | un
   let football = false, cricket = false;
   for (const [path, content] of Object.entries(files ?? {})) {
     if (!/^src\/.*\.(?:tsx?|jsx?)$/.test(path) || typeof content !== 'string') continue;
-    if (pool.get(path)?.content === content || /^src\/game\/board\//.test(path)) continue;   // the kit's own files say nothing
+    if (pool.get(path)?.content === content || path === WORLD_VENUE_PATH || /^src\/game\/board\//.test(path)) continue;   // the kit's own files say nothing
     if (FOOTBALL_CODE.test(content)) football = true;
     if (CRICKET_CODE.test(content)) cricket = true;
   }

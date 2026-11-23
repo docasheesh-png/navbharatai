@@ -257,6 +257,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/board/dice.ts": [
     "ab07024bd0487471a0a2c903e1cdb1bafbb10650ae89494080819345970278bf"
   ],
+  "src/game/board/football.ts": [
+    "5a3983937fdaf94853d7eede3d14a9a97884322547878ad9210fb018a1c18e3c"
+  ],
   "src/game/board/index.ts": [
     "905e8c74c0e029a99fae267cbc835304b5c2c519dfd0057d7db1adc79164e2f3",
     "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc",
@@ -264,7 +267,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3b023e173bd3c3c68dfa24ac1beea403338ba83fac53147d488432ea4368184d",
     "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b",
     "053e9f9b909528b10107e48248a2de3f134d11ceb5b03c5663ef2137f4d04c94",
-    "9572512cb4e1f447ac37f7f03642d2e777a64f6dc1bb5d382808ebbc69aef98c"
+    "9572512cb4e1f447ac37f7f03642d2e777a64f6dc1bb5d382808ebbc69aef98c",
+    "254d4b6ce2ca1925877aad9498e1e96f804ca8b64665112cc6f302d55fcb46ed"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"
@@ -603,7 +607,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c305ea5884c401bffe55eafb360752ea3b2fb9f7124107a5a0c4c9ff1953d5e9",
     "f824eab134e9159d672a848eb66f1407629dc1d4e656906320e5032cffee5e95",
     "6e2d317b6d609072819df5a88fb996b9476d59bc554312ad7ee13d3eb2b7b33d",
-    "09e4f076799fb5409fd3f302c41cac19aef10a2a76ab611f02b93bc378bacc91"
+    "09e4f076799fb5409fd3f302c41cac19aef10a2a76ab611f02b93bc378bacc91",
+    "acbab8f429256085a555f09af7027d3732ae93bf53f69a9639ed6cee5ca94ff9",
+    "044ae868f88e435ed88f1257f11e9a7f7c2617263be49ccced5b36ecec66ddc3"
   ],
   "src/game/three/lighting.ts": [
     "7b1f89bdc9398b48a10fcc2fd1fb77a9577a2925dee1e14120857e5ac3e8be96"

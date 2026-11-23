@@ -2234,7 +2234,8 @@ export interface Humanoid {
   /**
    * Play a one-shot ACTION pose over the walk, so the body visibly does what the button did: 'punch', 'swing'
    * (a melee weapon), 'fire' (a gun's recoil), 'kick', 'throw', 'jump' (the launch), 'land' (the squash, also
-   * automatic after a fall), 'hit' (a flinch), 'use' (a reach). Call it on the frame the action happens; keep
+   * automatic after a fall), 'hit' (a flinch), 'use' (a reach), 'dive' / 'dive-left' (a goalkeeper's full-length dive
+   * to his own right / left, arms stretched). Call it on the frame the action happens; keep
    * calling update() every frame. strength 0–1.5 scales it (default 1).
    */
   act: (action: HumanoidAction, strength?: number) => void;
@@ -2253,11 +2254,12 @@ export interface Humanoid {
 }
 
 /** The one-shot action poses a humanoid can play (see Humanoid.act). */
-export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use';
+export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use' | 'dive' | 'dive-left';
 
 /** How long each action pose lasts, in seconds — short enough to never delay the next press. */
 export const ACTION_SECONDS: Readonly<Record<HumanoidAction, number>> = {
   punch: 0.3, swing: 0.45, fire: 0.16, kick: 0.45, throw: 0.5, jump: 0.25, land: 0.24, hit: 0.32, use: 0.4,
+  dive: 0.8, 'dive-left': 0.8,
 };
 
 /**
@@ -2485,6 +2487,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   const act = (name: HumanoidAction, strength = 1) => {
     const dur = ACTION_SECONDS[name];
     if (dur === undefined) return;
+    hips.rotation.z = 0;                                  // a dive cut short does not leave the body tipped
     action = { name, t: 0, dur, strength: Math.max(0, Math.min(1.5, strength)) };
   };
   // Move a joint angle toward a target by weight w (0 = the walk's own pose, 1 = the action's).
@@ -2550,6 +2553,18 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
         spine.rotation.x += -0.35 * pulse; neck.rotation.x = -0.3 * pulse;
         mix(LS, 'z', -0.55, pulse); mix(RS, 'z', 0.55, pulse); mix(LS, 'x', -0.4, pulse); mix(RS, 'x', -0.4, pulse);
         break;
+      case 'dive':
+      case 'dive-left': {
+        // A keeper's dive: the body lays out sideways toward the ball, both arms reach past the head, then he gets up.
+        const side = action.name === 'dive' ? 1 : -1;            // rotation.z > 0 tips a +Z-facing body to its right (−X)
+        const out = (u < 0.3 ? u / 0.3 : u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) * k;
+        hips.rotation.z = side * 1.2 * out;
+        hips.position.y -= 0.35 * H * out;
+        mix(RS, 'x', -2.9, out); mix(LS, 'x', -2.9, out); mix(RE, 'x', -0.05, out); mix(LE, 'x', -0.05, out);
+        mix(leftLeg.knee.rotation, 'x', 0.2, out); mix(rightLeg.knee.rotation, 'x', 0.2, out);
+        if (u >= 1) hips.rotation.z = 0;
+        break;
+      }
       case 'use':
         mix(RS, 'x', -1.25, pulse); mix(LS, 'x', -1.25, pulse); mix(RE, 'x', -0.45, pulse); mix(LE, 'x', -0.45, pulse);
         spine.rotation.x += 0.1 * pulse;
@@ -2564,7 +2579,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
       const u = down.t / FALL_SECONDS;
       const e = u * u * (3 - 2 * u);                      // ease in and out: a collapse, not a hinge
       hips.rotation.x = -down.dir * (Math.PI / 2) * e;    // backward (from the front) or forward
-      hips.rotation.y = 0;
+      hips.rotation.y = 0; hips.rotation.z = 0;
       hips.position.y = legH - (legH - 0.12 * H) * e;     // down to the ground
       leftLeg.knee.rotation.x = 0.9 * e; rightLeg.knee.rotation.x = 0.6 * e;
       leftLeg.hip.rotation.x = 0.3 * e; rightLeg.hip.rotation.x = 0.1 * e;

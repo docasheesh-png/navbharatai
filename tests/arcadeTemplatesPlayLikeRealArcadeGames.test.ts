@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-arcade-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['lane-dash', 'dodge-fall', 'bolt-arena'];
+const IDS = ['lane-dash', 'dodge-fall', 'bolt-arena', 'shield-rush'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -144,6 +144,34 @@ describe('⚡ Bolt Arena', () => {
     const three = B().offer(rng(5)); expect(new Set(three).size).toBe(3);
     const base = B().baseStats();
     for (const [id, u] of Object.entries<any>(B().UPGRADES)) expect(u.apply(base), id).not.toEqual(base);
+  });
+});
+
+describe('🛡️ Shield Rush', () => {
+  const S = () => M['shield-rush'];
+  it('turns take the short way round', () => {
+    expect(S().angleDiff(0, 1)).toBeCloseTo(1);
+    expect(S().angleDiff(0.1, 2 * Math.PI - 0.1)).toBeCloseTo(-0.2);
+    expect(S().angleDiff(3, -3)).toBeCloseTo(2 * Math.PI - 6);
+  });
+  it('a shot is blocked only when the shield faces it as it reaches the shield; centred blocks are perfect', () => {
+    const o = S().OPTIONS, at = o.shieldRadius + 2;
+    expect(S().resolve({ angle: 0, dist: at, kind: 'slow', delay: 0 }, 0, 4)).toBe('perfect');
+    expect(S().resolve({ angle: 0, dist: at, kind: 'slow', delay: 0 }, o.shieldArc * 0.4, 4)).toBe('blocked');
+    expect(S().resolve({ angle: 0, dist: at, kind: 'slow', delay: 0 }, Math.PI, 4)).toBe('flying');
+    expect(S().resolve({ angle: 0, dist: o.coreRadius + 2, kind: 'slow', delay: 0 }, Math.PI, 4)).toBe('hit');
+    expect(S().resolve({ angle: 0, dist: 150, kind: 'slow', delay: 0 }, 0, 4)).toBe('flying');
+    expect(S().covers(2 * Math.PI - 0.1, 0.1)).toBe(true);                               // across the wrap-around
+  });
+  it('patterns: easy ones first, tougher ones later; shots come faster and more often, to a limit', () => {
+    const r = rng(9), kinds1 = new Set<string>(), kinds3 = new Set<string>();
+    for (let k = 0; k < 80; k++) {
+      S().pickPattern(1, r).forEach((x: any) => kinds1.add(x.kind));
+      S().pickPattern(5, r).forEach((x: any) => kinds3.add(x.kind));
+    }
+    expect([...kinds1]).toEqual(['slow']); expect(kinds3.has('heavy')).toBe(true);
+    expect(S().patternGap(5)).toBeLessThan(S().patternGap(1)); expect(S().patternGap(99)).toBe(0.6);
+    expect(S().speedScale(99)).toBe(2); expect(S().levelFor(0)).toBe(1); expect(S().levelFor(300)).toBe(3);
   });
 });
 

@@ -1,4 +1,5 @@
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
+import { askStandIn, generateStandIn } from './gameAssets/standInObject';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
@@ -268,6 +269,7 @@ import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type 
 import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
 import { kitLibraryRewriteRefusal } from './kitLibraryGuard';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, ownLandFindings, ownLandNote, type GroundShapeHalves } from './handWrittenGroundScan';
+import { missingGroundContact } from './groundContactRule';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
 import { shellHalves, shellBypassFinding, shellBypassNote, shellBypassWarning, type ShellHalves } from './shellBypass';
@@ -1203,6 +1205,8 @@ export class ToolDispatcher {
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
+  /** Ground without the shared contact module (groundContactRule.ts). Repeated until the call exists. */
+  private _groundContactIndex = new Map<string, string>();
   /** A feature's own map-scale land in an open world — its OWN once-flag, so it never sets or silences the note above. */
   private _ownLandNoted = false;
   private _openWorldKnown = false;
@@ -5206,6 +5210,12 @@ export class ToolDispatcher {
         if (found.length > 0) { vehicle += handWrittenGroundNote(found); this._groundShapeNoted = true; }
       } catch { /* a note is best-effort */ }
     }
+    // ⛰️ Ground without the shared contact module is not a one-time note: it is attached on every write
+    // until standOnGround / driveVehicle / groundScene is in the project (owner 2026-11-23).
+    try {
+      for (const p of paths) if (typeof files[p] === 'string') this._groundContactIndex.set(p, files[p]);
+      vehicle += missingGroundContact(this._groundContactIndex);
+    } catch { /* a note is best-effort */ }
     // 🌱 A feature that lays its own map-scale land in an OPEN WORLD (failedbr #2495) — only when src/game/world.ts exists,
     // looked up once, and only after the scan above found such a plane. Its own flag: the ground note above is untouched.
     if (!this._ownLandNoted) {
@@ -10334,6 +10344,20 @@ export class ToolDispatcher {
         const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
         return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
+      }
+
+      case 'generate_stand_in': {
+        const rec = (input as { subject?: unknown; plan_json?: unknown }) || {};
+        const subject = String(rec.subject ?? '').trim().slice(0, 80);
+        if (!subject) refuse('Name the object the library does not have.');
+        const supplied = typeof rec.plan_json === 'string' ? rec.plan_json : '';
+        const made = await generateStandIn(subject, supplied ? async () => ({ text: supplied }) : askStandIn);
+        if (made.kind === 'none') refuse('Name the object.');
+        const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
+        if (made.kind === 'adjusted') {
+          return `The closest library object (${made.libraryId}) was adjusted: scale ${made.scale}, colour ${made.color ?? 'unchanged'}, texture ${made.texture ?? 'unchanged'}, extra parts ${made.parts.join(', ') || 'none'}. It is at ${written[0] ?? made.path} and sits on the ground. The build continues.`;
+        }
+        return `A simple object for "${subject}" is at ${written[0] ?? made.path} and sits on the ground. The build does not wait.\n${made.guide}`;
       }
 
       case 'generate_procedural_object': {

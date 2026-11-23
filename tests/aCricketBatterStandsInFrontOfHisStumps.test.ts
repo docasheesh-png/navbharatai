@@ -1,6 +1,5 @@
-// 🏏 THE BATTER STANDS IN FRONT OF HIS STUMPS AND PLAYS THE SHOT (admin 2026-11-23, failedbr #2504: "cricket game me player
-// batsman wicket ki piche khada hai, bowl aur batsman ke bich me wicket hai, batsman bowl ko hit karne ka action hi nahi kar
-// raha"). These run the REAL generated src/game/board/cricket.ts (the field) and three/humanoid.ts (the bat swing).
+// 🏏 THE BATTER STANDS IN FRONT OF HIS STUMPS AND PLAYS THE SHOT (admin 2026-11-23: the batter stood behind his
+// stumps, the wickets were between bowler and batter, and the batter never played a shot). These run the REAL generated src/game/board/cricket.ts (the field) and three/humanoid.ts (the bat swing).
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -46,7 +45,7 @@ describe('🏏 cricketLayout — the field a fan recognises', () => {
   });
 });
 
-describe('🏏 checkCricketLayout catches what #2504 shipped', () => {
+describe('🏏 checkCricketLayout catches the reported wrong field', () => {
   const f = () => K.cricketLayout({});
   it('a batter behind his own stumps (the stumps between him and the bowler)', () => {
     const x = f();

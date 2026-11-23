@@ -451,6 +451,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
 
   const anchored = new Map<THREE.Object3D, { x: number; z: number }>();
   let time = 0;
+  // LATE GROUND EDITS (world: { lateEdits: true }, default off): a pad, land or road laid after this point redraws the map's
+  // chunks and plants it touches, and the walkable ground under the player is sampled again at once.
+  const lateEdits = options.lateEdits === true;
+  let groundEditsSeen = map.world.editCount ? map.world.editCount() : 0;
   const playerWorld = () => {
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
@@ -495,6 +499,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         for (const [object] of anchored) { object.position.x -= shift.dx; object.position.z -= shift.dz; }
         for (const root of roots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
+      }
+      if (lateEdits && map.world.editCount) {
+        const edits = map.world.editCount();
+        if (edits !== groundEditsSeen) { groundEditsSeen = edits; centre.x = Number.NaN; centre.z = Number.NaN; }
       }
       layGround(at.x, at.z);
       // A place still only planned is built when the player comes near it — at most one per frame, so walking towards a

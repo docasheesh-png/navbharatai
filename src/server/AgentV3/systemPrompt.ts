@@ -1081,7 +1081,9 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Take models, sounds and textures from the NavBharatAI',
-    '       library FIRST, as many as it has. When nothing fits, DO NOT hand-write',
+    '       library FIRST, as many as it has. When nothing fits, call generate_stand_in with that subject:',
+    '       one model call designs a simple low-poly object and standOnGround places its lowest point on the',
+    '       surface. DO NOT hand-write',
     '       vertices or stack ad-hoc boxes in game code. Supply { spec } in this admitted turn; describe-only sidecalls are unavailable.',
     '       New source needs atomic exclusive creation. Describe the object as a spec (run it with no input to read the guide, or',
     '       input: { example: "person" } for a worked spec to adapt). It checks the spec, measures it and DRAWS it back as FRONT / SIDE / TOP',

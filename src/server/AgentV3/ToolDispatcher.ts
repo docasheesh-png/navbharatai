@@ -1,4 +1,5 @@
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
+import { askStandIn, generateStandIn } from './gameAssets/standInObject';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
@@ -10343,6 +10344,18 @@ export class ToolDispatcher {
         const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
         return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
+      }
+
+      case 'generate_stand_in': {
+        const rec = (input as { subject?: unknown; plan_json?: unknown }) || {};
+        const subject = String(rec.subject ?? '').trim().slice(0, 80);
+        if (!subject) refuse('Name the object the library does not have.');
+        const supplied = typeof rec.plan_json === 'string' ? rec.plan_json : '';
+        const made = await generateStandIn(subject, supplied ? async () => ({ text: supplied }) : askStandIn);
+        if (made.kind === 'library') return `The library already has "${made.id}". Use that model. Do not replace it with a stand-in.`;
+        if (made.kind === 'none') return `No simple object was generated for "${subject}". Tell the user, in their language, where to get a CC0 file and how to attach it.`;
+        const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
+        return `A simple stand-in for "${subject}" is at ${written[0] ?? made.path}. Its create function places the object with standOnGround. Mount it in the scene.`;
       }
 
       case 'generate_procedural_object': {

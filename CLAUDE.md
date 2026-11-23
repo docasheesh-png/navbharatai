@@ -592,16 +592,15 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
    gap. Touching/redoing already-working committed code wastes credit and
    risks reintroducing bugs into code that was already correct.
 
-## Ground contact — hard rule (owner 2026-11-23)
+## Ground contact and library-first — hard rule (owner 2026-11-23). NEVER REMOVE.
 
-Every game build — a template, a from-scratch build, and a follow-up edit — keeps characters, vehicles and objects on the ground. When the game creates ground, land, grass or terrain:
+This rule must never be removed. It applies to every game build: a template, a from-scratch build, and a follow-up edit.
 
-- The ground has a physics collider.
-- An object's lowest point (its bounding box, not its origin) sits on the surface. A model whose origin is its centre must not sink.
-- Position is clamped to the surface every frame.
-- A vehicle's wheels and suspension stay on the ground, and a frame never ends with a wheel inside the surface.
-
-The one implementation is `src/server/lib/groundContact.ts`, copied into every 3D kit as `src/game/three/groundContact.ts`. `standOnGround`, `driveVehicle` and the character controller call it. The builder prompt states it, and a project that draws ground without calling it is told on every write until it does (`missingGroundContact`). A bird or a plane sets `userData.ground = false`. A code-built stand-in obeys the same rule.
+- When a game creates ground, land, grass or terrain, characters, vehicles and objects never sink into it. The ground has a physics collider. An object's lowest point (its bounding box, not its origin) sits on the surface. Position is clamped every frame. A vehicle's wheels and suspension stay on the ground.
+- The one implementation is `src/server/lib/groundContact.ts`, copied into every 3D kit as `src/game/three/groundContact.ts`. `standOnGround`, `driveVehicle` and the character controller call it. `missingGroundContact` tells the builder on every write until the call is there. A bird or a plane sets `userData.ground = false`.
+- Models, sounds and textures come from the NavBharatAI library first.
+- When the library has no match, `generate_stand_in` makes one model call for a simple low-poly object. That object goes through `standOnGround`.
+- A user upload of `.glb`, `.gltf`, `.png`, `.ogg` or `.mp3` is checked for type and size. A model is also checked for triangles. An uploaded model is placed with `standOnGround`.
 
 ## Where things live
 

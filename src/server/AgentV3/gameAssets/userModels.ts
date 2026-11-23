@@ -243,8 +243,15 @@ export function userModelsFromFiles(files: ReadonlyMap<string, Uint8Array>, take
     const raw = files.get(from)!; const warnings: string[] = [];
     try {
       let glb: Uint8Array;
-      if (/\.glb$/i.test(from)) glb = raw;
-      else if (/\.gltf$/i.test(from)) glb = gltfToGlb(files, from, raw, warnings);
+      if (/\.glb$/i.test(from)) {
+        if (raw.length < 12 || raw[0] !== 0x67 || raw[1] !== 0x6c || raw[2] !== 0x54 || raw[3] !== 0x46) throw new UserModelError('this is not a .glb file');
+        glb = raw;
+      }
+      else if (/\.gltf$/i.test(from)) {
+        const text = new TextDecoder('utf-8', { fatal: false }).decode(raw.slice(0, 400));
+        if (!/"asset"/.test(text) || !/"version"\s*:\s*"2\.0"/.test(text)) throw new UserModelError('this is not a .gltf file');
+        glb = gltfToGlb(files, from, raw, warnings);
+      }
       else if (/\.obj$/i.test(from)) glb = objToGlb(files, from, raw);
       // An .fbx reaches here only when it was not converted first (convertFbxFiles runs before this in planUserModels).
       else throw new UserModelError('this FBX was not converted — open it in Blender and use File → Export → glTF 2.0 (.glb), then attach the .glb');
@@ -396,7 +403,7 @@ export function userModelNote(models: readonly UserModel[], refused: readonly Us
         + `${m.animations.length ? `; animations: ${m.animations.slice(0, 24).map(a => JSON.stringify(a)).join(', ')}` : '; no animations'}`
         + `${m.materials.length ? `; materials: ${m.materials.slice(0, 16).join(', ')}` : ''}${m.parts.length ? `; parts: ${m.parts.slice(0, 16).join(', ')}` : ''}${m.warnings.length ? `; tell the user: ${m.warnings.slice(0, 4).join('; ')}` : ''})`);
     }
-    lines.push(`HOW: in a game with src/game/three/assetCustomizations.ts, add an entry per model, e.g. ${models[0].subject}: { source: { file: '${models[0].path}', sha256: '${models[0].sha256}' } }, then load it with loadRequestedAsset('${models[0].subject}', fallback) like any other model; recolour a part with colors: { <material>: '#rrggbb' }, hide one with hide: [<part>], pick a clip with animation / roles. In any other three.js game, load '/${models[0].path.replace(/^public\//, '')}' with GLTFLoader. Never rewrite these files; if the user asks for a change, change it in code.`);
+    lines.push(`HOW: in a game with src/game/three/assetCustomizations.ts, add an entry per model, e.g. ${models[0].subject}: { source: { file: '${models[0].path}', sha256: '${models[0].sha256}' } }, then load it with loadRequestedAsset('${models[0].subject}', fallback) like any other model; recolour a part with colors: { <material>: '#rrggbb' }, hide one with hide: [<part>], pick a clip with animation / roles. In any other three.js game, load '/${models[0].path.replace(/^public\//, '')}' with GLTFLoader. Place the loaded object with standOnGround so its lowest point sits on the ground. Never rewrite these files; if the user asks for a change, change it in code.`);
     // 🧍 As the PLAYER, in any game (2026-11-22: "Use as my character" in ALL games): one line in src/game/player.ts, which
     // every game on the kit reads by itself — and the moves it really has, so the user is told what it cannot do.
     lines.push(`AS THE PLAYER (the user says it is their character — "mera character ye wala", "boxer ko ye model do", "use this as my player"): in a game with src/game/player.ts set PLAYER.file = '/${models[0].path.replace(/^public\//, '')}' and PLAYER.model = null — nothing else; the game swaps the body by itself. As the player, ${models.map((m) => { const moves = playerMovesOf(m.animations); return `"${m.subject}": ${playerMovesLine(moves.has.map((h) => `${h.move} ("${h.clip}")`), moves.lacks)}`; }).join(' · ')}.`);

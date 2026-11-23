@@ -2275,6 +2275,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_stand_in',
+      description: 'When the NavBharatAI library has no model for an object, ask for a simple low-poly plan and write that geometry. The object is placed with standOnGround so its lowest point sits on the ground. If the library already has the object, this does not invent a replacement. Call it only after the library was checked.',
+      input_schema: { type: 'object', required: ['subject'], properties: {
+        subject: { type: 'string', description: 'What the user asked for, in a few words, such as "market stall" or "wooden cart".' },
+        plan_json: { type: 'string', description: 'Leave empty. The tool asks the model. A caller that already holds a checked plan may pass it.' },
+      } },
+    },
+    {
       name: 'generate_procedural_object',
       description: 'Optional bounded procedural geometry recipe. The existing admitted architect API turn designs an original declarative JSON plan from the user request; object names are not a preset whitelist. Compose new shapes from semantic parts rather than substituting an unrelated catalog object. No additional provider call. If the bounded geometry vocabulary cannot express the request, disclose the unsupported capability instead of claiming a complete object. Writes trusted geometry runtime and an additive object factory, NOT an automatically mounted game. Requires reviewed Three.js 0.180.0 and AGENTV3_PROCEDURAL_OBJECTS on; otherwise unavailable. Call through run_recipe. Plan version1 fields: label and parts (phone max24/12000 triangles, desktop64/60000). Each part: id, geometry, position xyz, rotation radians xyz, color #RRGGBB, roughness0..1, metalness0..1. Geometry kinds box(size xyz), sphere(radius,segments,rings), cylinder(top,bottom,height,segments), lathe(points radius/y strictly increasing y,segments). No executable code, textures, URLs or hierarchy. No automatic collision, rigging or realism guarantee. Integrate returned factory using existing guarded edits and verify the preview.',
       input_schema: {type:'object',required:['id','quality','plan_json'],properties:{

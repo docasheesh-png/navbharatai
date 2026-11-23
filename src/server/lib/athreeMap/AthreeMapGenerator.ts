@@ -499,6 +499,39 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // first frame. Inside the pad the ground is one height; over the margin it eases back into the land, so there is no
   // cliff and no floating slab. Everything that reads heightAt (the drawn terrain, the colliders, plants, vehicles) agrees.
   const pads: Array<{ x: number; z: number; hx: number; hz: number; y: number; margin: number }> = [];
+  // 🗂️ THE PLACE INDEX (map expansion, item 1). heightAt runs for every terrain vertex, collider sample and plant, and it used
+  // to visit EVERY pad and land on the map — a map of hundreds of places paid for all of them at every point. Each pad and land
+  // is now listed in the 256 m cells it can reach, and a point visits only its own cell's list, in the SAME order as before
+  // (ascending insertion). A pad or land that cannot reach a point added nothing to it, so every answer is exactly the old
+  // one, to the last bit. Anything not finite (or wider than the index) is checked at every point, as before; a point that is
+  // not finite takes the old full scan. PLACE_INDEX = false is the old scan everywhere (the reference the tests compare to).
+  const PLACE_INDEX = true;
+  const INDEX_CELL = 256, INDEX_MAX_REACH = 256 * 64;
+  const NO_IDS: number[] = [];
+  const padCells = new Map<string, number[]>(); const padsEverywhere: number[] = [];
+  const landCells = new Map<string, number[]>(); const landsEverywhere: number[] = [];
+  function indexPlace(cells: Map<string, number[]>, everywhere: number[], id: number, x: number, z: number, reachX: number, reachZ: number): void {
+    if (!(Number.isFinite(x) && Number.isFinite(z) && Number.isFinite(reachX) && Number.isFinite(reachZ)) || reachX > INDEX_MAX_REACH || reachZ > INDEX_MAX_REACH) { everywhere.push(id); return; }
+    const x0 = Math.floor((x - reachX) / INDEX_CELL), x1 = Math.floor((x + reachX) / INDEX_CELL);
+    const z0 = Math.floor((z - reachZ) / INDEX_CELL), z1 = Math.floor((z + reachZ) / INDEX_CELL);
+    for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+      const key = cx + ',' + cz; const list = cells.get(key);
+      if (list) list.push(id); else cells.set(key, [id]);
+    }
+  }
+  /** The ids (ascending) of the pads or lands that can reach a point; null: scan them all (index off, or the point not finite). */
+  function placeIds(cells: Map<string, number[]>, everywhere: number[], x: number, z: number): number[] | null {
+    if (!PLACE_INDEX || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    const own = cells.get(Math.floor(x / INDEX_CELL) + ',' + Math.floor(z / INDEX_CELL));
+    if (!everywhere.length) return own || NO_IDS;
+    if (!own) return everywhere;
+    const out: number[] = [];
+    let i = 0, j = 0;
+    while (i < own.length || j < everywhere.length) {
+      if (j >= everywhere.length || (i < own.length && own[i] < everywhere[j])) out.push(own[i++]); else out.push(everywhere[j++]);
+    }
+    return out;
+  }
   function naturalHeightAt(x: number, z: number): number {
     const t = terrainNoRoads(x, z);
     return withRoads ? roadsOf().carve(x, z, t) : t;
@@ -508,7 +541,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // and mountains rise out of the ground there. Laid before the first frame, so the terrain, the plants and the colliders agree.
   const lands: Array<{ x: number; z: number; r: number; land: LandBiome }> = [];
   function landAt(x: number, z: number): { land: LandBiome; w: number } | null {
-    for (const l of lands) {
+    const ids = placeIds(landCells, landsEverywhere, x, z);
+    const count = ids ? ids.length : lands.length;
+    for (let k = 0; k < count; k++) {
+      const l = lands[ids ? ids[k] : k];
       const d = Math.hypot(x - l.x, z - l.z);
       if (d >= l.r * 1.25) continue;
       const edge = l.r * (0.85 + 0.3 * fieldNoise(x, z, seed + 31, 2, Math.max(60, l.r / 2), 0));
@@ -518,7 +554,9 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   }
   function setLand(x: number, z: number, radius: number, land: LandBiome): void {
     if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
-    lands.push({ x, z, r: Math.min(4000, Math.max(60, radius)), land });
+    const r = Math.min(4000, Math.max(60, radius));
+    lands.push({ x, z, r, land });
+    indexPlace(landCells, landsEverywhere, lands.length - 1, x, z, r * 1.25 + 1, r * 1.25 + 1);
   }
   // GAME ROADS (admin 2026-11-22: "abhi 30 sec me hi road khatam ho jati hai"). A highway the game lays between its own places:
   // resampled every 10 m, its height the ground averaged along it and limited to an 8 percent grade, and the land cut and filled
@@ -575,7 +613,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       // Mountains rise from the land (higher towards the middle, ridged by noise), never out of the water.
       if (l && l.land === 'mountain' && t > 2) t += l.w * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
     }
-    for (const p of pads) {
+    const padIds = placeIds(padCells, padsEverywhere, x, z);
+    const padCount = padIds ? padIds.length : pads.length;
+    for (let k = 0; k < padCount; k++) {
+      const p = pads[padIds ? padIds[k] : k];
       const d = Math.max(Math.abs(x - p.x) - p.hx, Math.abs(z - p.z) - p.hz);
       if (d >= p.margin) continue;
       const w = d <= 0 ? 1 : 1 - smoothstep(0, p.margin, d);
@@ -592,11 +633,17 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) { sum += naturalHeightAt(x + (i / 2) * halfX, z + (j / 2) * halfZ); n++; }
     // A given height joins this pad to a neighbour at the same level (a city that grows by another block of streets).
     const y = typeof height === 'number' && Number.isFinite(height) ? height : Math.max(1.5, sum / n);
-    pads.push({ x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) });
+    const pad = { x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) };
+    pads.push(pad);
+    // Reaches as far as its margin eases (heightAt) or clearAt's 2 m, whichever is wider, and a metre more.
+    const reach = Math.max(pad.margin, 2) + 1;
+    indexPlace(padCells, padsEverywhere, pads.length - 1, x, z, pad.hx + reach, pad.hz + reach);
     return y;
   }
   function clearAt(x: number, z: number): boolean {
-    for (const p of pads) if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true;
+    const ids = placeIds(padCells, padsEverywhere, x, z);
+    const count = ids ? ids.length : pads.length;
+    for (let k = 0; k < count; k++) { const p = pads[ids ? ids[k] : k]; if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true; }
     if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half + 4) return true; }
     return false;
   }

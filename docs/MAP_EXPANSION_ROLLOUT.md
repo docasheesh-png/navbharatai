@@ -23,6 +23,7 @@ A step that shows a glitch the owner would see stops the rollout; the switch goe
 | 4 | Only the nearest cities stand built (phone 2, mid 5, desktop 8) | world option `liveCities: false` (all stay built) or a number | on, by device tier | `GameOpenWorldGenerator.ts` (`LIVE_CITIES`) |
 | 4 | Up to 1,000 places | `MAX_REGIONS` in the game's own `play/openWorld.ts`; an older copy reads 100 | 1,000 | `GameOpenWorldGenerator.ts`, `worldGrow.ts` (`placesTheMapHolds`) |
 | 10 | Map requests read by meaning, a note to the builder (#4488) | env `AGENTV3_MAP_GROWTH_NOTE=off` | on | `mapGrowthIntent.ts`, `growthTurn.ts` |
+| 11 | An edited world bridge: the builder asks first; the upgrade only on the user's "world upgrade karo", with one backup | env `AGENTV3_WORLD_UPGRADE=off` | on | `worldUpgrade.ts`, `growthTurn.ts` |
 | 12 | The playtest's geometry look (and memory over a round, #4495) | env `AGENTV3_GAME_GEOMETRY_PROBE=off` | on | `gameGeometryProbe.ts`, `gamePlaytest.ts` |
 | — | The growth guard (nothing the user did not ask for is changed) | env `AGENTV3_GROWTH_GUARD=off` | on | `growthGuard.ts` |
 
@@ -36,7 +37,7 @@ A step that shows a glitch the owner would see stops the rollout; the switch goe
 - **7 (sports on the world):** env `AGENTV3_SPORTS_WORLD`, default off; and only when the user asks (owner decision).
 - **8 (racing on joined places):** `TRACK.world` in the game's `src/game/track.ts`, set only after the user says yes once.
 - **9 (battle royale):** no growth — the island stays 8 km (owner decision); places that do not fit are reported.
-- **11 (migration):** a kit file is refreshed only while it is unedited (`GAME_KIT_HISTORY`); never a silent rewrite.
+- **11 (migration):** a kit file is refreshed only while it is unedited (`GAME_KIT_HISTORY`); never a silent rewrite. An edited `openWorld.ts` is upgraded only on the user's explicit words (switch above).
 
 ## Before lateEdits may be turned on (follow-ups from #4466)
 - Rivers and road meshes are redrawn over an edited area (today only terrain chunks and plants are).

@@ -8,6 +8,7 @@ import { gameGeometryProbeEnabled } from '../src/server/AgentV3/gameGeometryProb
 import { growthGuardEnabled } from '../src/server/AgentV3/growthGuard';
 import { MAX_PLACES } from '../src/server/AgentV3/worldGrow';
 import { recipeFilePool } from '../src/server/lib/gameRecipeLayers';
+import { worldUpgradeEnabled } from '../src/server/AgentV3/worldUpgrade';
 
 const root = join(__dirname, '..');
 const page = readFileSync(join(root, 'docs/MAP_EXPANSION_ROLLOUT.md'), 'utf8');
@@ -34,6 +35,8 @@ describe('📋 the map rollout page', () => {
     expect(gameGeometryProbeEnabled({ AGENTV3_GAME_GEOMETRY_PROBE: 'off' })).toBe(false);
     expect(growthGuardEnabled({})).toBe(true);
     expect(growthGuardEnabled({ AGENTV3_GROWTH_GUARD: 'off' })).toBe(false);
-    for (const name of ['AGENTV3_GAME_GEOMETRY_PROBE', 'AGENTV3_GROWTH_GUARD', 'AGENTV3_MAP_GROWTH_NOTE']) expect(page).toContain(`\`${name}=off\``);
+    expect(worldUpgradeEnabled({})).toBe(true);
+    expect(worldUpgradeEnabled({ AGENTV3_WORLD_UPGRADE: 'off' })).toBe(false);
+    for (const name of ['AGENTV3_GAME_GEOMETRY_PROBE', 'AGENTV3_GROWTH_GUARD', 'AGENTV3_MAP_GROWTH_NOTE', 'AGENTV3_WORLD_UPGRADE']) expect(page).toContain(`\`${name}=off\``);
   });
 });

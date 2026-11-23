@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-arcade-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['lane-dash', 'dodge-fall', 'bolt-arena', 'shield-rush'];
+const IDS = ['lane-dash', 'dodge-fall', 'bolt-arena', 'shield-rush', 'cave-steps'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -172,6 +172,47 @@ describe('🛡️ Shield Rush', () => {
     expect([...kinds1]).toEqual(['slow']); expect(kinds3.has('heavy')).toBe(true);
     expect(S().patternGap(5)).toBeLessThan(S().patternGap(1)); expect(S().patternGap(99)).toBe(0.6);
     expect(S().speedScale(99)).toBe(2); expect(S().levelFor(0)).toBe(1); expect(S().levelFor(300)).toBe(3);
+  });
+});
+
+describe('🕯️ Cave Steps', () => {
+  const C = () => M['cave-steps'];
+  it('every floor is one connected cave: start, stairs, creatures and items all reachable, nothing on a wall', () => {
+    for (let seed = 1; seed <= 40; seed++) for (const depth of [1, 4, 8]) {
+      const f = C().makeFloor(depth, seed);
+      const open = new Set(C().reachable(f, f.start[0], f.start[1]).map(([x, y]: number[]) => x + ',' + y));
+      const total = f.walls.filter((w: boolean) => !w).length;
+      expect(open.size).toBe(total);                                           // no cut-off pockets
+      expect(open.has(f.stairs.join(','))).toBe(true);
+      expect(f.stairs.join(',')).not.toBe(f.start.join(','));
+      for (const c of f.creatures) expect(open.has(c.x + ',' + c.y)).toBe(true);
+      for (const i of f.items) expect(open.has(i.x + ',' + i.y)).toBe(true);
+      expect(total).toBeGreaterThan(f.w * f.h * 0.2);
+    }
+  });
+  it('the same seed and floor give the same cave; deeper floors bring more and tougher creatures', () => {
+    expect(C().makeFloor(2, 77)).toEqual(C().makeFloor(2, 77));
+    expect(C().makeFloor(2, 77)).not.toEqual(C().makeFloor(3, 77));
+    expect(C().makeFloor(6, 5).creatures.length).toBeGreaterThan(C().makeFloor(1, 5).creatures.length);
+    const early = new Set<string>(); for (let s = 1; s < 30; s++) C().makeFloor(1, s).creatures.forEach((c: any) => early.add(c.kind));
+    expect(early.has('troll')).toBe(false);
+  });
+  it('walls block sight, distance limits it', () => {
+    const f = { w: 7, h: 3, walls: [1,1,1,1,1,1,1, 1,0,0,1,0,0,1, 1,1,1,1,1,1,1].map(Boolean), stairs: [5, 1], start: [1, 1], creatures: [], items: [] };
+    expect(C().canSee(f, 1, 1, 2, 1)).toBe(true);
+    expect(C().canSee(f, 1, 1, 4, 1)).toBe(false);
+    expect(C().canSee(f, 0, 0, 0, 0)).toBe(true);
+    const big = { ...f, w: 20, h: 1, walls: Array(20).fill(false) };
+    expect(C().canSee(big, 0, 0, C().OPTIONS.sight + 1, 0)).toBe(false);
+  });
+  it('a creature steps toward you round walls and never onto you or another creature', () => {
+    const f = { w: 5, h: 5, walls: Array(25).fill(false), stairs: [4, 4], start: [0, 0], creatures: [], items: [] };
+    const c = { kind: 'rat', x: 0, y: 0, hp: 5, awake: true };
+    expect(C().creatureStep(f, c, 3, 1, [c])).toEqual([1, 0]);
+    expect(C().creatureStep(f, c, 1, 0, [c])).toEqual([0, 0]);                     // you are right there: it attacks instead
+    const other = { kind: 'bat', x: 1, y: 0, hp: 3, awake: true };
+    expect(C().creatureStep(f, c, 3, 1, [c, other])).toEqual([0, 1]);
+    expect(C().nextTo(1, 1, 1, 2)).toBe(true); expect(C().nextTo(1, 1, 2, 2)).toBe(false);
   });
 });
 

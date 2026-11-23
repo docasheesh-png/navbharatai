@@ -57,7 +57,7 @@ export interface VegetationTier {
 }
 
 export const VEGETATION_TIERS: Record<AthreeQuality, VegetationTier> = {
-  phone: { treeRadius: 300, lod0Radius: 45, maxTrees: 450, maxLod0: 8, grassCell: 1.25, grassRadius: 30, maxTufts: 3000, tilesPerUpdate: 3, rebuildDistance: 15, propCell: 5.5, propRadius: 70, maxBushes: 220, maxRocks: 110 },
+  phone: { treeRadius: 300, lod0Radius: 45, maxTrees: 450, maxLod0: 8, grassCell: 1, grassRadius: 30, maxTufts: 3000, tilesPerUpdate: 3, rebuildDistance: 15, propCell: 5.5, propRadius: 70, maxBushes: 220, maxRocks: 110 },
   mid: { treeRadius: 500, lod0Radius: 70, maxTrees: 1000, maxLod0: 24, grassCell: 1, grassRadius: 45, maxTufts: 8000, tilesPerUpdate: 5, rebuildDistance: 20, propCell: 5, propRadius: 110, maxBushes: 700, maxRocks: 350 },
   desktop: { treeRadius: 800, lod0Radius: 110, maxTrees: 3600, maxLod0: 80, grassCell: 0.625, grassRadius: 70, maxTufts: 40000, tilesPerUpdate: 8, rebuildDistance: 25, propCell: 4, propRadius: 170, maxBushes: 2000, maxRocks: 900 },
 };

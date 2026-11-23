@@ -226,7 +226,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8e02aa14f283d30e40dd824a9d83b889693fe4cd4b73cd662fffb90c8151842a",
     "92e2acfd980a88d23441e976a7509103c025348a105c93a897bc0247d72c445e",
     "418f6b3be7e15a3c31aaa57f009078de211b653e99b740111936b0c5e052b013",
-    "85e36dc37a14acfb0df0f8faa9da8e56a6f6638890688ea657f789bc7041f561"
+    "4b20d09310a1df2f650fd0dc87c272e7b07df0a5220346fab1a9548ca7eb843d"
   ],
   "src/game/athree/vehicles.ts": [
     "cacc3ff86106db83b4c1c4058b4d7401a39cdfdd748b31fbb24873dccafbaa91",

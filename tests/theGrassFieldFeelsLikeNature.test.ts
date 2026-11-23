@@ -266,6 +266,41 @@ describe('🔌 nature: false is the plain look, and it is the only switch needed
   });
 });
 
+describe('🌾 an open field (a maidan) draws all four: real grass tufts, trees, bushes and stones', () => {
+  it('at every tier, standing in the field, the manager draws grass tufts, trees, bushes and stones together', () => {
+    for (const q of TIERS) {
+      const world = A.createAthreeWorld({ seed: 5 });
+      const p = wildPlace(world);
+      world.setLand(p.x + 120, p.z, 700, 'grassland');
+      expect(world.openFieldAt(p.x + 120, p.z)).toBe(true);
+      const veg = A.createVegetation(THREE, world, q);
+      for (let i = 0; i < (q === 'desktop' ? 700 : 400); i++) veg.update(p.x + 120, p.z, i * 0.016, { x: 0, z: 0 });
+      const s = veg.stats();
+      expect(s.tufts, q).toBeGreaterThan(200);
+      expect(s.trees, q).toBeGreaterThan(0);
+      expect(s.bushes, q).toBeGreaterThan(0);
+      expect(s.rocks, q).toBeGreaterThan(0);
+      veg.dispose();
+    }
+  });
+  it('the field itself (not only the land around it) holds lone trees, bushes and stones, scattered not in rows', () => {
+    const world = A.createAthreeWorld({ seed: 5 });
+    const p = wildPlace(world);
+    world.setLand(p.x, p.z, 900, 'grassland');
+    const inField = (list: any[]) => list.filter((t: any) => world.openFieldAt(t.x, t.z));
+    const trees = inField(A.treesInRect(world, p.x - 700, p.z - 700, p.x + 700, p.z + 700));
+    const props = inField(A.propsInRect(world, p.x - 300, p.z - 300, p.x + 300, p.z + 300, 5));
+    expect(trees.length).toBeGreaterThan(3);
+    expect(props.filter((q: any) => q.kind === 'bush').length).toBeGreaterThan(10);
+    expect(props.filter((q: any) => q.kind === 'rock').length).toBeGreaterThan(3);
+    // Jittered: positions inside their 5 m cells are spread, not on a grid line.
+    const offsets = new Set(props.map((q: any) => Math.round(((q.x % 5) + 5) % 5)));
+    expect(offsets.size).toBeGreaterThanOrEqual(4);
+    const tufts = A.grassInRect(world, p.x - 16, p.z - 16, p.x + 16, p.z + 16, 1);
+    expect(tufts.length / 6).toBeGreaterThan(300);                                // thick real grass in the field
+  });
+});
+
 describe('🔒 an edited kit file is never replaced by the refresh that brings nature to an older game', () => {
   const pool = recipeFilePool();
   const kitNow = (p: string) => pool.get(p)!.content;

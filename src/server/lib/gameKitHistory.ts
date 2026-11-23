@@ -136,7 +136,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
-    "f997b0e9ce8519c7e70278a84002bbb31c335ccb0527e02fc0f179645d6134ce"
+    "f997b0e9ce8519c7e70278a84002bbb31c335ccb0527e02fc0f179645d6134ce",
+    "6634b3bc02186a9166ec5047b2e96676ec2919ff1616243c0d47fe7efa083332"
   ],
   "src/game/athree/budget.ts": [
     "62862e8c1b57809d1227783b4c773fb0ab0dc15cef41bd5d418f5510b2b345c6"
@@ -531,10 +532,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d"
   ],
   "src/game/royale/practice.ts": [
-    "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"
+    "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9",
+    "1099c7c7405c74a91c9f969412efab6d46a8ffef5794b6d54e0bb2911018bb9f"
   ],
   "src/game/royale/rules.ts": [
-    "93a0d5a80c98ba3fb3436e26a16f47054f2397ebb9aec6d806ea1557958d37ce"
+    "93a0d5a80c98ba3fb3436e26a16f47054f2397ebb9aec6d806ea1557958d37ce",
+    "290e9225226b46b1c3f6533aa091c08dbfa8bacee922b5c798a6df6d22dee902"
   ],
   "src/game/systems/ai.ts": [
     "c4dbc016db9a13e81cad5847399bd37d21cc2fc248941739958c6f00bbe22db6",

@@ -121,6 +121,24 @@ export function asksForBattleRoyale(text: string | null | undefined): boolean {
   return mentionsBattleRoyale(text);
 }
 
+/**
+ * An action, shooter or open-world game (PUBG, Free Fire, BGMI, GTA, in any language) is a world of
+ * enterable houses. A flat 2D game is not. PURE.
+ */
+export function asksForEnterableHouses(text: string | null | undefined): boolean {
+  const raw = withoutDeclinedSentences(String(text ?? ''));
+  if (/\b(?:2d|two[\s-]?d)\b/i.test(raw) || names2DWorld(raw)) return false;
+  if (asksForBattleRoyale(raw)) return true;
+  if (/\b(?:gta|grand theft|gta[\s-]?v|gta[\s-]?5)\b|जीटीए/i.test(raw)) return true;
+  if (/\b(?:open[\s-]?world|free[\s-]?roam)\b|ओपन\s*वर्ल्ड/i.test(raw)) return true;
+  const contract = buildGameContract(raw);
+  if (contract.dimension === '2d') return false;
+  if (contract.genre === 'shooter' && (contract.dimension === '3d' || contract.camera === 'third-person' || contract.camera === 'first-person')) return true;
+  if (/\baction\b/i.test(raw) && /\b(?:3d|third[\s-]?person|open)\b/i.test(raw)) return true;
+  if (/एक्शन/.test(raw) && /(?:3\s*d|तीन|ओपन)/i.test(raw)) return true;
+  return false;
+}
+
 interface NamedGameReference { name: string; genre: GameGenre; dimension: GameDimension; camera: GameCamera }
 
 /** Title kinds → what naming one asks for. The request's own explicit words still win.

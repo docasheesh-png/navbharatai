@@ -99,7 +99,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c8b7adf9e5ab555aeebc5162530a9041dea66b99c5e8ddab3da9f27a435ffd6c",
     "2df11aaa176f46699c79849fc82d90ce30550f56478214ccf0dba6aa65053925",
     "07e6ffff4f5275a773fd7d76632c63889253a8ae85edf0faff30211d143cfbed",
-    "b1e8325ed84ef3627b7154824edce27be9657f42dcbbf2a96d36dc081ca0f8fe"
+    "66d89dc2ece435f4e8ca3aeb4ed74dd6ecc8b15650c5a553e01e4c05cb83cb41",
+    "b1e8325ed84ef3627b7154824edce27be9657f42dcbbf2a96d36dc081ca0f8fe",
+    "f039244202b5aeae8aed796cf8214b96c21bd8b79922b07d45b1474e698b74fb"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -578,7 +580,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8c9bc3850ef3a475216d51172d92e99f1dfbab848ec2c6ad82b4db8687e5ca7f"
   ],
   "src/game/three/buildings.ts": [
-    "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f"
+    "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f",
+    "9d12b3a208ad65fd8f050d5a18ab47d1a6039c64f95804348fb5e42a8e703b98"
   ],
   "src/game/three/camera.ts": [
     "2563e14758586a40217ed8efca551ed71133223b9f4775a025360afd060715b0",

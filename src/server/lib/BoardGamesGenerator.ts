@@ -1387,7 +1387,7 @@ export function cricketLayout(o: { centre?: { x: number; z: number }; heading?: 
   const c = o.centre && Number.isFinite(o.centre.x) && Number.isFinite(o.centre.z) ? o.centre : { x: 0, z: 0 };
   const h = Number.isFinite(o.heading as number) ? (o.heading as number) : 0;
   const along = { x: Math.sin(h), z: Math.cos(h) };
-  const side = { x: -along.z, z: along.x };                 // to the RIGHT of someone at the striker's end looking at the bowler (Y up)
+  const side = { x: along.z, z: -along.x };                  // to the RIGHT of someone at the striker's end looking at the bowler (Y up)
   const at = (a: number, s: number) => ({ x: c.x + along.x * a + side.x * s, z: c.z + along.z * a + side.z * s });
   const half = PITCH_LENGTH / 2;
   const legSide = o.leftHanded ? 0.45 : -0.45;              // a right-hander's leg side is to his left as he faces the bowler

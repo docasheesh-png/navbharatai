@@ -39,9 +39,9 @@ describe('🏏 cricketLayout — the field a fan recognises', () => {
   }
   it('a right-hander stands on his leg side (his left as he faces the bowler), a left-hander on the other', () => {
     const r = K.cricketLayout({}), l = K.cricketLayout({ leftHanded: true });
-    // heading 0: the bowler is towards +Z; facing +Z with Y up, the left is +X.
-    expect(r.batter.x).toBeGreaterThan(0);
-    expect(l.batter.x).toBeLessThan(0);
+    // heading 0: the bowler is towards +Z; facing +Z with Y up, the left is -X.
+    expect(r.batter.x).toBeLessThan(0);
+    expect(l.batter.x).toBeGreaterThan(0);
   });
 });
 
@@ -88,6 +88,7 @@ describe('🏏 the batter plays the shot', () => {
     }
     expect(maxChest, 'the back-lift turns the shoulders away').toBeGreaterThan(0.2);
     expect(minChest, 'the drive turns them through the shot').toBeLessThan(-0.2);
+    expect(maxArmForward, 'the arms lift and drive the bat through').toBeGreaterThan(0.5);
     expect(h.acting()).toBeNull();
   });
 });

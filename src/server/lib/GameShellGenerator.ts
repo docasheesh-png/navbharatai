@@ -502,9 +502,20 @@ export class Game {
     this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
     // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
     // Read-only except endRound, which only does what losing does — harmless in a single-player game.
+    // Models the loader is still fetching, and how many have sat at 0% for over 20 s (the playtest's "stuck loading" read).
+    // Counted from the loader's own ASSET_LOADING events only; nothing here changes how a model loads.
+    const modelJobs = new Map<number, { since: number; fraction: number }>();
+    this.disposers.push(events.on('ASSET_LOADING', (p: { id?: unknown; fraction?: unknown; done?: unknown } | undefined) => {
+      if (!p || typeof p.id !== 'number') return;
+      if (p.done === true) { modelJobs.delete(p.id); return; }
+      const job = modelJobs.get(p.id) ?? { since: performance.now(), fraction: 0 };
+      if (typeof p.fraction === 'number' && Number.isFinite(p.fraction)) job.fraction = p.fraction;
+      modelJobs.set(p.id, job);
+    }));
     const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
       // How much the last frame asked of the GPU — what decides whether a cheap phone keeps up (the playtest's budget check).
       load: () => { const i = this.renderer.info; return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures }; },
+      models: () => { const now = performance.now(); let stuck = 0; for (const j of modelJobs.values()) if (j.fraction <= 0 && now - j.since > 20000) stuck++; return { pending: modelJobs.size, stuck }; },
       endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
     if (typeof window !== 'undefined') {
       (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;

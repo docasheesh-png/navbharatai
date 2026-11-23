@@ -31,6 +31,10 @@ import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { initImageTooLarge, parseDataUrl } from '../lib/imageDataUrl';
 import { scanPollinationsPrompt, POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
+import { catalogueSteps, mediaFamily } from '../AI/ProviderHealth/mediaCatalogue';
+import { imageEngineProvider, mediaTrafficEnabled, orderMediaProviders } from '../AI/ProviderHealth/mediaTraffic';
+import { legacyPathAllows } from '../AI/TrafficRegistry/legacyControl';
+import { noteProviderCall } from '../AI/ProviderHealth/trafficHealth';
 
 /**
  * AI Image Gen — the REAL /api/image/generate route (admin autopsy 2026-07-20).
@@ -343,55 +347,72 @@ export function registerImageGenRoutes(app: Express): void {
       // image model draws, it does not refuse.
       // An edit never reaches these rungs: they would answer with a brand-new picture unrelated to the
       // one attached. It took its own one-rung ladder above.
+      const recordImage = (provider: string, started: number, ok: boolean, error?: unknown) => {
+        noteProviderCall({ provider, surface: 'image', ok, totalMs: Date.now() - started, ...(error ? { error } : {}) });
+      };
       if (!editing) {
         if (!scanPollinationsPrompt(prompt).ok) {
           res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' });
           return;
         }
         const px = imagePixelsFor(req.body.size, req.body.width, req.body.height);
+        // Health may move a suspended engine to the end. It never moves a dearer engine ahead of a cheaper one.
+        // `AGENTV3_MEDIA_TRAFFIC=off` keeps this list exactly as written.
+        const imageSteps = catalogueSteps('generator');
+        const orderedImageSteps = mediaTrafficEnabled() ? orderMediaProviders(imageSteps, imageEngineProvider) : imageSteps;
+        for (const step of orderedImageSteps) {
+        if (!legacyPathAllows('image', mediaFamily(step))) continue;
 
         // 1 — FLUX on Cloudflare Workers AI (`cloudflareImage.ts`): about 170 pictures a day inside the
         // account's free allowance, then a fraction of a paisa each. It makes only 1024×1024. Near-free,
         // so it is not one of the "paid rungs" the pricing-off tool gate and platform cap were written for.
-        if (cloudflareImageConfig() && cloudflareServesSize(px)) {
+        if (step === 'cloudflare' && cloudflareImageConfig() && cloudflareServesSize(px)) {
+          const started = Date.now();
           const cr = await fetchCloudflareImage(prompt, { timeoutMs: 30_000 });
-          if (cr.image) { await deliver(cr.image, false, 'cloudflare-flux'); return; }
+          if (cr.image) { recordImage('CLOUDFLARE', started, true); await deliver(cr.image, false, 'cloudflare-flux'); return; }
+          recordImage('CLOUDFLARE', started, false, new Error(cr.error ?? 'no image'));
           diag.push(`cloudflare: ${cr.error ?? 'no image'}`);
           console.warn(`[IMAGE_GEN] cloudflare failed: ${cr.error ?? 'no image'} — trying the next rung.`);
         }
 
         // 2 — the free provider WITH our account key (the old Pro tier's first engine): no watermark,
         // kept off the public feed, and the key travels in a header, never in a link.
-        if (pollinationsEnabled() && pollinationsApiKey() !== '') {
+        if (step === 'pollinations' && pollinationsEnabled() && pollinationsApiKey() !== '') {
           if (!(await allowPaidRung())) return;
+          const started = Date.now();
           const pr = await fetchPollinationsImage(prompt, req.body.size, {
             timeoutMs: ROUTE_TIMEOUT_MS,
             custom: { width: req.body.width, height: req.body.height },
           });
-          if (pr.image) { await deliver(pr.image, true, 'free-provider (account key)'); return; }
+          if (pr.image) { recordImage('POLLINATIONS', started, true); await deliver(pr.image, true, 'free-provider (account key)'); return; }
           if (pr.error) {
+            recordImage('POLLINATIONS', started, false, new Error(pr.error));
             diag.push(`pollinations (key): ${pr.error}`);
             console.warn(`[IMAGE_GEN] pollinations (key) failed: ${pr.error} — trying the next rung.`);
           }
         }
 
         // 3 — the old Pro tier's second engine (`imageProHost.ts`, `IMAGE_PRO_KEY`). Words only.
-        if (imageProConfigured()) {
+        if (step === 'pro-host' && imageProConfigured()) {
           if (!(await allowPaidRung())) return;
+          const started = Date.now();
           const hr = await fetchImageProHostImage(prompt, px, { timeoutMs: ROUTE_TIMEOUT_MS });
-          if (hr.image) { await deliver(hr.image, true, 'pro-host'); return; }
+          if (hr.image) { recordImage('IMAGE_PRO', started, true); await deliver(hr.image, true, 'pro-host'); return; }
+          recordImage('IMAGE_PRO', started, false, new Error(hr.error ?? 'no image'));
           diag.push(`pro host: ${hr.error ?? 'no image'}`);
           console.warn(`[IMAGE_GEN] pro host failed: ${hr.error ?? 'no image'} — trying the next rung.`);
         }
-      }
 
       // PRIMARY (paid) provider — Gemini image models (skipped entirely when no Gemini key is present).
+      if (step === 'gemini') {
       if (geminiImageConfigured() && !editing) {
         // First paid rung: the allowance is checked HERE, before a rupee is spent.
         if (!(await allowPaidRung())) return;
         const { GoogleGenAI } = await import('@google/genai');
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         const ai = new GoogleGenAI({ apiKey });
+        const started = Date.now();
+        let geminiError: unknown = null;
         for (const model of imageGenModels()) {
           try {
             const result: any = await timeout(ai.models.generateContent({
@@ -400,20 +421,24 @@ export function registerImageGenRoutes(app: Express): void {
               config: { responseModalities: ['IMAGE', 'TEXT'] },
             }));
             const img = parseImagePartsResponse(result);
-            if (img) { await deliver(img, true, `gemini:${model}`); return; }
+            if (img) { recordImage('GEMINI', started, true); await deliver(img, true, `gemini:${model}`); return; }
             if (isImageRefusal(result)) {
               sawRefusal = true;
               console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
             } else {
+              geminiError = new Error(extractResponseText(result)?.slice(0, 160) || 'no image part');
               diag.push(`${model}: no image part (${extractResponseText(result)?.slice(0, 120) || 'empty response'})`);
               console.warn(`[IMAGE_GEN] ${model} returned no image part — trying the next rung.`);
             }
           } catch (err) {
+            geminiError = err;
             const msg = err instanceof Error ? err.message : String(err);
             diag.push(`${model}: ${msg.slice(0, 160)}`);
             console.warn(`[IMAGE_GEN] ${model} failed: ${msg}`);
           }
         }
+        if (geminiError) recordImage('GEMINI', started, false, geminiError);
+      }
       }
 
       // FALLBACK provider — xAI/Grok text-to-image (OpenAI-compatible /v1/images/generations). This is what
@@ -422,11 +447,13 @@ export function registerImageGenRoutes(app: Express): void {
       // ⚠️ SKIPPED FOR AN EDIT, deliberately: this endpoint is text-to-image only. Letting it serve
       // an edit request would return a brand-new picture that has nothing to do with the one the
       // user attached — a successful-looking response that is the exact failure being fixed.
+      if (step === 'grok') {
       const gKey = editing ? null : grokImageKey();
       if (gKey) {
         // Also a PAID rung — reached when Gemini is absent or failed, so it needs the same check.
         if (!(await allowPaidRung())) return;
         const gModel = grokImageModel();
+        const started = Date.now();
         try {
           const r = await timeout(fetch('https://api.x.ai/v1/images/generations', {
             method: 'POST',
@@ -436,16 +463,22 @@ export function registerImageGenRoutes(app: Express): void {
           const data: any = await r.json().catch(() => null);
           if (r.ok) {
             const img = parseGrokImageResponse(data);
-            if (img) { await deliver(img, true, `grok:${gModel}`); return; }
+            if (img) { recordImage('GROK', started, true); await deliver(img, true, `grok:${gModel}`); return; }
+            recordImage('GROK', started, false, new Error('no image in response'));
             diag.push(`${gModel}: no image in response`);
           } else {
+            recordImage('GROK', started, false, new Error(`HTTP ${r.status}`));
             diag.push(`${gModel}: ${r.status} ${JSON.stringify(data?.error || data || '').slice(0, 140)}`);
             console.warn(`[IMAGE_GEN] ${gModel} failed: HTTP ${r.status}`);
           }
         } catch (err) {
+          recordImage('GROK', started, false, err);
           const msg = err instanceof Error ? err.message : String(err);
           diag.push(`${gModel}: ${msg.slice(0, 160)}`);
           console.warn(`[IMAGE_GEN] ${gModel} failed: ${msg}`);
+        }
+      }
+      }
         }
       }
 

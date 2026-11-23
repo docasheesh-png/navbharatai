@@ -27,6 +27,7 @@ import { nextPoolKeyEntry } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
 import { tryCheaperInferenceVision, tryQubaxVision } from './visionSuppliers';
 import { noteProviderCall, providerInFlight, providerPoolSlot, shouldSkipProvider } from '../AI/ProviderHealth/trafficHealth';
+import { mediaTrafficEnabled, orderMediaProviders } from '../AI/ProviderHealth/mediaTraffic';
 
 export interface VisionAttachment {
   name: string;
@@ -349,13 +350,15 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
     GROK: tryGrok,
     CLAUDE: tryClaude,
   };
-  for (const provider of visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true)) {
+  const visionOrder = visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true);
+  const orderedVision = mediaTrafficEnabled() ? orderMediaProviders(visionOrder, (id) => id) : visionOrder;
+  for (const provider of orderedVision) {
     o.signal?.throwIfAborted();
     // GLM rotates credentials internally: admission and outcomes belong to its selected slot.
     const managedHealth = provider === 'GLM';
     if (!managedHealth && shouldSkipProvider(provider)) continue;
     // Traffic Manager V2 (P8): skip a provider the admin drained or disabled — only when the control store covers
-    // the vision path (off by default). Skip only; the order is unchanged.
+    // the vision path (off by default). Health may reorder the list; this drain check still runs.
     if (!legacyPathAllows('vision', familyOfEngineName(provider))) continue;
     const started = Date.now();
     if (!managedHealth) providerInFlight(provider, 1);

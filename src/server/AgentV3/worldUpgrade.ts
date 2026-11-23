@@ -93,7 +93,9 @@ export function planWorldUpgrade(input: {
   const existing = new Map<string, string | null>();
   for (const [p, c] of input.kitFiles) if (typeof c === 'string') existing.set(p, c);
   const plan = planKitLayers({ [BRIDGE_PATH]: next }, present, existing, pool);
-  if (plan.unread.length) return { ok: false, reason: 'unread', unread: plan.unread };
+  // A file is added only once it was READ as absent (a stale listing must never let a kit file overwrite somebody's).
+  const unconfirmed = [...plan.add.keys()].filter((p) => !input.kitFiles.has(p));
+  if (plan.unread.length || unconfirmed.length) return { ok: false, reason: 'unread', unread: [...plan.unread, ...unconfirmed] };
   if (plan.kept.length) return { ok: false, reason: `the game's own edited kit file${plan.kept.length === 1 ? '' : 's'} would not work with the current world: ${plan.kept.slice(0, 4).map((k) => `${k.path} lacks ${k.missing.join(', ')}`).join('; ')}` };
   const writes = [...plan.add].map(([path, f]) => ({ path, content: f.content }))
     .concat([...plan.refresh].map(([path, f]) => ({ path, content: f.content })))

@@ -23,6 +23,7 @@
  */
 
 import { isCommonEnglishWord } from './commonEnglishWords';
+import { findGameTitles } from '../lib/wellKnownGameTitles';
 
 export function unknownNameNoteEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_UNKNOWN_NAME_NOTE ?? '').trim().toLowerCase() !== 'off';
@@ -136,7 +137,9 @@ for (const t of ENGINEERING_TERMS) COMMON_ACRONYMS.add(t);
 /**
  * Game titles and ranks: the game a request wants to resemble, never a service to connect to (failedbr #1384 "GTA",
  * #1373 "SSS" rank, 2026-11-20). Both were flagged UNKNOWN_NAME_IN_REQUEST; a sweep of the titles Indian requests name
- * found 14 more. Whether a title is a clone request is the scope analyzer's question, not this one's.
+ * found 14 more. Whether a title is a clone request is the scope analyzer's question, not this one's. A title in ANY
+ * spelling the shared tolerant matcher reads ("BUBG", "PABJI", "BGMII", "GTAA" — failedbr #2497) stands down too, below;
+ * this list keeps only the titles and ranks the catalogue does not hold.
  */
 const GAME_TITLE_TERMS = [
   'GTA', 'GTAV', 'GTA5', 'PUBG', 'BGMI', 'NFS', 'FIFA', 'WWE', 'FFMAX', 'CSGO', 'DOTA', 'MLBB', 'COC', 'TEKKEN', 'UNO',
@@ -249,6 +252,8 @@ export function unknownNamesInRequest(prompt: string): string[] {
     const w = m[0];
     if (out.includes(w)) continue;
     if (COMMON_ACRONYMS.has(w) || KNOWN_SERVICES.has(w) || EMPHASIS.has(w)) continue;
+    // A well-known game title, in any spelling (lib/wellKnownGameTitles): the game the request resembles, never a service.
+    if (findGameTitles(w).length > 0) continue;
     // A DATE OR TIME FORMAT TOKEN ("DD-MM-YYYY", "HH:MM", "YYYYMMDD") is a format, never a product (failedbr #1046: "YYYY").
     if (/^[YMDH]{2,10}$/.test(w) && /Y|DD|MM|HH/.test(w)) continue;
     // 🔴 AN ORDINARY ENGLISH WORD IN CAPITALS IS EMPHASIS, NOT A PRODUCT (autopsy 778d7c58: "CALCULATE" in

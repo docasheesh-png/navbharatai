@@ -22,6 +22,7 @@ import { validateGlb, type GlbLimits } from './assetPolicy';
 import { bundleGltf, safeGltfResourcePath } from './gltfBundle';
 import type { GameAssetPersistence } from './assetProject';
 import { playerMovesOf, playerMovesLine } from '../../lib/playerMoves';
+import { splitUserMedia, userMediaNote, type UserMediaFile, type UserMediaRefusal } from './userMedia';
 
 export const USER_MODEL_LIMITS: GlbLimits = Object.freeze({
   // 8 MB: the workspace store keeps a file this size durably (a 12 MB data URI ≈ 9 MB of bytes); a larger limit would
@@ -242,8 +243,16 @@ export function userModelsFromFiles(files: ReadonlyMap<string, Uint8Array>, take
     const raw = files.get(from)!; const warnings: string[] = [];
     try {
       let glb: Uint8Array;
-      if (/\.glb$/i.test(from)) glb = raw;
-      else if (/\.gltf$/i.test(from)) glb = gltfToGlb(files, from, raw, warnings);
+      if (raw.length > USER_MODEL_LIMITS.bytes) throw new UserModelError(`it is larger than ${USER_MODEL_LIMITS.bytes / 1024 / 1024} MB — reduce its textures or polygons and attach it again`);
+      if (/\.glb$/i.test(from)) {
+        if (raw.length < 12 || raw[0] !== 0x67 || raw[1] !== 0x6c || raw[2] !== 0x54 || raw[3] !== 0x46) throw new UserModelError('this is not a valid 3D model (.glb file)');
+        glb = raw;
+      }
+      else if (/\.gltf$/i.test(from)) {
+        const text = new TextDecoder('utf-8', { fatal: false }).decode(raw.slice(0, 400));
+        if (!/"asset"/.test(text) || !/"version"\s*:\s*"2\.0"/.test(text)) throw new UserModelError('this is not a valid 3D model (.gltf file)');
+        glb = gltfToGlb(files, from, raw, warnings);
+      }
       else if (/\.obj$/i.test(from)) glb = objToGlb(files, from, raw);
       // An .fbx reaches here only when it was not converted first (convertFbxFiles runs before this in planUserModels).
       else throw new UserModelError('this FBX was not converted — open it in Blender and use File → Export → glTF 2.0 (.glb), then attach the .glb');
@@ -395,7 +404,7 @@ export function userModelNote(models: readonly UserModel[], refused: readonly Us
         + `${m.animations.length ? `; animations: ${m.animations.slice(0, 24).map(a => JSON.stringify(a)).join(', ')}` : '; no animations'}`
         + `${m.materials.length ? `; materials: ${m.materials.slice(0, 16).join(', ')}` : ''}${m.parts.length ? `; parts: ${m.parts.slice(0, 16).join(', ')}` : ''}${m.warnings.length ? `; tell the user: ${m.warnings.slice(0, 4).join('; ')}` : ''})`);
     }
-    lines.push(`HOW: in a game with src/game/three/assetCustomizations.ts, add an entry per model, e.g. ${models[0].subject}: { source: { file: '${models[0].path}', sha256: '${models[0].sha256}' } }, then load it with loadRequestedAsset('${models[0].subject}', fallback) like any other model; recolour a part with colors: { <material>: '#rrggbb' }, hide one with hide: [<part>], pick a clip with animation / roles. In any other three.js game, load '/${models[0].path.replace(/^public\//, '')}' with GLTFLoader. Never rewrite these files; if the user asks for a change, change it in code.`);
+    lines.push(`HOW: in a game with src/game/three/assetCustomizations.ts, add an entry per model, e.g. ${models[0].subject}: { source: { file: '${models[0].path}', sha256: '${models[0].sha256}' } }, then load it with loadRequestedAsset('${models[0].subject}', fallback) like any other model; recolour a part with colors: { <material>: '#rrggbb' }, hide one with hide: [<part>], pick a clip with animation / roles. In any other three.js game, load '/${models[0].path.replace(/^public\//, '')}' with GLTFLoader. Place the loaded object with standOnGround so its lowest point sits on the ground. Never rewrite these files; if the user asks for a change, change it in code.`);
     // 🧍 As the PLAYER, in any game (2026-11-22: "Use as my character" in ALL games): one line in src/game/player.ts, which
     // every game on the kit reads by itself — and the moves it really has, so the user is told what it cannot do.
     lines.push(`AS THE PLAYER (the user says it is their character — "mera character ye wala", "boxer ko ye model do", "use this as my player"): in a game with src/game/player.ts set PLAYER.file = '/${models[0].path.replace(/^public\//, '')}' and PLAYER.model = null — nothing else; the game swaps the body by itself. As the player, ${models.map((m) => { const moves = playerMovesOf(m.animations); return `"${m.subject}": ${playerMovesLine(moves.has.map((h) => `${h.move} ("${h.clip}")`), moves.lacks)}`; }).join(' · ')}.`);
@@ -448,18 +457,20 @@ export async function landUserModels(models: readonly UserModel[], workspaceId: 
 }
 
 /** Everything the chat handler needs before routing, in ONE call (the handler is at its branch budget, Q-979 / TS2563). */
-export async function planUserModels<T extends { name?: unknown; base64?: unknown }>(atts: readonly T[]): Promise<{ rest: T[]; attached: boolean; models: UserModel[]; refused: UserModelRefusal[]; pendingNote: string }> {
+export async function planUserModels<T extends { name?: unknown; base64?: unknown }>(atts: readonly T[]): Promise<{ rest: T[]; attached: boolean; models: UserModel[]; refused: UserModelRefusal[]; pendingNote: string; media: UserMediaFile[]; mediaRefused: UserMediaRefusal[] }> {
   const split = await splitUserModelAttachments(atts);
-  if (!split.models.length) return { rest: split.rest, attached: false, models: [], refused: [], pendingNote: '' };
+  const media = splitUserMedia(split.rest);
+  const mediaNote = userMediaNote(media.files, media.refused);
+  if (!split.models.length) return { rest: media.rest, attached: media.files.length > 0, models: [], refused: [], pendingNote: mediaNote, media: media.files, mediaRefused: media.refused };
   const files = await userModelFilesFromAttachments(split.models);
   const fbx = await convertFbxFiles(files.files);
   const plan = userModelsFromFiles(fbx.files);
   for (const m of plan.models) { const w = fbx.warnings.get(m.from); if (w) { m.warnings.push(...w); m.from = m.from.replace(/\.glb$/i, '.fbx'); } }
   const refused = [...files.refused, ...fbx.refused, ...plan.refused];
   // Until they are really in the project, the note says only that they were attached (a chat answer writes nothing).
-  const pendingNote = `[USER MODELS ATTACHED] ${plan.models.length} 3D model(s) the user attached (${plan.models.map(m => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
-    + (refused.length ? ` Not usable: ${refused.slice(0, 8).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : '');
-  return { rest: split.rest, attached: true, models: plan.models, refused, pendingNote };
+  const pendingNote = [`[USER MODELS ATTACHED] ${plan.models.length} 3D model(s) the user attached (${plan.models.map(m => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
+    + (refused.length ? ` Not usable: ${refused.slice(0, 8).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : ''), mediaNote].filter(Boolean).join('\n');
+  return { rest: media.rest, attached: true, models: plan.models, refused, pendingNote, media: media.files, mediaRefused: media.refused };
 }
 
 type LandIssue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
@@ -469,7 +480,7 @@ type LandIssue = { phase: 'build'; severity: 'info' | 'warning'; code: string; a
  * in the handler. Never throws: a failure is a named "not added", never a claimed success.
  */
 export async function landPlannedUserModels(
-  plan: { attached: boolean; models: readonly UserModel[]; refused: readonly UserModelRefusal[]; pendingNote: string },
+  plan: { attached: boolean; models: readonly UserModel[]; refused: readonly UserModelRefusal[]; pendingNote: string; media?: readonly UserMediaFile[]; mediaRefused?: readonly UserMediaRefusal[] },
   context: string,
   io: {
     workspaceId: string;
@@ -491,12 +502,38 @@ export async function landPlannedUserModels(
     });
   } catch { /* landing keeps its "not saved" default */ }
   const notAdded = [...plan.refused, ...landing.failed];
-  try {
-    io.record(landing.landed.length && !notAdded.length
-      ? { phase: 'build', severity: 'info', code: 'USER_MODELS_ADDED', autoResolved: true, message: `The user's own 3D model(s) were added to the project: ${landing.landed.map(m => m.path).join(', ')}.` }
-      : { phase: 'build', severity: 'warning', code: 'USER_MODELS_NOT_ALL_ADDED', autoResolved: false, message: `Added: ${landing.landed.map(m => m.path).join(', ') || 'none'}. Not added: ${notAdded.map(r => `${r.from} (${r.reason})`).join('; ')}.` });
-  } catch { /* observation only */ }
-  const real = userModelNote(landing.landed, notAdded);
+  if (plan.models.length) {
+    try {
+      io.record(landing.landed.length && !notAdded.length
+        ? { phase: 'build', severity: 'info', code: 'USER_MODELS_ADDED', autoResolved: true, message: `The user's own 3D model(s) were added to the project: ${landing.landed.map(m => m.path).join(', ')}.` }
+        : { phase: 'build', severity: 'warning', code: 'USER_MODELS_NOT_ALL_ADDED', autoResolved: false, message: `Added: ${landing.landed.map(m => m.path).join(', ') || 'none'}. Not added: ${notAdded.map(r => `${r.from} (${r.reason})`).join('; ')}.` });
+    } catch { /* observation only */ }
+  }
+  const mediaLanded: UserMediaFile[] = [];
+  const mediaFailed: UserMediaRefusal[] = [...(plan.mediaRefused ?? [])];
+  if (plan.media?.length) {
+    try {
+      await io.step('user media', async () => {
+        if (typeof write !== 'function') {
+          for (const f of plan.media ?? []) mediaFailed.push({ from: f.from, reason: 'this project cannot take binary files right now' });
+          return;
+        }
+        for (const f of plan.media ?? []) {
+          try {
+            const base64 = Buffer.from(f.bytes).toString('base64');
+            await io.store.saveBinary(io.workspaceId, { [f.path]: `data:application/octet-stream;base64,${base64}` });
+            const saved = await io.store.readBinary(io.workspaceId, f.path, f.bytes.byteLength + 64);
+            if (!saved || createHash('sha256').update(saved).digest('hex') !== f.sha256) throw new Error('not saved');
+            await write.call(io.actuator, io.workspaceId, f.path, base64);
+            mediaLanded.push(f);
+          } catch {
+            mediaFailed.push({ from: f.from, reason: 'it could not be saved into the project this time — attach it again in a moment' });
+          }
+        }
+      });
+    } catch { /* a failed step leaves the files in mediaFailed below */ }
+  }
+  const real = [userModelNote(landing.landed, notAdded), userMediaNote(mediaLanded, mediaFailed)].filter(Boolean).join('\n');
   return plan.pendingNote && context.includes(plan.pendingNote) ? context.replace(plan.pendingNote, real) : [context, real].filter(Boolean).join('\n\n');
 }
 

@@ -203,6 +203,8 @@ import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './roads';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
+/** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
+export interface GroundEdit { x0: number; z0: number; x1: number; z1: number }
 /** A land a game can lay on part of the map (setLand). 'grassland' is an open field: grass to the horizon, no trees. */
 export type LandBiome = 'beach' | 'desert' | 'forest' | 'grassland' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
@@ -296,7 +298,7 @@ export interface AthreeWorld {
    * Make a round area of the map a different LAND (a desert, a forest, mountains, snow, a beach) — the colour, the plants and,
    * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
    */
-  setLand(x: number, z: number, radius: number, land: LandBiome): void;
+  setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void;
   /** True inside an open field a game laid with setLand(..., 'grassland'): thick grass and no trees (a maidan, a meadow). */
   openFieldAt(x: number, z: number): boolean;
   /**
@@ -305,14 +307,29 @@ export interface AthreeWorld {
    * is what to draw. Call it BEFORE the first map.update(), like levelGround.
    */
   addRoad(points: ReadonlyArray<{ x: number; z: number }>, width?: number): Array<{ x: number; y: number; z: number }>;
+  /**
+   * How many ground edits (levelGround, setLand, addRoad) this world has had, and the area each one can change, from the n-th
+   * on. A map made with lateEdits: true reads them every update and redraws the chunks and plants they touch.
+   */
+  editCount?(): number;
+  editsSince?(n: number): ReadonlyArray<GroundEdit>;
   /** Every road, plaza, the race circuit and the runways (regions are built on demand). */
   roadNetwork(): RoadNetwork;
   /** The road under a place (on the paved width), or null. */
   roadAt(x: number, z: number): RoadHit | null;
   /** What a vehicle drives on: the bridge deck on a bridge, the ground elsewhere. */
   drivableHeightAt(x: number, z: number): number;
-  /** What a wheel runs on at a place: asphalt on a road, water in a river, lake or the sea, else by biome (grass, sand, snow, rock). */
+  /**
+   * What a wheel runs on at a place: asphalt on a road, water in a river, lake or the sea, else by biome (grass, sand, snow, rock).
+   * ⚠️ NOT where grass may grow: a city's streets stand on levelled ground, which this reads by its biome ('grass'). Use plantableAt.
+   */
   surfaceAt(x: number, z: number): 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water';
+  /**
+   * 🌱 May grass, a flower or a bush grow here? False on water, within \`margin\` metres (default 1) of any road (the network's
+   * or one laid with addRoad), on levelled ground (a city, its streets, a ground, a pad) and on sand, snow or rock. Plant your
+   * own grass ONLY where this is true (admin 2026-11-23: "road par ghas jam gayi hai").
+   */
+  plantableAt(x: number, z: number, margin?: number): boolean;
   /** The home region: the race circuit (racing profile), the runways (flight and open-world) and the villages around the world origin. */
   homeRoads(): Region;
   /** How much of a desert a place is, 0 (not at all) to 1 (the heart of one). A continuous version of the desert biome. */
@@ -501,6 +518,45 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // first frame. Inside the pad the ground is one height; over the margin it eases back into the land, so there is no
   // cliff and no floating slab. Everything that reads heightAt (the drawn terrain, the colliders, plants, vehicles) agrees.
   const pads: Array<{ x: number; z: number; hx: number; hz: number; y: number; margin: number }> = [];
+  // ✏️ THE EDIT LOG (map expansion, item 2). Every ground edit notes the rectangle it can change, so a map that allows late
+  // edits redraws exactly those chunks and plants. 8 m more on every side: the drawn normals read the height 2 m around.
+  const groundEdits: GroundEdit[] = [];
+  function noteEdit(x0: number, z0: number, x1: number, z1: number): void {
+    groundEdits.push({ x0: x0 - 8, z0: z0 - 8, x1: x1 + 8, z1: z1 + 8 });
+  }
+  // 🗂️ THE PLACE INDEX (map expansion, item 1). heightAt runs for every terrain vertex, collider sample and plant, and it used
+  // to visit EVERY pad and land on the map — a map of hundreds of places paid for all of them at every point. Each pad and land
+  // is now listed in the 256 m cells it can reach, and a point visits only its own cell's list, in the SAME order as before
+  // (ascending insertion). A pad or land that cannot reach a point added nothing to it, so every answer is exactly the old
+  // one, to the last bit. Anything not finite (or wider than the index) is checked at every point, as before; a point that is
+  // not finite takes the old full scan. PLACE_INDEX = false is the old scan everywhere (the reference the tests compare to).
+  const PLACE_INDEX = true;
+  const INDEX_CELL = 256, INDEX_MAX_REACH = 256 * 16;   // wider than 4 km a side: checked everywhere (bounds the index to ~1,100 cells a pad)
+  const NO_IDS: number[] = [];
+  const padCells = new Map<string, number[]>(); const padsEverywhere: number[] = [];
+  const landCells = new Map<string, number[]>(); const landsEverywhere: number[] = [];
+  function indexPlace(cells: Map<string, number[]>, everywhere: number[], id: number, x: number, z: number, reachX: number, reachZ: number): void {
+    if (!(Number.isFinite(x) && Number.isFinite(z) && Number.isFinite(reachX) && Number.isFinite(reachZ)) || reachX > INDEX_MAX_REACH || reachZ > INDEX_MAX_REACH) { everywhere.push(id); return; }
+    const x0 = Math.floor((x - reachX) / INDEX_CELL), x1 = Math.floor((x + reachX) / INDEX_CELL);
+    const z0 = Math.floor((z - reachZ) / INDEX_CELL), z1 = Math.floor((z + reachZ) / INDEX_CELL);
+    for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+      const key = cx + ',' + cz; const list = cells.get(key);
+      if (list) list.push(id); else cells.set(key, [id]);
+    }
+  }
+  /** The ids (ascending) of the pads or lands that can reach a point; null: scan them all (index off, or the point not finite). */
+  function placeIds(cells: Map<string, number[]>, everywhere: number[], x: number, z: number): number[] | null {
+    if (!PLACE_INDEX || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    const own = cells.get(Math.floor(x / INDEX_CELL) + ',' + Math.floor(z / INDEX_CELL));
+    if (!everywhere.length) return own || NO_IDS;
+    if (!own) return everywhere;
+    const out: number[] = [];
+    let i = 0, j = 0;
+    while (i < own.length || j < everywhere.length) {
+      if (j >= everywhere.length || (i < own.length && own[i] < everywhere[j])) out.push(own[i++]); else out.push(everywhere[j++]);
+    }
+    return out;
+  }
   function naturalHeightAt(x: number, z: number): number {
     const t = terrainNoRoads(x, z);
     return withRoads ? roadsOf().carve(x, z, t) : t;
@@ -508,9 +564,31 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // LAND PATCHES (admin 2026-11-21, failedbr #2488: "ek village, ek desert, ek jungle aur ek mountain" became three TOWNS named
   // so). A round area of the map is given another land: biomeAt answers it inside (with a ragged edge, so it is not a circle),
   // and mountains rise out of the ground there. Laid before the first frame, so the terrain, the plants and the colliders agree.
-  const lands: Array<{ x: number; z: number; r: number; land: LandBiome }> = [];
+  const lands: Array<{ x: number; z: number; r: number; land: LandBiome; joined?: boolean }> = [];
+  // 🧩 JOINED LANDS (map expansion, item 3). A land laid against another place or land overlaps it a little, so there is no strip
+  // of plain country between them. Where two lands overlap the earlier one still colours the ground (first match, as always),
+  // but a JOINED mountain's rise is its own: it eases down to its own edge even where the land beside it is the one drawn, so
+  // two lands that meet never meet at a cliff. A map with no joined mountain takes exactly the old height.
+  let joinedMountains = 0;
+  function joinedMountainWeight(x: number, z: number): number {
+    const ids = placeIds(landCells, landsEverywhere, x, z);
+    const count = ids ? ids.length : lands.length;
+    let w = 0;
+    for (let k = 0; k < count; k++) {
+      const l = lands[ids ? ids[k] : k];
+      if (!l.joined || l.land !== 'mountain') continue;
+      const d = Math.hypot(x - l.x, z - l.z);
+      if (d >= l.r * 1.25) continue;
+      const edge = l.r * (0.85 + 0.3 * fieldNoise(x, z, seed + 31, 2, Math.max(60, l.r / 2), 0));
+      if (d <= edge) w = Math.max(w, 1 - smoothstep(edge * 0.55, edge, d));
+    }
+    return w;
+  }
   function landAt(x: number, z: number): { land: LandBiome; w: number } | null {
-    for (const l of lands) {
+    const ids = placeIds(landCells, landsEverywhere, x, z);
+    const count = ids ? ids.length : lands.length;
+    for (let k = 0; k < count; k++) {
+      const l = lands[ids ? ids[k] : k];
       const d = Math.hypot(x - l.x, z - l.z);
       if (d >= l.r * 1.25) continue;
       const edge = l.r * (0.85 + 0.3 * fieldNoise(x, z, seed + 31, 2, Math.max(60, l.r / 2), 0));
@@ -518,9 +596,14 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     return null;
   }
-  function setLand(x: number, z: number, radius: number, land: LandBiome): void {
+  function setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void {
     if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
-    lands.push({ x, z, r: Math.min(4000, Math.max(60, radius)), land });
+    const r = Math.min(4000, Math.max(60, radius));
+    const joined = options?.joined === true;
+    lands.push(joined ? { x, z, r, land, joined } : { x, z, r, land });
+    if (joined && land === 'mountain') joinedMountains++;
+    noteEdit(x - r * 1.25, z - r * 1.25, x + r * 1.25, z + r * 1.25);
+    indexPlace(landCells, landsEverywhere, lands.length - 1, x, z, r * 1.25 + 1, r * 1.25 + 1);
   }
   function openFieldAt(x: number, z: number): boolean {
     if (!lands.length) return false;
@@ -550,6 +633,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     for (let i = 1; i < y.length; i++) y[i] = Math.min(Math.max(y[i], y[i - 1] - 0.8), y[i - 1] + 0.8);
     for (let i = y.length - 2; i >= 0; i--) y[i] = Math.min(Math.max(y[i], y[i + 1] - 0.8), y[i + 1] + 0.8);
     const pts = line.map((p, i) => ({ x: p.x, y: y[i], z: p.z }));
+    const reachOut = Math.max(2, width / 2) + ROAD_SHOULDER;
+    let ex0 = Infinity, ez0 = Infinity, ex1 = -Infinity, ez1 = -Infinity;
+    for (const q of pts) { ex0 = Math.min(ex0, q.x); ez0 = Math.min(ez0, q.z); ex1 = Math.max(ex1, q.x); ez1 = Math.max(ez1, q.z); }
+    noteEdit(ex0 - reachOut, ez0 - reachOut, ex1 + reachOut, ez1 + reachOut);
     const id = gameRoads.length;
     gameRoads.push({ pts, half: Math.max(2, width / 2) });
     for (let i = 0; i < pts.length - 1; i++) {
@@ -580,9 +667,20 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (lands.length) {
       const l = landAt(x, z);
       // Mountains rise from the land (higher towards the middle, ridged by noise), never out of the water.
-      if (l && l.land === 'mountain' && t > 2) t += l.w * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+      if (!joinedMountains) {
+        if (l && l.land === 'mountain' && t > 2) t += l.w * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+      } else {
+        // A joined mountain eases to its own edge (see JOINED LANDS); the drawn land's own rise counts as before.
+        let mw = l && l.land === 'mountain' ? l.w : 0;
+        const jw = joinedMountainWeight(x, z);
+        if (jw > mw) mw = jw;
+        if (mw > 0 && t > 2) t += mw * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+      }
     }
-    for (const p of pads) {
+    const padIds = placeIds(padCells, padsEverywhere, x, z);
+    const padCount = padIds ? padIds.length : pads.length;
+    for (let k = 0; k < padCount; k++) {
+      const p = pads[padIds ? padIds[k] : k];
       const d = Math.max(Math.abs(x - p.x) - p.hx, Math.abs(z - p.z) - p.hz);
       if (d >= p.margin) continue;
       const w = d <= 0 ? 1 : 1 - smoothstep(0, p.margin, d);
@@ -599,11 +697,18 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) { sum += naturalHeightAt(x + (i / 2) * halfX, z + (j / 2) * halfZ); n++; }
     // A given height joins this pad to a neighbour at the same level (a city that grows by another block of streets).
     const y = typeof height === 'number' && Number.isFinite(height) ? height : Math.max(1.5, sum / n);
-    pads.push({ x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) });
+    const pad = { x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) };
+    pads.push(pad);
+    noteEdit(x - pad.hx - Math.max(pad.margin, 2), z - pad.hz - Math.max(pad.margin, 2), x + pad.hx + Math.max(pad.margin, 2), z + pad.hz + Math.max(pad.margin, 2));
+    // Reaches as far as its margin eases (heightAt) or clearAt's 2 m, whichever is wider, and a metre more.
+    const reach = Math.max(pad.margin, 2) + 1;
+    indexPlace(padCells, padsEverywhere, pads.length - 1, x, z, pad.hx + reach, pad.hz + reach);
     return y;
   }
   function clearAt(x: number, z: number): boolean {
-    for (const p of pads) if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true;
+    const ids = placeIds(padCells, padsEverywhere, x, z);
+    const count = ids ? ids.length : pads.length;
+    for (let k = 0; k < count; k++) { const p = pads[ids ? ids[k] : k]; if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true; }
     if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half + 4) return true; }
     return false;
   }
@@ -619,6 +724,19 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       case 'mountain': return 'rock';
       default: return 'grass';
     }
+  }
+
+  function plantableAt(x: number, z: number, margin = 1): boolean {
+    const m = Math.max(0, Math.min(20, Number.isFinite(margin) ? margin : 1));
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    if (waterAt(x, z) || heightAt(x, z) < 0 || clearAt(x, z)) return false;
+    if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half + m) return false; }
+    if (withRoads) {
+      const roads = roadsOf();
+      if (roads.roadAt(x, z) || (m > 0 && (roads.roadAt(x + m, z) || roads.roadAt(x - m, z) || roads.roadAt(x, z + m) || roads.roadAt(x, z - m)))) return false;
+    }
+    const b = biomeAt(x, z);
+    return b === 'grassland' || b === 'forest';
   }
 
   function drivableHeightAt(x: number, z: number): number {
@@ -768,7 +886,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -906,6 +1024,12 @@ export interface ChunkManager {
   readonly origin: { x: number; z: number };
   /** Stream chunks around the camera (world metres). Returns the origin shift when it was re-based, else null. */
   update(cameraX: number, cameraZ: number): { dx: number; dz: number } | null;
+  /**
+   * The ground changed over this world rectangle (a late levelGround, setLand or addRoad): the loaded chunks it touches are
+   * drawn again on the next updates, nearest first, within the tier's builds per update. A rectangle that is not finite
+   * redraws every loaded chunk. Returns how many chunks were marked.
+   */
+  invalidate(x0: number, z0: number, x1: number, z1: number): number;
   loadedCount(): number;
   dispose(): void;
 }
@@ -992,7 +1116,21 @@ export function createChunkManager(THREE: ThreeLike, world: AthreeWorld, quality
     sea.material.dispose();
   }
 
-  return { group, origin, update, loadedCount: () => loaded.size, dispose };
+  function invalidate(x0: number, z0: number, x1: number, z1: number): number {
+    const all = !(Number.isFinite(x0) && Number.isFinite(z0) && Number.isFinite(x1) && Number.isFinite(z1));
+    let marked = 0;
+    for (const [key, entry] of loaded) {
+      const [kx, kz] = key.split(',').map(Number);
+      // A chunk covers [k * size, (k + 1) * size] on each axis (its skirts hang under its own border).
+      if (!all && (kx * size > x1 || (kx + 1) * size < x0 || kz * size > z1 || (kz + 1) * size < z0)) continue;
+      entry.ring = -1;                                                     // no wanted ring is -1: built again
+      marked++;
+    }
+    if (marked > 0) lastCx = Infinity;                                     // the next update walks the list again
+    return marked;
+  }
+
+  return { group, origin, update, invalidate, loadedCount: () => loaded.size, dispose };
 }
 `;
 
@@ -1082,6 +1220,12 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '',
     'export interface AthreeMapOptions extends AthreeWorldOptions {',
     '  quality?: AthreeQuality;',
+    '  /**',
+    '   * LATE GROUND EDITS (default false: off). true: a levelGround, setLand or addRoad made AFTER the first update() redraws the',
+    '   * terrain chunks and plants it touches on the next updates (a few per update, nearest first). false keeps the old contract:',
+    '   * ground edits belong before the first update(), and what is drawn is never redrawn.',
+    '   */',
+    '  lateEdits?: boolean;',
   );
   if (has('plants')) add('  /** Set false to leave grass and trees out (a flat racing circuit that wants every triangle for the road). Default true. */', '  vegetation?: boolean;');
   if (has('sky')) add('  /** Set false to leave the sky out (you bring your own sky and lights). Default true. */', '  sky?: boolean;', '  /** Time of day, weather, day length and lights for the sky. */', '  skyOptions?: SkyOptions;');
@@ -1106,13 +1250,31 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('roads')) add('  const roadMesh = options.three && options.roads !== false ? createRoadMesh(options.three, world, quality) : null;', '  if (chunks && roadMesh) chunks.group.add(roadMesh.group);');
   const lit = ['sea', 'plants', 'rivers', 'roads'].some(has); // modules that take their light from the sky
   if (has('sky') && lit) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
+  add('  const lateEdits = options.lateEdits === true;', '  let editsSeen = 0;');
   add('  return {', '    world,', '    chunks,');
   if (has('sea')) add('    ocean,');
   if (has('plants')) add('    vegetation,');
   if (has('rivers')) add('    riverWater,');
   if (has('sky')) add('    sky,');
   if (has('roads')) add('    roadMesh,');
-  add('    update: (cameraX, cameraZ, time, cameraY = 0) => {', '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;');
+  add(
+    '    update: (cameraX, cameraZ, time, cameraY = 0) => {',
+    '      // A late ground edit redraws what it touched when the game asked for lateEdits. Without it the terrain is not redrawn,',
+    '      // but a plant never stays on a new road, pad or water: the ones standing there are taken away (admin 2026-11-23).',
+    '      if (world.editCount && world.editsSince) {',
+    '        const n = world.editCount();',
+    '        if (n > editsSeen) {',
+    '          for (const e of world.editsSince(editsSeen)) {',
+    '            if (lateEdits) chunks?.invalidate(e.x0, e.z0, e.x1, e.z1);',
+  );
+  if (has('plants')) add('            if (lateEdits) vegetation?.invalidate(e.x0, e.z0, e.x1, e.z1);', '            else vegetation?.prune(e.x0, e.z0, e.x1, e.z1);');
+  add(
+    '          }',
+    '          editsSeen = n;',
+    '        }',
+    '      }',
+    '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;',
+  );
   if (has('sky')) {
     add('      if (sky && chunks) {', '        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);');
     if (lit) add('        // One sun for everything the game chose: they take their light from the sky.', '        const r = sky.reading();');
@@ -1158,7 +1320,7 @@ export function athreeFiles(chosen: readonly string[], excludedModules: readonly
 const RULE_CORE = 'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. The world is always there: terrain, biomes, wind, spawns, heightfield colliders, desert dunes (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), rivers and lakes as DATA (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real; rivers always end in the sea, a lake or another river; the water level only goes down along a river; nothing grows or spawns in the water; pass rivers: false for a world without them), roads as DATA (map.world.homeRoads() gives the villages, highways and, for the racing profile, the closed banked race circuit with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; roads are made region by region (12.5 km) as you travel, with no junctions; pass roads: false for a world without them) and map.world.surfaceAt (what a wheel runs on).';
 const RULE_BY_MODULE: Record<string, string> = {
   sea: 'SEA: a real wave ocean (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour) and map.ocean.floatAt for boats. Do not add your own water plane: the ocean is already in map.chunks.group.',
-  plants: 'PLANTS: grass and trees (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map.',
+  plants: 'PLANTS: grass and trees (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map; a flower bed or bush you must add goes only where map.world.plantableAt(x, z) is true (never on a road, a city street or water).',
   rivers: 'RIVERS: map.riverWater draws the rivers and lakes with a flowing-water shader and gives boats floatAt; they are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Do not draw your own rivers or lakes.',
   sky: 'SKY: map.sky gives the sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. Do not draw your own sky.',
   roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers. Do not draw your own roads.',

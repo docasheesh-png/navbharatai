@@ -322,6 +322,8 @@ const CONTROLLER = `import * as THREE from 'three';
 import { stepMotor, stepSwim, initialMotorState, cameraRelative, DEFAULT_MOTOR, DEFAULT_SWIM, type MotorConfig, type MotorState, type SwimConfig } from './motor';
 import { events } from '../core/events';
 import { collisionRoot, hasWorldGround, sweepWorldCapsules, uprightCapsule, worldColliders, worldFloorAt } from '../three/collision';
+import { restOriginY } from '../three/groundContact';
+import { localLowestY } from '../three/surfaces';
 
 export interface CharacterOptions {
   radius?: number;
@@ -446,7 +448,11 @@ export class CharacterController {
     this.world = worldColliders(root, this.colliders, this.object);
     this.implicitGround = this.colliders.length === 0 && !hasWorldGround(this.world, root);
     const ground = this.probeGround(delta);
-    const grounded = this.state.vy <= 0 && ground !== null && this.object.position.y - ground.y <= 0.15;
+    // Feet, not the origin. A model whose origin is at the hips has a negative nbLowest; the capsule's
+    // own origin is already the feet, so its offset stays 0.
+    if (this.object.children.length > 0) this.object.userData.nbLowest = localLowestY(this.object);
+    const lowest = Number(this.object.userData.nbLowest) || 0;
+    const grounded = this.state.vy <= 0 && ground !== null && this.object.position.y + lowest - ground.y <= 0.15;
     const normalY = ground?.normal.y ?? 1;
     const impact = Math.max(0, -this.state.vy);
     const { state, jumped, landed } = stepMotor(
@@ -567,8 +573,9 @@ export class CharacterController {
 
     const dy = this.state.vy * delta;
     const floor = dy <= 0 ? this.probeGround(delta) : null;
-    if (floor && p.y + dy <= floor.y + 0.001) {
-      p.y = floor.y;
+    const feet = Number(this.object.userData.nbLowest) || 0;
+    if (floor && p.y + feet + dy <= floor.y + 0.001) {
+      p.y = restOriginY(floor.y, feet, 0);
       this.state.vy = 0;
       return;
     }

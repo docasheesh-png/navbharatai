@@ -20,6 +20,7 @@ import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
+import { GROUND_CONTACT_RULE } from './groundContactRule';
 import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
@@ -693,6 +694,7 @@ export const GAME_KIT_RULE = [
   'Use the kit character controller and driveVehicle for movement. For custom movers, apply the result',
   'of sweepWorldCapsules before changing position. Play against a wall and up a stair or slope where present.',
   GAME_COLLISION_RULE,
+  GROUND_CONTACT_RULE,
   ...VEHICLE_CAMERA_RULE_LINES,
   ...FORWARD_DIRECTION_RULE_LINES,
 ].join('\n');
@@ -1080,7 +1082,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       Cricket: createMatch / bowl / summary / shotFromTiming — every ball through bowl(); never your own scoring.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
-    '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',
+    '       or prop the library and the Athree modules do not have. Take models, sounds and textures from the NavBharatAI',
+    '       library FIRST. Look in the game library first. run_recipe({ name: "generate_stand_in" }) does the three steps and the build never waits:',
+    '       (1) the closest library object is adjusted — scale, recolour, retexture, combine parts;',
+    '       (2) if nothing fits, one model call writes a simple low-poly object so the game still has it;',
+    '       (3) together with (2), tell the user in their language, without naming an AI vendor, where a',
+    '       better free file is and how to download and upload it. standOnGround places the result.',
+    '       DO NOT hand-write',
     '       vertices or stack ad-hoc boxes in game code. Supply { spec } in this admitted turn; describe-only sidecalls are unavailable.',
     '       New source needs atomic exclusive creation. Describe the object as a spec (run it with no input to read the guide, or',
     '       input: { example: "person" } for a worked spec to adapt). It checks the spec, measures it and DRAWS it back as FRONT / SIDE / TOP',
@@ -1135,6 +1143,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  a start button or countdown gates the race, the vehicle MUST be moving the moment that gate',
     '  opens. A car that sits at 0 with the game "running" is a broken game, not a hard one — and the',
     '  user who reports it will describe it as "the speed is not increasing", not as "the car is stuck".',
+    `  ${GROUND_CONTACT_RULE}`,
     // ⚙️ Admin 2026-11-19 game-gap audit: the 3D shell now owns these screens, so a builder must not add a second set.
     '  ⚙️ A 3D GAME ON <GameCanvas> ALREADY HAS the start screen, the pause menu (Resume / Restart / Settings / Menu),',
     '  the game-over screen, a mute button, a Full screen button (Play on a phone goes full screen and locks it sideways;',

@@ -426,7 +426,14 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'
   + ' across, default 400); the map loads it when the player comes near and joins it by road. An .fbx or a game-engine project cannot be'
   + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
-  + ' map to make it bigger.';
+  + ' map to make it bigger.'
+  // Map expansion item 6: a sports ground or venue is a place ON the map, at its real size, on its own level ground.
+  + ' A SPORTS GROUND / VENUE on the map ("cricket ground jodo", "football ka maidan banao", "शहर में स्टेडियम बनाओ", "stadium next'
+  + ' to the city", "race track / circuit add karo", "ek arena banao") → ONE region { id, kind: \'venue\', venue: \'cricket-ground\' |'
+  + ' \'football-field\' | \'stadium\' | \'race-circuit\' | \'arena\', joinTo?: \'<region id>\' (beside that place, when they say'
+  + ' next to / in / near it), toward?, size? } — standard size (size = metres along its longer side), marked out, on level dry'
+  + ' ground, joined by road. It counts toward the 1000. Not a venue: "cricket game banao", "football khelna hai", "racing game'
+  + ' banao" ask for the GAME itself, not a ground added to the map.';
 /**
  * 🌱 A FEATURE NEVER LAYS MAP-SCALE LAND IN AN OPEN WORLD (failedbr #2495/#2501 autopsy: asked for a grass field in the middle,
  * the builder added a feature with a flat 2 km PlaneGeometry at y = -0.1, not anchored; the hilly map's slopes cut through it

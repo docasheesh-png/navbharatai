@@ -83,6 +83,29 @@ describe('🛣️ every place is joined by a road you can drive', () => {
     expect(faces).toBeGreaterThan(10);
     world.dispose();
   }, 120_000);
+  it('a highway ends ON the city\'s border, meeting its edge street — not short of it, and not inside its blocks on a diagonal', () => {
+    const c = context();
+    const world = OW.createOpenWorld(c.ctx, { seed: 7, regions: [
+      { id: 'main-city', kind: 'city', city: { blocksX: 3, blocksZ: 2, ...small } },
+      { id: 'east-town', kind: 'town', toward: 'east', city: small },
+      { id: 'sw-village', kind: 'village', toward: 'south-west', city: small },
+      { id: 'ne-town', kind: 'town', toward: 'north-east', city: small },
+    ] });
+    const home = world.regions[0]; const hw = home.city.plan.width / 2, hd = home.city.plan.depth / 2;
+    const local = (p: { x: number; z: number }) => ({ x: p.x - home.centre.x, z: p.z - home.centre.z });
+    // How far outside the street rectangle a point is (0 on its border, negative inside).
+    const outside = (p: { x: number; z: number }) => { const q = local(p); return Math.max(Math.abs(q.x) - hw, Math.abs(q.z) - hd); };
+    let touching = 0;
+    for (const line of world.highways) {
+      for (const end of [line[0], line[line.length - 1]]) {
+        const o = outside(end);
+        if (o < 30) { expect(Math.abs(o)).toBeLessThan(0.5); touching++; }       // an end at this city sits on its border
+      }
+      for (const p of line) expect(outside(p)).toBeGreaterThan(-0.5);            // and no road runs inside its blocks
+    }
+    expect(touching).toBeGreaterThan(0);
+    world.dispose();
+  }, 120_000);
   it('a universe of 100 places and lands is one connected network', () => {
     const c = context();
     const kinds = ['city', 'town', 'village', 'desert', 'jungle', 'mountain'];

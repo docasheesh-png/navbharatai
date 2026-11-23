@@ -167,7 +167,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0736c95fca90633bc7adca0c0d9235934240b367c82689fc1e83162bb7c0aa96",
     "6d325fe1c544bda8000946312877dd7456e809c8e4ff7a0c929e398e017aec86",
     "b8559a47de4724c631b800270fbb5263acbec65b0796cf2430fc451b86f94392",
-    "7c6f13c98b3d0c53abce1731b3748947f9b6bb083d442ddff0719eb6ca3eda36"
+    "7c6f13c98b3d0c53abce1731b3748947f9b6bb083d442ddff0719eb6ca3eda36",
+    "2896e49d8c8bb27921a91908ce1368e9464bb96c28f2159761acc7d6d8c1e6c9"
   ],
   "src/game/athree/noise.ts": [
     "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
@@ -178,7 +179,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/athree/plants.ts": [
     "58c460d350d3fcd90a8839b56b32d523a130e0c295eef892844eea8ac2e69f14",
-    "88cfd8080f5b884a2a5c02b35ff772905f30ccbb6430d38806002bf24760c92f"
+    "88cfd8080f5b884a2a5c02b35ff772905f30ccbb6430d38806002bf24760c92f",
+    "a3748b369a099732b5136b9fcc04c3e4a2f4e764bc2705498948cb3a9bf7e558"
   ],
   "src/game/athree/rivers.ts": [
     "8ca7148c58ea6f6bf4cd8b514495a6015bbc60743087abe42e5511e317dbdfb4",
@@ -209,7 +211,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b558e1127300beb2e42e0012e804e393b820e0a5fc0b0eece9c3780be97a3abf",
     "370fe0b003e88bb5d6bd162ebb4012eac59a7a6091b8e47488350e0fecd79c5c",
     "632c091bfa90c063cf41676e67b6ee415a72c47a7843b30b58b0e6cccd23ae6a",
-    "24777239f198dd0ee5389eec77cb329939ba98e77d639bcd8d3d3c475c55abe7"
+    "24777239f198dd0ee5389eec77cb329939ba98e77d639bcd8d3d3c475c55abe7",
+    "8e02aa14f283d30e40dd824a9d83b889693fe4cd4b73cd662fffb90c8151842a"
   ],
   "src/game/athree/vehicles.ts": [
     "cacc3ff86106db83b4c1c4058b4d7401a39cdfdd748b31fbb24873dccafbaa91",
@@ -236,7 +239,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "cb639a00b96b8bf2fa4e1dc983228a72909d64daf264152e896e3b3e163fc9e6",
     "a266388d4fc7a319ac0606f62d423458038b1dbed0096bae99084a5a00e9aa03",
     "bd787b80b415840f0630353ea4b6cafc50784a8ca07a6ea1e5d4af70a4230ac0",
-    "273fc5c257aca118e53591b226f78d0a653a5bdb396affb0d698b3cbe84d2c11"
+    "273fc5c257aca118e53591b226f78d0a653a5bdb396affb0d698b3cbe84d2c11",
+    "f95136dd95b30860d85d1aa4ff3640d2428d3ce57213f2d4ccedf675fa09a906"
   ],
   "src/game/board/business.ts": [
     "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",

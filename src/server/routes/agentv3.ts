@@ -19701,7 +19701,8 @@ async function noteBuildOutcome(
         if (gameHandoff.block) buildPrompt = `${gameHandoff.block}\n\n---\n\n${buildPrompt}`;
         // The last playtest's geometry look, for the builder only (gameGeometryProbe.ts) — a game turn reads it, nobody else.
         if (gameHandoff.block && gameGeometryProbeEnabled()) {
-          const geometryNote = geometryRepairNote((await previousReportAtStart)?.issues);
+          // Bounded (re-review 2026-11-23): a slow or hung report read must never hold the turn's start — after 1.5 s no note.
+          const geometryNote = geometryRepairNote((await raceTimeout(previousReportAtStart, 1500, 'geometryNote').catch(() => null))?.issues);
           if (geometryNote) buildPrompt = `${geometryNote}\n\n---\n\n${buildPrompt}`;
         }
         if (gameContract) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true,

@@ -2,7 +2,8 @@
 // na ho"). The maps-do-not-join autopsy: a flat grass plane the game laid over hills, road faces pointing down, a player off
 // the ground — none of it caught by a screenshot score. The kit's open world now answers, read-only, what is drawn
 // (window.__nbWorld.geometry), and the playtest turns the answer into a builder-only note. Runs the REAL generated kit headless.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import * as THREE from 'three';
@@ -11,6 +12,7 @@ import { OPEN_WORLD_BRIDGE_PATH } from '../src/server/lib/GameOpenWorldGenerator
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage, geometryRepairNote } from '../src/server/AgentV3/gameGeometryProbe';
 import { gamePlaytestConfig, gamePlaytestModule, PLAYTEST_RESULT_MARKER, parsePlaytest } from '../src/server/AgentV3/gamePlaytest';
 import { PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
+import { raceTimeout } from '../src/server/routes/agentv3';
 
 const DIR = join(__dirname, `.tmp-geometry-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -128,3 +130,31 @@ describe('📝 the findings are advisory and builder-only', () => {
     expect(parsePlaytest(PLAYTEST_RESULT_MARKER + JSON.stringify({ ok: true, geometry: { player: 0 }, models: { pending: 0, stuck: 0 } })).geometry).toEqual({ player: 0 });
   });
 });
+
+// Re-review 2026-11-23: the note waited on the last report's read with no limit — a hung read would have held the turn.
+describe('⏱️ a hung report read never delays the turn start beyond its budget', () => {
+  it('the call site races the read against 1.5 s and treats a timeout as "no note"', () => {
+    const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain("geometryRepairNote((await raceTimeout(previousReportAtStart, 1500, 'geometryNote').catch(() => null))?.issues)");
+    expect(route).not.toContain('geometryRepairNote((await previousReportAtStart)');
+  });
+  it('a read that never answers: the same expression settles to no note at 1.5 s', async () => {
+    vi.useFakeTimers();
+    try {
+      const hung = new Promise<{ issues?: unknown[] } | null>(() => {});
+      let settled: string | null | undefined;
+      const turnStart = (async () => { settled = geometryRepairNote((await raceTimeout(hung, 1500, 'geometryNote').catch(() => null))?.issues as never); })();
+      await vi.advanceTimersByTimeAsync(1499);
+      expect(settled).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      await turnStart;
+      expect(settled).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+  it('a read that answers in time still hands the note on', async () => {
+    const msg = geometryFindingsMessage(geometryFindings({ player: 6 } as never));
+    const note = geometryRepairNote((await raceTimeout(Promise.resolve({ issues: [{ code: GAME_GEOMETRY_CODE, message: msg }] }), 1500, 'geometryNote').catch(() => null))?.issues);
+    expect(note).toMatch(/ABOVE the ground/);
+  });
+});
+

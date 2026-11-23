@@ -7,7 +7,7 @@ import { laneDashAppTsx } from './games/laneDash';
 import { courtyardAppTsx } from './games/courtyard';
 import { gullyInningsAppTsx } from './games/gullyInnings';
 import { stackTilesAppTsx } from './games/stackTiles';
-import { ringRallyAppTsx } from './games/ringRally';
+import { roadRaceAppTsx } from './games/roadRace';
 import { bellRoundAppTsx } from './games/bellRound';
 import { pairGroveAppTsx } from './games/pairGrove';
 import { dodgeFallAppTsx } from './games/dodgeFall';
@@ -19,6 +19,7 @@ import { gardenMatchAppTsx } from './games/gardenMatch';
 import { oddOneAppTsx } from './games/oddOne';
 import { letterLinkAppTsx } from './games/letterLink';
 import { rhymePairAppTsx } from './games/rhymePair';
+import { tapBloomAppTsx } from './games/tapBloom';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -38,7 +39,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'courtyard', title: 'Courtyard', category: 'Board', accent: '#0f766e', appTsx: courtyardAppTsx },
   { id: 'gully-innings', title: 'Gully Innings', category: 'Sports', accent: '#b45309', appTsx: gullyInningsAppTsx },
   { id: 'stack-tiles', title: 'Stack Tiles', category: 'Puzzle', accent: '#7c3aed', appTsx: stackTilesAppTsx },
-  { id: 'ring-rally', title: 'Ring Rally', category: 'Racing', accent: '#be123c', appTsx: ringRallyAppTsx },
+  { id: 'ring-rally', title: 'Ring Rally', category: 'Racing', accent: '#be123c', appTsx: roadRaceAppTsx('race', 'ring-rally-best-v1') },
   { id: 'bell-round', title: 'Bell Round', category: 'Trivia', accent: '#0369a1', appTsx: bellRoundAppTsx },
   // Existing starters, registered here as the playable library face. One row adds or removes each.
   { id: 'trail-walk', title: 'Trail Walk', category: 'Adventure', accent: '#15803d', appTsx: trailWalkAppTsx },
@@ -52,10 +53,10 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'cave-steps', title: 'Cave Steps', category: 'Adventure', accent: '#365314', appTsx: gapScreen('cave-steps', 'cave-steps-best-v1') },
   { id: 'high-card', title: 'High Card', category: 'Card', accent: '#1e3a8a', appTsx: gapScreen('high-card', 'high-card-best-v1') },
   { id: 'coin-wheel', title: 'Coin Wheel', category: 'Casino', accent: '#a16207', appTsx: gapScreen('coin-wheel', 'coin-wheel-best-v1') },
-  { id: 'tap-bloom', title: 'Tap Bloom', category: 'Casual', accent: '#db2777', appTsx: gapScreen('tap-bloom', 'tap-bloom-best-v1') },
+  { id: 'tap-bloom', title: 'Tap Bloom', category: 'Casual', accent: '#db2777', appTsx: tapBloomAppTsx },
   { id: 'count-garden', title: 'Count Garden', category: 'Educational', accent: '#0f766e', appTsx: gapScreen('count-garden', 'count-garden-best-v1') },
   { id: 'beat-steps', title: 'Beat Steps', category: 'Music', accent: '#7c3aed', appTsx: gapScreen('beat-steps', 'beat-steps-best-v1') },
-  { id: 'slope-ride', title: 'Slope Ride', category: 'Racing', accent: '#9a3412', appTsx: gapScreen('slope-ride', 'slope-ride-best-v1') },
+  { id: 'slope-ride', title: 'Slope Ride', category: 'Racing', accent: '#9a3412', appTsx: roadRaceAppTsx('run', 'slope-ride-best-v1') },
   { id: 'camp-quest', title: 'Camp Quest', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('camp-quest', 'camp-quest-best-v1') },
   { id: 'tea-stall', title: 'Tea Stall', category: 'Simulation', accent: '#92400e', appTsx: gapScreen('tea-stall', 'tea-stall-best-v1') },
   { id: 'tower-line', title: 'Tower Line', category: 'Strategy', accent: '#334155', appTsx: gapScreen('tower-line', 'tower-line-best-v1') },

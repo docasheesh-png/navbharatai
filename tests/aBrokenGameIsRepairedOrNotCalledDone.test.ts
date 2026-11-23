@@ -62,8 +62,8 @@ describe('incomplete delivery gate', () => {
       'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_CAMERA_WRONG', 'GAME_DEFECT_VEHICLE_STALLED', 'GAME_DEFECT_MISSING_LAYER',
     ];
     expect(new Set(measuredDefects)).toEqual(HARD_DEFECTS);
-    for (const defect of measuredDefects) expect(gameIncompleteReason([D(defect)], [])).not.toBeNull();
-    expect(gameIncompleteReason([], ['levels'])).toContain('levels');
+    for (const defect of measuredDefects) expect(gameIncompleteReason([D(defect)], [], { played: true })).not.toBeNull();
+    expect(gameIncompleteReason([], ['levels'], { played: true })).toContain('levels');
   });
   it('makes the release gate RED, and leaves it alone when unset', () => {
     const ev = { buildOk: true, preview: 'passed', pages: 'passed', journeys: 'passed', typecheck: 'passed', tests: 'passed' } as const;

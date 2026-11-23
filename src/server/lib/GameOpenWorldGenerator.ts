@@ -646,8 +646,9 @@ export { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH };
 
 export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — a character on NavBharatAI's big map, playable as it stands: the kit's own animated person,
 // the follow camera, the joystick and keys, terrain that streams as you walk, roads, plants, rivers, the sea and the sky.
-// Make it your game through its props: setup() adds your things to the world (cars, enemies, pickups, missions) and
-// update() runs your rules — never replace the world, the player or the camera.
+// THIS FILE IS A STARTING POINT. A later request may change any of it: the character, the rules, a level, the controls,
+// the graphics, the sounds, the language, the UI, or the whole genre. Edit this file when its props do not reach the ask.
+// Make the first version through its props: setup() adds things (cars, enemies, pickups, missions) and update() runs rules.
 import React, { useMemo, useRef } from 'react';
 import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions, MinimapOptions } from './Game';

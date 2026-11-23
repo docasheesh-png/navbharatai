@@ -568,7 +568,7 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
             + (/src\/game\/LaneRunnerGame\.tsx/.test(done.find((r) => r.recipe === 'generate_game_shell')?.content ?? '')
               ? ' This is an ENDLESS RUNNER and its game is already on disk: render <LaneRunnerGame title="…" /> from src/game/LaneRunnerGame.tsx'
                 + ' (lanes, obstacles, jump, slide, coins, swipes, start screen, game over) and make it the user\'s game through its props'
-                + ' (colours, title, lanes, speed) or createLaneRunnerScene() — never hand-write the runner\'s rules, lanes or swipes.'
+                + ' (colours, title, lanes, speed) or createLaneRunnerScene(). A follow-up that asks to change the character, the rules, a level, the graphics, the sounds or the controls edits LaneRunnerGame.tsx; do not refuse it as a template limit.'
               : '')
           : ' For a car, bike or ridden animal, keep the camera BEHIND it, opposite its nose.')
         + (has('generate_game_3d')

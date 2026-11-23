@@ -68,7 +68,7 @@ describe('Q-3300 — the kit refresh is planned against the sandbox, not a saved
 
 describe('Q-3301 — the map rule says only what THIS project\'s own kit can do', () => {
   it('the current kit: every capability, and the rule is exactly GAME_WORLD_RULE', () => {
-    expect(worldCapabilities(CURRENT_OPEN_WORLD)).toEqual({ lands: ['desert', 'jungle', 'mountain', 'snow', 'beach', 'grassland'], joinTo: true, custom: true, spread: true, maxRegions: 100 });
+    expect(worldCapabilities(CURRENT_OPEN_WORLD)).toEqual({ lands: ['desert', 'jungle', 'mountain', 'snow', 'beach', 'grassland'], joinTo: true, custom: true, spread: true, maxRegions: 1000 });
     expect(gameWorldRule(CURRENT_OPEN_WORLD)).toBe(GAME_WORLD_RULE);
     expect(gameWorldRule(undefined)).toBe(GAME_WORLD_RULE);
   });

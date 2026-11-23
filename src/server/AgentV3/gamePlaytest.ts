@@ -43,6 +43,7 @@ import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
 import { locatedErrorText } from './runtimeErrorSite';
+import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead } from './gameGeometryProbe';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
 export const PLAYTEST_BUDGET_MS = 60_000;
@@ -270,6 +271,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     // The script's OWN deadline (autopsy 61279465): it reports what it measured, and where it got to,
     // before the route's outer timeout (budget + 20 s) kills it with nothing to show.
     budgetMs: PLAYTEST_BUDGET_MS,
+    // The read-only geometry look (gameGeometryProbe.ts) — false when AGENTV3_GAME_GEOMETRY_PROBE=off.
+    geometry: gameGeometryProbeEnabled(env),
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
@@ -763,7 +766,7 @@ const watchdog = setTimeout(async () => {
     say({ ...out, ok: true, partial: true, unfinished: out.stage, phoneChecked: out.phoneChecked === true });
     process.exit(0);
   }
-  say({ ok: false, partial: true, webgl: out.webgl, stage: out.stage, fps, started: out.started ?? null,
+  say({ ok: false, partial: true, webgl: out.webgl, stage: out.stage, fps, started: out.started ?? null, geometry: out.geometry ?? null,
     error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
   process.exit(0);
 }, Math.max(10000, Number(cfg.budgetMs) || 60000));
@@ -820,6 +823,16 @@ try {
   out.idle = Math.round(idle.change * 100) / 100;
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
+  // DOES WHAT IS DRAWN AGREE WITH THE LAND? (2026-11-23, the maps-do-not-join autopsy.) The kit's open world answers once,
+  // read-only (window.__nbWorld.geometry, openWorld.ts): drawn terrain against its height, big flat meshes the game added
+  // off the ground, road faces pointing down, the player off the ground. Its own 3 s limit; a game without it answers null.
+  // Advisory only: never scored, never a gate. Off with AGENTV3_GAME_GEOMETRY_PROBE=off.
+  if (cfg.geometry) {
+    out.geometry = await Promise.race([
+      page.evaluate(() => (window.__nbWorld && window.__nbWorld.geometry ? window.__nbWorld.geometry() : null)),
+      new Promise((r) => setTimeout(() => r(null), 3000)),
+    ]).catch(() => null);
+  }
 
   out.stage = 'driving it with the keyboard';
   const moves = [];
@@ -990,6 +1003,8 @@ try {
     out.sounds = await page.evaluate(() => (typeof window.__nbSounds === 'number' ? window.__nbSounds : null));
     // What the last frame asked of the GPU, read from the kit game's own renderer after a round of play (budget check).
     out.load = await page.evaluate(() => (window.__nbKit && window.__nbKit.load ? window.__nbKit.load() : null)).catch(() => null);
+    // Models still loading after a round of play, and how many never got past 0% (window.__nbKit.models) — advisory.
+    if (cfg.geometry) out.models = await page.evaluate(() => (window.__nbKit && window.__nbKit.models ? window.__nbKit.models() : null)).catch(() => null);
     const kit = await page.evaluate(() => (window.__nbKit ? { status: window.__nbKit.status(), score: window.__nbKit.score() } : null));
     if (kit) {
       out.kitScoreEnd = kit.score;
@@ -1252,6 +1267,10 @@ export interface PlaytestRun {
   kitScoreEnd?: number | null;
   /** What the kit game's last frame asked of the GPU (window.__nbKit.load) — null for a game that does not report it. */
   load?: { calls: number; triangles: number; geometries: number; textures: number } | null;
+  /** The open world's own read-only look at what is drawn (window.__nbWorld.geometry) — advisory, see gameGeometryProbe.ts. */
+  geometry?: GeometryRead | null;
+  /** Models still loading at the end of the desktop round (window.__nbKit.models) — advisory. */
+  models?: ModelsRead | null;
   /** The play-again probe: the status after the round was ended, the control pressed (null: none found), the status after. */
   restartCheck?: { ended?: string; pressed?: string | null; after?: string; error?: string };
   errors?: string[];

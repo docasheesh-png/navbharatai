@@ -60,6 +60,12 @@ const REQUIRED_INPUTS: Record<string, Record<string, unknown>> = {
   generate_i18n: { languages: ['en', 'hi', 'ta'] },
   generate_env_validation: { keys: ['DATABASE_URL'] },
   generate_release_notes: { features: ['Browse items'] },
+  generate_stand_in: {
+    subject: 'zzzz widget',
+    plan_json: JSON.stringify({ version: 1, label: 'Census widget', parts: [
+      { id: 'body', geometry: { kind: 'box', size: [0.4, 0.6, 0.4] }, position: [0, 0.3, 0], rotation: [0, 0, 0], color: '#887766', roughness: 0.8, metalness: 0 },
+    ] }),
+  },
   generate_procedural_object: {
     id: 'census-object',
     plan_json: JSON.stringify({ version: 1, label: 'Original census object', parts: [

@@ -103,14 +103,16 @@ export type CityGrowth =
 export function growCity(worldSource: string, request: string, openWorldSource: string | null | undefined): CityGrowth {
   const cities = citiesOnMap(worldSource);
   const names = cities.map((c) => c.name ? `${c.id} ("${c.name}")` : c.id);
-  if (!worldCapabilities(openWorldSource).joinTo) return { ok: false, reason: 'no-joinTo', cities: names };
+  const cap = worldCapabilities(openWorldSource);
+  if (!cap.joinTo) return { ok: false, reason: 'no-joinTo', cities: names };
   if (cityGrowthAsked(request) === 'mixed') return { ok: false, reason: 'mixed', cities: names };
   if (cities.length === 0) return { ok: false, reason: 'no-city', cities: names };
   const city = cityMeant(request, cities);
   if (!city) return { ok: false, reason: 'which-city', cities: names };
   const regions = parseRegions(worldSource);
   if (!regions) return { ok: false, reason: 'no-list', cities: names };
-  const room = MAX_PLACES - regions.length;
+  // The most THIS game's own map file reads (an older copy reads fewer than the current kit's MAX_PLACES).
+  const room = Math.min(MAX_PLACES, cap.maxRegions) - regions.length;
   const n = Math.min(tilesWanted(request), room);
   if (n <= 0) return { ok: false, reason: 'full', cities: names };
   const taken = new Set(regions.map((r) => r.id));
@@ -167,7 +169,7 @@ export function worldWishHandoff(growth: CityGrowth | null, spread: SpreadResult
       'which-city': `the map has ${growth.cities.length} cities (${growth.cities.join(', ')}) and the request does not say which one`,
       mixed: 'the request asks both to make a city bigger and for separate cities, so it is not clear which it wants',
       'no-city': 'the map has no city yet (only towns, villages or lands)',
-      full: `the map already holds ${MAX_PLACES} places, the most it holds`,
+      full: 'the map already holds as many places as this game\'s map file reads, the most it holds',
       'no-joinTo': `this game's map file (${GAME_OPEN_WORLD_FILE}) is an older or edited copy that cannot join tiles to a city`,
       'no-list': 'src/game/world.ts is not in the shape the platform can read',
     };

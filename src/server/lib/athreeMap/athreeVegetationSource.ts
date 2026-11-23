@@ -351,8 +351,8 @@ export function propsInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       let pb = 0;
       let pr = 0;
       if (biome === 'grassland') {
-        pb = 0.05 + 0.4 * smoothstep(0.56, 0.8, thicket);
-        pr = 0.025 + 0.3 * smoothstep(0.66, 0.86, outcrop);
+        pb = 0.07 + 0.4 * smoothstep(0.56, 0.8, thicket);
+        pr = 0.03 + 0.3 * smoothstep(0.66, 0.86, outcrop);
       } else if (biome === 'forest') {
         pb = 0.18 + 0.3 * smoothstep(0.45, 0.75, thicket);
         pr = 0.04 + 0.15 * smoothstep(0.66, 0.86, outcrop);
@@ -370,7 +370,7 @@ export function propsInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       let clear = true;
       for (const c of keepClear) if (Math.hypot(px - c.x, pz - c.z) < c.r) { clear = false; break; }
       if (!clear || propBlocked(world, px, pz, kind)) continue;
-      const scale = kind === 'bush' ? 0.6 + 0.8 * sizeR * sizeR : 0.35 + 1.1 * sizeR * sizeR * sizeR;
+      const scale = kind === 'bush' ? 0.6 + 0.8 * sizeR * sizeR : 0.45 + 1.15 * sizeR * sizeR;
       const stretch = kind === 'bush' ? 0.75 + 0.5 * stretchR : 0.45 + 0.45 * stretchR;
       out.push({ x: px, y: h, z: pz, rot, scale, stretch, kind, tint });
     }

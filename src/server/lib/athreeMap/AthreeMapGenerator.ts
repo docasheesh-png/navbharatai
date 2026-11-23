@@ -971,19 +971,21 @@ export function groundColor(world: AthreeWorld, x: number, z: number, biome: Bio
   let r = c[0], g = c[1], b = c[2];
   if (biome === 'grassland' || biome === 'forest') {
     // Lush (deeper, greener) where broad is low; dry (yellow-olive) where it is high.
-    const dry = Math.min(1, Math.max(0, (broad - 0.5) * 2.2));
-    const lush = Math.min(1, Math.max(0, (0.5 - broad) * 2.2));
+    const dry = Math.min(1, Math.max(0, (broad - 0.5) * 2.6));
+    const lush = Math.min(1, Math.max(0, (0.5 - broad) * 2.6));
     const dryC = biome === 'grassland' ? [0.55, 0.53, 0.27] : [0.3, 0.36, 0.17];
     const lushC = biome === 'grassland' ? [0.27, 0.46, 0.15] : [0.12, 0.29, 0.11];
-    r += (dryC[0] - r) * dry * 0.7 + (lushC[0] - r) * lush * 0.7;
-    g += (dryC[1] - g) * dry * 0.7 + (lushC[1] - g) * lush * 0.7;
-    b += (dryC[2] - b) * dry * 0.7 + (lushC[2] - b) * lush * 0.7;
+    r += (dryC[0] - r) * dry * 0.85 + (lushC[0] - r) * lush * 0.85;
+    g += (dryC[1] - g) * dry * 0.85 + (lushC[1] - g) * lush * 0.85;
+    b += (dryC[2] - b) * dry * 0.85 + (lushC[2] - b) * lush * 0.85;
     // Bare earth: a few soft patches where a third noise peaks.
     const soil = fieldNoise(x, z, world.seed + 23, 2, 34, period);
-    const e = Math.min(1, Math.max(0, (soil - 0.72) * 5)) * (biome === 'grassland' ? 0.55 : 0.35);
+    const e = Math.min(1, Math.max(0, (soil - 0.68) * 5)) * (biome === 'grassland' ? 0.55 : 0.35);
     r += (0.43 - r) * e; g += (0.36 - g) * e; b += (0.24 - b) * e;
   }
-  const shade = 0.88 + 0.24 * fine;
+  // Mottling at two scales: a few metres (clumps of darker and lighter grass under the tufts) and tens of metres.
+  const mottle = fieldNoise(x, z, world.seed + 24, 2, 9, period);
+  const shade = 0.82 + 0.2 * fine + 0.16 * mottle;
   return [Math.min(1, r * shade), Math.min(1, g * shade), Math.min(1, b * shade)];
 }
 

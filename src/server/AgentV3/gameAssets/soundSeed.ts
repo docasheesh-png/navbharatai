@@ -11,12 +11,15 @@
  * Kill switch: AGENTV3_GAME_SOUND_LIBRARY=off. Default ON.
  */
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { downloadGameAsset } from './assetDownload';
 import type { GameAssetPersistence, GameAssetWorkspace } from './assetProject';
 import type { AssetObjectStore } from './assetCache';
 import { gameAssetObjectStore } from './objectStore';
 import { SOUND_LIBRARY, SOUND_LIBRARY_LICENCE, SOUND_LIBRARY_REVISION, type LibrarySound } from './soundLibraryCatalogue';
+import { SOUND_PACKS } from './soundPackCatalogue';
 
 export const GAME_SOUND_LIBRARY_PATH = 'src/game/fx/soundLibrary.ts';
 export const GAME_SOUND_CUSTOMIZATIONS_PATH = 'src/game/fx/soundCustomizations.ts';
@@ -32,7 +35,7 @@ export const gameSoundLibraryEnabled = (env: NodeJS.ProcessEnv = process.env): b
 const normalized = (text: string) => ` ${String(text ?? '').slice(0, 16000).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ').trim()} `;
 
 /** Core sounds always, then every sound whose words the prompt names — inside the per-game budget. Pure. */
-export function soundsForPrompt(prompt: string, library: readonly LibrarySound[] = SOUND_LIBRARY): LibrarySound[] {
+export function soundsForPrompt(prompt: string, library: readonly LibrarySound[] = [...SOUND_LIBRARY, ...SOUND_PACKS]): LibrarySound[] {
   const text = normalized(prompt);
   const named = library.filter((s) => !s.core && s.words.some((w) => text.includes(normalized(w))));
   const chosen: LibrarySound[] = []; let bytes = 0; let loops = 0;
@@ -150,6 +153,10 @@ export async function prepareGameSounds(options: GameSoundSeedOptions): Promise<
    * A cache hit costs no origin request at all, so a sound any earlier game fetched is instant.
    */
   const fetchSound = async (s: LibrarySound): Promise<Uint8Array> => {
+    if (s.packaged) {
+      const file = await readFile(join(process.cwd(), 'assets/game-sounds', `${s.sha256}.ogg`));
+      return new Uint8Array(file);
+    }
     const key = `game-assets-public-cc/v1/${s.sha256}.ogg`;
     try { const hit = await store?.read(key, s.bytes + 1); if (verified(s, hit)) return hit; } catch { /* cache outage: the source still answers */ }
     let bytes: Uint8Array;
@@ -187,7 +194,10 @@ export async function prepareGameSounds(options: GameSoundSeedOptions): Promise<
   if (!ready.length) return { ...none, status: 'none', skipped };
   const order = new Map(chosen.map((s, i) => [s.name, i]));
   ready.sort((a, b) => order.get(a.name)! - order.get(b.name)!);
-  const credits = `Sounds: ${SOUND_LIBRARY_LICENCE.attribution}\nLicence: CC BY 4.0 — ${SOUND_LIBRARY_LICENCE.evidenceUrl}\nSource revision: ${SOUND_LIBRARY_REVISION}\nChanges: renamed per sound; playback level adjusted in src/game/fx/soundLibrary.ts.\n\n`
+  const extraCredits = [...new Set(ready.map((s) => s.credit).filter((c): c is string => !!c))];
+  const credits = `Sounds: ${SOUND_LIBRARY_LICENCE.attribution}\nLicence: CC BY 4.0 — ${SOUND_LIBRARY_LICENCE.evidenceUrl}\nSource revision: ${SOUND_LIBRARY_REVISION}\nChanges: renamed per sound; playback level adjusted in src/game/fx/soundLibrary.ts.\n`
+    + (extraCredits.length ? extraCredits.map((c) => `\n${c}`).join('') + '\n' : '')
+    + `\n`
     + ready.map((s) => `${s.name}: ${s.id} (sha256 ${s.sha256})`).join('\n') + '\n';
   const files: Record<string, string> = {
     [GAME_SOUND_LIBRARY_PATH]: generateSoundLibraryModule(ready),

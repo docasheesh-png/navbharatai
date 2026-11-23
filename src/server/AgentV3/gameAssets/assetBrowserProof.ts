@@ -2,18 +2,22 @@ import { gameAssetTextureVerifier } from '../../lib/GameAssetTextureVerifier';
 import { SANDBOX_BROWSER_ARGS, playwrightImport, browserScriptRunLine } from '../sandboxBrowserScript';
 import type { AssetRequirement } from './assetPolicy';
 import type { GameAssetWorkspace } from './assetProject';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { PLATFORM_SCRATCH_DIR } from '../../lib/generatedDirs';
 
 export const ASSET_PROOF_MARKER = 'NBAI_ASSET_PROOF:';
 /** Generated verifier uses only the already-installed sandbox Three.js and browser tooling. */
-export function assetBrowserProofModule(hash: string, animation?: string, importLine = playwrightImport('/home/user/.e-tools'), executablePath?: string): string {
+export function assetBrowserProofModule(hash: string, animation?: string, importLine = playwrightImport('/home/user/.e-tools'), executablePath?: string, modelPath = `.nbai-asset-${hash}.glb`): string {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid proof hash');
+  // The default is the layout of the offline admission checks (scripts/checks), which stage the model in a
+  // throwaway fixture directory. In a sandbox, proveAssetInSandbox always passes its scratch path.
+  if (!isSafeProofPath(modelPath)) throw new Error('Invalid proof model path');
   return `${importLine}
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-const cfg = ${JSON.stringify({ hash, animation, executablePath })};
-const bytes = await readFile('.nbai-asset-' + cfg.hash + '.glb');
+const cfg = ${JSON.stringify({ hash, animation, executablePath, modelPath })};
+const bytes = await readFile(cfg.modelPath);
 if (createHash('sha256').update(bytes).digest('hex') !== cfg.hash) throw Error('Staged asset hash mismatch');
 const modules = {
   '/three.module.js': 'node_modules/three/build/three.module.js',
@@ -86,19 +90,44 @@ try {
 `;
 }
 
+/**
+ * Where one proof stages its model and script: NavBharatAI's scratch directory, never the user's project.
+ *
+ * 🔴 failedbr #2496 (2026-11-22). These used to be `.nbai-asset-<sha>.mjs` / `.glb` at the PROJECT ROOT, removed in
+ * `finally` with `rm -f`. The rm ran — but the script had been written through the dispatcher's recorded write door,
+ * which notes every text write for the durable save, and an rm is not a write. So the script was saved into the
+ * user's project, restored into every later sandbox, listed in the build manifest as a file the build wrote, and
+ * graded by readiness as the app's own "hardcoded localhost URL" and "hardcoded server port". Under
+ * PLATFORM_SCRATCH_DIR (inside node_modules) no store, listing, analyzer, git commit or archive can see it.
+ *
+ * The nonce keeps two proofs of the same bytes (one model asked for with two animations) from deleting each other's
+ * files. The script still runs with the project root as its working directory, so it reads the project's own
+ * `node_modules/three`; Playwright is imported by absolute path. PURE.
+ */
+export function assetProofFiles(hash: string, nonce: string): { model: string; script: string; log: string } {
+  const stem = `${PLATFORM_SCRATCH_DIR}/asset-${hash}-${nonce}`;
+  return { model: `${stem}.glb`, script: `${stem}.mjs`, log: `${stem}.mjs.log` };
+}
+
+/** A relative path a shell line and a JSON literal can both carry unquoted and unescaped. PURE. */
+function isSafeProofPath(path: string): boolean {
+  return /^[A-Za-z0-9._/-]+$/.test(path) && !path.startsWith('/') && !path.split('/').includes('..');
+}
+
 /** A browser/tooling failure rejects L3 so the existing procedural model remains available. */
 export async function proveAssetInSandbox(workspace: GameAssetWorkspace, workspaceId: string, bytes: Uint8Array, requirement: AssetRequirement): Promise<void> {
   const hash = createHash('sha256').update(bytes).digest('hex');
-  const stem = `.nbai-asset-${hash}`;
+  const files = assetProofFiles(hash, randomBytes(6).toString('hex'));
   try {
-    await workspace.writeBinaryFile(workspaceId, `${stem}.glb`, Buffer.from(bytes).toString('base64'));
-    await workspace.writeFile(workspaceId, `${stem}.mjs`, assetBrowserProofModule(hash, requirement.animation));
-    const run = browserScriptRunLine({ toolsDir: '/home/user/.e-tools', scriptPath: `${stem}.mjs`, marker: ASSET_PROOF_MARKER });
+    await workspace.writeBinaryFile(workspaceId, files.model, Buffer.from(bytes).toString('base64'));
+    await workspace.writeFile(workspaceId, files.script, assetBrowserProofModule(hash, requirement.animation, undefined, undefined, files.model));
+    const run = browserScriptRunLine({ toolsDir: '/home/user/.e-tools', scriptPath: files.script, marker: ASSET_PROOF_MARKER });
     const result = await workspace.runCommand(workspaceId, run);
     const line = result.stdout.split('\n').find(l => l.startsWith(ASSET_PROOF_MARKER));
     const proof = line ? JSON.parse(line.slice(ASSET_PROOF_MARKER.length)) : null;
     if (proof?.hash !== hash || proof.rendered !== true || (requirement.animation && proof.animated !== true)) throw new Error('Model render/animation proof unavailable');
   } finally {
-    await workspace.runCommand(workspaceId, `rm -f -- ${stem}.glb ${stem}.mjs`).catch(() => {});
+    // The run line's log goes too — it used to be left behind beside the script.
+    await workspace.runCommand(workspaceId, `rm -f -- ${files.model} ${files.script} ${files.log}`).catch(() => {});
   }
 }

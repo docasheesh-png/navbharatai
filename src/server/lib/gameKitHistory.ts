@@ -97,7 +97,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "89ef1e4ccd41878c6c708ba48ad7be6bb15ecc38d9a4901b2bcac4780e5b83cb",
     "2cc185473f60c59d834ca91a55eb879d633743b729d788171c929520e5c1f076",
     "c8b7adf9e5ab555aeebc5162530a9041dea66b99c5e8ddab3da9f27a435ffd6c",
-    "2df11aaa176f46699c79849fc82d90ce30550f56478214ccf0dba6aa65053925"
+    "2df11aaa176f46699c79849fc82d90ce30550f56478214ccf0dba6aa65053925",
+    "07e6ffff4f5275a773fd7d76632c63889253a8ae85edf0faff30211d143cfbed"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -467,7 +468,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b6e9fd282b301ea95e8df4e455a3d7bdd66e1fea438ced55895f2476eb964cf6",
     "f1487d6a68507e210651446f7266ca1ee490e8feb7747db372ed5df6fa36aeaf",
     "3fbbb8e3727cf50f1b84bb01e53528d811153000058335d87b41eaa86c536eb9",
-    "57439a9bdf9bd38fd4347b14705d2f0a53e6df03af9709b6399d3d6f06c10216"
+    "04db075472ff344422553be6e02198a6dbcb2d480e0a60966da710c9b16218f5",
+    "1cbd90a058c02b352369136eb915dc132d99dd6f3c2d9efccc8c1ae239a2e1c8"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",

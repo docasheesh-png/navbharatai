@@ -471,6 +471,85 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     ...userMaps.map((m): WorldMapPlace => ({ id: m.id, name: named(regionOf(m.id, 'custom')), kind: 'custom', x: m.centre.x, z: m.centre.z, radius: m.size / 2, shape: 'square' })),
   ];
   const unregisterMap = setWorldMapSource({ places: () => mapPlaces, roads: () => roadLines, origin: () => ({ x: chunks.origin.x, z: chunks.origin.z }) });
+  // 🔎 THE PLAYTEST LOOKS AT WHAT IS DRAWN (admin 2026-11-23: "jo bhi banaye real lage, aise glitch na ho"). NavBharatAI's
+  // playtest asks once, read-only, whether the drawn world agrees with the land: the drawn terrain against heightAt, any big
+  // flat thing the GAME added (a grass plane, a floor) floating over or sunk under the hills, a road the game drew whose
+  // faces point down (from above it is not drawn at all), and the player off the ground. The kit's own places, highways and
+  // user maps are not judged here. It only READS the scene, never changes it, and stops after a fixed number of samples
+  // or 150 ms, whichever is first: a big world answers with what it had time to measure.
+  const geometryReport = () => {
+    const t0 = performance.now(), late = () => performance.now() - t0 > 150;
+    const o = chunks.origin, h = (x: number, z: number) => map.world.heightAt(x, z), r1 = (v: number) => Math.round(v * 10) / 10;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), box = new THREE.Box3();
+    // 1. The drawn terrain: a chunk's grid vertices (never its skirt, which hangs below on purpose) against the land there.
+    let samples = 0, off = 0, worst = 0;
+    for (const chunk of chunks.group.children.slice(0, 48)) {
+      const pos = ((chunk as THREE.Mesh).geometry as THREE.BufferGeometry | undefined)?.getAttribute?.('position') as THREE.BufferAttribute | undefined;
+      const n = pos ? Math.round(Math.sqrt(pos.count + 4) - 2) : 0;
+      if (!pos || n < 2 || n * n + 4 * n !== pos.count || late()) continue;
+      chunk.updateWorldMatrix(true, false);
+      for (let k = 0; k < 9; k++) {
+        a.fromBufferAttribute(pos, Math.min(n * n - 1, Math.floor(((k + 0.5) / 9) * n * n))).applyMatrix4(chunk.matrixWorld);
+        const d = Math.abs(a.y - h(a.x + o.x, a.z + o.z));
+        samples++; if (d > 0.5) off++; worst = Math.max(worst, d);
+      }
+    }
+    // 2 and 3. What the GAME added: big flat meshes against the land under them, and road-named meshes' faces.
+    const skip = new Set<THREE.Object3D>([chunks.group, ground, roadGroup, ctx.player.object, ...roots]);
+    const slabs: Array<{ name: string; size: number; above: number; below: number }> = [];
+    const roads: Array<{ name: string; down: number; faces: number }> = [];
+    const label = (m: THREE.Object3D, g: THREE.BufferGeometry) => String(m.name || g.type || 'mesh').replace(/[^\p{L}\p{N} _.-]/gu, '').slice(0, 40);
+    let seen = 0;
+    const visit = (obj: THREE.Object3D): void => {
+      if (skip.has(obj) || !obj.visible || ++seen > 4000 || late()) return;
+      const mesh = obj as THREE.Mesh;
+      const geo = mesh.isMesh && !(mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh ? (mesh.geometry as THREE.BufferGeometry | undefined) : undefined;
+      const pos = geo?.getAttribute?.('position') as THREE.BufferAttribute | undefined;
+      if (geo && pos && pos.count >= 3) {
+        mesh.updateWorldMatrix(true, false);
+        const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).filter(Boolean) as THREE.Material[];
+        const wet = /water|lake|sea|ocean|river|pond|pool|pani|jheel|nadi/i.test(mesh.name) || mats.some((m) => m.transparent && m.opacity < 1);
+        if (!geo.boundingBox) geo.computeBoundingBox();
+        box.copy(geo.boundingBox!).applyMatrix4(mesh.matrixWorld);
+        const size = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+        if (!wet && size >= 100 && box.max.y - box.min.y < 2 && slabs.length < 8) {
+          const y = (box.min.y + box.max.y) / 2;
+          let above = -Infinity, below = -Infinity, wrong = 0;
+          for (const fx of [0.1, 0.5, 0.9]) for (const fz of [0.1, 0.5, 0.9]) {
+            const x = box.min.x + (box.max.x - box.min.x) * fx, z = box.min.z + (box.max.z - box.min.z) * fz;
+            const d = y - h(x + o.x, z + o.z);
+            if (Math.abs(d) > 3) wrong++;
+            above = Math.max(above, d); below = Math.max(below, -d);
+          }
+          if (wrong >= 2) slabs.push({ name: label(mesh, geo), size: Math.round(size), above: r1(above), below: r1(below) });
+        }
+        if (/road|highway|street|sadak|asphalt/i.test(mesh.name) && roads.length < 8 && !mats.some((m) => m.side === THREE.DoubleSide)) {
+          const index = geo.getIndex(), tris = Math.floor((index ? index.count : pos.count) / 3), stride = Math.max(1, Math.floor(tris / 24));
+          const flip = mesh.matrixWorld.determinant() < 0 ? -1 : 1;
+          let down = 0, faces = 0;
+          for (let t = 0; t < tris && faces < 24; t += stride) {
+            const i0 = t * 3;
+            a.fromBufferAttribute(pos, index ? index.getX(i0) : i0).applyMatrix4(mesh.matrixWorld);
+            b.fromBufferAttribute(pos, index ? index.getX(i0 + 1) : i0 + 1).applyMatrix4(mesh.matrixWorld).sub(a);
+            c.fromBufferAttribute(pos, index ? index.getX(i0 + 2) : i0 + 2).applyMatrix4(mesh.matrixWorld).sub(a);
+            const nrm = b.clone().cross(c), len = nrm.length();
+            if (len === 0 || Math.abs(nrm.y) < 0.7 * len) continue;   // only the faces that lie flat
+            faces++; if (nrm.y * flip < 0) down++;
+          }
+          if (faces >= 4 && down > faces / 2) roads.push({ name: label(mesh, geo), down, faces });
+        }
+      }
+      for (const child of obj.children) visit(child);
+    };
+    for (const child of ctx.scene.children) visit(child);
+    // 4. The player on foot, on dry land: how far its feet are from the ground (null while driving or swimming).
+    const at = playerWorld(), land = h(at.x, at.z);
+    const player = ctx.vehicles.seated || land < map.world.seaLevel ? null : r1(at.y - land);
+    return { terrain: { samples, off, worst: r1(worst) }, slabs, roads, player, ms: Math.round(performance.now() - t0) };
+  };
+  const probeHook = { geometry: geometryReport };
+  const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
+  if (probeWindow) probeWindow.__nbWorld = probeHook;
   return {
     map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
@@ -547,6 +626,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
       unregisterMap();
+      if (probeWindow && probeWindow.__nbWorld === probeHook) delete probeWindow.__nbWorld;
     },
   };
 }

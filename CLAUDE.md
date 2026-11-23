@@ -602,6 +602,15 @@ This rule must never be removed. It applies to every game build: a template, a f
 - When the library has no match, `generate_stand_in` makes one model call for a simple low-poly object. That object goes through `standOnGround`.
 - A user upload of `.glb`, `.gltf`, `.png`, `.ogg` or `.mp3` is checked for type and size. A model is also checked for triangles. An uploaded model is placed with `standOnGround`.
 
+## Enterable houses — hard rule (owner 2026-11-23). NEVER REMOVE.
+
+This rule must never be removed. It applies to every action, shooter and open-world game (PUBG, Free Fire, BGMI, GTA style, in any language), including a follow-up edit.
+
+- The map has at least 100 houses, in towns or villages, on roads. A seeded shuffle keeps the same model off adjacent plots and the same model-plus-colour out of the six nearest houses. Rotation, scale and interior differ between neighbours. At least 15 designs are used.
+- Every house opens. The interact key (E, or Use on a phone) swings the door, and the door collider moves with it. The inside is hollow: walls, floor and ceiling collide, the floor is ground so the player stands on it, and the roof fades while the player is inside.
+- Distant houses are instanced shells. The interior is built only when the player is near, then removed. A solid library house is wrapped by `enterableShellFor`.
+- Furniture comes from the library subjects bed, sofa, chair, table, kitchen counter, fridge, lamp, cabinet and shelf.
+
 ## Where things live
 
 - **`CLAUDE.md`** (this file) — rules that rarely change. Auto-loaded.

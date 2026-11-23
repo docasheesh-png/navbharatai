@@ -904,6 +904,8 @@ export interface HeightfieldData {
   size: number;
   x0: number;
   z0: number;
+  /** How many ground edits the world had when this was sampled (map.colliderStale compares). */
+  edits?: number;
 }
 
 export function heightfieldFor(world: AthreeWorld, x0: number, z0: number, size: number, cells: number): HeightfieldData {
@@ -914,7 +916,7 @@ export function heightfieldFor(world: AthreeWorld, x0: number, z0: number, size:
       heights[col * n + row] = world.heightAt(x0 + (col * size) / cells, z0 + (row * size) / cells);
     }
   }
-  return { cells, heights, size, x0, z0 };
+  return { cells, heights, size, x0, z0, edits: world.editCount ? world.editCount() : 0 };
 }
 `;
 
@@ -1215,6 +1217,11 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '  update(cameraX: number, cameraZ: number, time: number, cameraY?: number): { dx: number; dz: number } | null;',
     '  /** Heightfield data for a physics collider over [x0, x0 + size] x [z0, z0 + size]. */',
     '  colliderFor(x0: number, z0: number, size: number, cells: number): HeightfieldData;',
+    '  /**',
+    '   * True when the ground under a heightfield made by colliderFor has changed since it was made (a levelGround, setLand or',
+    '   * addRoad over it): make it again with colliderFor and swap the physics collider, so a car never drives on the old ground.',
+    '   */',
+    '  colliderStale(hf: HeightfieldData): boolean;',
     '  dispose(): void;',
     '}',
     '',
@@ -1295,7 +1302,11 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('rivers')) disposers.push('riverWater?.dispose();');
   if (has('sky')) disposers.push('sky?.dispose();');
   if (has('roads')) disposers.push('roadMesh?.dispose();');
-  add('      return shift;', '    },', '    colliderFor: (x0, z0, size, cells) => heightfieldFor(world, x0, z0, size, cells),', `    dispose: () => { ${disposers.join(' ')} },`, '  };', '}', '');
+  add('      return shift;', '    },', '    colliderFor: (x0, z0, size, cells) => heightfieldFor(world, x0, z0, size, cells),',
+    '    colliderStale: (hf) => {',
+    '      if (!world.editCount || !world.editsSince || typeof hf.edits !== \'number\' || world.editCount() <= hf.edits) return false;',
+    '      return world.editsSince(hf.edits).some((e) => e.x0 <= hf.x0 + hf.size && e.x1 >= hf.x0 && e.z0 <= hf.z0 + hf.size && e.z1 >= hf.z0);',
+    '    },', `    dispose: () => { ${disposers.join(' ')} },`, '  };', '}', '');
   return L.join('\n');
 }
 

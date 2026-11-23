@@ -14,6 +14,7 @@ import { shouldRaceStreams } from './streamRacePolicy';
 import { noteProviderCall, providerInFlight, shouldSkipProvider } from '../ProviderHealth/trafficHealth';
 import { orderProfessionalProviders, professionalPriceIn, professionalTrafficEnabled } from '../ProviderHealth/professionalTraffic';
 import { familyOfEngineName, legacyPathAllows } from '../TrafficRegistry/legacyControl';
+import { withoutUnplugged } from '../ProviderHealth/providerPlug';
 
 /**
  * Which rung actually served a streamed turn.
@@ -200,8 +201,9 @@ export class AIRouter {
 
   /** Professional turns may start with a healthier equal-price rung. Other universes keep registration order. */
   private providersForTurn(): AIProvider[] {
-    if (!this.universe.includes('professional') || !professionalTrafficEnabled()) return this.providers;
-    const facts = this.providers.map((provider) => ({
+    const present = withoutUnplugged(this.providers, (provider) => familyOfEngineName(provider.name));
+    if (!this.universe.includes('professional') || !professionalTrafficEnabled()) return present;
+    const facts = present.map((provider) => ({
       item: provider,
       id: `${provider.name}:${provider.pinnedModel ?? ''}:${provider.priority}`,
       provider: provider.name,

@@ -18,18 +18,34 @@ export interface GroundShapeHalves {
   pinnedVehicleY: Array<{ obj: string; line: string }>;
   movedVehicles: string[];
   ownTrain: Array<{ line: string }>;
+  /** A FEATURE file of a kit game that lays a big flat plane of its own as land (failedbr #2495). */
+  flatLand: Array<{ line: string }>;
 }
-export type GroundFindingKind = 'flat-road' | 'pinned-vehicle-y' | 'own-train';
+export type GroundFindingKind = 'flat-road' | 'pinned-vehicle-y' | 'own-train' | 'own-land';
 export interface GroundFinding { kind: GroundFindingKind; path: string; line: string }
 
 const CODE_FILE = /\.(t|j)sx?$/i;
 const MAX_FILE = 400_000;
-const empty = (): GroundShapeHalves => ({ hillyTerrain: false, kitGround: { road: false, rail: false, height: false }, flatRoad: [], pinnedVehicleY: [], movedVehicles: [], ownTrain: [] });
+const empty = (): GroundShapeHalves => ({ hillyTerrain: false, kitGround: { road: false, rail: false, height: false }, flatRoad: [], pinnedVehicleY: [], movedVehicles: [], ownTrain: [], flatLand: [] });
 
 const ROAD_WORD = /(road|track|asphalt|lane|highway|street|rail)/i;
 const VEHICLE = /\b((?:player)?(?:car|vehicle|kart|bike|truck|bus|racer|auto)\w{0,24})\.position\.y\s*=\s*(-?\d+(?:\.\d+)?|ROAD_SURFACE_Y)\s*;/gi;
 const MOVED = /\b((?:player)?(?:car|vehicle|kart|bike|truck|bus|racer|auto)\w{0,24})\.position\.(?:x|z)\s*[+-]=/gi;
 const TRAIN_MOVE = /\b(train\w{0,24})\.position\.(?:x|z)\s*[+-]?=\s*[^;\n]{0,80}/gi;
+// 🌱 A FEATURE THAT LAYS ITS OWN LAND (failedbr #2495/#2501 autopsy: a 2 km PlaneGeometry at y = -0.1 in an open world's
+// feature — the map's hills cut through it). Only a feature file (src/game/features/…), only a plane or disc laid FLAT in
+// that file, and only a LARGE one (≥ LAND_METRES across): a sign, a decal, a screen, a marker or a HUD quad is never flagged.
+const FEATURE_FILE = /(^|\/)src\/game\/features\/[^/]+\.(t|j)sx?$/i;
+const LAND_METRES = 100;
+const LAID_FLAT = /(?:rotation\.x\s*=\s*-\s*Math\.PI\s*\/\s*2|rotateX\(\s*-\s*Math\.PI\s*\/\s*2\s*\)|rotation\.set\(\s*-\s*Math\.PI\s*\/\s*2\s*,)/;
+const PLANE_ARGS = /new\s+(?:THREE\.)?(PlaneGeometry|CircleGeometry)\s*\(\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?)(?:\s*,\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?))?/g;
+/** A number literal, or a `const|let|var NAME = <number>` in the same file; else NaN (unknown is never flagged). PURE. */
+function metres(token: string | undefined, src: string): number {
+  if (!token) return Number.NaN;
+  if (/^\d/.test(token)) return Number(token);
+  const m = src.match(new RegExp('\\b(?:const|let|var)\\s+' + token.replace(/\$/g, '\\$') + '\\s*(?::\\s*number\\s*)?=\\s*(\\d+(?:\\.\\d+)?)\\s*[;,\\n]'));
+  return m ? Number(m[1]) : Number.NaN;
+}
 
 /** The halves one file contributes. PURE. */
 export function groundShapeHalves(path: string, content: string): GroundShapeHalves {
@@ -50,14 +66,23 @@ export function groundShapeHalves(path: string, content: string): GroundShapeHal
   for (const m of src.matchAll(VEHICLE)) h.pinnedVehicleY.push({ obj: m[1], line: m[0].trim().slice(0, 160) });
   for (const m of src.matchAll(MOVED)) h.movedVehicles.push(m[1]);
   for (const m of src.matchAll(TRAIN_MOVE)) h.ownTrain.push({ line: m[0].trim().slice(0, 160) });
+  if (FEATURE_FILE.test(p) && LAID_FLAT.test(src)) {
+    for (const m of src.matchAll(PLANE_ARGS)) {
+      const a = metres(m[2], src), b = m[1] === 'PlaneGeometry' ? metres(m[3] ?? m[2], src) : a;
+      const across = m[1] === 'CircleGeometry' ? a * 2 : Math.max(a, b);
+      if (Number.isFinite(across) && across >= LAND_METRES) h.flatLand.push({ line: m[0].trim().slice(0, 160) });
+    }
+  }
   return h;
 }
 
 /** Join the halves across the build. Nothing is said for a flat world. PURE. */
 export function groundShapeFindings(index: ReadonlyMap<string, GroundShapeHalves>): GroundFinding[] {
   const all = [...index.entries()];
+  // A feature's own big flat land is said in any kit game: its map is drawn by the kit, not by a file this build wrote.
+  const ownLand: GroundFinding[] = all.flatMap(([path, h]) => (h.flatLand || []).map((r) => ({ kind: 'own-land' as const, path, line: r.line })));
   const hilly = all.some(([, h]) => h.hillyTerrain);
-  if (!hilly) return [];
+  if (!hilly) return ownLand;
   const usesRail = all.some(([, h]) => h.kitGround.rail);
   const usesHeight = all.some(([, h]) => h.kitGround.height);
   const moved = new Set(all.flatMap(([, h]) => h.movedVehicles));
@@ -67,19 +92,26 @@ export function groundShapeFindings(index: ReadonlyMap<string, GroundShapeHalves
     for (const v of h.pinnedVehicleY) if (moved.has(v.obj)) out.push({ kind: 'pinned-vehicle-y', path, line: v.line });
     if (!usesRail && !usesHeight) for (const t of h.ownTrain) out.push({ kind: 'own-train', path, line: t.line });
   }
-  return out;
+  return [...out, ...ownLand];
 }
 
 const WHAT: Readonly<Record<GroundFindingKind, string>> = {
   'flat-road': 'a flat road/track plane at one height over HILLY terrain — the grass rises over it and the car looks sunk. Use createRoad() (createRoad({ path, closed }) for a curve or circuit) or createTrackStream(plan) — they drape on the hills and cut the ground to the road',
   'pinned-vehicle-y': 'a driven vehicle pinned to a constant y on HILLY terrain — it drives into the first hill. Move it with driveVehicle(...) (it follows the ground, pitch and roll) or set y = groundHeightAt(x, z)',
   'own-train': 'a hand-moved train with no kit ground — it floats or sinks off the land. Lay the line with createRailTrack() and put the train at y = groundHeightAt(x, z) (that is the rail top)',
+  'own-land': 'a feature lays a big flat plane of its own as land — it sits at one height while the map\'s hills, sea and levelled places sit at theirs, so they cut through it. Remove it: stand things on the land with world.place(object, x, z), make a different land a LAND region in src/game/world.ts, and use the kit\'s highways for roads (ask the user if no land kind fits)',
 };
 
 /** The note the builder reads with the file still open — once per build. Never a build failure. PURE. */
 export function handWrittenGroundNote(findings: readonly GroundFinding[]): string {
   if (!findings || findings.length === 0) return '';
   const lines = findings.slice(0, 4).map((f) => `- ${f.path}: \`${f.line}\` — ${WHAT[f.kind]}.`);
+  // Only a feature's own land: its own heading (the road/rail note below is unchanged, byte for byte).
+  if (findings.every((f) => f.kind === 'own-land')) {
+    return '\n\n🌱 A FEATURE LAYS ITS OWN LAND — the map will not join it (failedbr #2495):\n'
+      + `${lines.join('\n')}\n`
+      + 'This is a note, not an error: fix the lines above now, while the file is open, unless the user asked for exactly this.';
+  }
   return '\n\n⛰️ HAND-WRITTEN GROUND — this will sink into the hills (admin 2026-11-02, build be6aae96: '
     + '"car zameen me dhas jaati hai"):\n'
     + `${lines.join('\n')}\n`

@@ -136,7 +136,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0fe8e46b17e6b3244f6fc31cab116ee5ed9f48e11b7d8c9f110795d56f0d8ca1",
     "c7ea438236cd31125d333f42fc9f2160dfd1ade6c38a7bf1d8d0678efb3be61f",
     "2da0a2fde705007cec51137c3ad9d4705bad9fba420fafef810649dd0ed16046",
-    "12d11ad8ce51b01b0bc1e8f33c7bb3e4f194c819073d9abe3a616b9927116be0"
+    "12d11ad8ce51b01b0bc1e8f33c7bb3e4f194c819073d9abe3a616b9927116be0",
+    "1fc69964aa1f6861ea80bab3d929b9913c4191ab2e0eff410fcb254f73302ca0"
   ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
@@ -538,7 +539,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "795e63a219ed1b40b80de950fb709153af4847941c15b40975a2b363751a9e07"
   ],
   "src/game/play/raceCustom.ts": [
-    "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0"
+    "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0",
+    "bd765b228f62e3006ab3ad5c1d7142761c10d2929142a6c6f2fcba0d9931fc70"
   ],
   "src/game/play/worldLayer.ts": [
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",

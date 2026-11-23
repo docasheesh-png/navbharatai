@@ -3860,7 +3860,7 @@ import { events } from './core/events';
 import { state } from './core/state';
 import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
 import { createRace, type Race } from './three/race';
-import { applyCarChoice, loadModelTrack, projectRaceChoices, type CarChoice, type CarModelHandle, type ModelTrack, type TrackChoice } from './play/raceCustom';
+import { applyCarChoice, loadModelTrack, loadWorldRace, projectRaceChoices, type CarChoice, type CarModelHandle, type ModelTrack, type TrackChoice, type WorldRaceHandle, type WorldRaceModule } from './play/raceCustom';
 
 /** Original racing starter. New plan identity restarts the game (all settings apply).
  * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan.
@@ -3895,6 +3895,8 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
     setFailure(null); setNotice(null);
     let game: Game | null = null, stream: TrackStream | null = null, course: ModelTrack | null = null;
     let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null, look: CarModelHandle | null = null;
+    // TRACK.world: the race on the open world's highways (play/worldRace.ts), only when the game has that file.
+    let worldRace: WorldRaceHandle | null = null;
     const tuning: VehicleTuning = { ...(carChoice?.tuning ?? {}) };
     // 3-2-1-GO! big in the middle; GO! clears itself.
     let callTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3913,25 +3915,33 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
       if (released) return; released = true;
       for (const off of offs) off();
       offCount(); offGo(); clearTimeout(callTimer);
-      look?.dispose(); race?.dispose(); stream?.dispose(); course?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
+      look?.dispose(); if (worldRace) { worldRace.dispose(); race = null; } race?.dispose(); stream?.dispose(); course?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
     };
-    const begin = (custom: ModelTrack | null) => {
+    const begin = (custom: ModelTrack | null, worldMod: WorldRaceModule | null = null) => {
       if (released || !host.current) return;
       course = custom;
       if (custom) tuning.ground = custom.heightAt;
       try {
         game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
           setup: (ctx) => {
-            if (!custom) stream = createTrackStream(config.current.plan, { detail: 'lite' });
-            const start = custom ? custom.startPose : stream!.startPose;
-            car = createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
+            if (worldMod && !custom) {
+              car = createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
+              try { worldRace = worldMod.startWorldRace(ctx, { car, opponents, finishKm }); tuning.ground = worldRace.groundAt; }
+              catch (error) { worldRace = null; setNotice('This race cannot run on the world (' + (error instanceof Error ? error.message : 'the world could not be made') + '), so it runs on the road library.'); }
+            }
+            if (!custom && !worldRace) stream = createTrackStream(config.current.plan, { detail: 'lite' });
+            const start = worldRace ? worldRace.startPose : custom ? custom.startPose : stream!.startPose;
+            car = car ?? createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
             car.position.set(start.x, start.y, start.z);
             car.rotation.y = start.heading;
             drive = createVehicleState(car, tuning);
-            ctx.scene.add(custom ? custom.root : stream!.root, car); ctx.follow(car);
+            if (worldRace) ctx.scene.add(car); else ctx.scene.add(custom ? custom.root : stream!.root, car);
+            ctx.follow(car);
             // The user's own car model, when they chose one: the kit car keeps driving, the model is its look.
             look = applyCarChoice(car, carChoice, undefined, setNotice);
-            if (custom) {
+            if (worldRace) {
+              race = worldRace.race;
+            } else if (custom) {
               ctx.scene.background = new THREE.Color(skies[0]);
               ctx.scene.fog = new THREE.Fog(skies[0], 120, 900);
               race = createRace(ctx.scene, { stream: custom, opponents, finishDistance: custom.laps * custom.length });
@@ -3941,6 +3951,20 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
           },
           update: (ctx, dt) => {
             if (!car) return;
+            if (worldRace) {
+              // The race on the world's highways: the world streams round the car, the route gives its distance.
+              if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt, tuning);
+              const w = worldRace.update(ctx, dt);
+              hudTime += dt;
+              if (hud.current && hudTime >= 0.2) {
+                hudTime = 0;
+                const st = w.standing;
+                const place = st.total > 1 ? 'P' + st.position + '/' + st.total + ' · ' : '';
+                const clock = Math.floor(st.time / 60) + ':' + (st.time % 60).toFixed(1).padStart(4, '0') + ' · ';
+                hud.current.textContent = place + clock + 'World race · ' + w.km.toFixed(1) + '/' + w.totalKm.toFixed(1) + ' km · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+              }
+              return;
+            }
             if (course) {
               // A lap race on the user's own track: the race holds the car at the line, then laps count to the finish.
               if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt, tuning);
@@ -3994,6 +4018,14 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
             lastMap = -1;
           };
         }
+        if (worldRace) {
+          // Play again after the finish starts the same world race from the line.
+          offs.push(events.on('GAME_STARTED', () => {
+            if (!car || !worldRace) return;
+            worldRace.reset();
+            drive = createVehicleState(car, tuning);
+          }));
+        }
         if (custom) {
           // Play again after the finish starts the same lap race from the line.
           offs.push(events.on('GAME_STARTED', () => {
@@ -4011,7 +4043,15 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
       }
     };
     const trackName = typeof trackChoice?.model === 'string' ? trackChoice.model.trim() : '';
-    if (trackChoice && trackName) {
+    if (trackChoice && !trackName && trackChoice.world === true) {
+      // TRACK.world: the race on the open world, when the game has the world race (written after the user said yes).
+      setNotice('Loading the world...');
+      void loadWorldRace().then((mod) => {
+        if (released) return;
+        setNotice(mod ? null : 'This game does not have the world race yet, so it runs on the road library.');
+        begin(null, mod);
+      });
+    } else if (trackChoice && trackName) {
       // The user's own track: loaded and read first, then raced on — or the reason it cannot be, said on screen.
       setNotice('Loading your track...');
       void loadModelTrack(trackChoice).then((built) => {

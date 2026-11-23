@@ -69,7 +69,22 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
 }
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
-export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom';
+export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom' | 'venue';
+/** A SPORTS GROUND OR VENUE on the map: full size, on its own level pad, with its markings (map expansion item 6). */
+export type VenueKind = 'cricket-ground' | 'football-field' | 'stadium' | 'race-circuit' | 'arena';
+/**
+ * The standard size of each venue (metres): the ground itself (width along x, depth along z) and the pad it stands on.
+ * Cricket: a 68 m boundary around a 20.12 m pitch. Football: a 105 × 68 m pitch. Stadium: that pitch with stands. Race circuit: a
+ * 12 m track, 400 m straights and 100 m bends. Arena: a 60 × 40 m floor with walls.
+ */
+export const VENUE_SIZES: Record<VenueKind, { width: number; depth: number }> = {
+  'cricket-ground': { width: 150, depth: 150 },
+  'football-field': { width: 115, depth: 78 },
+  stadium: { width: 150, depth: 118 },
+  'race-circuit': { width: 624, depth: 224 },
+  arena: { width: 70, depth: 50 },
+};
+export function isVenueKind(v: unknown): v is VenueKind { return typeof v === 'string' && v in VENUE_SIZES; }
 /**
  * A LAND, not a settlement: a desert, a jungle, mountains, snow, a beach or an open grass field (a maidan, a meadow) laid on
  * part of the map (no buildings).
@@ -130,8 +145,10 @@ export interface WorldRegion {
    * any .glb/.gltf/.obj they attached lands there. It stands on its own levelled ground, sized to size metres across.
    */
   model?: string;
-  /** A user map only: how wide it stands, in metres (default 400). */
+  /** A user map only: how wide it stands, in metres (default 400). A venue: how long its longer side is (default: its standard size). */
   size?: number;
+  /** A venue only (kind 'venue'): which one. */
+  venue?: VenueKind;
 }
 
 /** A user's own map on the world (a 'custom' region): where it stands, and the model it loads when the player comes near. */
@@ -154,6 +171,22 @@ export interface OpenWorldLand {
   readonly radius: number;
   /** A land laid against another place or land (its joinTo): the id it stands against. */
   readonly joinedTo?: string;
+}
+/** A sports ground or venue on the map, on its own level pad. Its own numbers (toWorld) are in VENUE metres, centred on it. */
+export interface OpenWorldVenue {
+  readonly id: string;
+  readonly venue: VenueKind;
+  /** Its centre in WORLD metres, and the height of its level ground. */
+  readonly centre: { x: number; y: number; z: number };
+  /** The ground's size in metres: width along x, depth along z (the pad it stands on). */
+  readonly width: number;
+  readonly depth: number;
+  /** A venue laid beside a place or land (its joinTo): the id it stands beside. */
+  readonly joinedTo?: string;
+  /** Drawn yet (it is drawn when the player first comes near). */
+  readonly built: boolean;
+  /** A VENUE point (0, 0 is its centre, in its standard metres) as a WORLD place on its level ground. */
+  toWorld(x: number, z: number): { x: number; y: number; z: number };
 }
 const COMPASS: Record<Compass, number> = { north: 0, 'north-east': Math.PI / 4, east: Math.PI / 2, 'south-east': (3 * Math.PI) / 4, south: Math.PI, 'south-west': (5 * Math.PI) / 4, west: (3 * Math.PI) / 2, 'north-west': (7 * Math.PI) / 4 };
 const REGION_PRESETS: Record<'city' | 'town' | 'village', { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
@@ -192,6 +225,8 @@ export interface OpenWorld {
   readonly lands: OpenWorldLand[];
   /** The user's own maps on the world ('custom' regions), each loaded when the player comes near it. */
   readonly userMaps: ReadonlyArray<OpenWorldUserMap>;
+  /** The sports grounds and venues on the map ('venue' regions), each drawn when the player first comes near it. */
+  readonly venues: ReadonlyArray<OpenWorldVenue>;
   /** The highways joining every place and land (centre lines in WORLD metres, with their heights). */
   readonly highways: ReadonlyArray<ReadonlyArray<{ x: number; y: number; z: number }>>;
   /**
@@ -256,6 +291,47 @@ export function spanningPairs(stops: ReadonlyArray<{ x: number; z: number }>): A
   return out;
 }
 
+/** An axis-aligned pad, already including any clearance (the world uses a 12 m shoulder). */
+export type VenueBox = { x0: number; x1: number; z0: number; z1: number };
+
+const inVenueBox = (p: { x: number; z: number }, b: VenueBox): boolean => p.x >= b.x0 && p.x <= b.x1 && p.z >= b.z0 && p.z <= b.z1;
+
+/** Liang–Barsky: whether the segment a→c enters the box. PURE. */
+export function segmentCrossesVenue(a: { x: number; z: number }, c: { x: number; z: number }, b: VenueBox): boolean {
+  let t0 = 0, t1 = 1;
+  const dx = c.x - a.x, dz = c.z - a.z;
+  for (const [pp, q] of [[-dx, a.x - b.x0], [dx, b.x1 - a.x], [-dz, a.z - b.z0], [dz, b.z1 - a.z]]) {
+    if (pp === 0) { if (q < 0) return false; continue; }
+    const t = q / pp;
+    if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+  }
+  return t0 <= t1;
+}
+
+/**
+ * A highway from one stop to the other, bent around a full side (two corners) of the first venue pad it would cross.
+ * A single corner is not enough: the second leg of a long straight road can still clip the pad. Unchanged when it does
+ * not cross any pad, when an end already sits in a pad, or when there are no venues. PURE.
+ */
+export function routeAroundVenues(from: { x: number; z: number }, to: { x: number; z: number }, boxes: ReadonlyArray<VenueBox>): Array<{ x: number; z: number }> {
+  const clear = 30;
+  for (const b of boxes) {
+    if (inVenueBox(from, b) || inVenueBox(to, b) || !segmentCrossesVenue(from, to, b)) continue;
+    const sw = { x: b.x0 - clear, z: b.z0 - clear }, se = { x: b.x1 + clear, z: b.z0 - clear };
+    const nw = { x: b.x0 - clear, z: b.z1 + clear }, ne = { x: b.x1 + clear, z: b.z1 + clear };
+    // Around the south, north, west or east face — never a single corner, so a long second leg cannot clip the pad.
+    const sides = [[sw, se], [nw, ne], [sw, nw], [se, ne]];
+    let best: Array<{ x: number; z: number }> | null = null, bestLen = Infinity;
+    for (const [a, c] of sides) {
+      if (segmentCrossesVenue(from, a, b) || segmentCrossesVenue(a, c, b) || segmentCrossesVenue(c, to, b)) continue;
+      const len = Math.hypot(a.x - from.x, a.z - from.z) + Math.hypot(c.x - a.x, c.z - a.z) + Math.hypot(to.x - c.x, to.z - c.z);
+      if (len < bestLen) { best = [from, a, c, to]; bestLen = len; }
+    }
+    if (best) return best;
+  }
+  return [from, to];
+}
+
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
   const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
@@ -311,6 +387,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // own list: it was pushed here once, and every place built after it then moved, hid and disposed its neighbour's root.
   const roots: THREE.Group[] = [];
   const userRoots: THREE.Object3D[] = [];
+  const venueRoots: THREE.Group[] = [];
   let disposed = false;
   const locals: THREE.Object3D[] = [];
   // The ground already given to a place, a land or a user map. Kept in 1 km cells as well as in order, so "is anything here?"
@@ -341,6 +418,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const seenIds = new Set<string>();
   const landList: OpenWorldLand[] = [];
   const userMaps: Array<{ id: string; model: string; centre: { x: number; y: number; z: number }; size: number; status: OpenWorldUserMap['status']; reason?: string; root?: THREE.Object3D }> = [];
+  const venueList: Array<{ id: string; venue: VenueKind; centre: { x: number; y: number; z: number }; width: number; depth: number; scale: number; joinedTo?: string; root?: THREE.Group }> = [];
   const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
   // 🌌 A UNIVERSE OF PLACES (admin 2026-11-22: "mujhe chahiye 10—100 maps jod kar bahut bada universe bhi bana sake"). Up to
   // MAX_REGIONS places and lands. Every place is PLANNED up front — its spot on the map and its levelled ground, which are cheap
@@ -418,13 +496,97 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     console.error('[world] the land "' + region.id + '" could not lie against "' + id + '" (' + (region.toward ? 'the ' + region.toward + ' side is' : 'every side is') + ' water or another place); it was laid nearby instead.');
     return null;
   };
+  /**
+   * 🏟️ A SPORTS GROUND OR VENUE (map expansion item 6): a cricket ground, a football field, a stadium, a race circuit or an
+   * arena at its standard size (or the size asked), on its own level pad with its markings. With joinTo it stands right beside
+   * that place (a whole grown city), land, user map or venue — on the side toward says, else the first free dry side — on the
+   * same ground level as a city it joins, with no highway between them; else it is spread like any place. It never stands on
+   * another place, in the sea or across a road; where nothing fits it is said in the console and left out.
+   */
+  const planVenue = (region: WorldRegion, n: number): void => {
+    const venue: VenueKind = isVenueKind(region.venue) ? region.venue : 'football-field';
+    if (!isVenueKind(region.venue)) console.error('[world] the venue "' + region.id + '" names no known venue (' + Object.keys(VENUE_SIZES).join(', ') + '); it was made a football field.');
+    const std = VENUE_SIZES[venue], longest = Math.max(std.width, std.depth);
+    const scale = Number(region.size) > 0 ? Math.min(2, Math.max(0.6, Number(region.size) / longest)) : 1;
+    const hw = (std.width * scale) / 2, hd = (std.depth * scale) / 2, vr = Math.max(hw, hd);
+    /** Dry, off the map's roads, and level enough: the rise across the ground, or Infinity. */
+    const groundCost = (cx: number, cz: number): number => {
+      let low = Infinity, high = -Infinity;
+      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+        const x = cx + (i / 2) * hw, z = cz + (j / 2) * hd, h = map.world.heightAt(x, z);
+        if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) return Infinity;
+        low = Math.min(low, h); high = Math.max(high, h);
+      }
+      return high - low;
+    };
+    let at: { x: number; z: number } | null = null, level: number | undefined, joinedTo: string | undefined;
+    if (typeof region.joinTo === 'string' && region.joinTo) {
+      const id = region.joinTo;
+      let shape: { x: number; z: number; hw?: number; hd?: number; radius?: number; y?: number; skip: Array<{ x: number; z: number }> } | null = null;
+      const place = planned.find((q) => q.region.id === id);
+      if (place) {
+        const rootId = place.cluster?.root ?? place.region.id;
+        const tiles = planned.filter((q) => (q.cluster?.root ?? q.region.id) === rootId);
+        let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+        for (const q of tiles) { const pl = planCity(q.cityOptions); x0 = Math.min(x0, q.centre.x - pl.width / 2); x1 = Math.max(x1, q.centre.x + pl.width / 2); z0 = Math.min(z0, q.centre.z - pl.depth / 2); z1 = Math.max(z1, q.centre.z + pl.depth / 2); }
+        shape = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: (x1 - x0) / 2, hd: (z1 - z0) / 2, y: place.centre.y, skip: tiles.map((q) => q.centre) };
+      } else {
+        const land = landList.find((l) => l.id === id), user = userMaps.find((m) => m.id === id), other = venueList.find((v) => v.id === id);
+        if (land) shape = { x: land.centre.x, z: land.centre.z, radius: land.radius * 0.85, skip: [land.centre] };
+        else if (user) shape = { x: user.centre.x, z: user.centre.z, hw: user.size / 2, hd: user.size / 2, skip: [user.centre] };
+        else if (other) shape = { x: other.centre.x, z: other.centre.z, hw: other.width / 2, hd: other.depth / 2, y: other.centre.y, skip: [other.centre] };
+      }
+      if (!shape) console.error('[world] the venue "' + region.id + '" stands beside "' + id + '", which is not on the map (yet); it was laid on its own instead.');
+      else {
+        const first = region.toward !== undefined ? COMPASS[region.toward] : 0;
+        const sides = region.toward !== undefined ? [first] : [0, 1, 2, 3, 4, 5, 6, 7].map((k) => first + (k * Math.PI) / 4);
+        for (const angle of sides) {
+          const ux = Math.sin(angle), uz = -Math.cos(angle);
+          const border = shape.radius !== undefined ? shape.radius : Math.min(shape.hw! / Math.max(1e-6, Math.abs(ux)), shape.hd! / Math.max(1e-6, Math.abs(uz)));
+          const own = Math.min(hw / Math.max(1e-6, Math.abs(ux)), hd / Math.max(1e-6, Math.abs(uz)));
+          const c = { x: shape.x + ux * (border + own + 14), z: shape.z + uz * (border + own + 14) };
+          const isBase = (t: { x: number; z: number }) => shape!.skip.some((k) => k.x === t.x && k.z === t.z);
+          if (taken.some(c.x, c.z, vr + 20, (t) => !isBase(t) && Math.hypot(c.x - t.x, c.z - t.z) < t.r + vr + 20)) continue;
+          if (!Number.isFinite(groundCost(c.x, c.z))) continue;
+          at = c; level = shape.y; joinedTo = id; break;
+        }
+        if (!at) console.error('[world] the venue "' + region.id + '" could not stand beside "' + id + '" (' + (region.toward ? 'the ' + region.toward + ' side is' : 'every side is') + ' water, a road or another place); it was laid on its own instead.');
+      }
+    }
+    if (!at) {
+      // Spread like a place: the way it was asked (toward, distance), else around the first place; a little further out, and a
+      // little to either side, before giving up.
+      const base = planned[0]?.centre ?? spawn;
+      const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
+      const spacing = vr * 2 + 400;
+      let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + vr + 300, spacing * Math.sqrt(Math.max(1, n)));
+      let best: { x: number; z: number; cost: number } | null = null;
+      for (let attempt = 0; attempt < 14 && !best; attempt++, far += spacing * 0.5) {
+        const turn = (attempt % 2 ? 1 : -1) * Math.ceil(attempt / 2) * (region.toward !== undefined ? 0.15 : 0.35);
+        const home = { x: base.x + Math.sin(angle + turn) * far, z: base.z - Math.cos(angle + turn) * far };
+        for (const ring of [0, 1, 2]) for (let k = 0; k < (ring ? 8 : 1); k++) {
+          const a = (k / 8) * Math.PI * 2, r = ring * vr * 0.9;
+          const cx = home.x + Math.cos(a) * r, cz = home.z + Math.sin(a) * r;
+          if (taken.some(cx, cz, vr + 140, (t) => Math.hypot(cx - t.x, cz - t.z) < t.r + vr + 140)) continue;
+          const cost = groundCost(cx, cz);
+          if (cost < (best?.cost ?? Infinity)) best = { x: cx, z: cz, cost };
+        }
+      }
+      if (!best) { console.error('[world] no dry, level ground was found for the venue "' + region.id + '"; it was left out.'); return; }
+      at = best;
+    }
+    const y = map.world.levelGround(at.x, at.z, hw + 8, hd + 8, 60, level);
+    taken.push({ x: at.x, z: at.z, r: vr });
+    venueList.push({ id: region.id, venue, centre: { x: at.x, y, z: at.z }, width: hw * 2, depth: hd * 2, scale, ...(joinedTo ? { joinedTo } : {}) });
+  };
   let overCap = 0;
   const waiting: Array<{ region: WorldRegion; preset: PlannedPlace['preset']; cityOptions: CityOptions; hx: number; hz: number; reach: number; angle: number }> = [];
   for (const region of wanted) {
-    if (region && planned.length + landList.length + userMaps.length >= MAX_REGIONS) { overCap++; continue; }
-    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length >= MAX_REGIONS) continue;
+    if (region && planned.length + landList.length + userMaps.length + venueList.length >= MAX_REGIONS) { overCap++; continue; }
+    if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length + venueList.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
-    const n = planned.length + landList.length + userMaps.length;
+    const n = planned.length + landList.length + userMaps.length + venueList.length;
+    if (region.kind === 'venue') { planVenue(region, n); continue; }
     // 🗺️ A MAP THE USER GAVE (admin 2026-11-22: "user khud ka map kan.zip ya koi aur format upload kar ke bole yeh bhi north add kar
     // do — to user ka diya map bhi usi game me add ho jaye"). Planned like a land (toward, distance, clear of the others) on its
     // own levelled ground; the model itself is loaded only when the player comes near, and a file that cannot be read is said.
@@ -589,7 +751,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // the road running out. Laid before the first frame, like the levelled ground.
   // A place's streets fill a rectangle (±width/2, ±depth/2 around its centre; the edge street runs along its border): a road
   // ends ON that border, so it meets the edge street — never short of it in the grass, never inside the blocks on a diagonal.
-  const stops: Array<{ x: number; z: number; r: number; hw?: number; hd?: number }> = [...planned.map((p) => { const pl = planCity(p.cityOptions); return { x: p.centre.x, z: p.centre.z, r: p.reach, hw: pl.width / 2, hd: pl.depth / 2 }; }), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 }))];
+  const stops: Array<{ x: number; z: number; r: number; hw?: number; hd?: number }> = [...planned.map((p) => { const pl = planCity(p.cityOptions); return { x: p.centre.x, z: p.centre.z, r: p.reach, hw: pl.width / 2, hd: pl.depth / 2 }; }), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 })),
+    // A venue's road ends on the edge of its pad (never on the field).
+    ...venueList.map((v) => ({ x: v.centre.x, z: v.centre.z, r: Math.max(v.width, v.depth) / 2, hw: v.width / 2 + 8, hd: v.depth / 2 + 8 }))];
   const roadGroup = new THREE.Group(); roadGroup.name = 'Highways';
   // Pulled a little towards the camera in the depth test (polygonOffset), so the ribbon never flickers against the carved
   // ground under it when seen from far away.
@@ -600,10 +764,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const p = planned.find((q) => q.region.id === id);
     if (p) { const rootId = p.cluster?.root ?? p.region.id; return planned.map((q, i) => ((q.cluster?.root ?? q.region.id) === rootId ? i : -1)).filter((i) => i >= 0); }
     const l = landList.findIndex((q) => q.id === id); if (l >= 0) return [planned.length + l];
-    const m = userMaps.findIndex((q) => q.id === id); return m >= 0 ? [planned.length + landList.length + m] : [];
+    const m = userMaps.findIndex((q) => q.id === id); if (m >= 0) return [planned.length + landList.length + m];
+    const v = venueList.findIndex((q) => q.id === id); return v >= 0 ? [planned.length + landList.length + userMaps.length + v] : [];
   };
   const joinedPairs = new Set<string>();
   landList.forEach((l, i) => { if (l.joinedTo) for (const j of stopIndex(l.joinedTo)) { joinedPairs.add((planned.length + i) + ',' + j); joinedPairs.add(j + ',' + (planned.length + i)); } });
+  // A venue beside a place stands at its edge: no highway between them either.
+  venueList.forEach((v, i) => { const k = planned.length + landList.length + userMaps.length + i; if (v.joinedTo) for (const j of stopIndex(v.joinedTo)) { joinedPairs.add(k + ',' + j); joinedPairs.add(j + ',' + k); } });
   /** The road between two stops, from the edge of one to the edge of the other; null when they touch (no road needed). */
   const roadBetween = (A0: (typeof stops)[number], B0: (typeof stops)[number], dist: number): { from: { x: number; z: number }; to: { x: number; z: number } } | null => {
     const len = dist || 1;
@@ -725,7 +892,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const ids = rescued.slice(0, 8).map((p) => '"' + p.region.id + '"').join(', ') + (rescued.length > 8 ? ' and ' + (rescued.length - 8) + ' more' : '');
     console.error('[world] ' + rescued.length + ' place(s) had no dry ground where they were asked and stand on the nearest dry ground, as close as they can to the direction they were asked: ' + ids + '.');
   }
-  for (const road of roads) roadLines.push(map.world.addRoad([road.from, road.to], 9));
+  // A highway never runs across a venue's ground: one that would is bent around the nearest corner of its pad.
+  const venueBoxes = venueList.map((v) => ({ x0: v.centre.x - v.width / 2 - 12, x1: v.centre.x + v.width / 2 + 12, z0: v.centre.z - v.depth / 2 - 12, z1: v.centre.z + v.depth / 2 + 12 }));
+  for (const road of roads) roadLines.push(map.world.addRoad(venueBoxes.length ? routeAroundVenues(road.from, road.to, venueBoxes) : [road.from, road.to], 9));
   /** One asphalt ribbon per road, a little above the carved ground, its faces pointing up. */
   for (const line of roadLines) {
     if (line.length < 2) continue;
@@ -830,6 +999,97 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
   };
+  // 🏟️ A VENUE IS DRAWN when the player first comes near it: its field, its markings at their real sizes, and its stands,
+  // walls, goals and sight screens solid to walk and drive into. Its surfaces lie a few centimetres over its level pad,
+  // pulled towards the camera in the depth test, so they never flicker against the ground. The batsman, the ball, the
+  // wickets and the players are the game's, never the world's.
+  const venueMat = (color: number, lift: number, basic = false): THREE.Material => (basic
+    ? new THREE.MeshBasicMaterial({ color, polygonOffset: true, polygonOffsetFactor: -lift, polygonOffsetUnits: -2 * lift })
+    : new THREE.MeshStandardMaterial({ color, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -lift, polygonOffsetUnits: -2 * lift }));
+  const venueMats = {
+    grass: venueMat(0x3e8a3a, 1), stripe: venueMat(0x469a40, 2), pitch: venueMat(0xc9b27c, 2), sand: venueMat(0xd6bf8c, 1),
+    track: venueMat(0x34363a, 1), line: venueMat(0xf4f4f0, 3, true), solid: new THREE.MeshStandardMaterial({ color: 0xa3a8ae, roughness: 0.85 }),
+    seat: new THREE.MeshStandardMaterial({ color: 0x2f5fa8, roughness: 0.7 }), white: new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }),
+  };
+  const buildVenue = (v: (typeof venueList)[number]): void => {
+    const root = new THREE.Group();
+    root.name = 'Venue ' + v.id;
+    const flat = (w: number, d: number, x: number, z: number, y: number, mat: THREE.Material, name: string) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat); m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.name = name; root.add(m); return m;
+    };
+    const ring = (r: number, width: number, y: number, mat: THREE.Material, name: string, start = 0, length = Math.PI * 2, x = 0) => {
+      const m = new THREE.Mesh(new THREE.RingGeometry(r - width / 2, r + width / 2, Math.max(48, Math.round(r * 1.5)), 1, start, length), mat);
+      m.rotation.x = -Math.PI / 2; m.position.set(x, y, 0); m.name = name; root.add(m); return m;
+    };
+    const solid = (w: number, h: number, d: number, x: number, y: number, z: number, mat: THREE.Material, name: string) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y + h / 2, z); m.name = name; markWorldCollider(m, 'solid'); root.add(m); return m;
+    };
+    const L = 0.12, Y = 0.05, YL = 0.07;
+    const outline = (w: number, d: number, x: number, z: number, name: string) => {
+      flat(w + L, L, x, z - d / 2, YL, venueMats.line, name); flat(w + L, L, x, z + d / 2, YL, venueMats.line, name);
+      flat(L, d, x - w / 2, z, YL, venueMats.line, name); flat(L, d, x + w / 2, z, YL, venueMats.line, name);
+    };
+    const football = () => {
+      // 105 × 68 m along x, mown in stripes; its lines, circles, boxes and goals at FIFA sizes.
+      flat(115, 78, 0, 0, Y, venueMats.grass, 'Field');
+      for (let k = 0; k < 10; k += 2) flat(10.5, 68, -52.5 + 5.25 + k * 10.5, 0, Y + 0.005, venueMats.stripe, 'Field stripe');
+      outline(105, 68, 0, 0, 'Touch line');
+      flat(L, 68, 0, 0, YL, venueMats.line, 'Halfway line');
+      ring(9.15, L, YL, venueMats.line, 'Centre circle');
+      ring(0.15, 0.3, YL, venueMats.line, 'Centre spot');
+      for (const side of [-1, 1]) {
+        outline(16.5, 40.32, side * (52.5 - 8.25), 0, 'Penalty area');
+        outline(5.5, 18.32, side * (52.5 - 2.75), 0, 'Goal area');
+        ring(0.15, 0.3, YL, venueMats.line, 'Penalty spot', 0, Math.PI * 2, side * (52.5 - 11));
+        const gx = side * (52.5 + 0.06);
+        solid(0.12, 2.44, 0.12, gx, 0, -3.66, venueMats.white, 'Goal post'); solid(0.12, 2.44, 0.12, gx, 0, 3.66, venueMats.white, 'Goal post');
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 7.44), venueMats.white); bar.position.set(gx, 2.44, 0); bar.name = 'Crossbar'; root.add(bar);
+      }
+    };
+    if (v.venue === 'cricket-ground') {
+      // A 68 m boundary, the 30-yard circle, a 20.12 × 3.05 m pitch with its creases, and a sight screen behind each end.
+      flat(150, 150, 0, 0, Y, venueMats.grass, 'Outfield');
+      ring(68, 0.3, YL, venueMats.line, 'Boundary');
+      ring(27.43, L, YL, venueMats.line, 'Inner circle');
+      flat(3.05, 20.12, 0, 0, Y + 0.01, venueMats.pitch, 'Pitch');
+      for (const end of [-1, 1]) {
+        flat(2.64, L, 0, end * 10.06, YL, venueMats.line, 'Bowling crease');
+        flat(3.66, L, 0, end * (10.06 - 1.22), YL, venueMats.line, 'Popping crease');
+        solid(10, 4, 0.5, 0, 0, end * 71.5, venueMats.white, 'Sight screen');
+      }
+    } else if (v.venue === 'football-field') football();
+    else if (v.venue === 'stadium') {
+      // The football pitch inside four stands that step up and back, five rows each.
+      football();
+      const rows = 5;
+      for (let k = 0; k < rows; k++) {
+        const h = 1.2 * (k + 1);
+        for (const side of [-1, 1]) {
+          solid(115 + 4 * k * 2, h, 3.4, 0, 0, side * (39 + 1.7 + k * 3.4), k % 2 ? venueMats.seat : venueMats.solid, 'Stand');
+          solid(3.4, h, 78, side * (57.5 + 1.7 + k * 3.4), 0, 0, k % 2 ? venueMats.seat : venueMats.solid, 'Stand');
+        }
+      }
+    } else if (v.venue === 'race-circuit') {
+      // Two 400 m straights and two bends of 100 m radius, 12 m wide, edged in white, with a start line.
+      for (const side of [-1, 1]) {
+        flat(400, 12, 0, side * 100, Y, venueMats.track, 'Track');
+        flat(400, 0.3, 0, side * 94, YL, venueMats.line, 'Track edge'); flat(400, 0.3, 0, side * 106, YL, venueMats.line, 'Track edge');
+        const start = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+        ring(100, 12, Y, venueMats.track, 'Track', start, Math.PI, side * 200);
+        ring(94, 0.3, YL, venueMats.line, 'Track edge', start, Math.PI, side * 200); ring(106, 0.3, YL, venueMats.line, 'Track edge', start, Math.PI, side * 200);
+      }
+      flat(1.5, 12, 0, 100, YL, venueMats.line, 'Start line');
+    } else {
+      // A 60 × 40 m sand floor inside a 1.5 m wall.
+      flat(60, 40, 0, 0, Y, venueMats.sand, 'Arena floor');
+      for (const side of [-1, 1]) {
+        solid(60.8, 1.5, 0.4, 0, 0, side * 20.2, venueMats.solid, 'Arena wall'); solid(0.4, 1.5, 40, side * 30.2, 0, 0, venueMats.solid, 'Arena wall');
+      }
+    }
+    root.scale.set(v.scale, 1, v.scale);
+    root.position.set(v.centre.x - chunks.origin.x, v.centre.y, v.centre.z - chunks.origin.z);
+    ctx.scene.add(root); venueRoots.push(root); v.root = root;
+  };
   // 🗺️ THE MAP KNOWS THE WORLD (admin 2026-11-22: "jaise PUBG/Free Fire me location map … tap kar kar pura map aur location").
   // Every place, land and user map with its name, and every highway, handed to the Hud's corner map and full map in WORLD
   // metres. origin() turns the render positions the shell reads (the player, the vehicle it drives, every marker) into WORLD
@@ -840,6 +1100,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     ...planned.map((p): WorldMapPlace => ({ id: p.region.id, name: p.cluster && !p.region.name ? '' : named(p.region), kind: p.region.kind, x: p.centre.x, z: p.centre.z, radius: p.reach, shape: 'square' })),
     ...landList.map((l): WorldMapPlace => ({ id: l.id, name: named(regionOf(l.id, l.kind)), kind: l.kind, x: l.centre.x, z: l.centre.z, radius: l.radius, shape: 'circle' })),
     ...userMaps.map((m): WorldMapPlace => ({ id: m.id, name: named(regionOf(m.id, 'custom')), kind: 'custom', x: m.centre.x, z: m.centre.z, radius: m.size / 2, shape: 'square' })),
+    ...venueList.map((v): WorldMapPlace => ({ id: v.id, name: named(regionOf(v.id, 'venue')), kind: 'venue', x: v.centre.x, z: v.centre.z, radius: Math.max(v.width, v.depth) / 2, shape: 'square' })),
   ];
   const unregisterMap = setWorldMapSource({ places: () => mapPlaces, roads: () => roadLines, origin: () => ({ x: chunks.origin.x, z: chunks.origin.z }) });
   // 🔎 THE PLAYTEST LOOKS AT WHAT IS DRAWN (admin 2026-11-23: "jo bhi banaye real lage, aise glitch na ho"). NavBharatAI's
@@ -866,7 +1127,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
     }
     // 2 and 3. What the GAME added: big flat meshes against the land under them, and road-named meshes' faces.
-    const skip = new Set<THREE.Object3D>([chunks.group, ground, roadGroup, ctx.player.object, ...roots]);
+    const skip = new Set<THREE.Object3D>([chunks.group, ground, roadGroup, ctx.player.object, ...roots, ...venueRoots]);
     const slabs: Array<{ name: string; size: number; above: number; below: number }> = [];
     const roads: Array<{ name: string; down: number; faces: number }> = [];
     const label = (m: THREE.Object3D, g: THREE.BufferGeometry) => String(m.name || g.type || 'mesh').replace(/[^\p{L}\p{N} _.-]/gu, '').slice(0, 40);
@@ -924,6 +1185,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   return {
     map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
+    venues: venueList.map((v): OpenWorldVenue => ({
+      get id() { return v.id; }, get venue() { return v.venue; }, get centre() { return v.centre; }, get width() { return v.width; }, get depth() { return v.depth; },
+      get joinedTo() { return v.joinedTo; }, get built() { return !!v.root; },
+      toWorld: (x: number, z: number) => ({ x: v.centre.x + x * v.scale, y: v.centre.y, z: v.centre.z + z * v.scale }),
+    })),
     places: planned.map((p) => ({ id: p.region.id, kind: p.region.kind, centre: { x: p.centre.x, z: p.centre.z }, radius: p.reach, get built() { return p.built >= 0; } })),
     nearestRegion() {
       const at = playerWorld();
@@ -952,6 +1218,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         for (const [object] of anchored) { object.position.x -= shift.dx; object.position.z -= shift.dz; }
         for (const root of roots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         for (const root of userRoots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
+        for (const root of venueRoots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
       }
       if (lateEdits && map.world.editCount) {
@@ -992,6 +1259,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           ctx.scene.add(object); userRoots.push(object); m.root = object; m.status = 'loaded';
         }).catch((error) => { m.status = 'failed'; m.reason = String(error instanceof Error ? error.message : error).slice(0, 200); console.error('[world] the map "' + m.id + '" could not be loaded from ' + userMapUrl(m.model) + ': ' + m.reason); });
       }
+      // A venue is drawn when the player first comes near it (one per frame), and hidden while it is far out of view.
+      let venueBuilt = false;
+      for (const v of venueList) {
+        const d = Math.hypot(at.x - v.centre.x, at.z - v.centre.z), r = Math.max(v.width, v.depth) / 2;
+        if (!v.root) { if (venueBuilt || d > r + BUILD_AHEAD) continue; buildVenue(v); venueBuilt = true; }
+        v.root!.visible = d < r + CITY_HIDE;
+      }
       // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
       const seated = ctx.vehicles.seated;
       towns.forEach((t, i) => {
@@ -1013,6 +1287,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
       for (const root of userRoots) ctx.scene.remove(root);
       userRoots.length = 0;
+      for (const root of venueRoots) { ctx.scene.remove(root); root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); }
+      venueRoots.length = 0;
+      for (const m of Object.values(venueMats)) m.dispose();
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
       unregisterMap();

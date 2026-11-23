@@ -104,6 +104,16 @@ const REPLACE_VERB = String.raw`(?:badal\w*|change\w*|replace\w*|redo|rewrite\w*
 /** The scope noun must be the OBJECT of the verb, never a possessive ("poore game KA colour badlo" changes a colour). */
 const NOT_POSSESSED = String.raw`(?!\s*'s\b|\s+(?:ka|ki|ke|me|mein|main|par|pe|of|for|in)\b)`;
 const FROM_SCRATCH = /\b(?:from\s+scratch|scratch\s+se|start\s+over|shuru\s+se\s+(?:bana|likh)\w*|naye\s+sire\s+se)\b/i;
+/**
+ * A follow-up that changes the KIND of game ("make this a platformer", "genre badal do"). It is a whole-game
+ * replacement: the starter, the mount and the old parts may all change. A request that only uses a genre word
+ * as a detail ("add a racing car", "make it faster") is not one.
+ */
+const GENRE_NAME = String.raw`platformer|shooter|racer|racing|puzzle|runner|arcade|rpg|strategy|simulator|fighting|quiz|board|card|sports|snake`;
+const GENRE_SWAP = new RegExp(String.raw`\b(?:make|turn|convert)\s+(?:it|this|the game)\s+(?:into\s+)?(?:a|an)\s+(?:different\s+)?(?:${GENRE_NAME})\b|\b(?:change|switch)\s+(?:the\s+)?genre\b|\bgenre\s+(?:ko\s+)?(?:badal|change|switch)\w*|\b(?:ise|isko|isey)\s+(?:ek\s+)?(?:${GENRE_NAME})\s+(?:game\s+)?bana\s*do\b|\b(?:different|another|dusra|doosra)\s+genre\b`, 'i');
+export function changesGenre(request: string): boolean {
+  return GENRE_SWAP.test(String(request ?? ''));
+}
 const EVERYTHING_REPLACED = /\b(?:sab\s+kuch|sabkuch|har\s+cheez|har\s+chiz|everything)\s+(?:ko\s+)?(?:badal\w*|change\w*|replace\w*|hata\w*|remove\w*|delete\w*|redo|rewrite\w*)\b|\b(?:change|replace|redo|rewrite|remove|delete)\s+everything\b(?!\s+(?:about|in|of)\b)/i;
 const NEW_GAME_INSTEAD = /\b(?:naya|nayi|new|dusra|doosra|another|different)\s+(?:\w+\s+){0,2}(?:game|khel)\b[\s\S]{0,40}?\b(?:ki\s+jagah|instead)\b|\b(?:purana|old)\s+(?:wala\s+)?(?:game|khel)\s+(?:\w+\s+)?(?:hata\w*|remove\w*|delete\w*|band)\b/i;
 function wholeScopeReplaced(request: string, scope: string): boolean {
@@ -114,7 +124,7 @@ function wholeScopeReplaced(request: string, scope: string): boolean {
 /** Does the request replace the WHOLE game — its features, its map and the way it starts? PURE. */
 export function replacesWholeGame(request: string): boolean {
   const r = String(request ?? '');
-  return FROM_SCRATCH.test(r) || EVERYTHING_REPLACED.test(r) || NEW_GAME_INSTEAD.test(r) || wholeScopeReplaced(r, String.raw`(?:game|project|app|khel)`);
+  return FROM_SCRATCH.test(r) || EVERYTHING_REPLACED.test(r) || NEW_GAME_INSTEAD.test(r) || changesGenre(r) || wholeScopeReplaced(r, String.raw`(?:game|project|app|khel)`);
 }
 /** Does the request replace the WHOLE map (every place on it)? A whole game replaced replaces its map too. PURE. */
 export function replacesWholeMap(request: string): boolean {

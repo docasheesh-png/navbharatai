@@ -55,8 +55,10 @@ describe('when the library has no such model, the user is told where to get it a
     for (const s of FREE_MODEL_SOURCES) { expect(guide).toContain(s.url); expect(s.url.startsWith('https://')).toBe(true); }
     expect(guide).toMatch(/prefer \.glb/);
     expect(guide).toMatch(/NavBharatAI Pro → paperclip → Choose file/);
-    expect(guide).toMatch(/CC-BY needs the author's name/);
-    expect(guide).toMatch(/Never suggest paid, ripped/);
+    expect(guide).toMatch(/CC0 only/);
+    expect(guide).toMatch(/OpenGameArt/);
+    expect(guide).toMatch(/\.ogg or \.mp3/);
+    expect(guide).not.toMatch(/CC-BY/);
     expect(guide).toMatch(/Build the closest working version from code so the game runs/);
   });
 

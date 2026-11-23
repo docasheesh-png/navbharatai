@@ -5,7 +5,7 @@
 // project's 2D city map as "the game" ("apne pata nahi kya photo bana diya hai"). And the playtest, whose start
 // stems knew "play" and "race" but not "enter", never pressed "Enter Battleground" — although the click explorer
 // had pressed it and seen a game screen with "Quit Game" on it — and filed GAME_PLAYTEST_NOT_RUN.
-// Reversion: drop BATTLE_ROYALE_REFERENCE from NAMED_GAMES, or "enter" from START_STEM together with
+// Reversion: drop the royale reference from namedGameReference (gameIntent), or "enter" from START_STEM together with
 // `opensGameSession`, and the matching block fails.
 
 import { describe, it, expect } from 'vitest';

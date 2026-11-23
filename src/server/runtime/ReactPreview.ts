@@ -34,6 +34,7 @@ import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './bro
 import { previewBridgeSource } from '../AgentV3/previewBridge';
 import { REACT_CORE_SPECS, REACT_CORE_LOADER_SOURCE } from './reactCoreLoader';
 import { REACT_SPLIT_FAULT_MESSAGE } from '../../lib/previewPlatformFault';
+import { expandImportMetaGlob } from './previewImportMetaGlob';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -325,7 +326,11 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
   // class name in the page instead of `undefined`. Done BEFORE precompilation so the Babel-in-browser
   // fallback ships the same scoped stylesheet — one transform, both paths. src/lib/cssModules.ts.
   const cssBundle = bundleCssModules(gathered);
-  const modules = cssBundle.files;
+  // `import.meta.glob` IS EXPANDED HERE, with Vite's semantics, against the files this page holds — before
+  // either compile path sees the code, so the server precompile and the Babel-in-browser fallback ship the
+  // same expansion (previewImportMetaGlob.ts). A call that cannot be proven is left untouched; the
+  // capability prover refuses that app, so it never reaches a viewer.
+  const modules = expandImportMetaGlob(cssBundle.files).modules;
 
   if (!entry) {
     return `<!doctype html><html><body style="font-family:system-ui;padding:24px;color:#444">`

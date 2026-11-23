@@ -51,10 +51,10 @@ describe('🏜️ lands on the map', () => {
     // The first place keeps its level ground.
     expect(world.map.world.clearAt(c.x, c.z)).toBe(true);
   });
-  it('places and lands share the region limit (100 since 2026-11-22)', () => {
+  it('places and lands share the region limit (100 since 2026-11-22; 1,000 since 2026-11-23 — the cut itself: aThousandPlacesStream)', () => {
     const regions = Array.from({ length: 104 }, (_, i) => ({ id: `d${i}`, kind: 'desert' }));
     const world = OW.createOpenWorld(context(), { seed: 3, regions });
-    expect(world.places.length + world.lands.length).toBe(100);
+    expect(world.places.length + world.lands.length).toBe(104);
   });
 });
 

@@ -9,9 +9,19 @@ import { parseRegions } from './growthGuard';
 
 export type PlaceKind = 'city' | 'town' | 'village' | 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
 const KINDS: readonly PlaceKind[] = ['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach'];
-/** The most places a map holds (play/openWorld.ts). */
-/** The most places and lands a map holds (play/openWorld.ts MAX_REGIONS — admin 2026-11-22: "10—100 maps … universe"). */
-export const MAX_PLACES = 100;
+/** The most places and lands a map holds (play/openWorld.ts MAX_REGIONS — admin 2026-11-22: "10—100 maps … universe"; 1,000 since 2026-11-23). */
+export const MAX_PLACES = 1000;
+/** What an older copy of play/openWorld.ts holds (a game whose kit file was edited keeps it): it reads no entry past this. */
+export const OLD_MAX_PLACES = 100;
+/**
+ * How many places THIS game's map reads: the MAX_REGIONS written in its own play/openWorld.ts (never above MAX_PLACES). A file
+ * that cannot be read, or says no number, is taken as the older 100 — so an entry is never added where the map would ignore it. PURE.
+ */
+export function placesTheMapHolds(bridge: string | null | undefined): number {
+  const m = /export const MAX_REGIONS = (\d+);/.exec(String(bridge ?? ''));
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.min(MAX_PLACES, n) : OLD_MAX_PLACES;
+}
 
 /** The request the library's "Add to game" sends for a map place (libraryThumbnails.addToGamePrompt). Exactly that shape. PURE. */
 export function mapPlaceAsked(prompt: string | null | undefined): PlaceKind | null {
@@ -24,12 +34,12 @@ export type AppendResult =
   | { ok: false; reason: 'no-list' | 'full' };
 
 /** `source` with ONE more place of this kind at the end of WORLD.regions. Every existing entry is kept byte for byte. PURE. */
-export function appendPlace(source: string, kind: PlaceKind): AppendResult {
+export function appendPlace(source: string, kind: PlaceKind, cap: number = MAX_PLACES): AppendResult {
   const text = String(source ?? '');
   const regions = parseRegions(text);
   const open = /\bregions\s*:\s*\[/.exec(text);
   if (!regions || !open) return { ok: false, reason: 'no-list' };
-  if (regions.length >= MAX_PLACES) return { ok: false, reason: 'full' };
+  if (regions.length >= Math.min(MAX_PLACES, cap)) return { ok: false, reason: 'full' };
   // The closing bracket of the regions list: the first `]` at depth 0 after it opens.
   let depth = 0, close = -1;
   for (let i = open.index + open[0].length; i < text.length; i++) {
@@ -57,7 +67,7 @@ export function placeAddedHandoff(kind: PlaceKind, id: string, count: number): s
     + `that a new ${kind} is on the map, away from the others with open country between, and that they can ask for more.`;
 }
 /** When the map is full: said plainly, nothing invented. */
-export function placeNotAddedHandoff(kind: PlaceKind): string {
-  return `The map already has ${MAX_PLACES} places, the most it holds, so the platform did NOT add another ${kind}. Do not add one by hand. Tell the user plainly, `
+export function placeNotAddedHandoff(kind: PlaceKind, cap: number = MAX_PLACES): string {
+  return `The map already has ${cap} places, the most it holds, so the platform did NOT add another ${kind}. Do not add one by hand. Tell the user plainly, `
     + 'in their language, that the map is full, and offer to make one of the existing places bigger or to remove one they name.';
 }

@@ -18,6 +18,8 @@ export const GAME_PHYSICS_VERSION = '0.20.0';
 export const GAME_PHYSICS = String.raw`import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { worldColliders } from './collision';
+import { clampOriginY } from './groundContact';
+import { getGround, groundHeightAt, localLowestY } from './surfaces';
 
 export interface BodyOptions {
   /** 0 = never moves (a wall). Default 1. */
@@ -108,6 +110,7 @@ export function createPhysics(scene: THREE.Object3D, options: PhysicsOptions = {
     const centre = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
     mesh.quaternion.copy(rotation); mesh.updateMatrixWorld(true);
     const material = new CANNON.Material();
+    mesh.userData.nbBody = true;
     const body = new CANNON.Body({ mass: Math.max(0, o.mass ?? 1), material, allowSleep: true, sleepSpeedLimit: 0.15, sleepTimeLimit: 0.6 });
     body.addShape(shape, v3(centre.sub(mesh.position)));
     body.position.copy(v3(mesh.getWorldPosition(new THREE.Vector3())));
@@ -237,6 +240,14 @@ export function createPhysics(scene: THREE.Object3D, options: PhysicsOptions = {
         const wq = new THREE.Quaternion(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
         const pq = mesh.parent ? mesh.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
         mesh.quaternion.copy(pq.invert().multiply(wq));
+        // The physics shape is centred on the mesh. A model whose origin is not its lowest point would
+        // rest with that origin on the plane and the body inside the ground. Clamp the lowest point.
+        if (getGround() && mesh.userData.ground !== false && mesh.userData.nbBody === true) {
+          const at = mesh.getWorldPosition(new THREE.Vector3());
+          const target = clampOriginY(at.y, localLowestY(mesh), groundHeightAt(at.x, at.z));
+          const lift = target - at.y;
+          if (lift > 1e-4) { mesh.position.y += lift; body.position.y += lift; }
+        }
       }
       for (const sync of ragdolls) sync();
     },

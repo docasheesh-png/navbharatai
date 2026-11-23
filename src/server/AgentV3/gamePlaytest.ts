@@ -43,7 +43,7 @@ import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
 import { locatedErrorText } from './runtimeErrorSite';
-import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead } from './gameGeometryProbe';
+import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead, type HeapRead } from './gameGeometryProbe';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
 export const PLAYTEST_BUDGET_MS = 60_000;
@@ -832,6 +832,9 @@ try {
       page.evaluate(() => (window.__nbWorld && window.__nbWorld.geometry ? window.__nbWorld.geometry() : null)),
       new Promise((r) => setTimeout(() => r(null), 3000)),
     ]).catch(() => null);
+    // The page's memory now (Chromium's performance.memory; null elsewhere), against the end of the round — advisory.
+    const heap0 = await page.evaluate(() => (performance && performance.memory ? performance.memory.usedJSHeapSize : null)).catch(() => null);
+    if (typeof heap0 === 'number') out.heap = { start: heap0 };
   }
 
   out.stage = 'driving it with the keyboard';
@@ -1005,6 +1008,10 @@ try {
     out.load = await page.evaluate(() => (window.__nbKit && window.__nbKit.load ? window.__nbKit.load() : null)).catch(() => null);
     // Models still loading after a round of play, and how many never got past 0% (window.__nbKit.models) — advisory.
     if (cfg.geometry) out.models = await page.evaluate(() => (window.__nbKit && window.__nbKit.models ? window.__nbKit.models() : null)).catch(() => null);
+    if (cfg.geometry && out.heap) {
+      const heap1 = await page.evaluate(() => (performance && performance.memory ? performance.memory.usedJSHeapSize : null)).catch(() => null);
+      if (typeof heap1 === 'number') out.heap.end = heap1;
+    }
     const kit = await page.evaluate(() => (window.__nbKit ? { status: window.__nbKit.status(), score: window.__nbKit.score() } : null));
     if (kit) {
       out.kitScoreEnd = kit.score;
@@ -1271,6 +1278,8 @@ export interface PlaytestRun {
   geometry?: GeometryRead | null;
   /** Models still loading at the end of the desktop round (window.__nbKit.models) — advisory. */
   models?: ModelsRead | null;
+  /** The page's JS heap after the start and at the end of the desktop round (performance.memory) — advisory. */
+  heap?: HeapRead | null;
   /** The play-again probe: the status after the round was ended, the control pressed (null: none found), the status after. */
   restartCheck?: { ended?: string; pressed?: string | null; after?: string; error?: string };
   errors?: string[];

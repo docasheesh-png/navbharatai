@@ -413,6 +413,21 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
   + ' map to make it bigger.';
 /**
+ * 🌱 A FEATURE NEVER LAYS ITS OWN LAND IN AN OPEN WORLD (failedbr #2495/#2501 autopsy: asked for a grass field in the middle,
+ * the builder added a feature with a flat 2 km PlaneGeometry at y = -0.1, not anchored; the hilly map's slopes cut through it
+ * and the sea showed grass under it — the user saw maps "on different planes"). Said on every turn of a game that has BOTH
+ * the features list and src/game/world.ts (an open world), never in other games. Only land-like meshes are meant: a flat plane
+ * for a sign, a decal, a screen or the HUD is fine.
+ */
+export const OPEN_WORLD_FEATURE_GROUND_RULE = '🌱 IN THIS OPEN WORLD A FEATURE NEVER LAYS ITS OWN LAND: no ground, grass, field, water, terrain or road mesh of its own'
+  + ' (no big flat PlaneGeometry spread as land, nothing at a fixed y = 0 / -0.1, nothing added to ctx.scene at the map\'s scale) — it'
+  + ' would sit flat while the map\'s hills, sea and levelled places sit at their own heights, and stay behind when the world re-centres.'
+  + ' Stand things on the land with world.place(object, x, z) (WORLD metres; world.heightAt(x, z) is the ground). A different land'
+  + ' ("registan", "jungle", "pahad", "barf", "beach" / desert, jungle, mountain, snow, beach) is a LAND region in src/game/world.ts;'
+  + ' roads between places are the kit\'s highways (world.highways), never a road mesh of your own. "Ghaas ka maidan", "a grass field",'
+  + ' "park" with no such land kind → ask the user (one short question) instead of laying a plane. A small flat plane for a sign,'
+  + ' a decal, a screen, a marker or the HUD is fine.';
+/**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the
  * request can mean two things, the builder asks instead of choosing. Said on every turn of a game that grows by lists.
@@ -482,7 +497,7 @@ export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP
   + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). Unless the user asks for it,'
   + ' do not rewrite src/App.tsx\'s world, and NEVER write a second world, ground, player, character controller, camera or game component'
   + ' beside it (no CustomGame, no WorldSetup, no characterController of your own): a different one the user asks for is made by'
-  + ' changing the kit\'s own, in this game. ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
+  + ' changing the kit\'s own, in this game. ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' ' + OPEN_WORLD_FEATURE_GROUND_RULE + ' In a feature, setup(ctx, world) adds things with'
   + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
   + ' world.city gives the city, its traffic, people, parked cars and'
   + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. The corner map (roads, named places; tap or M for the full'
@@ -663,6 +678,8 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     // Asked, never guessed, in every game that grows by the user's requests — a road-library race included (2026-11-22).
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' || /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? GAME_NO_GUESS_RULE : '',
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
+    // An open world = the features list AND the map's regions file: features there never lay land of their own.
+    typeof files[GAME_WORLD_FILE] === 'string' && typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? OPEN_WORLD_FEATURE_GROUND_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
     // Every later turn of a game made on the kit: nothing passes through anything (admin 2026-11-22). A game = the kit's loop

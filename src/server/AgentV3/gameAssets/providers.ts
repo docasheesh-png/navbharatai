@@ -17,11 +17,12 @@ import { REVIEWED_LIBRARY_BATCH_10 } from './reviewedLibraryBatch10';
 import { REVIEWED_LIBRARY_BATCH_11 } from './reviewedLibraryBatch11';
 import { REVIEWED_LIBRARY_BATCH_12 } from './reviewedLibraryBatch12';
 import { REVIEWED_LIBRARY_BATCH_13 } from './reviewedLibraryBatch13';
+import { REVIEWED_LIBRARY_BATCH_14 } from './reviewedLibraryBatch14';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab', 'vuena', 'ggbot'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
 /** Providers whose CC0 packs the admin downloaded and we converted offline: their models may ship inside the server image. */
-const PACKAGED_PROVIDERS: readonly GameAssetProviderId[] = ['quaternius', 'kaykit', 'sketchfab', 'vuena', 'ggbot'];
+const PACKAGED_PROVIDERS: readonly GameAssetProviderId[] = ['quaternius', 'kaykit', 'sketchfab', 'vuena', 'ggbot', 'kenney', 'github'];
 /**
  * A packaged model may be CC0, or CC-BY 4.0 WITH its author credit (admin 2026-11-21, Indian clothing: "CC-BY lein, credit
  * game me apne-aap judega"): the credit travels into the game's ATTRIBUTION.txt and the in-game credit (assetSeed).
@@ -53,7 +54,7 @@ export interface ReviewedAsset extends AssetCandidate {
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8, ...REVIEWED_LIBRARY_BATCH_9, ...REVIEWED_LIBRARY_BATCH_10, ...REVIEWED_LIBRARY_BATCH_11, ...REVIEWED_LIBRARY_BATCH_12, ...REVIEWED_LIBRARY_BATCH_13];
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8, ...REVIEWED_LIBRARY_BATCH_9, ...REVIEWED_LIBRARY_BATCH_10, ...REVIEWED_LIBRARY_BATCH_11, ...REVIEWED_LIBRARY_BATCH_12, ...REVIEWED_LIBRARY_BATCH_13, ...REVIEWED_LIBRARY_BATCH_14];
 
 /**
  * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was

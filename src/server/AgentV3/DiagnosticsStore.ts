@@ -21,6 +21,7 @@ import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 import { workaroundCountOf } from '../../lib/healIssue';
 import { GREEN_RESTORE_UNCHECKED_DETAIL } from './GreenGuard';
 import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
+import { isOrphanedReport, settleOrphanedReport } from './orphanedBuildReport';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -679,6 +680,34 @@ export async function upsertDiagnosticsHistoryProgress(workspaceId: string, repo
       await commitDiagnosticsHistory(db, workspaceId, stored, Date.now(), report.endedAt === undefined);
     });
   } catch { /* best-effort — the settle-time saveDiagnosticsHistory still backstops a clean finish */ }
+}
+
+/**
+ * Settle every OLDER in-progress report of this workspace — called the moment a new build holds the workspace lease,
+ * which proves those builds are no longer running anywhere (orphanedBuildReport.ts, failedbr #2497). Bounded to a
+ * few documents and best-effort: a failure leaves the reports exactly as they were. Never throws.
+ */
+export async function settleOrphanedBuildReports(workspaceId: string, newBuildStartedAt: number): Promise<number> {
+  if (!workspaceId || !Number.isFinite(newBuildStartedAt)) return 0;
+  if (process.env.VITEST) return 0; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const snap = await db.collection('workspace_diagnostics_v3').doc(workspaceId).collection('history')
+      .where('inProgress', '==', true).limit(5).get();
+    let settled = 0;
+    for (const doc of snap.docs) {
+      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || !isOrphanedReport(report, newBuildStartedAt)) continue;
+      await commitDiagnosticsHistory(db, workspaceId, settleOrphanedReport(report, { newBuildStartedAt }), Date.now(), false);
+      settled += 1;
+    }
+    if (settled) console.warn(`[DIAGNOSTICS] settled ${settled} orphaned build report(s) in ${workspaceId}: their builds ended without recording an end.`);
+    return settled;
+  } catch (err) {
+    console.error(`[DIAGNOSTICS] orphaned-report settle failed (workspace=${workspaceId}): ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
 }
 
 /**

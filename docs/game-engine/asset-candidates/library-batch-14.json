@@ -1,0 +1,14 @@
+{
+  "checkedAt": "2026-11-23",
+  "added": 538,
+  "skipped": [],
+  "counts": {
+    "urban": 124,
+    "nature": 68,
+    "village": 19,
+    "dye": 327
+  },
+  "bytes": 181095244,
+  "variantBytes": 96845012,
+  "totalWithCatalogue": 281413068
+}

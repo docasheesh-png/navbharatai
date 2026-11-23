@@ -1657,6 +1657,12 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
               setServerBuildRunning(false);
               continue;
             }
+            // failedbr #2498: an admission refusal that arrived IN the stream (the preflight had already opened it) is a
+            // status notice, not an app error — no "Fix with AI" under it, and the real Stop when a build holds the app.
+            if (event.type === 'error' && (event as { beforeBuildStarted?: unknown }).beforeBuildStarted === true) {
+              setErrorBeforeBuildStarted(true);
+              if ((event as { code?: unknown }).code === 'BUILD_RUNNING_ELSEWHERE') setServerBuildRunning(true);
+            }
             if (event.type === 'error' && typeof (event as { code?: unknown }).code === 'string'
               && String((event as { code?: unknown }).code).startsWith('BUILD_REQUEST_')) {
               receiptRefused = true;
@@ -1671,7 +1677,8 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
               sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
               resultWorkspaceRef.current = workspaceIdRef.current;
               setRunning(false);
-              setServerBuildRunning(false);
+              // An admission refusal's result describes the build that HOLDS the app, which is still running (#2498).
+              if ((event as { beforeBuildStarted?: unknown }).beforeBuildStarted !== true) setServerBuildRunning(false);
             }
           }
         }

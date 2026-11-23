@@ -11,28 +11,46 @@ const PLAN = JSON.stringify({
   parts: [{ id: 'top', geometry: { kind: 'box', size: [1.2, 0.1, 0.8] }, position: [0, 1, 0], rotation: [0, 0, 0], color: '#8a5a2b', roughness: 0.7, metalness: 0 }],
 });
 
-describe('a missing library object is generated and sat on the ground', () => {
-  it('asks the model and the written object calls standOnGround', async () => {
+describe('step 1 — the closest library object is adjusted', () => {
+  it('scales, recolours, retextures and combines parts, and does not call the model', async () => {
+    let asked = 0;
+    const made = await generateStandIn('a large red wooden knight with a sword', async () => { asked++; return { text: PLAN }; });
+    expect(asked).toBe(0);
+    expect(made.kind).toBe('adjusted');
+    if (made.kind !== 'adjusted') return;
+    expect(made.libraryId).toContain('knight');
+    expect(made.scale).toBe(1.5);
+    expect(made.color).toBe('#b91c1c');
+    expect(made.texture).toBe('wood');
+    expect(made.parts.some((id) => id.includes('sword') || id.includes('blade'))).toBe(true);
+    expect(made.source).toContain('standOnGround');
+    expect(made.source).toContain('1.5');
+  });
+});
+
+describe('steps 2 and 3 — a missing object is generated and the user is told where to get a better one', () => {
+  it('a model call writes the object and the reply includes the free-file guide', async () => {
     let asked = 0;
     const made = await generateStandIn('purple teapot', async () => { asked++; return { text: PLAN }; });
     expect(asked).toBe(1);
     expect(made.kind).toBe('generated');
     if (made.kind !== 'generated') return;
+    expect(made.fromModel).toBe(true);
     expect(made.source).toContain('standOnGround');
     expect(made.source).toContain('BoxGeometry');
-    expect(made.triangles).toBeGreaterThan(0);
+    expect(made.guide).toContain('in their language');
+    expect(made.guide).toContain('Kenney');
+    expect(made.guide).toContain('paperclip');
+    expect(made.guide).not.toMatch(/groq|claude|gemini|openai/i);
   });
 
-  it('does not call the model when the library already has the object', async () => {
-    let asked = 0;
-    const made = await generateStandIn('knight', async () => { asked++; return { text: PLAN }; });
-    expect(asked).toBe(0);
-    expect(made.kind).toBe('library');
-  });
-
-  it('a model that answers nothing does not invent an object', async () => {
-    expect(await generateStandIn('purple teapot', async () => null)).toEqual({ kind: 'none' });
-    expect(await generateStandIn('purple teapot', async () => ({ text: 'not json' }))).toEqual({ kind: 'none' });
+  it('a silent model still leaves an object in the game and still tells the user', async () => {
+    const made = await generateStandIn('purple teapot', async () => null);
+    expect(made.kind).toBe('generated');
+    if (made.kind !== 'generated') return;
+    expect(made.fromModel).toBe(false);
+    expect(made.source).toContain('standOnGround');
+    expect(made.guide).toMatch(/how to bring it in/i);
   });
 });
 
@@ -57,6 +75,8 @@ describe('the ground-contact and library-first rule cannot quietly disappear', (
     const prompt = architectSystemPrompt();
     expect(prompt).toContain('GROUND CONTACT IS MANDATORY');
     expect(prompt).toContain('generate_stand_in');
+    expect(prompt).toContain('closest library object is adjusted');
+    expect(prompt).toContain('the build never waits');
     expect(prompt).toContain('library FIRST');
     expect(GAME_KIT_RULE).toContain('GROUND CONTACT IS MANDATORY');
     expect(GROUND_CONTACT_RULE).toContain('standOnGround');

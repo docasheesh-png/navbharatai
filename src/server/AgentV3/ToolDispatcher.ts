@@ -10352,10 +10352,12 @@ export class ToolDispatcher {
         if (!subject) refuse('Name the object the library does not have.');
         const supplied = typeof rec.plan_json === 'string' ? rec.plan_json : '';
         const made = await generateStandIn(subject, supplied ? async () => ({ text: supplied }) : askStandIn);
-        if (made.kind === 'library') return `The library already has "${made.id}". Use that model. Do not replace it with a stand-in.`;
-        if (made.kind === 'none') return `No simple object was generated for "${subject}". Tell the user, in their language, where to get a CC0 file and how to attach it.`;
+        if (made.kind === 'none') refuse('Name the object.');
         const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
-        return `A simple stand-in for "${subject}" is at ${written[0] ?? made.path}. Its create function places the object with standOnGround. Mount it in the scene.`;
+        if (made.kind === 'adjusted') {
+          return `The closest library object (${made.libraryId}) was adjusted: scale ${made.scale}, colour ${made.color ?? 'unchanged'}, texture ${made.texture ?? 'unchanged'}, extra parts ${made.parts.join(', ') || 'none'}. It is at ${written[0] ?? made.path} and sits on the ground. The build continues.`;
+        }
+        return `A simple object for "${subject}" is at ${written[0] ?? made.path} and sits on the ground. The build does not wait.\n${made.guide}`;
       }
 
       case 'generate_procedural_object': {

@@ -5,6 +5,7 @@
 import { noteProviderCall } from '../../AI/ProviderHealth/trafficHealth';
 import { validateObjectPlan, type ObjectPlan } from '../../lib/proceduralObjects/validatePlan';
 import { searchGameLibrary } from './gameLibrary';
+import { ownModelGuide } from './modelSourcesGuide';
 
 export type StandInAsk = (prompt: string) => Promise<{ text: string } | null>;
 
@@ -53,25 +54,101 @@ function slug(subject: string): string {
   return /^[a-z]/.test(s) ? s : 'object';
 }
 
-export async function generateStandIn(subject: string, ask: StandInAsk): Promise<
-  | { kind: 'library'; id: string }
-  | { kind: 'generated'; id: string; path: string; source: string; triangles: number }
-  | { kind: 'none' }
-> {
+const COLOURS: Record<string, string> = { red: '#b91c1c', blue: '#1d4ed8', green: '#15803d', yellow: '#ca8a04', black: '#171717', white: '#f8fafc', brown: '#92400e', orange: '#ea580c', purple: '#7e22ce', pink: '#db2777' };
+const TEXTURES = ['wood', 'metal', 'stone', 'cloth', 'brick', 'grass'];
+
+export interface LibraryAdjustment {
+  kind: 'adjusted';
+  id: string;
+  path: string;
+  source: string;
+  libraryId: string;
+  scale: number;
+  color: string | null;
+  texture: string | null;
+  parts: string[];
+}
+export interface GeneratedObject {
+  kind: 'generated';
+  id: string;
+  path: string;
+  source: string;
+  triangles: number;
+  fromModel: boolean;
+  /** Shown with the object. The build does not stop to wait for an upload. */
+  guide: string;
+}
+
+function requestWords(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+}
+
+function fittedSource(id: string, fit: { libraryId: string; scale: number; color: string | null; texture: string | null; parts: string[] }): string {
+  return `import type { Object3D } from 'three';
+import { standOnGround } from '../three/surfaces';
+
+/** Closest library object, adjusted. scale, colour, texture and extra parts. */
+export const libraryFit = ${JSON.stringify({ ...fit, id })};
+export function placeFitted(root: Object3D): Object3D {
+  root.scale.multiplyScalar(${fit.scale});
+  const tint = ${JSON.stringify(fit.color)};
+  if (tint) root.traverse((node) => {
+    const mesh = node as { material?: { color?: { set: (hex: string) => void } } };
+    if (mesh.material?.color) mesh.material.color.set(tint);
+  });
+  return standOnGround(root);
+}
+`;
+}
+
+/** Step 1. The closest library model, resized, recoloured, retextured, and combined with other hits. */
+export function adjustClosest(request: string): LibraryAdjustment | null {
+  const query = request.trim().slice(0, 200);
+  if (!query) return null;
+  const found = searchGameLibrary({ query, limit: 5 });
+  const models = found.entries.filter((entry) => entry.kind === 'reviewed-model');
+  if (!models.length) return null;
+  const primary = models[0];
+  const words = new Set(requestWords(query));
+  const parts = models.slice(1).filter((entry) => entry.subjects.some((subject) => words.has(subject))).map((entry) => entry.id).slice(0, 3);
+  const scale = /\b(large|big|huge|giant)\b/i.test(query) ? 1.5 : /\b(small|tiny|little)\b/i.test(query) ? 0.6 : 1;
+  const colorWord = requestWords(query).find((word) => COLOURS[word]);
+  const texture = words.has('wood') || words.has('wooden') ? 'wood' : (TEXTURES.find((name) => words.has(name)) ?? null);
+  const id = slug(primary.subjects[0] || 'object');
+  const fit = { libraryId: primary.id, scale, color: colorWord ? COLOURS[colorWord] : null, texture, parts };
+  return { kind: 'adjusted', id, path: `src/game/generatedObjects/${id}-fit.ts`, source: fittedSource(id, fit), ...fit };
+}
+
+const FALLBACK = (label: string): ObjectPlan => ({
+  version: 1, label: label.slice(0, 40) || 'Object',
+  parts: [{ id: 'body', geometry: { kind: 'box', size: [1, 1, 1] }, position: [0, 0.5, 0], rotation: [0, 0, 0], color: '#888888', roughness: 0.7, metalness: 0 }],
+});
+
+/**
+ * Steps 2 and 3 together. A model call designs the object. If that call does not answer, a simple
+ * shape is still written so the build does not stop, and the user is told where to get a better file.
+ */
+export async function generateStandIn(subject: string, ask: StandInAsk): Promise<LibraryAdjustment | GeneratedObject | { kind: 'none' }> {
   const query = subject.trim().slice(0, 80);
   if (!query) return { kind: 'none' };
-  const found = searchGameLibrary({ query, limit: 1 });
-  if (found.entries.length > 0 && found.missing.length === 0) return { kind: 'library', id: found.entries[0].id };
+  const fitted = adjustClosest(query);
+  if (fitted) return fitted;
+  let checked: ReturnType<typeof validateObjectPlan> | null = null;
+  let fromModel = false;
   const asked = await ask(standInPrompt(query));
-  if (!asked?.text) return { kind: 'none' };
-  const start = asked.text.indexOf('{');
-  const end = asked.text.lastIndexOf('}');
-  if (start < 0 || end <= start) return { kind: 'none' };
-  let checked: ReturnType<typeof validateObjectPlan>;
-  try { checked = validateObjectPlan(asked.text.slice(start, end + 1), 'phone'); } catch { return { kind: 'none' }; }
+  if (asked?.text) {
+    const start = asked.text.indexOf('{');
+    const end = asked.text.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try { checked = validateObjectPlan(asked.text.slice(start, end + 1), 'phone'); fromModel = true; } catch { checked = null; }
+    }
+  }
+  if (!checked) checked = validateObjectPlan(JSON.stringify(FALLBACK(query)), 'phone');
   const id = slug(query);
-  const path = `src/game/generatedObjects/${id}.ts`;
-  return { kind: 'generated', id, path, source: standInSource(id, checked.plan), triangles: checked.triangles };
+  return {
+    kind: 'generated', id, path: `src/game/generatedObjects/${id}.ts`, source: standInSource(id, checked.plan),
+    triangles: checked.triangles, fromModel, guide: ownModelGuide([query]),
+  };
 }
 
 /** The live call. No key, or a failed call, means no stand-in — never a pretended object. */

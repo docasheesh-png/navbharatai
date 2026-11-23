@@ -26,9 +26,17 @@ describe('the builder chooses library models by meaning', () => {
     expect(rolesOf('young woman')).toBe('walk/run');
     expect(rolesOf('cactus')).toBeUndefined();
     expect(menu).toMatch(/MEANING/);
-    // Paid on every 3D game turn: keep it a menu, not a dump of the catalogue. 2026-11-21: 8000 → 11000 for the intent map
-    // (gameCapabilities.ts, ~2.7 KB) that lets the builder pick by meaning in any language — ~2.5k tokens a turn in all.
-    expect(menu.length).toBeLessThan(11000);
+    // Paid on every 3D game turn. A fixed 11000 fitted the catalogue on 2026-11-21 and then rejected the next
+    // real pack: 469 models, each subject still one short name on a shared line (14 characters of menu each).
+    // The dump this guards is a description in place of a name, or a second copy of the catalogue in the wrapper.
+    const subjectLines = menu.split('\n').filter(l => /^[a-z0-9-]+( \([^)]*\))?: /.test(l));
+    const listed = subjectLines.join('\n');
+    const named = REVIEWED_GAME_ASSETS.reduce((n, a) => n + Math.min(a.subjects.length, 16), 0);
+    expect(named).toBeGreaterThan(100);
+    expect(listed.length / named).toBeLessThan(40);
+    // The wrapper is the capability map, the instruction and the free-file guide: about 5.9 KB with this
+    // catalogue. One more short paragraph still fits. A second copy of the subject list does not.
+    expect(menu.length - listed.length).toBeLessThan(7000);
   });
 
   it('a subject appears once even when several models serve it', () => {

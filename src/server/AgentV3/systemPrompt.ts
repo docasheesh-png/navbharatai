@@ -1078,6 +1078,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       never real money, deposits or cash prizes (India bans real-money online games).',
     '       Carrom: createCarrom / placeStriker / shoot(game, angle, power) — play shot.frames, show shot.message.',
     '       Cricket: createMatch / bowl / summary / shotFromTiming — every ball through bowl(); never your own scoring.',
+    '       3D cricket: every place from cricketLayout() (batter IN FRONT of his stumps, facing the bowler), the ball on',
+    "       deliveryPath(), batter.act('bat') on every shot; checkCricketLayout() must return [] — never place them by hand.",
     '       Football: footballLayout / kickBall / stepBall / keeperMove / tickMatch — the pitch, the ball and the clock; never your own.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',

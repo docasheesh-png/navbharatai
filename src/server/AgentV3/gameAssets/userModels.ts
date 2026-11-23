@@ -294,7 +294,7 @@ function parseMtl(text: string, files: ReadonlyMap<string, Uint8Array>, mtlPath:
   return out;
 }
 
-function objToGlb(files: ReadonlyMap<string, Uint8Array>, path: string, raw: Uint8Array): Uint8Array {
+export function objToGlb(files: ReadonlyMap<string, Uint8Array>, path: string, raw: Uint8Array): Uint8Array {
   const text = new TextDecoder('utf-8').decode(raw);
   const v: number[] = []; const vt: number[] = []; const vn: number[] = [];
   const groups = new Map<string, { keys: Map<string, number>; pos: number[]; uv: number[]; nrm: number[]; idx: number[]; hasNormals: boolean }>();

@@ -205,8 +205,8 @@ import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './r
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
 export interface GroundEdit { x0: number; z0: number; x1: number; z1: number }
-/** A land a game can lay on part of the map (setLand). */
-export type LandBiome = 'beach' | 'desert' | 'forest' | 'mountain' | 'snow';
+/** A land a game can lay on part of the map (setLand). 'grassland' is an open field: grass to the horizon, no trees. */
+export type LandBiome = 'beach' | 'desert' | 'forest' | 'grassland' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
 
 export interface AthreeWorldOptions {
@@ -299,6 +299,8 @@ export interface AthreeWorld {
    * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
    */
   setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void;
+  /** True inside an open field a game laid with setLand(..., 'grassland'): thick grass and no trees (a maidan, a meadow). */
+  openFieldAt(x: number, z: number): boolean;
   /**
    * Lay a ROAD the game asks for (a highway between two of its places), through these points. The ground is cut and filled
    * to it (a smooth grade, a shoulder) so it can be driven, roadAt answers it, and the returned centre line (with heights)
@@ -317,8 +319,17 @@ export interface AthreeWorld {
   roadAt(x: number, z: number): RoadHit | null;
   /** What a vehicle drives on: the bridge deck on a bridge, the ground elsewhere. */
   drivableHeightAt(x: number, z: number): number;
-  /** What a wheel runs on at a place: asphalt on a road, water in a river, lake or the sea, else by biome (grass, sand, snow, rock). */
+  /**
+   * What a wheel runs on at a place: asphalt on a road, water in a river, lake or the sea, else by biome (grass, sand, snow, rock).
+   * ⚠️ NOT where grass may grow: a city's streets stand on levelled ground, which this reads by its biome ('grass'). Use plantableAt.
+   */
   surfaceAt(x: number, z: number): 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water';
+  /**
+   * 🌱 May grass, a flower or a bush grow here? False on water, within \`margin\` metres (default 1) of any road (the network's
+   * or one laid with addRoad), on levelled ground (a city, its streets, a ground, a pad) and on sand, snow or rock. Plant your
+   * own grass ONLY where this is true (admin 2026-11-23: "road par ghas jam gayi hai").
+   */
+  plantableAt(x: number, z: number, margin?: number): boolean;
   /** The home region: the race circuit (racing profile), the runways (flight and open-world) and the villages around the world origin. */
   homeRoads(): Region;
   /** How much of a desert a place is, 0 (not at all) to 1 (the heart of one). A continuous version of the desert biome. */
@@ -594,6 +605,11 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     noteEdit(x - r * 1.25, z - r * 1.25, x + r * 1.25, z + r * 1.25);
     indexPlace(landCells, landsEverywhere, lands.length - 1, x, z, r * 1.25 + 1, r * 1.25 + 1);
   }
+  function openFieldAt(x: number, z: number): boolean {
+    if (!lands.length) return false;
+    const l = landAt(x, z);
+    return !!l && l.land === 'grassland' && l.w > 0.15;
+  }
   // GAME ROADS (admin 2026-11-22: "abhi 30 sec me hi road khatam ho jati hai"). A highway the game lays between its own places:
   // resampled every 10 m, its height the ground averaged along it and limited to an 8 percent grade, and the land cut and filled
   // to it with a shoulder — the same heightAt feeds the drawn terrain, the collider and the road ribbon, so they always agree.
@@ -708,6 +724,19 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       case 'mountain': return 'rock';
       default: return 'grass';
     }
+  }
+
+  function plantableAt(x: number, z: number, margin = 1): boolean {
+    const m = Math.max(0, Math.min(20, Number.isFinite(margin) ? margin : 1));
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    if (waterAt(x, z) || heightAt(x, z) < 0 || clearAt(x, z)) return false;
+    if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half + m) return false; }
+    if (withRoads) {
+      const roads = roadsOf();
+      if (roads.roadAt(x, z) || (m > 0 && (roads.roadAt(x + m, z) || roads.roadAt(x - m, z) || roads.roadAt(x, z + m) || roads.roadAt(x, z - m)))) return false;
+    }
+    const b = biomeAt(x, z);
+    return b === 'grassland' || b === 'forest';
   }
 
   function drivableHeightAt(x: number, z: number): number {
@@ -857,7 +886,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -1230,14 +1259,15 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('roads')) add('    roadMesh,');
   add(
     '    update: (cameraX, cameraZ, time, cameraY = 0) => {',
-    '      // A late ground edit redraws what it touched (only when the game asked for lateEdits).',
-    '      if (lateEdits && world.editCount && world.editsSince) {',
+    '      // A late ground edit redraws what it touched when the game asked for lateEdits. Without it the terrain is not redrawn,',
+    '      // but a plant never stays on a new road, pad or water: the ones standing there are taken away (admin 2026-11-23).',
+    '      if (world.editCount && world.editsSince) {',
     '        const n = world.editCount();',
     '        if (n > editsSeen) {',
     '          for (const e of world.editsSince(editsSeen)) {',
-    '            chunks?.invalidate(e.x0, e.z0, e.x1, e.z1);',
+    '            if (lateEdits) chunks?.invalidate(e.x0, e.z0, e.x1, e.z1);',
   );
-  if (has('plants')) add('            vegetation?.invalidate(e.x0, e.z0, e.x1, e.z1);');
+  if (has('plants')) add('            if (lateEdits) vegetation?.invalidate(e.x0, e.z0, e.x1, e.z1);', '            else vegetation?.prune(e.x0, e.z0, e.x1, e.z1);');
   add(
     '          }',
     '          editsSeen = n;',
@@ -1290,7 +1320,7 @@ export function athreeFiles(chosen: readonly string[], excludedModules: readonly
 const RULE_CORE = 'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. The world is always there: terrain, biomes, wind, spawns, heightfield colliders, desert dunes (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), rivers and lakes as DATA (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real; rivers always end in the sea, a lake or another river; the water level only goes down along a river; nothing grows or spawns in the water; pass rivers: false for a world without them), roads as DATA (map.world.homeRoads() gives the villages, highways and, for the racing profile, the closed banked race circuit with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; roads are made region by region (12.5 km) as you travel, with no junctions; pass roads: false for a world without them) and map.world.surfaceAt (what a wheel runs on).';
 const RULE_BY_MODULE: Record<string, string> = {
   sea: 'SEA: a real wave ocean (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour) and map.ocean.floatAt for boats. Do not add your own water plane: the ocean is already in map.chunks.group.',
-  plants: 'PLANTS: grass and trees (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map.',
+  plants: 'PLANTS: grass and trees (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map; a flower bed or bush you must add goes only where map.world.plantableAt(x, z) is true (never on a road, a city street or water).',
   rivers: 'RIVERS: map.riverWater draws the rivers and lakes with a flowing-water shader and gives boats floatAt; they are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Do not draw your own rivers or lakes.',
   sky: 'SKY: map.sky gives the sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. Do not draw your own sky.',
   roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers. Do not draw your own roads.',

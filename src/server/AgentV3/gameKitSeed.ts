@@ -54,6 +54,7 @@ import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
+import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
@@ -389,44 +390,122 @@ export const GAME_FEATURES_INDEX_FILE = 'src/game/features/index.ts';
  * rule maps the user's WISH to the smallest change that fulfils it, and is said on every turn of a game that has the file.
  */
 export const GAME_WORLD_FILE = 'src/game/world.ts';
-export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; places: city, town, village; lands: desert, jungle, mountain, snow, beach). Read what the user'
-  + ' WANTS, not the words: "map / zameen bada karo", "aur jagah chahiye", "ek aur shehar / gaon jodo", "duniya chhoti hai" → ADD one'
-  + ' region per place asked for (several at once when they ask for several; a new id each; toward: north / east / … when they say where),'
-  + ' and never edit or remove the regions already there. "Zyada traffic / log" → edit ONLY that region\'s own entry (city: { traffic:'
-  + ' { count }, people: { count }, parkedCars }). "Yeh shehar bada karo", "city ko bada karo" → GROW it with joined tiles: add'
-  + ' { id: \'main-city-2\', kind: \'city\', joinTo: \'main-city\' } (several for "bahut bada"; toward: east / north … when they say'
-  + ' where) — each tile is a new block of streets and buildings edge to edge with the city, the streets carried straight on.'
+/** The lands the current kit knows (play/openWorld.ts LandKind), in the order the rule names them. */
+const KIT_LANDS = ['desert', 'jungle', 'mountain', 'snow', 'beach', 'grassland'] as const;
+/** What THIS project's own map file can do — read from the file itself, never assumed from the current kit. PURE. */
+export interface WorldCapabilities { lands: string[]; joinTo: boolean; custom: boolean; spread: boolean; maxRegions: number }
+export const GAME_OPEN_WORLD_FILE = 'src/game/play/openWorld.ts';
+/**
+ * 🧬 THE RULE STATES ONLY WHAT THE PROJECT'S OWN KIT CAN DO (Q-3301 — failedbr #2494, 2026-11-22). The rule described lands
+ * (desert, jungle …) and joinTo, but that project's play/openWorld.ts was an older copy whose RegionKind was 'city' | 'town' |
+ * 'village': the builder wrote regions its own kit rejected, fought six to eleven type errors, and made features that pretended
+ * to grow the map. The class: an instruction that describes the CURRENT kit, said to a project holding ANOTHER version. So the
+ * capabilities come from the file. A project without the file (a first build, or a read-back that missed it) gets the current
+ * kit's — that is what the platform writes. PURE.
+ */
+export function worldCapabilities(openWorldSource: string | null | undefined): WorldCapabilities {
+  if (typeof openWorldSource !== 'string') return { lands: [...KIT_LANDS], joinTo: true, custom: true, spread: true, maxRegions: MAX_PLACES };
+  const src = openWorldSource;
+  const landUnion = /export\s+type\s+LandKind\s*=\s*([^;]+);/.exec(src)?.[1] ?? '';
+  const lands = KIT_LANDS.filter((k) => new RegExp(`'${k}'`).test(landUnion));
+  const regionUnion = /export\s+type\s+RegionKind\s*=\s*([^;]+);/.exec(src)?.[1] ?? '';
+  const max = /MAX_REGIONS\s*=\s*(\d+)/.exec(src);
+  return { lands, joinTo: /\bjoinTo\?\s*:/.test(src), custom: /'custom'/.test(regionUnion), spread: /\bspreadMeters\?\s*:/.test(src), maxRegions: max ? Math.min(MAX_PLACES, Number(max[1])) : 12 };
+}
+/** What each land does to the ground — the words the rule says about a land the kit has. */
+const LAND_LOOK: Record<string, string> = { desert: 'sand', jungle: 'dense trees', mountain: 'rising mountains', snow: 'snow', beach: 'beach', grassland: 'an open grass field — grass to the horizon, no trees' };
+
+/** The map rule for THIS project, from its own play/openWorld.ts (see worldCapabilities). PURE. */
+export function gameWorldRule(openWorldSource?: string | null): string {
+  const cap = worldCapabilities(openWorldSource);
+  const lands = cap.lands;
+  const missing: string[] = [];
+  const parts: string[] = [];
+  parts.push(`🗺️ THIS GAME'S MAP GROWS BY REGIONS (src/game/world.ts → WORLD.regions; places: city, town, village${lands.length ? `; lands: ${lands.join(', ')}` : ''}). Read what the user`
+    + ' WANTS, not the words: "map / zameen bada karo", "aur jagah chahiye", "ek aur shehar / gaon jodo", "duniya chhoti hai" → ADD one'
+    + ' region per place asked for (several at once when they ask for several; a new id each; toward: north / east / … when they say where),'
+    + ' and never edit or remove the regions already there. "Zyada traffic / log" → edit ONLY that region\'s own entry (city: { traffic:'
+    + ' { count }, people: { count }, parkedCars }).');
+  // failedbr #2495: "un citys ko jod jod ke copy clone kar ke" — the builder added SEPARATE cities; no city grew.
+  if (cap.joinTo) {
+    parts.push('ONE CITY BIGGER — "yeh shehar bada karo", "city ko bada karo", "city ka size badhao", "shehar ko copy / clone / duplicate kar'
+      + ' ke jodo", "city ko merge karke bada karo" → GROW that city with joined tiles: add { id: \'main-city-2\', kind: \'city\', joinTo:'
+      + ' \'main-city\' } (several for "bahut bada"; toward: east / north … when they say where) — each tile is a new block of streets and'
+      + ' buildings edge to edge with the city, the streets carried straight on. A copy that is NOT joined is a separate city far away and'
+      + ' makes no city bigger. A SEPARATE place only when they ask for a new / another / alag city or a number of cities ("4 city ho").'
+      + ' If you cannot tell whether they want one city bigger or more cities, or which city, ask (one short question) and change nothing.');
+  } else {
+    missing.push('grow a city by joined tiles (joinTo)');
+  }
   // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
   // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
-  + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','
-  + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). A land RIGHT'
-  + ' NEXT TO a place or another land ("shehar ke bagal me registan", "city se laga hua jungle", "शहर के पास रेगिस्तान", "gaon ke peeche pahad", "a desert next to'
-  + ' the city", "snow beside the mountains") → add joinTo: \'<that region id>\' (toward: the side, when they say it): it lies against'
-  + ' that place\'s edge, no plain strip and no highway between; without joinTo a land is spread out as before. NEVER add a'
-  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 1000 regions (places and lands'
-  + ' together; an older src/game/play/openWorld.ts reads only its own MAX_REGIONS, 100) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
+  if (lands.length) {
+    parts.push(`A ${lands.join(' / ')} is a LAND region: { id, kind: ${lands.map((k) => `'${k}'`).join(' | ')},`
+      + ` toward?, radius? } — the ground there really becomes that land (${lands.map((k) => LAND_LOOK[k]).join(', ')}).`
+      + (cap.joinTo ? ' A land RIGHT NEXT TO a place or another land ("shehar ke bagal me registan", "city se laga hua jungle", "शहर के पास रेगिस्तान",'
+        + ' "gaon ke peeche pahad", "a desert next to the city", "snow beside the mountains") → add joinTo: \'<that region id>\' (toward: the'
+        + ' side, when they say it): it lies against that place\'s edge, no plain strip and no highway between; without joinTo a land is'
+        + ' spread out as before.' : '')
+      + ' NEVER add a town and name it "Desert"/"Jungle"/"Mountain".'
+      + (lands.includes('grassland') ? ' "Ghas ka maidan", "khula maidan", "field", "meadow", "grassland" → { kind: \'grassland\' } — never a feature that draws a green circle or lays a grass texture.' : ''));
+  }
+  for (const k of KIT_LANDS) if (!lands.includes(k)) missing.push(`a ${k} land (kind '${k}')`);
+  const together = lands.length ? 'places and lands together' : '';
+  const olderNote = cap.maxRegions >= MAX_PLACES ? `an older ${GAME_OPEN_WORLD_FILE} reads only its own MAX_REGIONS, ${OLD_MAX_PLACES}` : '';
+  const note = [together, olderNote].filter(Boolean).join('; ');
+  parts.push(`The WHOLE map's land is WORLD.style. Up to ${cap.maxRegions} regions${note ? ` (${note})` : ''}`
+    + (cap.maxRegions >= 100 ? ' — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.' : '.'));
   // failedbr #2490: "is map ko 50x bigger banao … isi ko duplicate kar ke merge karo" — the builder stretched sizeMeters (the SAME
   // terrain, 7× wider) to the 1000 km cap and stopped at 12 places, all near the start. Bigger means MORE places, not a stretch.
-  + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
-  + ' in every direction) up to 1000 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land).'
+  parts.push(`"Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places${lands.length ? ' and lands' : ''}, spread`
+    + ` in every direction) up to ${cap.maxRegions} — NEVER raise sizeMeters to make the map bigger (it only stretches the same land).`);
   // failedbr #2494 autopsy: "4 bade map jod ke ek bada giant world" became places spread 2.6–3.5 km apart, each on its own
   // levelled ground at its own height — the user saw maps that never joined. JOINED INTO ONE means edge to edge.
-  + ' JOINED INTO ONE — only when the maps are to BECOME ONE map ("N map jod ke ek (bada) map / world banao", "sab maps ko jod ke ek'
-  + ' hi map bana do", "ek hi map bana do", "mila ke ek karo", "chipka ke ek kar do", "join / merge the maps into one world") → the'
-  + ' places stand EDGE TO EDGE, never kilometres apart: each place asked for is a'
-  + ' joined tile of the FIRST region, { id: \'<new id>\', kind: \'city\', joinTo: \'<first region id>\', toward?: \'east\' … }'
-  + ' (one ground level, the streets carried straight on; a village or town look is city: { style: \'town\' } on that tile),'
-  + ' and a land asked for in the same breath is a land region JOINED to it, { id, kind: \'desert\' …, joinTo: \'<first region id>\' }'
-  + ' (it lies right against the city\'s edge; where that side is water the kit lays it nearby and says so in the console).'
-  + ' The word "ek" alone NEVER means this, and these keep the spread behaviour above: "ek aur map jodo", "ek naya map jodo", "ek'
-  + ' desert map jodo" ADD one spread place or land; "aur maps jodo" / "map bada karo" ADD spread places; "sab shehron ko aapas me'
-  + ' road se jodo" means ROADS between the places (the kit\'s highways already join every place), not moving them edge to edge. "Isi map ko'
-  + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
-  + ' the original. A MAP THE USER ATTACHED (a .glb / .gltf / .obj, loose or in a .zip — it lands at public/models/<name>.glb) and asks'
-  + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'
-  + ' across, default 400); the map loads it when the player comes near and joins it by road. An .fbx or a game-engine project cannot be'
-  + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
-  + ' map to make it bigger.';
+  if (cap.joinTo) {
+    parts.push('JOINED INTO ONE — only when the maps are to BECOME ONE map ("N map jod ke ek (bada) map / world banao", "sab maps ko jod ke ek'
+      + ' hi map bana do", "ek hi map bana do", "mila ke ek karo", "chipka ke ek kar do", "join / merge the maps into one world") → the'
+      + ' places stand EDGE TO EDGE, never kilometres apart: each place asked for is a'
+      + ' joined tile of the FIRST region, { id: \'<new id>\', kind: \'city\', joinTo: \'<first region id>\', toward?: \'east\' … }'
+      + ' (one ground level, the streets carried straight on; a village or town look is city: { style: \'town\' } on that tile),'
+      + (lands.length ? ' and a land asked for in the same breath is a land region JOINED to it, { id, kind: \'desert\' …, joinTo: \'<first region id>\' }'
+        + ' (it lies right against the city\'s edge; where that side is water the kit lays it nearby and says so in the console).' : '')
+      + ' The word "ek" alone NEVER means this, and these keep the spread behaviour above: "ek aur map jodo", "ek naya map jodo", "ek'
+      + ' desert map jodo" ADD one spread place or land; "aur maps jodo" / "map bada karo" ADD spread places; "sab shehron ko aapas me'
+      + ' road se jodo" means ROADS between the places (the kit\'s highways already join every place), not moving them edge to edge.');
+  }
+  parts.push('"Isi map ko'
+    + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
+    + ' the original — copies of the whole MAP; copies to make one CITY bigger are joined tiles (above).');
+  // failedbr #2495: "map ko 40km*40km banao" was ignored, and the reply still said "all conditions met".
+  if (cap.spread) {
+    parts.push('A SIZE THE USER NAMES ("map 40km*40km banao", "50 km ka map") is never ignored: WORLD.spreadMeters = that many metres'
+      + ' (40 km → 40000) lays the places across that square; the platform sets it itself when the request is clear — then do not change'
+      + ' it. The most is 1000 km: above that, say so plainly. Never claim a size or a number of places the map does not have.');
+  } else {
+    missing.push('lay the places across a size the user names (spreadMeters)');
+  }
+  if (cap.custom) {
+    parts.push('A MAP THE USER ATTACHED (a .glb / .gltf / .obj, loose or in a .zip — it lands at public/models/<name>.glb) and asks'
+      + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'
+      + ' across, default 400); the map loads it when the player comes near and joins it by road. An .fbx or a game-engine project cannot be'
+      + ' loaded in a web game: tell the user to export it as .glb first.');
+  } else {
+    missing.push('add a map the user attached (kind \'custom\')');
+  }
+  // failedbr #2494: regionExpansion, giantWorld, worldStreamer — features that "added regions" while WORLD.regions never changed.
+  parts.push('A FEATURE CANNOT ADD A PLACE OR MAKE THE MAP BIGGER: the map is laid from WORLD.regions before the first frame, and a feature'
+    + ' only gets the world that is already there. Never write a feature that claims to add regions, expand, stream or enlarge the map —'
+    + ' the change goes in src/game/world.ts or it is not made. Never build a place by hand beside the list, and never replace the'
+    + ' map to make it bigger.');
+  if (missing.length) {
+    parts.push(`⚠️ THIS GAME'S MAP FILE (src/game/play/openWorld.ts) is an older or edited copy and CANNOT: ${missing.join('; ')}. Do not write`
+      + ' those into src/game/world.ts (the game will not compile) and do not fake them with a feature or a hand-made shape: do what it CAN'
+      + ' do, then tell the user plainly, in their language, which part this game\'s map cannot do yet.');
+  }
+  return parts.join(' ');
+}
+/** The rule for the current kit — what a first build and every project holding the current play/openWorld.ts gets. */
+export const GAME_WORLD_RULE = gameWorldRule();
 /**
  * 🌱 A FEATURE NEVER LAYS MAP-SCALE LAND IN AN OPEN WORLD (failedbr #2495/#2501 autopsy: asked for a grass field in the middle,
  * the builder added a feature with a flat 2 km PlaneGeometry at y = -0.1, not anchored; the hilly map's slopes cut through it
@@ -445,7 +524,8 @@ export const OPEN_WORLD_FEATURE_GROUND_RULE = '🌱 IN THIS OPEN WORLD A FEATURE
   + ' field, a court, a swimming pool, a talaab / pond, a parking lot, a race track or a grass field ("ghaas ka maidan") is a'
   + ' feature at its real size (under about 300 m), put down with world.place(object, x, z) (WORLD metres) so it sits on the'
   + ' ground there and follows world.heightAt(x, z); its water, grass or tarmac is part of it. Signs, decals, screens, markers and'
-  + ' the HUD are fine too.';
+  + ' the HUD are fine too. GRASS, FLOWERS OR BUSHES a feature scatters go ONLY where map.world.plantableAt(x, z) is true — never'
+  + ' where surfaceAt says \'grass\' (a city\'s streets read as grass there), so nothing green ever grows on a road.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the
@@ -696,7 +776,8 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? GAME_FEATURES_RULE : '',
     // Asked, never guessed, in every game that grows by the user's requests — a road-library race included (2026-11-22).
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' || /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? GAME_NO_GUESS_RULE : '',
-    typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
+    // Q-3301: what THIS project's own play/openWorld.ts can do, never the current kit's on faith.
+    typeof files[GAME_WORLD_FILE] === 'string' ? gameWorldRule(files[GAME_OPEN_WORLD_FILE]) : '',
     // An open world = the features list AND the map's regions file: features there never lay land of their own.
     typeof files[GAME_WORLD_FILE] === 'string' && typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? OPEN_WORLD_FEATURE_GROUND_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
@@ -715,6 +796,36 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
  * Pure snapshot handoff. No reads, writes, recipes, provider calls or continuation after Stop.
  * Module/import scopes remain independent; the seed's preservation/refresh gates are untouched.
  */
+/** How a car is driven on a phone (the kit's touchControls.drive). */
+export type DriveControlsWord = 'pads' | 'tilt' | 'auto' | 'joystick';
+const NEGATED_JOYSTICK = /\b(no|not|without|bina|mat)\b[^.!?\n]{0,20}joystick|joystick[^.!?\n]{0,30}\b(nahi|nahin|nhi|mat|not|na|nahi\s+chahiye)\b|जॉयस्टिक[^।.!?\n]{0,30}(नहीं|मत)/i;
+/**
+ * 🚗 THE CAR CONTROLS THE USER ASKED FOR (admin 2026-11-23: "car control hardcore joystick se nahi honi chahiye, user jo
+ * prompt de usse ho"). Read from the request in English, Hinglish or Hindi; null when it names none (the kit default,
+ * Left/Right + Brake/Gas pads, then holds). A joystick only when it is asked for and not refused. PURE.
+ */
+export function driveControlsFromWords(text: string | null | undefined): DriveControlsWord | null {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return null;
+  if (/\b(tilt|gyro|gyroscope|accelerometer|motion\s+control)\b|jhuka|jhukaa|झुका/i.test(t)) return 'tilt';
+  if (/\bjoystick\b|जॉयस्टिक/i.test(t) && !NEGATED_JOYSTICK.test(t)) return 'joystick';
+  if (/\bauto[\s-]?(gas|accelerat\w*|drive|race)\b|\b(sirf|only|just)\s+steer\w*|\b(easy|simple|aasan|asaan)\s+(control|controls|driving|steering)\b|अपने\s*आप\s*(चले|चलेगी)/i.test(t)) return 'auto';
+  if (/\b(button|buttons|batan)\b[^.!?\n]{0,30}\b(chala\w*|drive|steer\w*|control\w*)\b|\b(left|right)\s*\/\s*(right|left)\s+button/i.test(t)) return 'pads';
+  return null;
+}
+
+/** The line a game turn carries when the user named how the car is driven. */
+export function driveControlsLine(text: string | null | undefined): string {
+  const mode = driveControlsFromWords(text);
+  if (!mode) return '';
+  const what = mode === 'tilt' ? 'tilt the phone to steer, Brake / Gas buttons'
+    : mode === 'auto' ? 'the car drives forward by itself; the player steers and brakes'
+    : mode === 'joystick' ? 'the analogue joystick steers and drives'
+    : 'Left / Right and Brake / Gas buttons';
+  return `🚗 CAR CONTROLS THE USER ASKED FOR: ${what}. Set touchControls: { drive: '${mode}' } in the Game options (keep any other`
+    + ' touchControls fields); never hand-roll them. A computer still drives with W/A/S/D and the arrows.';
+}
+
 export function gameTurnHandoff(
   prompt: string,
   files: Readonly<Record<string, string>>,
@@ -735,6 +846,7 @@ export function gameTurnHandoff(
   const grows = projectGrowthRules(files);
   return { contract, block: [
     grows,
+    driveControlsLine(prompt),
     contract ? gameContractBlock(contract) : '',
     api ? '[GAME KIT API SNAPSHOT — saved start-of-turn source plus acknowledged seed/refresh writes; '
       + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '

@@ -229,3 +229,23 @@ describe('🌌 up to 1,000 places — and an older map file is never handed more
     said.mockRestore(); world.dispose();
   }, 180_000);
 });
+
+describe('🌊 a land or a user map laid the spread way never falls into the sea silently', () => {
+  it('in the sea: said in the console, still on the map, not moved; on dry ground: nothing said', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const c = context();
+    const world = OW.createOpenWorld(c, { seed: 7, profile: 'battle-royale', quality: 'phone', regions: [
+      { id: 'home', kind: 'village', city: tiny },
+      { id: 'wet-sands', kind: 'desert', toward: 'north', distance: 7000 },
+      { id: 'wet-map', kind: 'custom', model: 'kan', toward: 'west', distance: 7000 },
+      { id: 'dry-woods', kind: 'jungle', toward: 'east', distance: 900, radius: 200 },
+    ] });
+    const text = said.mock.calls.flat().join(' ');
+    expect(text).toMatch(/the land "wet-sands" lies mostly in the sea or a river/);
+    expect(text).toMatch(/the map "wet-map" lies mostly in the sea or a river/);
+    expect(text).not.toMatch(/"dry-woods"/);
+    expect(world.lands.map((l: any) => l.id)).toEqual(['wet-sands', 'dry-woods']);
+    expect(world.userMaps.map((m: any) => m.id)).toEqual(['wet-map']);
+    said.mockRestore(); world.dispose();
+  }, 180_000);
+});

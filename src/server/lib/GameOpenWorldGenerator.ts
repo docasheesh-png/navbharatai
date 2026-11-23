@@ -335,6 +335,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   let growSeed = 0x9e3779b9;
   const nextRandom = (): number => { growSeed = (Math.imul(growSeed ^ (growSeed >>> 15), 2246822519) + 0x6d2b79f5) | 0; return ((growSeed >>> 0) % 10000) / 10000; };
   /**
+   * A land or a user map laid the spread way (or nearby, when it could not join) is never moved for this — the same map as
+   * before — but where most of its ground is sea or river it is SAID, so the builder can tell the user and ask again.
+   */
+  const sayIfWet = (what: string, id: string, at: { x: number; z: number }, r: number): void => {
+    let wet = 0;
+    for (const [dx, dz] of [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
+      const x = at.x + dx * r, z = at.z + dz * r;
+      if (!(map.world.heightAt(x, z) >= 2) || map.world.waterAt(x, z)) wet++;
+    }
+    if (wet >= 3) console.error('[world] the ' + what + ' "' + id + '" lies mostly in the sea or a river (no dry ground there on this map); it is on the map, but ask for it in another direction or nearer.');
+  };
+  /**
    * Where a land joined to region.joinTo stands: its centre, so that it overlaps the edge of that place (the whole grown city,
    * all its tiles) or land a little. null (said in the console) when the id is unknown or every side asked for is water or taken.
    */
@@ -396,6 +408,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
+      sayIfWet('map', region.id, at, r);
       const y = map.world.levelGround(at.x, at.z, r, r, 60);
       taken.push({ x: at.x, z: at.z, r });
       userMaps.push({ id: region.id, model, centre: { x: at.x, y, z: at.z }, size, status: 'waiting' });
@@ -423,6 +436,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
+      sayIfWet('land', region.id, at, r);
       map.world.setLand(at.x, at.z, r, LAND_BIOME[region.kind]);
       taken.push({ x: at.x, z: at.z, r });
       landList.push({ id: region.id, kind: region.kind, centre: at, radius: r });

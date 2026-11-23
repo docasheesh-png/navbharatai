@@ -19,6 +19,8 @@ import { gardenMatchAppTsx } from './games/gardenMatch';
 import { tapBloomAppTsx } from './games/tapBloom';
 import { countGardenAppTsx } from './games/countGarden';
 import { shapeYardAppTsx } from './games/shapeYard';
+import { teaStallAppTsx } from './games/teaStall';
+import { riverFerryAppTsx } from './games/riverFerry';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -57,7 +59,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'beat-steps', title: 'Beat Steps', category: 'Music', accent: '#7c3aed', appTsx: gapScreen('beat-steps', 'beat-steps-best-v1') },
   { id: 'slope-ride', title: 'Slope Ride', category: 'Racing', accent: '#9a3412', appTsx: roadRaceAppTsx('run', 'slope-ride-best-v1') },
   { id: 'camp-quest', title: 'Camp Quest', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('camp-quest', 'camp-quest-best-v1') },
-  { id: 'tea-stall', title: 'Tea Stall', category: 'Simulation', accent: '#92400e', appTsx: gapScreen('tea-stall', 'tea-stall-best-v1') },
+  { id: 'tea-stall', title: 'Tea Stall', category: 'Simulation', accent: '#92400e', appTsx: teaStallAppTsx },
   { id: 'tower-line', title: 'Tower Line', category: 'Strategy', accent: '#334155', appTsx: gapScreen('tower-line', 'tower-line-best-v1') },
   { id: 'odd-one', title: 'Odd One', category: 'Trivia', accent: '#0369a1', appTsx: gapScreen('odd-one', 'odd-one-best-v1') },
   { id: 'letter-link', title: 'Letter Link', category: 'Word', accent: '#4338ca', appTsx: gapScreen('letter-link', 'letter-link-best-v1') },
@@ -66,7 +68,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'shape-yard', title: 'Shape Yard', category: 'Educational', accent: '#0f766e', appTsx: shapeYardAppTsx },
   { id: 'drum-row', title: 'Drum Row', category: 'Music', accent: '#6d28d9', appTsx: gapScreen('drum-row', 'drum-row-best-v1') },
   { id: 'road-tale', title: 'Road Tale', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('road-tale', 'road-tale-best-v1') },
-  { id: 'river-ferry', title: 'River Ferry', category: 'Simulation', accent: '#92400e', appTsx: gapScreen('river-ferry', 'river-ferry-best-v1') },
+  { id: 'river-ferry', title: 'River Ferry', category: 'Simulation', accent: '#92400e', appTsx: riverFerryAppTsx },
   { id: 'seed-row', title: 'Seed Row', category: 'Strategy', accent: '#334155', appTsx: gapScreen('seed-row', 'seed-row-best-v1') },
   { id: 'rhyme-pair', title: 'Rhyme Pair', category: 'Word', accent: '#4338ca', appTsx: gapScreen('rhyme-pair', 'rhyme-pair-best-v1') },
 ];

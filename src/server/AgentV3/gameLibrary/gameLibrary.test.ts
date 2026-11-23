@@ -45,7 +45,8 @@ describe('game library matching', () => {
     const library = GAME_LIBRARY.filter((game) => game.id !== 'courtyard');
     const ask: GameAsk = async () => ({ text: '{"id":"courtyard","confidence":0.95}' });
     expect(await matchGameLibrary('board game', ask, library)).toBeNull();
-    expect(library.map((game) => game.id)).toEqual(['lane-dash', 'gully-innings', 'stack-tiles', 'ring-rally', 'bell-round']);
+    expect(library.map((game) => game.id)).not.toContain('courtyard');
+    expect(library).toHaveLength(GAME_LIBRARY.length - 1);
   });
 
   it('an exact starter chip is not sent to the game model', async () => {

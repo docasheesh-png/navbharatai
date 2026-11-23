@@ -9,6 +9,13 @@ import { gullyInningsAppTsx } from './games/gullyInnings';
 import { stackTilesAppTsx } from './games/stackTiles';
 import { ringRallyAppTsx } from './games/ringRally';
 import { bellRoundAppTsx } from './games/bellRound';
+import { pairGroveAppTsx } from './games/pairGrove';
+import { dodgeFallAppTsx } from './games/dodgeFall';
+import { ladderPathAppTsx } from './games/ladderPath';
+import { threeLeavesAppTsx } from './games/threeLeaves';
+import { trailWalkAppTsx } from './games/trailWalk';
+import { pavilionAppTsx } from './games/pavilion';
+import { gardenMatchAppTsx } from './games/gardenMatch';
 
 export type PlayCategory =
   | 'Action' | 'Adventure' | 'Arcade' | 'Board' | 'Card' | 'Casino' | 'Casual' | 'Educational'
@@ -29,6 +36,14 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'stack-tiles', title: 'Stack Tiles', category: 'Puzzle', accent: '#7c3aed', appTsx: stackTilesAppTsx },
   { id: 'ring-rally', title: 'Ring Rally', category: 'Racing', accent: '#be123c', appTsx: ringRallyAppTsx },
   { id: 'bell-round', title: 'Bell Round', category: 'Trivia', accent: '#0369a1', appTsx: bellRoundAppTsx },
+  // Existing starters, registered here as the playable library face. One row adds or removes each.
+  { id: 'trail-walk', title: 'Trail Walk', category: 'Adventure', accent: '#15803d', appTsx: trailWalkAppTsx },
+  { id: 'pair-grove', title: 'Pair Grove', category: 'Casual', accent: '#7c3aed', appTsx: pairGroveAppTsx },
+  { id: 'dodge-fall', title: 'Dodge Fall', category: 'Arcade', accent: '#ea580c', appTsx: dodgeFallAppTsx },
+  { id: 'ladder-path', title: 'Ladder Path', category: 'Board', accent: '#0f766e', appTsx: ladderPathAppTsx },
+  { id: 'three-leaves', title: 'Three Leaves', category: 'Card', accent: '#1d4ed8', appTsx: threeLeavesAppTsx },
+  { id: 'pavilion', title: 'Pavilion', category: 'Sports', accent: '#b45309', appTsx: pavilionAppTsx },
+  { id: 'garden-match', title: 'Garden Match', category: 'Puzzle', accent: '#16a34a', appTsx: gardenMatchAppTsx },
 ];
 
 export function gameById(id: string, library: readonly GameTemplate[] = GAME_LIBRARY): GameTemplate | undefined {

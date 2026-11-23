@@ -298,7 +298,7 @@ export interface AthreeWorld {
    * Make a round area of the map a different LAND (a desert, a forest, mountains, snow, a beach) — the colour, the plants and,
    * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
    */
-  setLand(x: number, z: number, radius: number, land: LandBiome): void;
+  setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void;
   /**
    * Lay a ROAD the game asks for (a highway between two of its places), through these points. The ground is cut and filled
    * to it (a smooth grade, a shoulder) so it can be driven, roadAt answers it, and the returned centre line (with heights)
@@ -553,7 +553,26 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // LAND PATCHES (admin 2026-11-21, failedbr #2488: "ek village, ek desert, ek jungle aur ek mountain" became three TOWNS named
   // so). A round area of the map is given another land: biomeAt answers it inside (with a ragged edge, so it is not a circle),
   // and mountains rise out of the ground there. Laid before the first frame, so the terrain, the plants and the colliders agree.
-  const lands: Array<{ x: number; z: number; r: number; land: LandBiome }> = [];
+  const lands: Array<{ x: number; z: number; r: number; land: LandBiome; joined?: boolean }> = [];
+  // 🧩 JOINED LANDS (map expansion, item 3). A land laid against another place or land overlaps it a little, so there is no strip
+  // of plain country between them. Where two lands overlap the earlier one still colours the ground (first match, as always),
+  // but a JOINED mountain's rise is its own: it eases down to its own edge even where the land beside it is the one drawn, so
+  // two lands that meet never meet at a cliff. A map with no joined mountain takes exactly the old height.
+  let joinedMountains = 0;
+  function joinedMountainWeight(x: number, z: number): number {
+    const ids = placeIds(landCells, landsEverywhere, x, z);
+    const count = ids ? ids.length : lands.length;
+    let w = 0;
+    for (let k = 0; k < count; k++) {
+      const l = lands[ids ? ids[k] : k];
+      if (!l.joined || l.land !== 'mountain') continue;
+      const d = Math.hypot(x - l.x, z - l.z);
+      if (d >= l.r * 1.25) continue;
+      const edge = l.r * (0.85 + 0.3 * fieldNoise(x, z, seed + 31, 2, Math.max(60, l.r / 2), 0));
+      if (d <= edge) w = Math.max(w, 1 - smoothstep(edge * 0.55, edge, d));
+    }
+    return w;
+  }
   function landAt(x: number, z: number): { land: LandBiome; w: number } | null {
     const ids = placeIds(landCells, landsEverywhere, x, z);
     const count = ids ? ids.length : lands.length;
@@ -566,10 +585,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     return null;
   }
-  function setLand(x: number, z: number, radius: number, land: LandBiome): void {
+  function setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void {
     if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
     const r = Math.min(4000, Math.max(60, radius));
-    lands.push({ x, z, r, land });
+    const joined = options?.joined === true;
+    lands.push(joined ? { x, z, r, land, joined } : { x, z, r, land });
+    if (joined && land === 'mountain') joinedMountains++;
     noteEdit(x - r * 1.25, z - r * 1.25, x + r * 1.25, z + r * 1.25);
     indexPlace(landCells, landsEverywhere, lands.length - 1, x, z, r * 1.25 + 1, r * 1.25 + 1);
   }
@@ -630,7 +651,15 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (lands.length) {
       const l = landAt(x, z);
       // Mountains rise from the land (higher towards the middle, ridged by noise), never out of the water.
-      if (l && l.land === 'mountain' && t > 2) t += l.w * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+      if (!joinedMountains) {
+        if (l && l.land === 'mountain' && t > 2) t += l.w * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+      } else {
+        // A joined mountain eases to its own edge (see JOINED LANDS); the drawn land's own rise counts as before.
+        let mw = l && l.land === 'mountain' ? l.w : 0;
+        const jw = joinedMountainWeight(x, z);
+        if (jw > mw) mw = jw;
+        if (mw > 0 && t > 2) t += mw * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
+      }
     }
     const padIds = placeIds(padCells, padsEverywhere, x, z);
     const padCount = padIds ? padIds.length : pads.length;

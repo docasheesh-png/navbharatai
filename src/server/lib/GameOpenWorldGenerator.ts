@@ -79,6 +79,8 @@ export interface WorldRegion {
   /**
    * GROW A CITY: the id of a city (or of another tile of it) this one joins edge to edge — the same streets carried on, the
    * same ground level, one continuous bigger city. Without toward, it takes a free side of the city at random.
+   * A LAND (desert, jungle, mountain, snow, beach) with joinTo lies right against that place or land — no strip of plain
+   * country and no highway between them — on the side toward says, else the first free dry side.
    */
   joinTo?: string;
   /**
@@ -108,6 +110,8 @@ export interface OpenWorldLand {
   /** Its centre in WORLD metres, and how far it reaches. */
   readonly centre: { x: number; z: number };
   readonly radius: number;
+  /** A land laid against another place or land (its joinTo): the id it stands against. */
+  readonly joinedTo?: string;
 }
 const COMPASS: Record<Compass, number> = { north: 0, 'north-east': Math.PI / 4, east: Math.PI / 2, 'south-east': (3 * Math.PI) / 4, south: Math.PI, 'south-west': (5 * Math.PI) / 4, west: (3 * Math.PI) / 2, 'north-west': (7 * Math.PI) / 4 };
 const REGION_PRESETS: Record<'city' | 'town' | 'village', { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
@@ -245,6 +249,48 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const AXIS: Record<string, [number, number]> = { north: [0, -1], 'north-east': [1, -1], east: [1, 0], 'south-east': [1, 1], south: [0, 1], 'south-west': [-1, 1], west: [-1, 0], 'north-west': [-1, -1] };
   let growSeed = 0x9e3779b9;
   const nextRandom = (): number => { growSeed = (Math.imul(growSeed ^ (growSeed >>> 15), 2246822519) + 0x6d2b79f5) | 0; return ((growSeed >>> 0) % 10000) / 10000; };
+  /**
+   * Where a land joined to region.joinTo stands: its centre, so that it overlaps the edge of that place (the whole grown city,
+   * all its tiles) or land a little. null (said in the console) when the id is unknown or every side asked for is water or taken.
+   */
+  const joinedLandSpot = (region: WorldRegion, r: number, n: number): { x: number; z: number } | null => {
+    const id = region.joinTo as string;
+    let shape: { x: number; z: number; hw?: number; hd?: number; radius?: number; skip: Array<{ x: number; z: number }> } | null = null;
+    const place = planned.find((q) => q.region.id === id);
+    if (place) {
+      const rootId = place.cluster?.root ?? place.region.id;
+      const tiles = planned.filter((q) => (q.cluster?.root ?? q.region.id) === rootId);
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const q of tiles) { const pl = planCity(q.cityOptions); x0 = Math.min(x0, q.centre.x - pl.width / 2); x1 = Math.max(x1, q.centre.x + pl.width / 2); z0 = Math.min(z0, q.centre.z - pl.depth / 2); z1 = Math.max(z1, q.centre.z + pl.depth / 2); }
+      shape = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: (x1 - x0) / 2, hd: (z1 - z0) / 2, skip: tiles.map((q) => q.centre) };
+    } else {
+      const land = landList.find((l) => l.id === id);
+      if (land) shape = { x: land.centre.x, z: land.centre.z, radius: land.radius, skip: [land.centre] };
+      else {
+        const user = userMaps.find((m) => m.id === id);
+        if (user) shape = { x: user.centre.x, z: user.centre.z, hw: user.size / 2, hd: user.size / 2, skip: [user.centre] };
+      }
+    }
+    if (!shape) { console.error('[world] the land "' + region.id + '" joins "' + id + '", which is not on the map (yet); it was laid nearby instead.'); return null; }
+    const first = region.toward !== undefined ? COMPASS[region.toward] : n * 2.399963;
+    const sides = region.toward !== undefined ? [first] : [0, 1, 2, 3, 4, 5, 6, 7].map((k) => first + (k * Math.PI) / 4);
+    for (const angle of sides) {
+      const ux = Math.sin(angle), uz = -Math.cos(angle);
+      // From the centre to the border along this side: the rectangle's border, or a land's nearest (ragged) edge.
+      const border = shape.radius !== undefined ? shape.radius * 0.85 : Math.min(shape.hw! / Math.max(1e-6, Math.abs(ux)), shape.hd! / Math.max(1e-6, Math.abs(uz)));
+      const at = { x: shape.x + ux * (border + r * 0.8), z: shape.z + uz * (border + r * 0.8) };
+      const isBase = (t: { x: number; z: number }) => shape!.skip.some((c) => c.x === t.x && c.z === t.z);
+      if (taken.some((t) => !isBase(t) && Math.hypot(at.x - t.x, at.z - t.z) < t.r + r * 0.8)) continue;
+      let dry = 0;
+      for (const [dx, dz] of [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
+        const x = at.x + dx * r, z = at.z + dz * r;
+        if (map.world.heightAt(x, z) >= 2 && !map.world.waterAt(x, z)) dry++;
+      }
+      if (dry >= 4) return at;
+    }
+    console.error('[world] the land "' + region.id + '" could not lie against "' + id + '" (' + (region.toward ? 'the ' + region.toward + ' side is' : 'every side is') + ' water or another place); it was laid nearby instead.');
+    return null;
+  };
   for (const region of wanted) {
     if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
@@ -271,6 +317,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     // A LAND, not a place to build: laid on the map the way it was asked (toward, distance), clear of the places already there.
     if (isLandKind(region.kind)) {
       const r = Math.min(2000, Math.max(150, Number(region.radius) || 450));
+      // 🧩 A LAND JOINED TO A PLACE OR A LAND (map expansion, item 3): laid against it, overlapping its edge a little, on the side
+      // asked for (else the first free dry side). Where that side is water or another place, it is said in the console and the
+      // land is laid the old way (near, spread), never dropped and never on top of something.
+      if (typeof region.joinTo === 'string' && region.joinTo) {
+        const against = joinedLandSpot(region, r, n);
+        if (against) {
+          map.world.setLand(against.x, against.z, r, LAND_BIOME[region.kind], { joined: true });
+          taken.push({ x: against.x, z: against.z, r });
+          landList.push({ id: region.id, kind: region.kind, centre: { x: against.x, z: against.z }, radius: r, joinedTo: region.joinTo });
+          continue;
+        }
+      }
       const base = planned[0]?.centre ?? spawn;
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
       let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 300, (r * 2 + 400) * Math.sqrt(n));
@@ -399,6 +457,15 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // ground under it when seen from far away.
   const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   const roadLines: Array<Array<{ x: number; y: number; z: number }>> = [];
+  // A land joined to a place or land touches it: the two need no highway between them (any tile of a grown city counts).
+  const stopIndex = (id: string): number[] => {
+    const p = planned.find((q) => q.region.id === id);
+    if (p) { const rootId = p.cluster?.root ?? p.region.id; return planned.map((q, i) => ((q.cluster?.root ?? q.region.id) === rootId ? i : -1)).filter((i) => i >= 0); }
+    const l = landList.findIndex((q) => q.id === id); if (l >= 0) return [planned.length + l];
+    const m = userMaps.findIndex((q) => q.id === id); return m >= 0 ? [planned.length + landList.length + m] : [];
+  };
+  const joinedPairs = new Set<string>();
+  landList.forEach((l, i) => { if (l.joinedTo) for (const j of stopIndex(l.joinedTo)) { joinedPairs.add((planned.length + i) + ',' + j); joinedPairs.add(j + ',' + (planned.length + i)); } });
   if (stops.length > 1) {
     const joined = new Set<number>([0]);
     while (joined.size < stops.length) {
@@ -410,6 +477,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       if (!best) break;
       joined.add(best[1]);
+      if (joinedPairs.has(best[0] + ',' + best[1])) continue;                                // a joined land touches it
       const A0 = stops[best[0]], B0 = stops[best[1]], len = best[2] || 1;
       const ux = (B0.x - A0.x) / len, uz = (B0.z - A0.z) / len;
       if (len < A0.r + B0.r + 20) continue;                                                   // touching places need no road

@@ -17,7 +17,7 @@ describe('🧩 the rule: "jod ke ek world" is edge to edge, "aur maps jodo" is s
     expect(GAME_WORLD_RULE).toMatch(/only when the maps are to BECOME ONE map/);
     expect(GAME_WORLD_RULE).toMatch(/EDGE TO EDGE, never kilometres apart/);
     expect(GAME_WORLD_RULE).toMatch(/joinTo: '<first region id>'/);
-    expect(GAME_WORLD_RULE).toMatch(/land region with NO distance/);
+    expect(GAME_WORLD_RULE).toMatch(/land region JOINED to it, \{ id, kind: 'desert' …, joinTo: '<first region id>' \}/);
     expect(OPEN_WORLD_HANDOFF).toContain(GAME_WORLD_RULE);
   });
   it('keeps the universe and 50x behaviour: more places spread out, never a stretched map; duplicates are copies', () => {

@@ -16,7 +16,19 @@ import * as THREE from 'three';
 import { Octree } from 'three/addons/math/Octree.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
+import { GROUND_CONTACT_SOURCE } from '../src/server/lib/groundContact';
 import { THREE_STUB, SURFACES_STUB, walk, worldPos, type Obj3D } from './helpers/threeStub';
+
+/** The generated objects.ts places bodies through restOriginY. Run the real module, not a guess. */
+function loadGroundContact(): Record<string, unknown> {
+  const js = ts.transpileModule(GROUND_CONTACT_SOURCE, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const out: Record<string, unknown> = {};
+  // eslint-disable-next-line no-new-func
+  new Function('exports', 'require', js)(out, (id: string) => { throw new Error(id); });
+  return out;
+}
 
 /** Transpile the GENERATED objects.ts and run it against the stubs. This is the point of the file. */
 function loadObjects(): Record<string, (o?: Record<string, unknown>) => unknown> {
@@ -49,6 +61,7 @@ function loadObjects(): Record<string, (o?: Record<string, unknown>) => unknown>
     if (id === 'three') return THREE_STUB;
     if (id === './buildings') return loadBuildingDependency(id);
     if (id.endsWith('surfaces')) return SURFACES_STUB;
+    if (id === './groundContact') return loadGroundContact();
     if (id === './collision') return { markWorldCollider: (object: Obj3D) => object };
     if (id === 'three/addons/math/Capsule.js') return { Capsule };
     throw new Error('the generated objects.ts should not import ' + id);

@@ -403,12 +403,12 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' NEXT TO a place or another land ("shehar ke bagal me registan", "city se laga hua jungle", "शहर के पास रेगिस्तान", "gaon ke peeche pahad", "a desert next to'
   + ' the city", "snow beside the mountains") → add joinTo: \'<that region id>\' (toward: the side, when they say it): it lies against'
   + ' that place\'s edge, no plain strip and no highway between; without joinTo a land is spread out as before. NEVER add a'
-  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 100 regions (places and lands'
-  + ' together) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
+  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 1000 regions (places and lands'
+  + ' together; an older src/game/play/openWorld.ts reads only its own MAX_REGIONS, 100) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
   // failedbr #2490: "is map ko 50x bigger banao … isi ko duplicate kar ke merge karo" — the builder stretched sizeMeters (the SAME
   // terrain, 7× wider) to the 1000 km cap and stopped at 12 places, all near the start. Bigger means MORE places, not a stretch.
   + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
-  + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land).'
+  + ' in every direction) up to 1000 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land).'
   // failedbr #2494 autopsy: "4 bade map jod ke ek bada giant world" became places spread 2.6–3.5 km apart, each on its own
   // levelled ground at its own height — the user saw maps that never joined. JOINED INTO ONE means edge to edge.
   + ' JOINED INTO ONE — only when the maps are to BECOME ONE map ("N map jod ke ek (bada) map / world banao", "sab maps ko jod ke ek'

@@ -7,7 +7,10 @@ import * as THREE from 'three';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { recipeFilePool } from '../src/server/lib/gameRecipeLayers';
-import { OPEN_WORLD_BRIDGE_PATH } from '../src/server/lib/GameOpenWorldGenerator';
+import { OPEN_WORLD_BRIDGE_PATH, OPEN_WORLD_MAX_REGIONS } from '../src/server/lib/GameOpenWorldGenerator';
+import { MAX_PLACES, OLD_MAX_PLACES, appendPlace, placesTheMapHolds, placeNotAddedHandoff } from '../src/server/AgentV3/worldGrow';
+import { OPEN_WORLD_FILE, addLibraryPlaceAtTurnStart } from '../src/server/AgentV3/growthTurn';
+import { GAME_WORLD_RULE } from '../src/server/AgentV3/gameKitSeed';
 
 const DIR = join(__dirname, `.tmp-thousand-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -175,5 +178,54 @@ describe('🏙️ only the nearest cities stand (phone 2, mid 5, desktop 8)', ()
     expect(metro.every((p: any) => p.built)).toBe(true);
     expect(standing(world)).toBe(2);
     world.dispose();
+  }, 180_000);
+});
+
+describe('🌌 up to 1,000 places — and an older map file is never handed more than it reads', () => {
+  it('the kit, the platform and the rule agree on 1,000', () => {
+    expect(OPEN_WORLD_MAX_REGIONS).toBe(1000); expect(MAX_PLACES).toBe(1000);
+    expect(recipeFilePool().get(OPEN_WORLD_BRIDGE_PATH)!.content).toContain('export const MAX_REGIONS = 1000;');
+    expect(GAME_WORLD_RULE).toMatch(/Up to 1000 regions \(places and lands together; an older src\/game\/play\/openWorld\.ts reads only its own MAX_REGIONS, 100\)/);
+    expect(OPEN_WORLD_FILE).toBe(OPEN_WORLD_BRIDGE_PATH);
+  });
+  it('the game\'s own map file says how many it reads; unreadable or older = 100', () => {
+    expect(placesTheMapHolds(recipeFilePool().get(OPEN_WORLD_BRIDGE_PATH)!.content)).toBe(1000);
+    expect(placesTheMapHolds('export const MAX_REGIONS = 100;')).toBe(100);
+    expect(placesTheMapHolds('export const MAX_REGIONS = 5000;')).toBe(1000);
+    expect(placesTheMapHolds(null)).toBe(OLD_MAX_PLACES);
+    expect(placesTheMapHolds('// no number here')).toBe(100);
+  });
+  const worldWith = (n: number) => `export const WORLD = {\n  regions: [\n${Array.from({ length: n }, (_, i) => `    { id: 'p${i}', kind: 'village' },`).join('\n')}\n  ],\n};\n`;
+  it('the library adds a 101st place only where the map file reads 1,000; an older one is told it is full (100 places)', async () => {
+    const run = async (bridge: string | null) => {
+      const files: Record<string, string> = { 'src/game/world.ts': worldWith(100), ...(bridge === null ? {} : { [OPEN_WORLD_FILE]: bridge }) };
+      const issues: Array<{ code: string }> = [];
+      const said = await addLibraryPlaceAtTurnStart({
+        prompt: 'Add this to my game (library map place: "village")', filesAtTurnStart: { ...files },
+        read: async (p) => { if (!(p in files)) throw new Error('missing'); return files[p]; },
+        write: async (p, c) => { files[p] = c; }, record: (i) => issues.push(i),
+      });
+      return { said, issues: issues.map((i) => i.code), count: (files['src/game/world.ts'].match(/kind: 'village'/g) || []).length };
+    };
+    const fresh = await run('export const MAX_REGIONS = 1000;');
+    expect(fresh.count).toBe(101); expect(fresh.issues).toEqual(['MAP_PLACE_ADDED']);
+    const older = await run('export const MAX_REGIONS = 100;');
+    expect(older.count).toBe(100); expect(older.issues).toEqual(['MAP_PLACE_NOT_ADDED']); expect(older.said).toContain('already has 100 places');
+    const none = await run(null);
+    expect(none.count).toBe(100);
+    expect(appendPlace(worldWith(999), 'city')).toMatchObject({ ok: true, count: 1000 });
+    expect(appendPlace(worldWith(1000), 'city')).toEqual({ ok: false, reason: 'full' });
+    expect(placeNotAddedHandoff('city', 100)).toContain('100 places');
+  });
+  it('a list longer than 1,000 is cut at 1,000 — and said in the console, never silently', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const c = context();
+    // Lands are never left out for want of dry ground, so the list really reaches the cap.
+    const regions = [{ id: 'home', kind: 'village', city: tiny }, ...Array.from({ length: 1002 }, (_, i) => ({ id: 'l' + i, kind: (['desert', 'jungle', 'snow'] as const)[i % 3], radius: 150 }))];
+    const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions });
+    expect(said.mock.calls.flat().join(' ')).toMatch(/the map holds 1000 places and lands; 3 more in the list were left out/);
+    expect(world.places.length + world.lands.length).toBe(1000);
+    expect(world.lands.at(-1).id).toBe('l998');
+    said.mockRestore(); world.dispose();
   }, 180_000);
 });

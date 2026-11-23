@@ -51,7 +51,7 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /**
    * MORE PLACES ON THE MAP — how the world grows. Each entry is a city, a town or a village standing on its own levelled
    * ground, spread out across the map with open country between them. Add an entry to make the map bigger; never edit
-   * the others. The first place (city, or regions[0]) is where the player starts. Up to 100 (places and lands together):
+   * the others. The first place (city, or regions[0]) is where the player starts. Up to 1000 (places and lands together):
    * only the cities near the player are built, so a long list is a big universe, not a slow start.
    */
   regions?: WorldRegion[];
@@ -63,8 +63,8 @@ export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom';
 export type LandKind = 'desert' | 'jungle' | 'mountain' | 'snow' | 'beach';
 const LAND_BIOME: Record<LandKind, LandBiome> = { desert: 'desert', jungle: 'forest', mountain: 'mountain', snow: 'snow', beach: 'beach' };
 export function isLandKind(kind: unknown): kind is LandKind { return typeof kind === 'string' && kind in LAND_BIOME; }
-/** How many places and lands one map holds (admin 2026-11-22: "10—100 maps … bahut bada universe"). */
-export const MAX_REGIONS = 100;
+/** How many places and lands one map holds (admin 2026-11-22: "10—100 maps … bahut bada universe"; owner decision 2026-11-23: 1,000). */
+export const MAX_REGIONS = 1000;
 /** A planned place's city is built when the player comes this many metres from its edge. */
 export const BUILD_AHEAD = 1500;
 /** How many cities stand built at once, by the map's quality tier (owner decision 2026-11-23: phone 2, mid 5, desktop 8). */
@@ -376,7 +376,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     console.error('[world] the land "' + region.id + '" could not lie against "' + id + '" (' + (region.toward ? 'the ' + region.toward + ' side is' : 'every side is') + ' water or another place); it was laid nearby instead.');
     return null;
   };
+  let overCap = 0;
   for (const region of wanted) {
+    if (region && planned.length + landList.length + userMaps.length >= MAX_REGIONS) { overCap++; continue; }
     if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length >= MAX_REGIONS) continue;
     seenIds.add(region.id);
     const n = planned.length + landList.length + userMaps.length;
@@ -498,6 +500,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     taken.push({ x: best.x, z: best.z, r: reach });
     planned.push({ region, preset, cityOptions, centre: { x: best.x, y, z: best.z }, reach, built: -1 });
   }
+  if (overCap) console.error('[world] the map holds ' + MAX_REGIONS + ' places and lands; ' + overCap + ' more in the list were left out.');
   /** Build one planned place's city now (buildings, traffic, people, parked cars) and put it on the map. */
   const buildPlace = (p: PlannedPlace): OpenWorldCity => {
     const { traffic: trafficOption, people: peopleOption, parkedCars = p.preset.parkedCars } = p.region.city || {};
@@ -918,7 +921,7 @@ export default OpenWorldGame;
 `;
 
 /** The bridge's own MAX_REGIONS (places and lands on one map), for the recipe's words — a test keeps the two equal. */
-export const OPEN_WORLD_MAX_REGIONS = 100;
+export const OPEN_WORLD_MAX_REGIONS = 1000;
 export const OPEN_WORLD_BRIDGE_PATH = 'src/game/play/openWorld.ts';
 export const OPEN_WORLD_STARTER_PATH = 'src/game/OpenWorldGame.tsx';
 

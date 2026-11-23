@@ -2384,18 +2384,29 @@ const RUNNER = `/**
  * - A hit is tested over the WHOLE distance travelled this step, not at the end point, so no speed tunnels through.
  * - Lane 0 is the LEFT lane: left() lowers the lane, laneX() grows to the right. One convention, everywhere.
  * - 'block' needs a lane change, 'low' needs a jump, 'high' needs a slide. Coins sit on the ground in a free lane.
+ *
+ * EXTRAS (template round R10; ideas studied from open-source runners, our own code): power-ups in a free lane — a MAGNET
+ * pulls in coins from every lane, a SHIELD takes one hit, DOUBLE makes each coin count twice — laid from their OWN seeded
+ * stream, so a seed still gives exactly the same obstacles and coins as before. revive() brings a crashed run back once
+ * (clearing the road just ahead and giving a moment of grace); a game that never calls it plays as before. RunnerMissions
+ * is a set of three goals at a time; finishing all three raises the level and the score multiplier (run.scoreMultiplier).
  */
 
 export type RunnerObstacleKind = 'block' | 'low' | 'high';
 export interface RunnerObstacle { id: number; lane: number; z: number; kind: RunnerObstacleKind }
 export interface RunnerCoin { id: number; lane: number; z: number }
+export type RunnerPowerKind = 'magnet' | 'shield' | 'double';
+export interface RunnerPowerUp { id: number; lane: number; z: number; kind: RunnerPowerKind }
 export interface RunnerControls { left?: boolean; right?: boolean; jump?: boolean; slide?: boolean }
 export type RunnerEvent =
   | { type: 'lane'; lane: number }
   | { type: 'jump' }
   | { type: 'slide' }
   | { type: 'coin'; coin: RunnerCoin; coins: number }
-  | { type: 'crash'; obstacle: RunnerObstacle };
+  | { type: 'crash'; obstacle: RunnerObstacle }
+  | { type: 'powerup'; power: RunnerPowerUp }
+  | { type: 'shielded'; obstacle: RunnerObstacle }
+  | { type: 'revive' };
 
 export interface RunnerOptions {
   /** Number of lanes. Default 3. Use 1 for a one-line side-scroller (jump and slide only). */
@@ -2426,6 +2437,18 @@ export interface RunnerOptions {
   seed?: number;
   /** Chance (0–1) that a row is a coin trail instead of obstacles. Default 0.25. */
   coinRowChance?: number;
+  /** Chance (0–1) that a row also carries a power-up in its free lane. Default 0.12; 0 turns power-ups off. */
+  powerUpChance?: number;
+  /** How long each power-up lasts, in seconds. Defaults 8 (magnet), 10 (shield, or until it takes a hit), 10 (double). */
+  magnetSeconds?: number;
+  shieldSeconds?: number;
+  doubleSeconds?: number;
+  /** How far ahead a magnet pulls coins in, world units. Default 5. */
+  magnetReach?: number;
+  /** Revives a run may use (see revive()). Default 1. */
+  revives?: number;
+  /** Seconds after a revive or a shield hit when obstacles pass through the player. Default 1.5. */
+  graceSeconds?: number;
 }
 
 /** A small, fast, seeded random source (mulberry32). PURE given its seed. */
@@ -2469,11 +2492,25 @@ export class LaneRunner {
   alive = true;
   obstacles: RunnerObstacle[] = [];
   pickups: RunnerCoin[] = [];
+  /** Power-ups still on the road. */
+  powerUps: RunnerPowerUp[] = [];
+  /** Seconds left on each power-up (0 = off). */
+  magnet = 0;
+  shield = 0;
+  double = 0;
+  /** Seconds left when obstacles pass through (after a revive or a shield hit). */
+  grace = 0;
+  revivesLeft = 0;
+  /** Multiplies the score; missions raise it. Kept across runs, 1 by default. */
+  scoreMultiplier = 1;
   private jumpT = -1;
   private slideT = -1;
   private nextRowZ = 0;
   private nextId = 1;
   private rand: () => number;
+  private powerRand: () => number;
+  /** Power-ups count their ids apart from obstacles and coins, so those keep the same ids for a seed. */
+  private nextPowerId = 1_000_000;
   private readonly o: Required<RunnerOptions>;
 
   constructor(options: RunnerOptions = {}) {
@@ -2495,10 +2532,18 @@ export class LaneRunner {
       obstacleDepth: num(options.obstacleDepth, 1.2, 0.01),
       seed: num(options.seed, Math.floor(Math.random() * 2 ** 31)),
       coinRowChance: num(options.coinRowChance, 0.25, 0, 1),
+      powerUpChance: num(options.powerUpChance, 0.12, 0, 1),
+      magnetSeconds: num(options.magnetSeconds, 8, 0),
+      shieldSeconds: num(options.shieldSeconds, 10, 0),
+      doubleSeconds: num(options.doubleSeconds, 10, 0),
+      magnetReach: num(options.magnetReach, 5, 0),
+      revives: Math.round(num(options.revives, 1, 0, 99)),
+      graceSeconds: num(options.graceSeconds, 1.5, 0),
     };
     this.lanes = lanes;
     this.laneWidth = this.o.laneWidth;
     this.rand = seededRandom(this.o.seed);
+    this.powerRand = seededRandom(this.o.seed ^ 0x2545f491);
     this.reset();
   }
 
@@ -2506,6 +2551,9 @@ export class LaneRunner {
   reset(seed?: number): void {
     if (typeof seed === 'number' && Number.isFinite(seed)) this.o.seed = seed;
     this.rand = seededRandom(this.o.seed);
+    // Power-ups have their own stream: turning them on or off never changes the obstacles a seed lays.
+    this.powerRand = seededRandom(this.o.seed ^ 0x2545f491);
+    this.powerUps = []; this.nextPowerId = 1_000_000; this.magnet = 0; this.shield = 0; this.double = 0; this.grace = 0; this.revivesLeft = this.o.revives;
     this.lane = Math.floor((this.lanes - 1) / 2);
     this.x = this.laneX(this.lane);
     this.y = 0; this.distance = 0; this.speed = this.o.startSpeed; this.coins = 0; this.alive = true;
@@ -2519,8 +2567,8 @@ export class LaneRunner {
   laneX(lane: number): number { return (lane - (this.lanes - 1) / 2) * this.laneWidth; }
   get jumping(): boolean { return this.jumpT >= 0; }
   get sliding(): boolean { return this.slideT >= 0; }
-  /** Distance plus ten per coin. */
-  get score(): number { return Math.floor(this.distance) + this.coins * 10; }
+  /** Distance plus ten per coin, times the mission multiplier (1 unless missions raised it). */
+  get score(): number { return (Math.floor(this.distance) + this.coins * 10) * this.scoreMultiplier; }
 
   left(): boolean { return this.changeLane(-1); }
   right(): boolean { return this.changeLane(1); }
@@ -2532,6 +2580,20 @@ export class LaneRunner {
   slide(): boolean {
     if (!this.alive) return false;
     this.jumpT = -1; this.y = 0; this.slideT = 0; return true;
+  }
+
+  /**
+   * Bring a crashed run back: uses one revive, clears the road from just behind to about 1.5 s ahead, and gives a moment
+   * of grace. Returns false (and changes nothing) when the run is still going or no revives are left.
+   */
+  revive(): boolean {
+    if (this.alive || this.revivesLeft <= 0) return false;
+    this.revivesLeft -= 1;
+    this.alive = true; this.jumpT = -1; this.slideT = -1; this.y = 0;
+    const clearTo = this.distance + Math.max(this.speed * 1.5, 10);
+    this.obstacles = this.obstacles.filter((ob) => ob.z < this.distance - 2 || ob.z > clearTo);
+    this.grace = this.o.graceSeconds;
+    return true;
   }
 
   /** Advance dt seconds. Returns what happened this step, in order. Nothing moves once the player has crashed. */
@@ -2555,6 +2617,8 @@ export class LaneRunner {
       else this.y = this.o.jumpHeight * Math.sin(Math.PI * (this.jumpT / this.o.jumpSeconds));
     }
     if (this.slideT >= 0) { this.slideT += dt; if (this.slideT >= this.o.slideSeconds) this.slideT = -1; }
+    this.magnet = Math.max(0, this.magnet - dt); this.shield = Math.max(0, this.shield - dt);
+    this.double = Math.max(0, this.double - dt); this.grace = Math.max(0, this.grace - dt);
 
     const from = this.distance;
     this.speed = Math.min(this.o.maxSpeed, this.speed + this.o.acceleration * dt);
@@ -2569,18 +2633,38 @@ export class LaneRunner {
       if (ob.z + half < from || ob.z - half > to) continue; // swept over the whole step
       if (ob.kind === 'low' && this.y >= this.o.lowClearance) continue;
       if (ob.kind === 'high' && this.sliding) continue;
+      if (this.grace > 0) continue;
+      if (this.shield > 0) {
+        this.shield = 0; this.grace = Math.min(this.o.graceSeconds, 0.6);
+        this.obstacles = this.obstacles.filter((o) => o !== ob);
+        out.push({ type: 'shielded', obstacle: ob });
+        break;
+      }
       this.alive = false;
       out.push({ type: 'crash', obstacle: ob });
       return out;
     }
     const kept: RunnerCoin[] = [];
+    const reach = this.magnet > 0 ? this.o.magnetReach : 0;
     for (const c of this.pickups) {
-      if (c.lane === bodyLane && c.z <= to + 0.5 && c.z >= from - 0.5 && this.y < this.o.jumpHeight * 0.75) {
-        this.coins += 1;
+      const inLane = c.lane === bodyLane && c.z <= to + 0.5 && c.z >= from - 0.5 && this.y < this.o.jumpHeight * 0.75;
+      const pulled = reach > 0 && c.z <= to + reach && c.z >= from - 0.5;
+      if (inLane || pulled) {
+        this.coins += this.double > 0 ? 2 : 1;
         out.push({ type: 'coin', coin: c, coins: this.coins });
       } else kept.push(c);
     }
     this.pickups = kept;
+    const keptPowers: RunnerPowerUp[] = [];
+    for (const p of this.powerUps) {
+      if (p.lane === bodyLane && p.z <= to + 0.5 && p.z >= from - 0.5) {
+        if (p.kind === 'magnet') this.magnet = this.o.magnetSeconds;
+        else if (p.kind === 'shield') this.shield = this.o.shieldSeconds;
+        else this.double = this.o.doubleSeconds;
+        out.push({ type: 'powerup', power: p });
+      } else keptPowers.push(p);
+    }
+    this.powerUps = keptPowers.filter((p) => p.z > this.distance - 10);
     const behind = this.distance - 10;
     this.obstacles = this.obstacles.filter((ob) => ob.z > behind);
     this.pickups = this.pickups.filter((c) => c.z > behind);
@@ -2622,6 +2706,10 @@ export class LaneRunner {
           this.pickups.push({ id: this.nextId++, lane: free, z });
         }
       }
+      if (this.o.powerUpChance > 0 && this.powerRand() < this.o.powerUpChance) {
+        const r = this.powerRand();
+        this.powerUps.push({ id: this.nextPowerId++, lane: free, z, kind: r < 0.4 ? 'magnet' : r < 0.7 ? 'shield' : 'double' });
+      }
       // Worst case: the free lane is at the far side of the road from where the player stands.
       const crossings = Math.max(1, this.lanes - 1);
       const needSeconds = crossings * this.o.laneChangeSeconds + this.o.reactionSeconds + Math.max(this.o.jumpSeconds, this.o.slideSeconds) * 0.5;
@@ -2629,6 +2717,62 @@ export class LaneRunner {
       this.nextRowZ = z + gap;
     }
   }
+}
+
+// ── MISSIONS — three goals at a time; finish all three to raise the level and the score multiplier ─────────────────
+export type RunnerMissionKind = 'distance' | 'coins' | 'jumps' | 'slides' | 'powerups' | 'lanes';
+export interface RunnerMission { kind: RunnerMissionKind; target: number; progress: number }
+export interface RunnerMissionsSave { level: number; goals: RunnerMission[] }
+/** What a level-0 goal asks for; each level asks for half as much again. 'distance' is in ONE run, the rest add up. */
+export const RUNNER_MISSION_BASE: Record<RunnerMissionKind, number> = { distance: 500, coins: 40, jumps: 15, slides: 10, powerups: 3, lanes: 40 };
+const MISSION_ORDER: RunnerMissionKind[] = ['distance', 'coins', 'jumps', 'slides', 'powerups', 'lanes'];
+
+export class RunnerMissions {
+  level = 0;
+  goals: RunnerMission[] = [];
+  constructor(saved?: unknown) {
+    const s = saved as Partial<RunnerMissionsSave> | null | undefined;
+    const ok = (g: unknown): g is RunnerMission => !!g && typeof g === 'object' && MISSION_ORDER.includes((g as RunnerMission).kind)
+      && Number.isFinite((g as RunnerMission).target) && Number.isFinite((g as RunnerMission).progress);
+    if (s && Number.isFinite(s.level) && Array.isArray(s.goals) && s.goals.length === 3 && s.goals.every(ok)) {
+      this.level = Math.max(0, Math.floor(s.level as number)); this.goals = s.goals.map((g) => ({ ...g }));
+    } else this.goals = RunnerMissions.goalsFor(0);
+  }
+  /** The three goals for a level: a different trio each level, each a bit bigger. */
+  static goalsFor(level: number): RunnerMission[] {
+    const k = 1 + level * 0.5;
+    return [0, 2, 4].map((i) => {
+      const kind = MISSION_ORDER[(i + level) % MISSION_ORDER.length];
+      return { kind, target: Math.round(RUNNER_MISSION_BASE[kind] * k), progress: 0 };
+    });
+  }
+  /** Score multiplier this level gives: 1, 2, 3 … up to 30. */
+  get multiplier(): number { return Math.min(30, 1 + this.level); }
+  /** A new run starts: single-run goals (distance) start again from zero. */
+  newRun(): void { for (const g of this.goals) if (g.kind === 'distance' && g.progress < g.target) g.progress = 0; }
+  /**
+   * Count one step's events (and the run's distance). Returns the goals finished in this step; when all three are done
+   * the level goes up and three new goals arrive (levelledUp is true).
+   */
+  track(events: ReadonlyArray<RunnerEvent>, run: { distance: number }): { finished: RunnerMission[]; levelledUp: boolean } {
+    const finished: RunnerMission[] = [];
+    for (const g of this.goals) {
+      if (g.progress >= g.target) continue;
+      if (g.kind === 'distance') g.progress = Math.max(g.progress, Math.floor(run.distance));
+      for (const ev of events) {
+        if (g.kind === 'coins' && ev.type === 'coin') g.progress += 1;
+        if (g.kind === 'jumps' && ev.type === 'jump') g.progress += 1;
+        if (g.kind === 'slides' && ev.type === 'slide') g.progress += 1;
+        if (g.kind === 'powerups' && ev.type === 'powerup') g.progress += 1;
+        if (g.kind === 'lanes' && ev.type === 'lane') g.progress += 1;
+      }
+      if (g.progress >= g.target) { g.progress = g.target; finished.push(g); }
+    }
+    const levelledUp = this.goals.every((g) => g.progress >= g.target);
+    if (levelledUp) { this.level += 1; this.goals = RunnerMissions.goalsFor(this.level); }
+    return { finished, levelledUp };
+  }
+  save(): RunnerMissionsSave { return { level: this.level, goals: this.goals.map((g) => ({ ...g })) }; }
 }
 `;
 

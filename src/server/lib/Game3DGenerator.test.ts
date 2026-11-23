@@ -193,7 +193,8 @@ describe('the pack itself', () => {
 
   it('emits every advertised module', () => {
     expect(Object.keys(all.files)).toHaveLength(GAME_3D_MODULES.length);
-    for (const m of GAME_3D_MODULES) expect(all.files[`src/game/three/${m}.ts`]).toBeTruthy();
+    const written = new Map(Object.keys(all.files).map((f) => [f.toLowerCase(), f]));
+    for (const m of GAME_3D_MODULES) expect(all.files[written.get(`src/game/three/${m}.ts`)!]).toBeTruthy();
   });
 
   it('a subset that would not compile pulls in what it imports', () => {

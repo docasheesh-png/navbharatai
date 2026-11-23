@@ -81,7 +81,7 @@ export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REV
       .map(([roles, names]) => `${category}${roles ? ` (${roles})` : ''}: ${names.join(', ')}`);
   });
   return gameCapabilityMenu() + '\n[GAME_LIBRARY_MENU]\n'
-    + `Every ready 3D model in the NavBharatAI library, by subject. The models already prepared above were matched from the WORDS of the request; `
+    + `Every ready 3D model, texture and sound in the NavBharatAI library. Use the library FIRST for models, sounds and textures, as many as it has. The models already prepared above were matched from the WORDS of the request; `
     + `choose from this menu by its MEANING. When the game needs something listed here that was not prepared — a village story needs villagers, `
     + `houses and a well even if nobody typed "villager"; a hunting game needs a hunter and animals — call add_library_models with those subjects `
     + `(and the animation role the game uses — a line's roles in brackets apply to every subject on it). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes; `

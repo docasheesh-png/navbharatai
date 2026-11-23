@@ -2275,6 +2275,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_stand_in',
+      description: 'Three steps for a missing object, and the build never waits. First adjust the closest library model: scale, recolour, retexture, combine parts. When nothing fits, write a simple low-poly object and tell the user, in their language, where a free file is and how to upload it. standOnGround places the result. Call through run_recipe.',
+      input_schema: { type: 'object', required: ['subject'], properties: {
+        subject: { type: 'string', description: 'What the user asked for, in a few words, such as "market stall" or "wooden cart".' },
+        plan_json: { type: 'string', description: 'Leave empty. The tool asks the model. A caller that already holds a checked plan may pass it.' },
+      } },
+    },
+    {
       name: 'generate_procedural_object',
       description: 'Optional bounded procedural geometry recipe. The existing admitted architect API turn designs an original declarative JSON plan from the user request; object names are not a preset whitelist. Compose new shapes from semantic parts rather than substituting an unrelated catalog object. No additional provider call. If the bounded geometry vocabulary cannot express the request, disclose the unsupported capability instead of claiming a complete object. Writes trusted geometry runtime and an additive object factory, NOT an automatically mounted game. Requires reviewed Three.js 0.180.0 and AGENTV3_PROCEDURAL_OBJECTS on; otherwise unavailable. Call through run_recipe. Plan version1 fields: label and parts (phone max24/12000 triangles, desktop64/60000). Each part: id, geometry, position xyz, rotation radians xyz, color #RRGGBB, roughness0..1, metalness0..1. Geometry kinds box(size xyz), sphere(radius,segments,rings), cylinder(top,bottom,height,segments), lathe(points radius/y strictly increasing y,segments). No executable code, textures, URLs or hierarchy. No automatic collision, rigging or realism guarantee. Integrate returned factory using existing guarded edits and verify the preview.',
       input_schema: {type:'object',required:['id','quality','plan_json'],properties:{
@@ -2627,8 +2635,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
+              'Optional subset: renderer, lighting, materials, camera, world, collision, groundcontact, environment, surfaces, '
               + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable, city, citytraffic, citypeople, physics. Default = all; imports are pulled in automatically. '
+              + 'groundcontact = standOnGround / restOriginY: the lowest point of a model sits on the ground, every frame. '
               + 'city = createCity({ blocksX, blocksZ, style }): a whole grid of city blocks — streets, crossings, pavements, shops, apartments, offices, houses, parks; city.spawn, city.route(from, to) for left-lane AI routes, city.lotsOf(kind) for mission targets. citytraffic = createCityTraffic(city): vehicles that drive the grid, turn at crossings and obey traffic lights. citypeople = createCityPeople(city, { traffic }): people on the pavements who cross on the zebras when the cars have red. '
               + 'physics = createPhysics(scene): real rigid bodies — physics.add(mesh, { mass }) falls, rolls, stacks and topples; physics.explode(point, strength, radius); physics.ragdoll(humanoid) for a character that goes limp; physics.step(dt) each frame. '
               + 'breakable = makeBreakable(crate, { health }): the player\'s shots and swings break it into debris (breakableTargets() + hitBreakables(hits)); '
@@ -3783,6 +3792,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'request_secrets',
   'generate_game_systems',
+  'generate_stand_in',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',
@@ -4018,6 +4028,7 @@ export const RECIPE_TOOLS = [
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',
+  'generate_stand_in',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',

@@ -12,7 +12,8 @@ export const GAME_WORLD_LAYER = String.raw`// THE WORLD LAYER — NavBharatAI's 
 //   world.frame(ctx, dt);                                                            // in update(), every frame
 // The world streams the land around the followed thing, keeps walkable ground under it and, when the render origin moves
 // far from the start, moves it, the camera, the player and everything placed with world.place() back together — so they
-// never drift apart. Put anything else of yours that stands on the world in carry (or place it with world.place()).
+// never drift apart. Put anything else of yours that stands on the world in carry, or place it with world.place()
+// (never both: a placed thing is already moved with the origin, and is not moved a second time).
 import * as THREE from 'three';
 import type { GameContext } from '../Game';
 import { createOpenWorld, type OpenWorld, type OpenWorldOptions } from './openWorld';
@@ -62,11 +63,13 @@ export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = 
   Object.defineProperty(view, 'camera', { get: () => (target() === ctx.camera ? spareCamera : ctx.camera) });
   // The game's own things keep their WORLD places across the first origin move (made while the world is made).
   const before = new Map<THREE.Object3D, THREE.Vector3>();
+  const placed = new Set<THREE.Object3D>();
   const others = (): THREE.Object3D[] => {
     const list: THREE.Object3D[] = [];
     if (target() !== ctx.player.object) list.push(ctx.player.object);
     // The camera is moved by the world already (or is the followed thing); never a second time here.
-    for (const o of carried) if (o !== target() && o !== ctx.player.object && o !== ctx.camera && !list.includes(o)) list.push(o);
+    // A thing placed with world.place() is already moved by the bridge — never also as a carried thing.
+    for (const o of carried) if (o !== target() && o !== ctx.player.object && o !== ctx.camera && !placed.has(o) && !list.includes(o)) list.push(o);
     return list;
   };
   for (const o of others()) before.set(o, o.position.clone());
@@ -78,8 +81,11 @@ export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = 
   if (target() === ctx.camera) { ctx.camera.near = spareCamera.near; ctx.camera.far = spareCamera.far; ctx.camera.updateProjectionMatrix(); }
   const layer = Object.create(world) as WorldLayer;
   Object.defineProperty(layer, 'target', { get: target });
+  const rawPlace = world.place.bind(world), rawRelease = world.release.bind(world);
+  layer.place = (object, x, z, lift = 0) => { placed.add(object); carried.delete(object); rawPlace(object, x, z, lift); };
+  layer.release = (object) => { placed.delete(object); rawRelease(object); };
   layer.follow = (next) => { chosen = next; };
-  layer.carry = (object, on = true) => { if (on) carried.add(object); else carried.delete(object); };
+  layer.carry = (object, on = true) => { if (on) { if (!placed.has(object)) carried.add(object); } else carried.delete(object); };
   layer.frame = (_ctx, delta) => {
     if (pick) { const next = pick(); if (next !== undefined) chosen = next; }
     const ox = origin.x, oz = origin.z;

@@ -494,7 +494,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0"
   ],
   "src/game/play/worldLayer.ts": [
-    "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8"
+    "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
+    "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d"
   ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"

@@ -129,6 +129,20 @@ describe('🚗 following a car', () => {
     expect(layer.target).toBe(car);
     layer.dispose();
   }, 180_000);
+  it('a thing placed with world.place() is never moved twice, even if it was also listed in carry', () => {
+    const c = context();
+    const car = new THREE.Group(); c.scene.add(car);
+    const sign = new THREE.Object3D(); c.scene.add(sign);
+    const layer = WL.createWorldLayer(c, { seed: 7, quality: 'phone', regions, follow: car, carry: [sign] });
+    const at = { x: layer.spawn.x + 40, z: layer.spawn.z - 25 };
+    layer.place(sign, at.x, at.z);
+    expect(worldOf(layer, sign).x).toBeCloseTo(at.x, 6); expect(worldOf(layer, sign).z).toBeCloseTo(at.z, 6);
+    const to = { x: layer.spawn.x + 9000, z: layer.spawn.z + 1500 };
+    drive(layer, c, car, to, 60);
+    expect(layer.map.chunks.origin.x).not.toBe(0);
+    expect(worldOf(layer, sign).x).toBeCloseTo(at.x, 6); expect(worldOf(layer, sign).z).toBeCloseTo(at.z, 6);
+    layer.dispose();
+  }, 180_000);
 });
 
 describe('🎥 following the camera', () => {

@@ -150,6 +150,7 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
 import { isScratchCapture } from './scratchCapture';
+import { mentionGrepCommand, parseMentionGrep } from './scratchCopies';
 import { isKnownKitVersion, recipeWritesReact, projectRunsReact } from '../lib/gameRecipeLayers';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
@@ -1388,6 +1389,31 @@ export class ToolDispatcher {
     }
     await this.reconcileDeletions(gone);
     return gone;
+  }
+
+  /** Every path this build wrote — this agent's own writes and the route's write set (scratchCopies.ts, failedbr #2494). */
+  writtenThisBuild(): string[] {
+    let buildWrites: string[] = [];
+    try { buildWrites = this._buildWrites ? [...this._buildWrites()] : []; } catch { buildWrites = []; }
+    return [...new Set([...this._writtenPaths, ...buildWrites])];
+  }
+
+  /** The sandbox's file listing, for the scratch-copy net. An unreadable listing is empty, so the net removes nothing. */
+  async listProjectFiles(): Promise<string[]> {
+    try { return (await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'scratch-copy-listing')).map((p) => String(p).replace(/^\.?\/+/, '')); }
+    catch { return []; }
+  }
+
+  /**
+   * Does any project file other than `path` mention `token`? Asked of the sandbox with one fixed-string grep (dependencies,
+   * git and build output skipped). TRUE / FALSE only on a clean answer; NULL when it could not be checked, so the
+   * caller keeps the file. `token` and `path` must be plain names — anything else is not checked (NULL).
+   */
+  async mentionedOutside(path: string, token: string): Promise<boolean | null> {
+    const command = mentionGrepCommand(token);
+    if (!command || !/^[A-Za-z0-9._/-]+$/.test(path)) return null;
+    const grep = await this.actuator.runCommand(this.workspaceId, command).catch(() => null);
+    return grep ? parseMentionGrep(grep.stdout, path) : null;
   }
 
   /** Told when a delete of the user's own file is refused, so the build report says so. */

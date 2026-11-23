@@ -25,6 +25,7 @@ import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
+import { SCRATCH_COPY_RULE } from './scratchCopies';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, NO_GUESS_RULE, LIGHT_THEME_BY_DEFAULT_RULE, PERSISTED_STATE_RULE, AI_AUDIO_RULE } from './noEvalRule';
 
 /**
@@ -731,6 +732,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     LIGHT_THEME_BY_DEFAULT_RULE,
     PERSISTED_STATE_RULE,
     AI_AUDIO_RULE,
+    `- ${SCRATCH_COPY_RULE}`, // failedbr #2494: world.ts.backup shipped; worldCorrected.ts broke the typecheck
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',

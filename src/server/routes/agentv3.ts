@@ -83,7 +83,7 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
-import { offerBugHunt, bugHuntWaitMs, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
+import { offerBugHunt, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
 import { isKitFile as isGameKitFile } from '../AgentV3/growthGuard';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
@@ -21197,7 +21197,7 @@ async function noteBuildOutcome(
       // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
       // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
       // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
-      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);
+      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest, process.env, { existedAtStart: durableFilePaths }); // + scratch copies (scratchCopies.ts)
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.
@@ -26517,17 +26517,17 @@ async function noteBuildOutcome(
        * to the person paying it, which is what the admin asked for.
        *
        * Offered HERE because every other condition for the review has already said yes, so the user is
-       * never asked to pay for a pass that was not going to run. The whole flow lives in the module (the
-       * ask, the wait, the words) and takes its effects as arguments: this handler is at TypeScript's
+       * never asked to pay for a pass that was not going to run. Nothing WAITS on it any more (failedbr #2494): the
+       * offer is a standing ❗️ row and the turn ends with its work. The whole flow lives in the module (the
+       * offer, the words) and takes its effects as arguments: this handler is at TypeScript's
        * control-flow-analysis ceiling (Q-979), so a feature that adds branches here is a feature that
        * stops the file type-checking. One call, one await.
        */
-      const bugHunt = await offerBugHunt({
+      const bugHunt = await offerBugHunt({ // never waits: the offer is a standing ❗️ row, the turn ends with its work
         eligible: completedAppReviewEligible({ ok: result.ok, headroom: reviewHeadroomOk, allowed: reviewerAllowed, deferred: !!reviewDeferredToShell, runProven: runProof().proven, stopped: abort.signal.aborted }),
         hasUser: !!userId,
         newCallId: () => randomUUID(),
-        ask: (gate) => emit({ type: 'permission_request', agent: 'reviewer', ts: Date.now(), ...gate }),
-        wait: (callId) => waitForUser(callId, bugHuntWaitMs()),
+        offer: (o) => events.emit({ type: 'bug_hunt_offer', agent: 'reviewer', ts: Date.now(), ...o }), // through the stream, so the ❗️ recorder stores it; nothing waits (failedbr #2494)
         say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
         record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
         preApproved: bugHuntAskedByUser,

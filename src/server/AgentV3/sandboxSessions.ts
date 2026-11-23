@@ -164,6 +164,8 @@ export type PeakMemory =
     oomKills?: number; highEvents?: number;
     /** The cgroup's OWN limit (memory.max) — the real ceiling, which envd sets below the template's RAM. */
     limitBytes?: number;
+    /** In use NOW (memory.current), and its split: the programs' own memory (anon) vs reclaimable file cache (file). */
+    currentBytes?: number; anonBytes?: number; fileBytes?: number;
   }
   | { kind: 'unavailable'; cgroup?: string };
 
@@ -183,6 +185,9 @@ export function parsePeakMemory(stdout: string | null | undefined): PeakMemory |
     const oom = num('oom_kill');
     const high = num('high');
     const limit = num('max');
+    const current = num('current');
+    const anon = num('anon');
+    const file = num('file');
     const cgroup = kv.get('cgroup');
     return {
       kind: 'value', bytes, source: m[1] === 'v2' ? 'cgroup-v2' : 'cgroup-v1',
@@ -190,6 +195,9 @@ export function parsePeakMemory(stdout: string | null | undefined): PeakMemory |
       ...(oom !== undefined ? { oomKills: oom } : {}),
       ...(high !== undefined ? { highEvents: high } : {}),
       ...(limit !== undefined && limit > 0 && limit < 1024 ** 4 ? { limitBytes: limit } : {}),
+      ...(current !== undefined ? { currentBytes: current } : {}),
+      ...(anon !== undefined ? { anonBytes: anon } : {}),
+      ...(file !== undefined ? { fileBytes: file } : {}),
     };
   }
   const u = /^\s*unavailable(?:\s+cgroup=(\S+))?\s*$/m.exec(text);
@@ -248,13 +256,35 @@ export function describePeakMemory(peak: PeakMemory | null, templateGb: number, 
   const delta = (a?: number, b?: number) => (typeof a === 'number' && typeof b === 'number' ? Math.max(0, a - b) : undefined);
   if (start) {
     const ev = events(delta(peak.oomKills, start.oomKills), delta(peak.highEvents, start.highEvents), ' during this build');
+    const calm = noPressure(delta(peak.oomKills, start.oomKills), delta(peak.highEvents, start.highEvents), peak.source);
     if (peak.bytes > start.bytes) {
-      return `Peak memory during this build: ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where} — the build raised the machine's high-water mark, so this is its own peak${bound ? '; it includes reclaimable file cache' : ''}${ev})`;
+      return `Peak memory during this build: ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where} — the build raised the machine's high-water mark, so this is its own peak${bound ? '; it includes reclaimable file cache' : ''}${ev})${calm}${nowSentence(peak)}`;
     }
-    return `Peak memory: this build stayed under the machine's earlier high-water mark of ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where}; set before this build began — this kernel cannot reset the counter, so the build's own peak is at most that${ev})`;
+    return `Peak memory: this build stayed under the machine's earlier high-water mark of ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where}; set before this build began — this kernel cannot reset the counter, so the build's own peak is at most that${ev})${calm}${nowSentence(peak)}`;
   }
   const age = typeof opts.sessionAgeMs === 'number' && opts.sessionAgeMs >= 0 ? ` (this session started ${Math.max(1, Math.round(opts.sessionAgeMs / 60_000))} min ago${opts.sessionOrigin ? `, ${opts.sessionOrigin}` : ''})` : '';
-  return `Peak memory since this machine came up${age}: ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where}${bound}; includes anything that ran on this machine before this build${events(peak.oomKills, peak.highEvents, ' since it came up')})`;
+  return `Peak memory since this machine came up${age}: ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where}${bound}; includes anything that ran on this machine before this build${events(peak.oomKills, peak.highEvents, ' since it came up')})${nowSentence(peak)}`;
+}
+
+/**
+ * 🔴 A FULL CACHE IS NOT A SHORTAGE (failedbr #2495/#2496, 2026-11-22). Both reports read "3.69 GB of 3.71 GB (99%)" with
+ * "0 out-of-memory kills, 0 reclaim-throttle events" — a scary number with no pressure behind it. cgroup v2's
+ * `memory.peak` counts page cache, and the kernel lets cache fill free memory until something needs it, so a long-lived
+ * sandbox's mark drifts toward 100% on its own. Said plainly when (and only when) the counters prove there was no pressure.
+ */
+function noPressure(oom: number | undefined, high: number | undefined, source: string): string {
+  if (source !== 'cgroup-v2' || oom !== 0 || high !== 0) return '';
+  return '. No memory pressure during this build: the mark counts reclaimable file cache, which the kernel lets fill free '
+    + 'memory, so a high percentage with no out-of-memory kill and no reclaim throttling is not a shortage';
+}
+
+/** What is in use at the end of the build, split when the machine says how. '' when it did not say. */
+function nowSentence(peak: { currentBytes?: number; anonBytes?: number; fileBytes?: number }): string {
+  if (typeof peak.currentBytes !== 'number') return '';
+  const split = typeof peak.anonBytes === 'number' && typeof peak.fileBytes === 'number'
+    ? ` — ${gbOf(peak.anonBytes).toFixed(2)} GB the programs' own memory, ${gbOf(peak.fileBytes).toFixed(2)} GB reclaimable file cache`
+    : '';
+  return `. Right now: ${gbOf(peak.currentBytes).toFixed(2)} GB in use${split}.`;
 }
 
 /** A probe outcome turned into a reading and, when there is none, the reason — a timeout is never called a failure. */

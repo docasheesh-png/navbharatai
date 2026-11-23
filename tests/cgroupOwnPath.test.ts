@@ -40,6 +40,7 @@ let CONTAINER: { root: string; self: string };
 let V1: { root: string; self: string };
 let HYBRID: { root: string; self: string };
 let EMPTY: { root: string; self: string };
+let WARM: { root: string; self: string };
 
 beforeAll(() => {
   base = mkdtempSync(join(tmpdir(), 'cgroup-own-'));
@@ -59,19 +60,28 @@ beforeAll(() => {
   // A hybrid host: a unified line with no memory controller there, and memory on v1.
   HYBRID = layout('hybrid', { 'self-cgroup': '9:name=systemd:/\n4:memory:/process_api/x\n0::/process_api/x\n', 'cg/memory/process_api/x/memory.max_usage_in_bytes': '734003200\n', 'cg/memory/memory.max_usage_in_bytes': '15095373824\n' });
   EMPTY = layout('empty', { 'self-cgroup': '0::/user\n' });
+  // failedbr #2495/#2496: a warm VM whose mark sits at 99% of its limit, mostly page cache, with no pressure at all.
+  WARM = layout('warm', {
+    'self-cgroup': '0::/user\n',
+    'cg/user/memory.peak': '3962125107\n',
+    'cg/user/memory.events': 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n',
+    'cg/user/memory.max': '3983582413\n',
+    'cg/user/memory.current': '3221225472\n',
+    'cg/user/memory.stat': 'anon 1073741824\nfile 2147483648\nkernel 0\n',
+  });
 });
 afterAll(() => { if (base) rmSync(base, { recursive: true, force: true }); });
 
 describe('1 · the probe reads the build\'s own cgroup, on every layout', () => {
   it('the report\'s VM: 1.50 GB in /user, against /user\'s own limit, with its reclaim and OOM counts', () => {
-    expect(run(VM)).toBe('v2 1610612736 max=4160749568 high=12 oom_kill=0 cgroup=/user');
+    expect(run(VM)).toBe('v2 1610612736 max=4160749568 high=12 oom_kill=0 current= anon= file= cgroup=/user');
     const peak = parsePeakMemory(run(VM));
     expect(peak).toMatchObject({ bytes: 1610612736, limitBytes: 4160749568, highEvents: 12, oomKills: 0, cgroup: '/user' });
     expect(describePeakMemory(peak, 4)).toMatch(/^Peak memory since this machine came up: 1\.50 GB of 3\.88 GB \(the cgroup's own limit; template 4 GB\) \(39%, cgroup-v2 \/user/);
   });
 
   it('a namespaced container reads exactly what it read before', () => {
-    expect(run(CONTAINER)).toBe('v2 734003200 max= high= oom_kill=2 cgroup=/');
+    expect(run(CONTAINER)).toBe('v2 734003200 max= high= oom_kill=2 current= anon= file= cgroup=/');
     expect(parsePeakMemory(run(CONTAINER))).toMatchObject({ kind: 'value', bytes: 734003200, oomKills: 2 });
   });
 
@@ -103,6 +113,29 @@ describe('1 · the probe reads the build\'s own cgroup, on every layout', () => 
   it('a probe that never answered is "not measured", never a claim about the machine', () => {
     expect(describePeakMemory(parsePeakMemory(undefined), 4)).toMatch(/not measured/);
     expect(describePeakMemory(parsePeakMemory(undefined), 4)).not.toMatch(/accounting exposed/);
+  });
+});
+
+describe('1b · a full cache is not a shortage (failedbr #2495/#2496)', () => {
+  it('the probe reads what is in use now and how it splits', () => {
+    expect(run(WARM)).toBe('v2 3962125107 max=3983582413 high=0 oom_kill=0 current=3221225472 anon=1073741824 file=2147483648 cgroup=/user');
+    expect(parsePeakMemory(run(WARM))).toMatchObject({ currentBytes: 3221225472, anonBytes: 1073741824, fileBytes: 2147483648 });
+  });
+
+  it('the #2496 shape: a pre-build 99% mark with zero pressure says so, and shows the real split', () => {
+    const warm = parsePeakMemory(run(WARM));
+    const line = describePeakMemory(warm, 4, { start: warm });
+    expect(line).toMatch(/stayed under the machine's earlier high-water mark of 3\.69 GB/);
+    expect(line).toContain('No memory pressure during this build');
+    expect(line).toContain("Right now: 3.00 GB in use — 1.00 GB the programs' own memory, 2.00 GB reclaimable file cache.");
+  });
+
+  it('never claims calm when the counters moved', () => {
+    const warm = parsePeakMemory(run(WARM));
+    const start = { ...warm!, highEvents: -1 } as typeof warm;
+    const throttled = { ...warm!, highEvents: 3 } as typeof warm;
+    expect(describePeakMemory(throttled, 4, { start: { ...(start as object), highEvents: 0 } as typeof warm })).not.toContain('No memory pressure');
+    expect(describePeakMemory({ ...warm!, oomKills: 1 } as typeof warm, 4, { start: warm })).not.toContain('No memory pressure');
   });
 });
 

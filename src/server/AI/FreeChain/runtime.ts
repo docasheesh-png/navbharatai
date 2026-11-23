@@ -1,5 +1,6 @@
 import { runApprovedQubaxChat, QubaxError, QUBAX_FIRST_BYTE_MS } from '../../lib/qubax';
 import { familyOfFreeChainRung, legacyPathAllows } from '../TrafficRegistry/legacyControl';
+import { withoutUnplugged } from '../ProviderHealth/providerPlug';
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
 import { prioritizeChatSuppliers, FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
@@ -227,6 +228,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     if (!exclusiveAdmin && !(cfg.fixedOrder && fixedTextChainSurface() && !fixedTextChainSelected())) {
       order = prioritizeChatSuppliers(order, fixedTextChainSurface());
     }
+    order = withoutUnplugged(order, (id) => familyOfFreeChainRung(id));
     trace.route = route; trace.routeReason = routed.reason;
     // Re-scan only pre-reservation capacity refusals. The original queue-wait budget bounds
     // this wait too; no extra provider attempt, quota charge or unbounded timer is introduced.

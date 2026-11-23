@@ -4,8 +4,10 @@
 // `AGENTV3_BUILDER_TRAFFIC=off` leaves the tier ladder untouched.
 
 import { parseEnvFlag } from '../../lib/envFlag';
+import { familyOfEngineName } from '../TrafficRegistry/legacyControl';
 import { orderChatByHealth } from './chatTrafficOrder';
 import { professionalPriceIn } from './professionalTraffic';
+import { withoutUnplugged } from './providerPlug';
 
 export function builderTrafficEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.AGENTV3_BUILDER_TRAFFIC) !== false;
@@ -19,4 +21,9 @@ export function orderBuilderRungs<T extends { provider: string; model: string }>
     priceIn: professionalPriceIn(rung.provider, rung.model),
   }));
   return orderChatByHealth(facts, now).map((fact) => fact.item);
+}
+
+/** Drop a tier rung whose provider was unplugged. The remaining rungs stay in order. */
+export function presentBuilderRungs<T extends { provider: string }>(rungs: readonly T[]): T[] {
+  return withoutUnplugged(rungs, (rung) => familyOfEngineName(rung.provider));
 }

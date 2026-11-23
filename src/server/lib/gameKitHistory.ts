@@ -112,7 +112,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "cf39902ee649a85b2ef44fee1b2f6d23402aab7170a8890eaf72d0abfe19ff40",
     "bacd56e98099c29f0ac622cc77d69505ba8870f5b34506f8146fa80f646f20eb",
     "71356106d28aeb5387805c0d32768914702155d42d8972cd4a58bfe27fea985a",
-    "b752924336338ae0fb7d7e89afd7f2cbc721eef5bc79461a9a81973de3852d44"
+    "b752924336338ae0fb7d7e89afd7f2cbc721eef5bc79461a9a81973de3852d44",
+    "04a5d343fb5167d24360d9064fbb3cac04c8c2ebf8995e172383646823c39531"
   ],
   "src/game/OpenWorldGame.tsx": [
     "48c550cff4d14f2bc7edac196803f67b6c94106a981b5aad7a4d19d7ebe6f440",
@@ -383,7 +384,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "23688f9c511f110c2e0aab1a704abd655b54a2822d5143b09f816313d43dc06c"
   ],
   "src/game/core/runner.ts": [
-    "97bdd55536727c171dcd0045864eda6f8ecc1406539771fb8ba32e92cdeb2312"
+    "97bdd55536727c171dcd0045864eda6f8ecc1406539771fb8ba32e92cdeb2312",
+    "a06767604361385befb2be4ce618bebf6aad192239e911ea354849ad14958d6c"
   ],
   "src/game/core/settings.ts": [
     "26763b0415a83d97907448f7e605ac9ddd527119c2ac59ba08e6e9f743416007",

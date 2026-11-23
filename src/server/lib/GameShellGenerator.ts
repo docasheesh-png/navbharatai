@@ -4042,13 +4042,13 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
 }
 `;
 
-const LANE_RUNNER_GAME = `import { useEffect, useRef } from 'react';
+const LANE_RUNNER_GAME = `import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions } from './Game';
 import { events } from './core/events';
 import { state, setStatus, addScore } from './core/state';
-import { LaneRunner, runnerInput, type RunnerOptions } from './core/runner';
+import { LaneRunner, RunnerMissions, runnerInput, type RunnerMission, type RunnerOptions, type RunnerPowerKind } from './core/runner';
 import { bindSwipe } from './core/swipe';
 import { tunable } from './core/tuning';
 import { createHumanoid } from './three/humanoid';
@@ -4059,6 +4059,8 @@ import { createPlayerCharacter, resolvePlayerChoice, type PlayerChoice } from '.
  * the rules, a level, the graphics, the sounds, the language, the UI or the genre by editing this file.
  * The rules are the kit's LaneRunner (a row always has a way through; no tunnelling at speed); this file draws them
  * and wires the kit: start screen, pause, game over with Play again, settings, language, swipes and keys.
+ * EXTRAS: power-ups on the road (🧲 magnet, 🛡 shield, ×2 coins), one revive per run ("Keep running" after a crash),
+ * and missions — three goals at a time, saved on the device; finishing all three raises the score multiplier.
  *
  * 🔴 LEFT IS LEFT. LaneRunner's lane 0 is the player's LEFT and run.x grows to the RIGHT. The camera sits behind the
  * runner looking down +Z, and from there the screen's right is world -X — so the runner is drawn at x = -run.x
@@ -4083,6 +4085,39 @@ export interface LaneRunnerGameProps {
    * its own clips, and says on screen which of those moves it lacks.
    */
   player?: PlayerChoice;
+  /** Revives a run may use after a crash (default 1; 0 = straight to game over). */
+  revives?: number;
+  /** Seconds the "Keep running" offer stays up after a crash (default 3). */
+  reviveSeconds?: number;
+  /** Chance a row carries a power-up (default 0.12; 0 = none). */
+  powerUpChance?: number;
+  /** Missions and the score multiplier (default true). */
+  missions?: boolean;
+}
+
+/** What the overlay shows: power-up timers, the revive offer, missions and the multiplier. */
+export interface LaneRunnerHud {
+  magnet: number; shield: number; double: number;
+  /** Seconds left to take the revive (0 = no offer). */
+  reviveOffer: number;
+  revivesLeft: number;
+  missions: RunnerMission[];
+  missionLevel: number;
+  multiplier: number;
+  /** The last mission finished, shown for a moment. */
+  toast: string;
+}
+const MISSIONS_KEY = 'lane-runner-missions-v1';
+const MISSION_WORDS: Record<RunnerMission['kind'], string> = {
+  distance: 'Run {n} m in one go', coins: 'Collect {n} coins', jumps: 'Jump {n} times', slides: 'Slide {n} times',
+  powerups: 'Pick up {n} power-ups', lanes: 'Change lanes {n} times',
+};
+export function missionText(m: RunnerMission): string { return MISSION_WORDS[m.kind].replace('{n}', String(m.target)); }
+function loadMissions(): RunnerMissions {
+  try { return new RunnerMissions(JSON.parse(globalThis.localStorage?.getItem(MISSIONS_KEY) ?? 'null')); } catch { return new RunnerMissions(); }
+}
+function saveMissions(m: RunnerMissions): void {
+  try { globalThis.localStorage?.setItem(MISSIONS_KEY, JSON.stringify(m.save())); } catch { /* storage can be blocked */ }
 }
 
 /** World x for a runner x: the camera looks down +Z, so the screen's right is world -X. */
@@ -4096,14 +4131,26 @@ export interface LaneRunnerScene {
   update: (ctx: GameContext, dt: number) => void;
   /** Begin a fresh run (Play and Play again call this through GAME_STARTED). */
   restart: () => void;
+  /** Take the revive offered after a crash. Returns false when there is no offer. */
+  revive: () => boolean;
+  /** A snapshot for the overlay. */
+  hud: () => LaneRunnerHud;
+  missions: RunnerMissions | null;
   dispose: () => void;
 }
 
 /** The runner game without React: the GameCanvas starter below uses it, and so can a game of your own. */
 export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunnerScene {
   const lanes = Math.max(1, Math.min(5, Math.round(props.lanes ?? 3)));
-  const runnerOptions: RunnerOptions = { lanes, laneWidth: LANE_WIDTH, startSpeed: props.startSpeed ?? 10, maxSpeed: props.maxSpeed ?? 30, seed: props.seed ?? Date.now() };
+  const runnerOptions: RunnerOptions = {
+    lanes, laneWidth: LANE_WIDTH, startSpeed: props.startSpeed ?? 10, maxSpeed: props.maxSpeed ?? 30, seed: props.seed ?? Date.now(),
+    revives: props.revives ?? 1, powerUpChance: props.powerUpChance ?? 0.12,
+  };
   const run = new LaneRunner(runnerOptions);
+  const missions = props.missions === false ? null : loadMissions();
+  const reviveSeconds = Math.max(0.5, props.reviveSeconds ?? 3);
+  let reviveOffer = 0;
+  let toast = '', toastT = 0;
   // The Tune panel in NavBharatAI's preview shows this as a slider (core/tuning): the whole run faster or slower.
   const pace = tunable('gameSpeed', 1, { label: 'Game speed', min: 0.5, max: 2, step: 0.05 });
   const width = lanes * LANE_WIDTH + 1;
@@ -4116,6 +4163,15 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
   const high = { geo: geo(new THREE.BoxGeometry(LANE_WIDTH * 0.95, 0.35, 0.4)), mat: mat(0x3d8bfd) };
   const post = { geo: geo(new THREE.BoxGeometry(0.15, 2.2, 0.15)), mat: mat(0x6b7280) };
   const coin = { geo: geo(new THREE.CylinderGeometry(0.35, 0.35, 0.08, 16)), mat: mat(0xffd23f, { metalness: 0.6, roughness: 0.3, emissive: 0x6b4f00 }) };
+  // POWER-UPS: a red magnet ring, a blue shield ball, a green ×2 gem. Change their look here.
+  const powerLooks: Record<RunnerPowerKind, { geo: THREE.BufferGeometry; mat: THREE.Material }> = {
+    magnet: { geo: geo(new THREE.TorusGeometry(0.35, 0.12, 8, 16, Math.PI * 1.4)), mat: mat(0xe11d48, { emissive: 0x5b0718 }) },
+    shield: { geo: geo(new THREE.SphereGeometry(0.4, 16, 12)), mat: mat(0x38bdf8, { emissive: 0x0b4a6b }) },
+    double: { geo: geo(new THREE.OctahedronGeometry(0.42)), mat: mat(0x22c55e, { emissive: 0x0b5227 }) },
+  };
+  // The shield bubble around the runner while a shield is on.
+  const bubble = new THREE.Mesh(geo(new THREE.SphereGeometry(1.1, 20, 14)), mat(0x7dd3fc, { transparent: true, opacity: 0.25 }));
+  bubble.visible = false;
   const root = new THREE.Group();
   root.name = 'Lane runner';
   const track = new THREE.Group();
@@ -4147,20 +4203,31 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
   const character = createPlayerCharacter(body, choice, () => { runner.root.visible = false; });
   const obstacleMeshes = new Map<number, THREE.Mesh | THREE.Group>();
   const coinMeshes = new Map<number, THREE.Mesh>();
+  const powerMeshes = new Map<number, THREE.Mesh>();
+  root.add(bubble);
   let scored = 0;
 
   const clearPieces = () => {
     for (const m of obstacleMeshes.values()) root.remove(m);
     for (const m of coinMeshes.values()) root.remove(m);
-    obstacleMeshes.clear(); coinMeshes.clear();
+    for (const m of powerMeshes.values()) root.remove(m);
+    obstacleMeshes.clear(); coinMeshes.clear(); powerMeshes.clear();
   };
   const restart = () => {
     run.reset(props.seed ?? Date.now());
     clearPieces();
     scored = 0;
+    reviveOffer = 0;
+    if (missions) { missions.newRun(); run.scoreMultiplier = missions.multiplier; }
     runner.revive();
     character.revive();
     runner.root.scale.set(1, 1, 1);
+  };
+  const revive = (): boolean => {
+    if (reviveOffer <= 0 || !run.revive()) return false;
+    reviveOffer = 0;
+    runner.revive(); character.revive();
+    return true;
   };
   const offStart = events.on('GAME_STARTED', restart);
 
@@ -4202,15 +4269,35 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
       coinsSeen.add(c.id);
       let m = coinMeshes.get(c.id);
       if (!m) { m = new THREE.Mesh(coin.geo, coin.mat); m.rotation.z = Math.PI / 2; coinMeshes.set(c.id, m); root.add(m); }
-      m.position.set(runnerWorldX(run.laneX(c.lane)), 0.8, c.z);
+      // A magnet draws the coins it is about to pull in toward the runner.
+      const pull = run.magnet > 0 && c.z - run.distance < 8 ? Math.max(0, 1 - (c.z - run.distance) / 8) : 0;
+      m.position.set(runnerWorldX(run.laneX(c.lane) + (run.x - run.laneX(c.lane)) * pull), 0.8, c.z);
       m.rotation.y += 0.08;
     }
     for (const [id, m] of coinMeshes) if (!coinsSeen.has(id)) { root.remove(m); coinMeshes.delete(id); }
+    const powersSeen = new Set<number>();
+    for (const p of run.powerUps) {
+      powersSeen.add(p.id);
+      let m = powerMeshes.get(p.id);
+      if (!m) { m = new THREE.Mesh(powerLooks[p.kind].geo, powerLooks[p.kind].mat); powerMeshes.set(p.id, m); root.add(m); }
+      m.position.set(runnerWorldX(run.laneX(p.lane)), 1, p.z);
+      m.rotation.y += 0.05;
+    }
+    for (const [id, m] of powerMeshes) if (!powersSeen.has(id)) { root.remove(m); powerMeshes.delete(id); }
+    bubble.visible = run.shield > 0 && run.alive;
+    bubble.position.set(runner.root.position.x, run.y + 0.9, run.distance);
   };
 
   return {
     run,
     restart,
+    revive,
+    missions,
+    hud: () => ({
+      magnet: run.magnet, shield: run.shield, double: run.double, reviveOffer, revivesLeft: run.revivesLeft,
+      missions: missions ? missions.goals.map((g) => ({ ...g })) : [], missionLevel: missions?.level ?? 0,
+      multiplier: run.scoreMultiplier, toast: toastT > 0 ? toast : '',
+    }),
     setup: (ctx) => {
       ctx.scene.background = new THREE.Color(props.skyColor ?? 0x9bd3f0);
       ctx.scene.fog = new THREE.Fog(props.skyColor ?? 0x9bd3f0, 40, 160);
@@ -4219,13 +4306,33 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
       ctx.follow(runner.root);
     },
     update: (ctx, dt) => {
+      if (state.status === 'playing' && !run.alive && reviveOffer > 0) {
+        // The "Keep running" offer counts down while the game is playing; when it runs out it is game over.
+        reviveOffer = Math.max(0, reviveOffer - dt);
+        if (reviveOffer === 0) setStatus('gameover');
+      }
+      toastT = Math.max(0, toastT - dt);
       if (state.status !== 'playing' || !run.alive) { runner.update(dt, 0, true); character.update(dt); return; }
       const t = dt * pace.value;
-      for (const ev of run.update(t, runnerInput(ctx.input))) {
+      const happened = run.update(t, runnerInput(ctx.input));
+      for (const ev of happened) {
         const at = { x: runnerWorldX(run.x), y: run.y + 1, z: run.distance };
         if (ev.type === 'jump') { runner.act('jump'); character.act('jump'); events.emit('PLAYER_JUMPED', { position: at }); }
         else if (ev.type === 'coin') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.coin.lane)), y: 0.8, z: ev.coin.z } });
-        else if (ev.type === 'crash') { runner.die(); character.act('die'); events.emit('PLAYER_DIED', { position: at }); setStatus('gameover'); }
+        else if (ev.type === 'powerup') events.emit('ITEM_COLLECTED', { position: { x: runnerWorldX(run.laneX(ev.power.lane)), y: 1, z: ev.power.z } });
+        else if (ev.type === 'crash') {
+          runner.die(); character.act('die'); events.emit('PLAYER_DIED', { position: at });
+          if (run.revivesLeft > 0) reviveOffer = reviveSeconds; else setStatus('gameover');
+        }
+      }
+      if (missions) {
+        const done = missions.track(happened, run);
+        if (done.finished.length || done.levelledUp) {
+          toast = done.levelledUp ? 'Missions done! Score ×' + missions.multiplier : '✓ ' + missionText(done.finished[0]);
+          toastT = 2.5;
+          if (done.levelledUp) run.scoreMultiplier = missions.multiplier;
+          saveMissions(missions);
+        }
       }
       runner.update(t, run.alive ? run.speed * pace.value : 0, !run.jumping);
       character.update(t);
@@ -4235,6 +4342,7 @@ export function createLaneRunnerScene(props: LaneRunnerGameProps = {}): LaneRunn
     },
     dispose: () => {
       offStart();
+      if (missions) saveMissions(missions);
       clearPieces();
       root.removeFromParent();
       character.dispose();
@@ -4252,6 +4360,8 @@ export function LaneRunnerGame(props: LaneRunnerGameProps = {}) {
   if (!scene.current) scene.current = createLaneRunnerScene(props);
   useEffect(() => () => { unbind.current?.(); scene.current?.dispose(); }, []);
   const s = scene.current;
+  const [hud, setHud] = useState<LaneRunnerHud>(() => s.hud());
+  useEffect(() => { const id = setInterval(() => setHud(s.hud()), 200); return () => clearInterval(id); }, [s]);
   const options: Omit<GameOptions, 'container'> = {
     camera: 'chase', playerBody: false, gameId: 'lane-runner-starter', touchControls: false, orientation: 'portrait',
     startScreen: {
@@ -4261,7 +4371,28 @@ export function LaneRunnerGame(props: LaneRunnerGameProps = {}) {
     setup: (ctx) => s.setup(ctx),
     update: (ctx, dt) => s.update(ctx, dt),
   };
-  return <GameCanvas options={options} onReady={(game) => { unbind.current?.(); unbind.current = bindSwipe(window, game.input); }} />;
+  const chip = { background: '#0f172acc', color: 'white', borderRadius: 8, padding: '4px 8px', fontSize: 13 } as const;
+  return <>
+    <GameCanvas options={options} onReady={(game) => { unbind.current?.(); unbind.current = bindSwipe(window, game.input); }} />
+    {/* THE RUN OVERLAY — power-up timers, missions and the revive offer. Move or restyle it here. */}
+    <div style={{ position: 'fixed', left: 12, bottom: 12, display: 'flex', flexDirection: 'column', gap: 4, pointerEvents: 'none', zIndex: 5 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {hud.magnet > 0 && <span style={chip}>🧲 {Math.ceil(hud.magnet)}</span>}
+        {hud.shield > 0 && <span style={chip}>🛡 {Math.ceil(hud.shield)}</span>}
+        {hud.double > 0 && <span style={chip}>×2 {Math.ceil(hud.double)}</span>}
+        {hud.multiplier > 1 && <span style={chip}>Score ×{hud.multiplier}</span>}
+      </div>
+      {hud.missions.map((m) => <span key={m.kind} style={{ ...chip, opacity: m.progress >= m.target ? 0.6 : 1 }}>
+        {m.progress >= m.target ? '✓' : '○'} {missionText(m)} · {m.progress}/{m.target}
+      </span>)}
+      {hud.toast && <span style={{ ...chip, background: '#15803dee' }}>{hud.toast}</span>}
+    </div>
+    {hud.reviveOffer > 0 && <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', zIndex: 6, background: '#0006' }}>
+      <button type="button" onClick={() => { if (s.revive()) setHud(s.hud()); }} style={{ fontSize: 22, padding: '14px 22px', borderRadius: 12 }}>
+        Keep running ({Math.ceil(hud.reviveOffer)})
+      </button>
+    </div>}
+  </>;
 }
 `;
 

@@ -1,5 +1,8 @@
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { IMAGE_ENGINE_FAMILY, legacyPathAllows } from '../AI/TrafficRegistry/legacyControl';
+import { catalogueSteps } from '../AI/ProviderHealth/mediaCatalogue';
+import { imageEngineProvider, mediaTrafficEnabled, orderMediaProviders } from '../AI/ProviderHealth/mediaTraffic';
+import { noteProviderCall } from '../AI/ProviderHealth/trafficHealth';
 // NAVBHARATAI'S OWN IMAGE ENGINE, FOR SOMEBODY ELSE'S CALLER — an app built on NavBharatAI, or a
 // developer holding a NavBharatAI API key (admin 2026-10-04).
 //
@@ -69,46 +72,70 @@ export async function drawWithNavBharat(
   const tried: string[] = [];
 
   // Traffic Manager V2 (P9): an engine the admin drained or disabled is skipped — only when the control store covers
-  // the image path (off by default). Skip only; order, holds, quotas and safety guards are unchanged.
+  // the image path (off by default). Holds, quotas and safety guards are unchanged. Health may reorder the engines.
   const allowed = (engine: keyof typeof IMAGE_ENGINE_FAMILY) => legacyPathAllows('image', IMAGE_ENGINE_FAMILY[engine]);
+  const imageEngines = catalogueSteps('app');
+  const orderedEngines = mediaTrafficEnabled() ? orderMediaProviders(imageEngines, imageEngineProvider) : imageEngines;
+  const record = (provider: string, started: number, ok: boolean, error?: unknown) => {
+    noteProviderCall({ provider, surface: 'image', ok, totalMs: Date.now() - started, ...(error ? { error } : {}) });
+  };
 
-  if (cloudflareImageConfig(env) && cloudflareServesSize(px) && allowed('cloudflare')) {
-    try {
-      const r = await fetchCloudflareImage(prompt, { env, fetchImpl, timeoutMs });
-      if (r.image) return { ok: true, image: r.image, engine: 'cloudflare-flux' };
-      tried.push(`cloudflare: ${r.error ?? 'no image'}`);
-    } catch (e) {
-      tried.push(`cloudflare: ${e instanceof Error ? e.message.slice(0, 120) : 'failed'}`);
+  for (const engine of orderedEngines) {
+    if (engine === 'cloudflare' && cloudflareImageConfig(env) && cloudflareServesSize(px) && allowed('cloudflare')) {
+      const started = Date.now();
+      try {
+        const r = await fetchCloudflareImage(prompt, { env, fetchImpl, timeoutMs });
+        if (r.image) {
+          record('CLOUDFLARE', started, true);
+          return { ok: true, image: r.image, engine: 'cloudflare-flux' };
+        }
+        record('CLOUDFLARE', started, false, new Error(r.error ?? 'no image'));
+        tried.push(`cloudflare: ${r.error ?? 'no image'}`);
+      } catch (e) {
+        record('CLOUDFLARE', started, false, e);
+        tried.push(`cloudflare: ${e instanceof Error ? e.message.slice(0, 120) : 'failed'}`);
+      }
     }
-  }
 
-  if (pollinationsApiKey(env) && allowed('pollinations')) {
-    const r = await fetchPollinationsImage(prompt, undefined, { env, fetchImpl, timeoutMs, custom: { width: px.w, height: px.h } });
-    if (r.image) return { ok: true, image: r.image, engine: 'free-provider (keyed)' };
-    if (r.blocked) return { ok: false, reason: 'blocked', detail: 'word ban' };
-    tried.push(`pollinations: ${r.error ?? (r.disabled ? 'disabled' : 'no image')}`);
-  }
+    if (engine === 'pollinations' && pollinationsApiKey(env) && allowed('pollinations')) {
+      const started = Date.now();
+      const r = await fetchPollinationsImage(prompt, undefined, { env, fetchImpl, timeoutMs, custom: { width: px.w, height: px.h } });
+      if (r.image) {
+        record('POLLINATIONS', started, true);
+        return { ok: true, image: r.image, engine: 'free-provider (keyed)' };
+      }
+      if (r.blocked) return { ok: false, reason: 'blocked', detail: 'word ban' };
+      record('POLLINATIONS', started, false, new Error(r.error ?? (r.disabled ? 'disabled' : 'no image')));
+      tried.push(`pollinations: ${r.error ?? (r.disabled ? 'disabled' : 'no image')}`);
+    }
 
-  const gKey = grokImageKey(env);
-  if (gKey && allowed('grok')) {
-    const model = grokImageModel(env);
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      const r = await fetchImpl('https://api.x.ai/v1/images/generations', {
-        method: 'POST',
-        signal: ctl.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gKey}` },
-        body: JSON.stringify({ model, prompt, n: 1, response_format: 'b64_json' }),
-      });
-      const data: unknown = await r.json().catch(() => null);
-      const img = r.ok ? parseGrokImageResponse(data) : null;
-      if (img) return { ok: true, image: img, engine: `grok:${model}` };
-      tried.push(`grok: ${r.ok ? 'no image' : `HTTP ${r.status}`}`);
-    } catch (e) {
-      tried.push(`grok: ${e instanceof Error ? e.message.slice(0, 120) : 'failed'}`);
-    } finally {
-      clearTimeout(timer);
+    const gKey = grokImageKey(env);
+    if (engine === 'grok' && gKey && allowed('grok')) {
+      const model = grokImageModel(env);
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      const started = Date.now();
+      try {
+        const r = await fetchImpl('https://api.x.ai/v1/images/generations', {
+          method: 'POST',
+          signal: ctl.signal,
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gKey}` },
+          body: JSON.stringify({ model, prompt, n: 1, response_format: 'b64_json' }),
+        });
+        const data: unknown = await r.json().catch(() => null);
+        const img = r.ok ? parseGrokImageResponse(data) : null;
+        if (img) {
+          record('GROK', started, true);
+          return { ok: true, image: img, engine: `grok:${model}` };
+        }
+        record('GROK', started, false, new Error(r.ok ? 'no image' : `HTTP ${r.status}`));
+        tried.push(`grok: ${r.ok ? 'no image' : `HTTP ${r.status}`}`);
+      } catch (e) {
+        record('GROK', started, false, e);
+        tried.push(`grok: ${e instanceof Error ? e.message.slice(0, 120) : 'failed'}`);
+      } finally {
+        clearTimeout(timer);
+      }
     }
   }
 

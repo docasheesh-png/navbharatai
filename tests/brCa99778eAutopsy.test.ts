@@ -300,7 +300,8 @@ describe('7 · a chip plus the user\'s own words seeds the template and puts the
 
   it('the route seeds with it', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain('const golden = seedableScaffoldFor(prompt);');
+    expect(route).toContain('const golden = await resolveBuildScaffold(prompt);');
+    expect(read('src/server/AgentV3/gameLibrary/match.ts')).toContain('seedableScaffoldFor(prompt)');
     expect(route).toContain("buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt), { mustAuthorCode: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' });");
   });
 });

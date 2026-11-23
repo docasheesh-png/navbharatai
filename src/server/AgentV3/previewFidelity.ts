@@ -14,6 +14,7 @@
 // 🔒 THE RULE THIS MODULE FOLLOWS: report ONLY what is genuinely unsupported and genuinely present in
 // this workspace's files. A false caveat is worse than none — it teaches the user to distrust a
 // preview that was in fact accurate, and sends them to the paid Live server for nothing.
+import { importMetaGlobNeedsLiveServer } from './previewCapability';
 
 export interface PreviewFidelityCaveat {
   /** Stable id, so the panel can style or suppress one without matching on prose. */
@@ -60,9 +61,9 @@ export function previewFidelityCaveats(files: Record<string, string>): PreviewFi
     out.push({ id: 'web-worker', text: 'Background workers do not run here, so anything they power will look inactive.' });
   }
 
-  // 4. import.meta.glob — a Vite-only API. `import.meta` is rewritten to a plain object in the page, so
-  //    `.glob` is undefined and the module throws on load.
-  if (code.some((p) => /import\.meta\.glob\b/.test(bodyOf(p)))) {
+  // 4. import.meta.glob — expanded by the React renderer since 2026-11-22 (previewImportMetaGlob.ts), so a
+  //    caveat only when it cannot be: the SAME decision the capability prover makes.
+  if (importMetaGlobNeedsLiveServer(files || {})) {
     out.push({ id: 'vite-glob', text: 'This app loads files in bulk the way Vite does, which only works on the live server.' });
   }
 

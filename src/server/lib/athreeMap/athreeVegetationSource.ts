@@ -160,9 +160,9 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
 }
 
 /** Grass quality at one lattice node: ground height, how thick the grass is there (0..1), and its colour (0 dark, 0.6 lush, 1 dry). */
-function grassNode(world: AthreeWorld, x: number, z: number, period: number): { h: number; d: number; t: number } {
+function grassNode(world: AthreeWorld, x: number, z: number, period: number): { h: number; d: number; t: number; blocked?: boolean } {
   const h = world.heightAt(x, z);
-  if (world.waterAt(x, z) || world.roadAt(x, z) || world.clearAt(x, z)) return { h, d: 0, t: 0.5 };
+  if (plantBlocked(world, x, z)) return { h, d: 0, t: 0.5, blocked: true };
   const biome = world.biomeAt(x, z);
   let base = 0;
   let tint = 0.5;
@@ -176,6 +176,30 @@ function grassNode(world: AthreeWorld, x: number, z: number, period: number): { 
   const dry = fieldNoise(x, z, world.seed + 14, 2, 40, period);
   const d = base * smoothstep(0.62, 0.86, ny) * (0.55 + 0.45 * smoothstep(0.25, 0.65, patch));
   return { h, d, t: Math.min(1, Math.max(0, tint + (dry - 0.5) * 0.5)) };
+}
+
+/** How far a grass tuft's blades reach from its root, in metres (a tuft is about 0.5 m wide). */
+export const TUFT_REACH = 0.35;
+
+/** Nothing grows here: water, a road (the network's or one the game laid) or levelled ground. */
+function plantBlocked(world: AthreeWorld, x: number, z: number): boolean {
+  return !!(world.waterAt(x, z) || world.roadAt(x, z) || world.clearAt(x, z));
+}
+
+/**
+ * 🌱 NO GRASS ON A ROAD (admin 2026-11-23: "road par ghas jam gayi hai"). True when a tuft rooted here would put a blade on a
+ * road, on levelled ground or in water: its root or any point TUFT_REACH away is blocked. The density lattice is 2 m and
+ * blended, so near a road's edge it says "some grass" inside the road; this exact test is what keeps the asphalt bare.
+ */
+export function tuftBlocked(world: AthreeWorld, x: number, z: number): boolean {
+  const r = TUFT_REACH;
+  return plantBlocked(world, x, z) || plantBlocked(world, x + r, z) || plantBlocked(world, x - r, z)
+    || plantBlocked(world, x, z + r) || plantBlocked(world, x, z - r);
+}
+
+/** A tree whose trunk stands on a road, levelled ground or water (the scatter rule, read again after the ground changed). */
+export function treeBlocked(world: AthreeWorld, x: number, z: number): boolean {
+  return plantBlocked(world, x, z);
 }
 
 /**
@@ -192,12 +216,14 @@ export function grassInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
   const H = new Float32Array(nx * nz);
   const D = new Float32Array(nx * nz);
   const T = new Float32Array(nx * nz);
+  // 1 where the node itself is blocked (water, road, levelled ground): a tuft in a cell touching one is tested exactly.
+  const B = new Uint8Array(nx * nz);
   let anyGrass = false;
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
       const n = grassNode(world, (i0 + i) * LATTICE, (j0 + j) * LATTICE, period);
       const k = j * nx + i;
-      H[k] = n.h; D[k] = n.d; T[k] = n.t;
+      H[k] = n.h; D[k] = n.d; T[k] = n.t; B[k] = n.blocked ? 1 : 0;
       if (n.d > 0) anyGrass = true;
     }
   }
@@ -223,6 +249,8 @@ export function grassInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       const lerp2 = (A: Float32Array): number => (A[k00] * (1 - tx) + A[k00 + 1] * tx) * (1 - tz) + (A[k00 + nx] * (1 - tx) + A[k00 + nx + 1] * tx) * tz;
       const d = lerp2(D);
       if (roll >= d) continue;
+      // A cell beside a road, a pad or water: keep the tuft only if none of its blades would reach onto it.
+      if ((B[k00] | B[k00 + 1] | B[k00 + nx] | B[k00 + nx + 1]) && tuftBlocked(world, px, pz)) continue;
       out.push(px, lerp2(H), pz, rot, 0.9 + 0.6 * sizeR, Math.min(1, Math.max(0, lerp2(T) + (tintJitter - 0.5) * 0.12)));
     }
   }
@@ -543,7 +571,7 @@ export const PLANTS = `// Athree map — plants on screen: wind shaders, instanc
 import { type AthreeQuality } from './config';
 import {
   SPECIES, VARIANTS, VEGETATION_TIERS, TREE_TILE, GRASS_TILE, TUFT_TRIANGLES,
-  buildTreeArrays, buildTuftArrays, treesInRect, grassInRect,
+  buildTreeArrays, buildTuftArrays, treesInRect, grassInRect, tuftBlocked, treeBlocked,
   type PlantArrays, type TreeSpec,
 } from './vegetation';
 import type { AthreeWorld } from './world';
@@ -569,6 +597,18 @@ export interface Vegetation {
   stats(): VegetationStats;
   /** Match the scene's light: sun direction (towards the sun), sun colour, ambient colour. */
   setLight(sun: { x: number; y: number; z: number }, sunColor?: number, ambientColor?: number): void;
+  /**
+   * The ground changed over this world rectangle (a late levelGround, setLand or addRoad): the plant tiles it touches are
+   * scattered again on the next updates (a few per update), so no tree floats over a new pad or stands on a new road. Plants
+   * already drawn stay until their tiles are ready. A rectangle that is not finite drops every tile. Returns tiles dropped.
+   */
+  invalidate(x0: number, z0: number, x1: number, z1: number): number;
+  /**
+   * The ground changed over this world rectangle, and the terrain is NOT redrawn (a map without lateEdits): every loaded tuft
+   * and tree that now stands on a road, levelled ground or water is taken away, and every other plant stays exactly where it
+   * is (on the ground that is drawn). A rectangle that is not finite checks every loaded plant. Returns plants removed.
+   */
+  prune(x0: number, z0: number, x1: number, z1: number): number;
   dispose(): void;
 }
 
@@ -882,7 +922,51 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     grassTiles.clear();
   }
 
-  return { group, update, stats, setLight, dispose };
+  function invalidate(x0: number, z0: number, x1: number, z1: number): number {
+    const all = !(Number.isFinite(x0) && Number.isFinite(z0) && Number.isFinite(x1) && Number.isFinite(z1));
+    let dropped = 0;
+    const drop = (tiles: Map<string, unknown>, size: number): void => {
+      for (const key of Array.from(tiles.keys())) {
+        const [i, j] = key.split(',').map(Number);
+        if (!all && (i * size > x1 || (i + 1) * size < x0 || j * size > z1 || (j + 1) * size < z0)) continue;
+        tiles.delete(key); dropped++;
+      }
+    };
+    drop(treeTiles, TREE_TILE);
+    drop(grassTiles, GRASS_TILE);
+    if (dropped > 0) { scanTile = { x: Infinity, z: Infinity }; dirty = true; }
+    return dropped;
+  }
+
+  function prune(x0: number, z0: number, x1: number, z1: number): number {
+    const all = !(Number.isFinite(x0) && Number.isFinite(z0) && Number.isFinite(x1) && Number.isFinite(z1));
+    const reach = 1;
+    const touches = (key: string, size: number): boolean => {
+      if (all) return true;
+      const [i, j] = key.split(',').map(Number);
+      return !(i * size > x1 + reach || (i + 1) * size < x0 - reach || j * size > z1 + reach || (j + 1) * size < z0 - reach);
+    };
+    let removed = 0;
+    for (const [key, tile] of grassTiles) {
+      if (!touches(key, GRASS_TILE)) continue;
+      const kept: number[] = [];
+      let gone = 0;
+      for (let i = 0; i < tile.length; i += 6) {
+        if (tuftBlocked(world, tile[i], tile[i + 2])) { gone++; continue; }
+        for (let k = 0; k < 6; k++) kept.push(tile[i + k]);
+      }
+      if (gone) { grassTiles.set(key, Float32Array.from(kept)); removed += gone; }
+    }
+    for (const [key, list] of treeTiles) {
+      if (!touches(key, TREE_TILE)) continue;
+      const kept = list.filter((t) => !treeBlocked(world, t.x, t.z));
+      if (kept.length !== list.length) { treeTiles.set(key, kept); removed += list.length - kept.length; }
+    }
+    if (removed > 0) dirty = true;
+    return removed;
+  }
+
+  return { group, update, stats, setLight, invalidate, prune, dispose };
 }
 
 `;

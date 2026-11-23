@@ -167,6 +167,21 @@ export function noteProviderCall(call: TrafficCall): void {
   }
 }
 
+/** Successful-call p50 and current in-flight count. Unknown latency stays null, never a guessed zero. */
+export function providerPace(provider: string): { latencyMs: number | null; load: number } {
+  const row = rows.get(canonProvider(provider));
+  if (!row) return { latencyMs: null, load: 0 };
+  const totals = row.samples.filter((sample) => sample.ok && sample.totalMs > 0).map((sample) => sample.totalMs);
+  return { latencyMs: percentile(totals, 50), load: row.inFlight };
+}
+
+/** Unhealthy and still inside the recovery window. Does not open the recovery probe. */
+export function providerIsUnhealthy(provider: string, now = Date.now()): boolean {
+  if (!trafficHealthEnabled()) return false;
+  const row = rows.get(canonProvider(provider));
+  return !!row && row.state !== 'up' && now < row.recoverAt;
+}
+
 export function providerInFlight(provider: string, delta: number): void {
   if (!trafficHealthEnabled()) return;
   const row = rowOf(provider);

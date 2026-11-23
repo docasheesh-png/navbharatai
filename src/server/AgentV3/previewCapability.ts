@@ -28,6 +28,9 @@
 
 import { detectBackendPresence } from './BackendPresence';
 import { usesImportMetaGlob } from '../runtime/previewImportMeta';
+import { hasUnexpandableImportMetaGlob } from '../runtime/previewImportMetaGlob';
+import { choosePreviewKind } from '../runtime/renderPreview';
+import { VirtualFileSystem } from '../project/ProjectModel';
 
 /** Why the browser cannot be trusted with this project. Each is a genuinely different refusal. */
 export type PreviewBlocker =
@@ -142,6 +145,16 @@ const BLOCKER_REASON: Record<PreviewBlocker, string> = {
  * screen is more useful when it can say "and also", and because a caller measuring these needs the
  * whole picture rather than whichever check happened to run first.
  */
+/**
+ * Does this project use `import.meta.glob` in a way the in-browser runtime cannot answer? ONE decision, read
+ * by the prover above and by previewFidelity's caveat, so the two cannot disagree. PURE.
+ */
+export function importMetaGlobNeedsLiveServer(files: Record<string, string> | null | undefined): boolean {
+  const map = files && typeof files === 'object' ? files : {};
+  if (!usesImportMetaGlob(map)) return false;
+  return hasUnexpandableImportMetaGlob(map) || choosePreviewKind(VirtualFileSystem.fromRecord(map)) !== 'react';
+}
+
 export function proveBrowserRunnable(files: Record<string, string> | null | undefined): PreviewCapability {
   const map = files && typeof files === 'object' ? files : {};
   const paths = Object.keys(map);
@@ -168,12 +181,14 @@ export function proveBrowserRunnable(files: Record<string, string> | null | unde
   if (usesBuiltin) blockers.push('node-builtin-import');
 
   /**
-   * `import.meta.glob` is the one part of `import.meta` a value cannot answer. Phase 1b makes
-   * `import.meta.env` work by supplying Vite's real dev values, but glob is a BUILD-TIME directory
-   * expansion: with no `glob` on the object, an app that builds its routes from one would render with
-   * no routes — working-looking and wrong, which is worse than an honest refusal.
+   * `import.meta.glob` is a BUILD-TIME directory expansion. Since 2026-11-22 the React renderer performs it
+   * on the server, with Vite's semantics, against the files it holds (previewImportMetaGlob.ts) — the
+   * platform's own game kit writes it, and refusing it refused every such game on App Mart. It is still a
+   * blocker when it cannot be PROVEN: a call with non-literal arguments or an unsupported option, or a
+   * project the React renderer will not render (the Vue and static renderers do not expand it). There an
+   * app would render with no routes or no assets — working-looking and wrong.
    */
-  if (usesImportMetaGlob(map)) blockers.push('import-meta-glob');
+  if (importMetaGlobNeedsLiveServer(map)) blockers.push('import-meta-glob');
 
   if (!hasRenderableEntry(map, paths)) blockers.push('no-renderable-entry');
 

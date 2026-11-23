@@ -17,6 +17,8 @@
 //
 // PURE: prompt in, tier out.
 
+import { findGameTitles } from './wellKnownGameTitles';
+
 export type RealismTier = 'real' | 'lite';
 
 /**
@@ -40,8 +42,9 @@ const REAL_INTENT: RegExp[] = [
   /\b(?:sach\s*much|sachmuch|sach\s*me\s*(?:jaisa|asli))\b/i,
   /\b100\s*%\s*(?:real|asli|realistic|sahi)?\b/i,
   // "GTA jaisa", "PUBG jaisa" — naming a photoreal AAA title IS the realism ask.
-  // BR1966: "gta5" / "gtav" / "gta-5" are the same title as "gta 5" (spaced form already matched).
-  /\b(?:gta(?:\s*[-_]?\s*[5v])?|pubg|bgmi|forza|need\s*for\s*speed|nfs|far\s*cry|witcher|cyberpunk|red\s*dead|assassin'?s?\s*creed)\b/i,
+  // GTA, PUBG, BGMI and Need for Speed are read by the shared tolerant title matcher (PHOTOREAL_TITLES below — failedbr
+  // #2497: "bubg", "gtaa", "g.t.a" are the same titles); the titles the catalogue does not hold stay here.
+  /\b(?:forza|nfs|far\s*cry|witcher|cyberpunk|red\s*dead|assassin'?s?\s*creed)\b/i,
   // Devanagari
   /(?:असली|यथार्थ|वास्तविक|हूबहू|हुबहु|सजीव|फोटो\s*रियल)/,
   /(?:रियलिस्टिक|रीयलिस्टिक)/,
@@ -53,13 +56,19 @@ const REAL_INTENT: RegExp[] = [
  * and building the heavy tier for them wastes the device budget on the wrong look entirely.
  */
 const STYLISED_INTENT: RegExp[] = [
-  /\b(?:low\s*-?\s*poly|lowpoly|voxel|minecraft|roblox|blocky|pixel\s*art|pixelated|8\s*-?\s*bit|16\s*-?\s*bit|retro)\b/i,
+  // Minecraft and Roblox are read by the shared tolerant title matcher (STYLISED_TITLES below).
+  /\b(?:low\s*-?\s*poly|lowpoly|voxel|blocky|pixel\s*art|pixelated|8\s*-?\s*bit|16\s*-?\s*bit|retro)\b/i,
   /\b(?:cartoon|cartoony|toon|cel\s*-?\s*shade[d]?|anime|comic|doodle|sketch[y]?|hand\s*-?\s*drawn)\b/i,
   /\b(?:stylised|stylized|abstract|minimal(?:ist)?|flat\s*shad(?:ed|ing)|simple\s*(?:3d|graphics|look))\b/i,
   /\b(?:cute|chibi|kawaii|clay|papercraft|origami)\b/i,
   /\b(?:cartoon\s*jaisa|simple\s+rakho|halka\s+(?:sa|rakho)|basic\s+rakho)\b/i,
   /(?:कार्टून|सरल|साधारण)/,
 ];
+
+/** Titles that ARE the realism ask, and titles that are a deliberate blocky style — in any spelling (lib/wellKnownGameTitles). */
+const PHOTOREAL_TITLES: readonly string[] = ['GTA', 'PUBG', 'BGMI', 'Need for Speed'];
+const STYLISED_TITLES: readonly string[] = ['Minecraft', 'Roblox'];
+const namesTitle = (text: string, names: readonly string[]): boolean => findGameTitles(text).some((m) => names.includes(m.name));
 
 /** Did the user ask for 3D at all? Used only to explain the decision, never to force the tier. */
 const THREE_D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional|3d\s*game)\b|(?:थ्री\s*डी|3डी)/i;
@@ -83,8 +92,8 @@ export function realismIntent(prompt: string | null | undefined): RealismDecisio
   const text = String(prompt ?? '');
   if (!text.trim()) return { tier: 'lite', reason: 'No prompt text — building the light 3D tier.', stylisedOverride: false };
 
-  const stylised = STYLISED_INTENT.some((re) => re.test(text));
-  const real = REAL_INTENT.some((re) => re.test(text));
+  const stylised = STYLISED_INTENT.some((re) => re.test(text)) || namesTitle(text, STYLISED_TITLES);
+  const real = REAL_INTENT.some((re) => re.test(text)) || namesTitle(text, PHOTOREAL_TITLES);
 
   if (stylised && real) {
     // "realistic low-poly" is a style request. Honour the style; the realism word is describing the

@@ -35,6 +35,7 @@ import { GAME_CITY_PEOPLE } from './GameCityPeopleGenerator';
 import { GAME_PHYSICS, GAME_PHYSICS_VERSION } from './GamePhysicsGenerator';
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
+import { GROUND_CONTACT_SOURCE } from './groundContact';
 // L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
 export { GAME_ASSET_MODELS_PATH, generateGameAssetRuntime, upgradeAssetModelLoader } from './GameAssetRuntimeGenerator';
 
@@ -1033,6 +1034,7 @@ export function buildingGeometry(width = 4, height = 3, depth = 4): THREE.Buffer
 // a scene that looks worse than the flat colours it replaced.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const SURFACES = `import * as THREE from 'three';
+import { restOriginY } from './groundContact';
 
 export type Detail = 'real' | 'lite';
 
@@ -1354,13 +1356,74 @@ export function isWaterAt(x: number, z: number): boolean { return WATER.some((w)
  * (plus userData.groundOffset, default 0). Opt-outs are explicit: userData.ground = false (a bird, a
  * plane, a projectile, a hand-placed bridge deck), or a declared water region under it.
  */
+/**
+ * Local Y of the mesh's lowest vertex, relative to this object's origin, ignoring the object's own
+ * pitch and roll (those are how it sits on a slope, not part of its shape). Cached until the
+ * children or the scale change. An empty object is 0 — its origin is the point that sits on the ground.
+ */
+export function localLowestY(obj: THREE.Object3D): number {
+  const ud = obj.userData as { nbLowest?: number; nbLowestN?: number; nbLowestS?: number };
+  const n = obj.children.length;
+  const s = obj.scale.x;
+  if (typeof ud.nbLowest === 'number' && ud.nbLowestN === n && ud.nbLowestS === s) return ud.nbLowest;
+  obj.updateWorldMatrix(true, true);
+  const inv = obj.matrixWorld.clone().invert();
+  const box = new THREE.Box3();
+  const corner = new THREE.Vector3();
+  let any = false;
+  obj.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    const geo = mesh.geometry;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    if (!bb) return;
+    mesh.updateWorldMatrix(true, false);
+    const local = inv.clone().multiply(mesh.matrixWorld);
+    for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z]) {
+      corner.set(x, y, z).applyMatrix4(local);
+      if (!any) { box.min.copy(corner); box.max.copy(corner); any = true; }
+      else box.expandByPoint(corner);
+    }
+  });
+  const y = any ? box.min.y : 0;
+  ud.nbLowest = y; ud.nbLowestN = n; ud.nbLowestS = s;
+  return y;
+}
+
+/** Put this object on the ground: its lowest point, not its origin, meets the surface. */
+export function standOnGround<T extends THREE.Object3D>(obj: T, lift = 0): T {
+  obj.userData.nbBody = true;
+  const ground = getGround();
+  obj.updateWorldMatrix(true, false);
+  const world = obj.getWorldPosition(new THREE.Vector3());
+  const surface = ground ? ground(world.x, world.z) : 0;
+  const target = restOriginY(surface, localLowestY(obj), lift + (Number(obj.userData.groundOffset) || 0));
+  if (obj.parent) {
+    world.y = target;
+    obj.parent.updateWorldMatrix(true, false);
+    obj.parent.worldToLocal(world);
+    obj.position.copy(world);
+  } else obj.position.y = target;
+  return obj;
+}
+
 export function groundObject(obj: THREE.Object3D, ground: GroundHeight | null = getGround()): boolean {
   if (!ground || obj.userData.ground === false || obj.userData.heightAt) return false;
-  const x = obj.position.x, z = obj.position.z;
-  if (WATER.length && isWaterAt(x, z)) return false;
-  const floor = ground(x, z) + (Number(obj.userData.groundOffset) || 0);
-  if (obj.position.y < floor) { obj.position.y = floor; return true; }
-  return false;
+  const values = Object.values(obj.userData);
+  if (values.includes('ground')) return false;
+  obj.updateWorldMatrix(true, false);
+  const world = obj.getWorldPosition(new THREE.Vector3());
+  if (WATER.length && isWaterAt(world.x, world.z)) return false;
+  const lift = Number(obj.userData.groundOffset) || 0;
+  const lowest = obj.userData.nbBody === true ? localLowestY(obj) : 0;
+  const floor = restOriginY(ground(world.x, world.z), lowest, lift);
+  if (world.y >= floor - 1e-4) return false;
+  world.y = floor;
+  const parent = obj.parent;
+  if (parent) { parent.updateWorldMatrix(true, false); parent.worldToLocal(world); obj.position.copy(world); }
+  else obj.position.y = floor;
+  return true;
 }
 
 /**
@@ -1373,11 +1436,15 @@ export function groundScene(root: THREE.Object3D, ground: GroundHeight | null = 
   syncGround();
   if (!ground) return 0;
   let lifted = 0;
-  for (const obj of root.children) {
+  const consider = (obj: THREE.Object3D) => {
     const o = obj as THREE.Object3D & { isLight?: boolean; isCamera?: boolean; isPoints?: boolean; isInstancedMesh?: boolean; isSprite?: boolean; isLine?: boolean };
-    if (o.isLight || o.isCamera || o.isPoints || o.isInstancedMesh || o.isSprite || o.isLine) continue;
+    if (o.isLight || o.isCamera || o.isPoints || o.isInstancedMesh || o.isSprite || o.isLine) return;
     if (groundObject(o, ground)) lifted++;
-  }
+  };
+  for (const obj of root.children) consider(obj);
+  // A vehicle nested in a city is still a body. Its lowest point is clamped every frame; the city
+  // group itself is not, so a street grid is never lifted by one deep foundation.
+  root.traverse((obj) => { if (obj.userData.nbBody === true && obj.parent !== root) consider(obj); });
   return lifted;
 }
 
@@ -2963,7 +3030,8 @@ export function keepApart(movers: readonly Mover[]): number {
 const OBJECTS = `import * as THREE from 'three';
 import { createEnterableHouse } from './buildings';
 export { createEnterableHouse, houseDoor } from './buildings';
-import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, resolveDetail, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, resolveDetail, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, localLowestY, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
+import { restOriginY } from './groundContact';
 import { colliderLocalBounds, collisionRoot, markWorldCollider, sweepWorldCapsules, worldColliders } from './collision';
 import { Capsule } from 'three/addons/math/Capsule.js';
 
@@ -3915,10 +3983,11 @@ export function createTraffic(options: TrafficOptions = {}): Traffic {
   root.userData.ground = false;   // each vehicle is grounded on its own, below — not the group's origin
   // ON the road surface wherever the road climbs, not at a flat ROAD_SURFACE_Y under the hills.
   const settle = (o: THREE.Object3D) => {
-    if (!getGround()) { o.position.y = ROAD_SURFACE_Y; return; }
+    const lowest = o.userData.nbBody === true ? localLowestY(o) : 0;
+    if (!getGround()) { o.position.y = restOriginY(ROAD_SURFACE_Y, lowest, 0); return; }
     root.updateMatrixWorld(true);
     const w = o.getWorldPosition(new THREE.Vector3());
-    o.position.y += groundHeightAt(w.x, w.z) - w.y;
+    o.position.y += restOriginY(groundHeightAt(w.x, w.z), lowest, 0) - w.y;
   };
   for (const v of vehicles) settle(v.object);
 
@@ -4097,6 +4166,7 @@ export function settleOnGround(
   if (!ground) return null;
   // The ground already IS the asphalt (or rail top) on a corridor, so the tyres sit ON it: 0.
   const ride = tuning.rideHeight ?? 0;
+  const lowest = vehicle.userData.nbBody === true ? localLowestY(vehicle) : 0;
   const L = (tuning.length ?? 2.6) / 2, W = (tuning.width ?? 1.6) / 2;
   const x = vehicle.position.x, z = vehicle.position.z;
   const fx = Math.sin(heading), fz = Math.cos(heading);   // the nose (+Z of the model)
@@ -4104,7 +4174,7 @@ export function settleOnGround(
   const fl = ground(x + fx * L + lx * W, z + fz * L + lz * W), fr = ground(x + fx * L - lx * W, z + fz * L - lz * W);
   const bl = ground(x - fx * L + lx * W, z - fz * L + lz * W), br = ground(x - fx * L - lx * W, z - fz * L - lz * W);
   const hF = (fl + fr) / 2, hB = (bl + br) / 2, hLft = (fl + bl) / 2, hRgt = (fr + br) / 2;
-  const floor = Math.max(ground(x, z), (hF + hB) / 2) + ride;
+  const floor = restOriginY(Math.max(ground(x, z), (hF + hB) / 2), lowest, ride);
   const k = 1 - Math.exp(-14 * Math.max(0, dt));
   // Up is instant (the tyres are ON the surface); down is sprung — never below the floor.
   const y = vehicle.position.y;
@@ -4202,7 +4272,11 @@ const vehicleBounds = new WeakMap<THREE.Object3D, THREE.Box3>();
 const vehicleBodies = new Set<THREE.Object3D>();
 const vehicleWasPlaced = new WeakSet<THREE.Object3D>();
 /** Mark a model as a vehicle body: other vehicles stop at it. The kit's vehicle factories do this themselves. */
-export function markVehicleBody<T extends THREE.Object3D>(vehicle: T): T { vehicleBodies.add(vehicle); return vehicle; }
+export function markVehicleBody<T extends THREE.Object3D>(vehicle: T): T {
+  vehicle.userData.nbBody = true;
+  vehicleBodies.add(vehicle);
+  return vehicle;
+}
 
 function carries(outer: THREE.Object3D, inner: THREE.Object3D): boolean {
   for (let o: THREE.Object3D | null = inner.parent; o; o = o.parent) if (o === outer) return true;
@@ -7164,6 +7238,7 @@ const FILES: Record<string, string> = {
   'src/game/three/camera.ts': CAMERA,
   'src/game/three/world.ts': WORLD,
   'src/game/three/collision.ts': COLLISION,
+  'src/game/three/groundContact.ts': GROUND_CONTACT_SOURCE,
   // The three modules added 2026-08-26, each closing one reason a "realistic" scene came out flat:
   // nothing to reflect (environment), no surface detail (surfaces), and a capsule for a body (humanoid).
   'src/game/three/environment.ts': ENVIRONMENT,
@@ -7192,7 +7267,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics',
 ];
 
 /**
@@ -7237,6 +7312,10 @@ export function generateGame3D(include?: string[]): Game3DResult {
     if (files['src/game/three/objects.ts'] || files['src/game/three/humanoid.ts']) {
       files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
       files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
+    }
+    // surfaces.ts, objects.ts and physics.ts all import the ground-contact module.
+    if (files['src/game/three/surfaces.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/physics.ts']) {
+      files['src/game/three/groundContact.ts'] = FILES['src/game/three/groundContact.ts'];
     }
     if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];

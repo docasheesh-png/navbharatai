@@ -738,6 +738,7 @@ import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, 
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { gameMeasureFromIssues, gameGotWorse, versionBeforeTurn, gameUndoMessage } from '../AgentV3/gameRegression';
+import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage, geometryRepairNote } from '../AgentV3/gameGeometryProbe';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -19698,6 +19699,11 @@ async function noteBuildOutcome(
         gameContract = gameHandoff.contract;
         requestContractRef.contract = gameContract;
         if (gameHandoff.block) buildPrompt = `${gameHandoff.block}\n\n---\n\n${buildPrompt}`;
+        // The last playtest's geometry look, for the builder only (gameGeometryProbe.ts) — a game turn reads it, nobody else.
+        if (gameHandoff.block && gameGeometryProbeEnabled()) {
+          const geometryNote = geometryRepairNote((await previousReportAtStart)?.issues);
+          if (geometryNote) buildPrompt = `${geometryNote}\n\n---\n\n${buildPrompt}`;
+        }
         if (gameContract) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true,
           message: `Game scope contract: ${JSON.stringify(gameContract)}` });
       } catch { /* unavailable contract is not permission to change an existing project */ }
@@ -24827,6 +24833,12 @@ async function noteBuildOutcome(
               gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
+              // 🔎 The read-only geometry look (gameGeometryProbe.ts): an info line for the admin report, handed to the builder
+              // as a builder-only note on the next turn. Never scored, never a gate, never shown to the user.
+              if (gameGeometryProbeEnabled()) {
+                const geometryMsg = geometryFindingsMessage(geometryFindings(playRun.geometry, playRun.models));
+                if (geometryMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: GAME_GEOMETRY_CODE, message: geometryMsg, autoResolved: true });
+              }
               // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
               const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');
               if (heavy) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: ${heavy.evidence}.`, autoResolved: false });

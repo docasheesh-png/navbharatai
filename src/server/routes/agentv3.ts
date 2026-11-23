@@ -24845,7 +24845,7 @@ async function noteBuildOutcome(
               // 🔎 The read-only geometry look (gameGeometryProbe.ts): an info line for the admin report, handed to the builder
               // as a builder-only note on the next turn. Never scored, never a gate, never shown to the user.
               if (gameGeometryProbeEnabled()) {
-                const geometryMsg = geometryFindingsMessage(geometryFindings(playRun.geometry, playRun.models));
+                const geometryMsg = geometryFindingsMessage(geometryFindings(playRun.geometry, playRun.models, playRun.heap));
                 if (geometryMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: GAME_GEOMETRY_CODE, message: geometryMsg, autoResolved: true });
               }
               // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).

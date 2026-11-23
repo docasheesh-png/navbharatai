@@ -88,7 +88,8 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
+import { resolveBuildScaffold } from '../AgentV3/gameLibrary/match';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -19367,7 +19368,7 @@ async function noteBuildOutcome(
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
           // A chip the user ADDED words to seeds its template too (chipExtensionFor, autopsy ca99778e).
-          const golden = seedableScaffoldFor(prompt);
+          const golden = await resolveBuildScaffold(prompt);
           if (golden) {
             const existingSrc = await seedSourceInventory(() => finalSteps.step('template check', () => actuator.listFiles(workspaceId)));
             // "Nothing of anybody's is here", not "src/ is empty" — setup writes our own starter into a fresh

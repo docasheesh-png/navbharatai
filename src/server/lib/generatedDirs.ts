@@ -71,5 +71,33 @@ export function isNeverSourcePath(relPath: string): boolean {
  * must agree with the command, or the two listings of one workspace differ.
  */
 export function isListPrunedPath(relPath: string): boolean {
-  return String(relPath ?? '').replace(/\\/g, '/').split('/').some((seg) => LIST_PRUNE.has(seg));
+  return String(relPath ?? '').replace(/\\/g, '/').split('/').some((seg) => LIST_PRUNE.has(seg))
+    || isPlatformScratchPath(relPath);
+}
+
+// 🔴 NAVBHARATAI'S OWN TEMPORARY FILES ARE NEVER THE USER'S PROJECT (failedbr #2496, 2026-11-22).
+//
+// The 3D-model browser proof (gameAssets/assetBrowserProof.ts) staged its script and model at the PROJECT ROOT as
+// `.nbai-asset-<sha256>.mjs` / `.glb`, then removed them with `rm -f`. The `rm` worked — in the sandbox. But the
+// script was written through the tool dispatcher's recorded write door (recordedWrites.ts), which notes every text
+// write for the durable save, and a later `rm` is not a write. So the proof script was saved into the user's
+// project, put back into every later sandbox by the restore, entered the build manifest as a file "this build
+// wrote", and was graded by the readiness scan as the user's code: "1 hardcoded localhost URL(s) — first at
+// .nbai-asset-….mjs:29" and "1 hardcoded server port(s)" — our own 127.0.0.1 test server.
+//
+// So platform scratch lives in ONE place, inside `node_modules`: the durable store refuses it (`toDurableFileKey`),
+// every listing prunes it, git ignores it, the source archive skips it, the sandbox write cache never keeps it, and
+// the recorded write door does not note it. The legacy root names are recognised too, so a project that already
+// holds one is healed on its next load instead of keeping it for ever.
+
+/** Where the platform stages its own short-lived files in a sandbox (relative to the project root). */
+export const PLATFORM_SCRATCH_DIR = 'node_modules/.cache/nbai-scratch';
+
+/** Root-level platform files from before PLATFORM_SCRATCH_DIR: the asset proof's pair and its log, the import archive. */
+const LEGACY_PLATFORM_SCRATCH_FILE = /^\.nbai-(?:asset-[a-f0-9]{64}\.(?:glb|mjs)(?:\.log)?|landing\.tar\.gz)$/;
+
+/** Is this a temporary file NavBharatAI itself writes into a sandbox — never the user's project? PURE. */
+export function isPlatformScratchPath(relPath: string | null | undefined): boolean {
+  const p = String(relPath ?? '').replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
+  return p === PLATFORM_SCRATCH_DIR || p.startsWith(`${PLATFORM_SCRATCH_DIR}/`) || LEGACY_PLATFORM_SCRATCH_FILE.test(p);
 }

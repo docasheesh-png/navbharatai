@@ -73,7 +73,7 @@ const STUBS: Record<string, string> = {
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-let O: any; let SHELL: any;
+let O: any; let SHELL: any; let TC: any;
 
 beforeAll(async () => {
   (globalThis as any).document = { createElement: (t: string) => new FakeEl(t), addEventListener: () => {}, removeEventListener: () => {}, hidden: false };
@@ -85,6 +85,7 @@ beforeAll(async () => {
   for (const [p, c] of Object.entries(STUBS)) writeFileSync(join(DIR, p), c);
   O = await import(join(DIR, 'src/game/three/objects.ts'));
   SHELL = await import(join(DIR, 'src/game/Game.ts'));
+  TC = await import(join(DIR, 'src/game/ui/touchControls.ts'));
 });
 afterAll(() => {
   rmSync(DIR, { recursive: true, force: true });
@@ -92,15 +93,20 @@ afterAll(() => {
 });
 
 const key = (g: any, type: 'keydown' | 'keyup', code: string) => (g.canvas as FakeEl).fire(type, { code, repeat: false });
+/** A drive-pad button by its action, in the real touch overlay. */
+const pad = (g: any, action: string): FakeEl => (g.touch.root as FakeEl).all('nbg-tc-btn').find((b) => b.attrs['data-action'] === action && !!b.parentElement?.className.includes('nbg-tc-pedals'))!;
+/** A pointer event just big enough for the real overlay. */
+const ptr = (pointerId: number) => ({ pointerId, clientX: 0, clientY: 0, preventDefault() {}, stopPropagation() {} });
 const tap = (g: any, code: string) => { key(g, 'keydown', code); g.loop.step(1); key(g, 'keyup', code); g.loop.step(1); };
 
 /** A game with one car parked beside the player. seats: hand it to ctx.vehicles. drivesItself: the game drives it too. */
-function makeGame(o: { seats?: boolean; gap?: number; drivesItself?: boolean } = {}) {
+function makeGame(o: { seats?: boolean; gap?: number; drivesItself?: boolean; touch?: any; reads?: string } = {}) {
   let car!: THREE.Group;
   let ctxRef: any;
   let drive: any;
   const game = new SHELL.Game({
     container: new FakeEl('div'),
+    ...(o.touch ? { touchControls: o.touch } : {}),
     setup: (ctx: any) => {
       ctxRef = ctx;
       car = O.createCar({ detail: 'lite' });
@@ -112,6 +118,7 @@ function makeGame(o: { seats?: boolean; gap?: number; drivesItself?: boolean } =
       return [];
     },
     update: (ctx: any, dt: number) => {
+      if (o.reads) ctx.input.wasPressed(o.reads);
       if (o.drivesItself && ctx.vehicles.seated === car) drive = O.driveVehicle(car, drive, ctx.input.axis(), dt);
     },
   });
@@ -212,11 +219,79 @@ describe('🚗 ctx.vehicles: walk up, get in, drive, get out', () => {
     game.dispose();
   });
 
-  it('on a phone, a seated player keeps the Use button (the way out), not the pedal-only layout', () => {
+  // 🚗 admin 2026-11-23: "car control hardcore joystick se nahi honi chahiye". A seated player used to keep the joystick,
+  // because the pedal set had no Use button; the pedals now carry Use (the way out), so the car gets the pedals.
+  it('on a phone, a seated player gets the Left/Right + Brake/Gas pads WITH Use on them (the way out)', () => {
     const { game, ctx } = makeGame();
+    expect((game as any).touch?.layout).toBe('move');                                 // on foot: the joystick
     tap(game, 'KeyE');
     expect(ctx.vehicles.seated).not.toBeNull();
-    expect((game as any).touch?.layout).toBe('move');
+    const touch = (game as any).touch;
+    expect(touch.layout).toBe('drive');
+    expect(touch.root.classList.contains('exit')).toBe(true);
+    const use = pad(game, 'interact');
+    expect(use, 'Use is one of the pedal buttons').toBeTruthy();
+    // Pressing Use on the pads gets out, and the joystick comes back.
+    use.fire('pointerdown', ptr(7));
+    game.loop.step(1);
+    use.fire('pointerup', ptr(7));
+    game.loop.step(2);
+    expect(ctx.vehicles.seated).toBeNull();
+    expect(touch.layout).toBe('move');
+    expect(touch.root.classList.contains('exit')).toBe(false);
+    game.dispose();
+  });
+
+  it('a game that reads another action button while driving (fires from the car) keeps the joystick and its buttons', () => {
+    const { game, ctx } = makeGame({ reads: 'attack' });
+    tap(game, 'KeyE');
+    expect(ctx.vehicles.seated).not.toBeNull();
+    expect((game as any).touch.layout).toBe('move');
+    game.dispose();
+  });
+
+  it("touchControls.drive: 'joystick' (the user asked for one) keeps the joystick in the car", () => {
+    const { game, ctx } = makeGame({ touch: { drive: 'joystick' } });
+    tap(game, 'KeyE');
+    expect(ctx.vehicles.seated).not.toBeNull();
+    expect((game as any).touch.layout).toBe('move');
+    game.dispose();
+  });
+
+  it("touchControls.drive: 'auto' — the car drives forward by itself, Brake stops it, and there is no Gas pad", () => {
+    const { game, car, ctx } = makeGame({ touch: { drive: 'auto' } });
+    tap(game, 'KeyE');
+    expect(ctx.vehicles.seated).toBe(car);
+    const touch = (game as any).touch;
+    expect(touch.layout).toBe('drive');
+    expect(touch.root.classList.contains('auto')).toBe(true);
+    const start = car.position.clone();
+    game.loop.step(120);
+    expect(car.position.distanceTo(start), 'it drove with no key and no pedal').toBeGreaterThan(5);
+    const forward = car.position.clone().sub(start).normalize();
+    const brake = pad(game, 'down');
+    brake.fire('pointerdown', ptr(3));
+    game.loop.step(240);
+    const stopped = car.position.clone();
+    game.loop.step(30);
+    // Held Brake stops it (then backs up, as S on a keyboard does) — it never keeps driving forward.
+    expect(car.position.clone().sub(stopped).dot(forward), 'held Brake: no more forward').toBeLessThan(0.05);
+    brake.fire('pointerup', ptr(3));
+    game.dispose();
+  });
+
+  it("touchControls.drive: 'tilt' — the pads stay until the sensor answers, then the phone's tilt steers", () => {
+    const { game, ctx } = makeGame({ touch: { drive: 'tilt' } });
+    tap(game, 'KeyE');
+    expect(ctx.vehicles.seated).not.toBeNull();
+    const touch = (game as any).touch;
+    expect(touch.layout).toBe('drive');
+    expect(touch.root.classList.contains('tilting'), 'no reading yet: Left/Right stay').toBe(false);
+    ((globalThis as any).window as FakeEl).fire('deviceorientation', { beta: 0, gamma: 20 });
+    expect(touch.root.classList.contains('tilting')).toBe(true);
+    expect(game.input.axis().x).toBeGreaterThan(0.5);                                  // tilted right → steer right
+    ((globalThis as any).window as FakeEl).fire('deviceorientation', { beta: 0, gamma: -20 });
+    expect(game.input.axis().x).toBeLessThan(-0.5);
     game.dispose();
   });
 
@@ -224,5 +299,21 @@ describe('🚗 ctx.vehicles: walk up, get in, drive, get out', () => {
     const shell = generateGameShell();
     expect(shell.instructions).toMatch(/ctx\.vehicles\.add\(car\)/);
     expect(shell.files['src/game/ui/Hud.tsx']).toMatch(/<SeatPrompt game=\{game\} \/>/);
+  });
+});
+
+describe('🚗 the car controls follow the words (touchControls.drive)', () => {
+  it('an unknown or missing choice is the pads; the four choices are kept', () => {
+    expect(TC.resolveDriveControls(undefined)).toBe('pads');
+    expect(TC.resolveDriveControls('hardcore')).toBe('pads');
+    for (const m of ['pads', 'tilt', 'auto', 'joystick']) expect(TC.resolveDriveControls(m)).toBe(m);
+  });
+  it('tilt steers by the axis across the screen, with a dead zone, in every orientation', () => {
+    expect(TC.steerFromTilt(0, 1, 0)).toBe(0);                     // inside the dead zone: straight
+    expect(TC.steerFromTilt(0, 28, 0)).toBeCloseTo(1, 5);          // portrait, tilted right: full right
+    expect(TC.steerFromTilt(0, -60, 0)).toBeCloseTo(-1, 5);        // clamped
+    expect(TC.steerFromTilt(28, 0, 90)).toBeCloseTo(1, 5);         // landscape one way: beta steers
+    expect(TC.steerFromTilt(28, 0, 270)).toBeCloseTo(-1, 5);       // and the other way round, reversed
+    expect(TC.steerFromTilt(Number.NaN, null, 0)).toBe(0);
   });
 });

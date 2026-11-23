@@ -354,6 +354,8 @@ export class Game {
    * phone had no Use button at all — the player was stuck in the car (verifier, 2026-10-11).
    */
   private gameReadsButtons = false;
+  /** Which of those action buttons the game reads (Use alone still lets a car get the drive pads, with Use on them). */
+  private readonly gameReadActions = new Set<string>();
 
   constructor(options: GameOptions) {
     this.options = options;
@@ -429,7 +431,11 @@ export class Game {
     for (const m of ['isDown', 'wasPressed', 'wasReleased'] as const) {
       const read = this.input[m].bind(this.input);
       this.input[m] = (action: string) => {
-        if (this.inGameCode && buttonActions.has(action) && !this.gameReadsButtons) { this.gameReadsButtons = true; this.syncTouchLayout(); }
+        if (this.inGameCode && buttonActions.has(action) && !this.gameReadActions.has(action)) {
+          this.gameReadActions.add(action);
+          this.gameReadsButtons = true;
+          this.syncTouchLayout();
+        }
         return read(action);
       };
     }
@@ -691,8 +697,19 @@ export class Game {
   private syncTouchLayout(): void {
     if (!this.touch || !this.touchLayoutIsOurs) return;
     const chased = this.chased;
-    // A game with ctx.vehicles keeps the joystick and the Use button: Use is the way out of the vehicle.
-    this.touch.setLayout(chased && isVehicle(chased) && !this.gameReadsButtons && this.seats.size === 0 ? 'drive' : 'move');
+    const inCar = !!chased && isVehicle(chased);
+    // 🚗 (admin 2026-11-23: "car control hardcore joystick se nahi honi chahiye"). A player who got into a car (ctx.vehicles)
+    // used to keep the joystick, because the pedal set had no Use button and Use is the way out. The pedals now carry Use,
+    // so a seated player gets them — unless the game reads another action button (it fires from the car, say): then the
+    // joystick and those buttons stay, as before. touchControls.drive: 'joystick' keeps the joystick everywhere.
+    const othersRead = [...this.gameReadActions].some((a) => a !== 'interact');
+    const seatedHere = !!this.seated && chased === this.seated;
+    let drive = false;
+    if (inCar && this.touch.driveMode !== 'joystick') {
+      drive = seatedHere ? !othersRead : !this.gameReadsButtons && this.seats.size === 0;
+    }
+    this.touch.setLayout(drive ? 'drive' : 'move');
+    this.touch.setExitButton(drive && seatedHere);
   }
 
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
@@ -2551,6 +2568,33 @@ export interface TouchButton {
  */
 export type TouchLayout = 'move' | 'drive';
 
+/** How a car is driven on a touch screen (TouchControlsOptions.drive). */
+export type DriveControls = 'pads' | 'tilt' | 'auto' | 'joystick';
+
+/** Any value → a known DriveControls; unknown or missing → 'pads'. */
+export function resolveDriveControls(value: unknown): DriveControls {
+  return value === 'tilt' || value === 'auto' || value === 'joystick' || value === 'pads' ? value : 'pads';
+}
+
+/** Tilt-to-steer: degrees of tilt for full lock, and the dead zone around level (as a fraction of full lock). */
+export const TILT_FULL_LOCK_DEG = 28;
+export const TILT_DEAD_ZONE = 0.08;
+
+/**
+ * The steering a tilt reading gives, -1 (full left) .. 1 (full right). The phone's tilt about the axis that points
+ * along the screen's width: gamma held upright (portrait), beta held sideways (landscape; its sign follows which way
+ * the phone was turned). PURE.
+ */
+export function steerFromTilt(beta: number | null | undefined, gamma: number | null | undefined, screenAngle: number): number {
+  const a = ((Math.round(Number(screenAngle) || 0) % 360) + 360) % 360;
+  const b = Number.isFinite(beta as number) ? (beta as number) : 0;
+  const g = Number.isFinite(gamma as number) ? (gamma as number) : 0;
+  const deg = a === 90 ? b : a === 270 ? -b : a === 180 ? -g : g;
+  const v = Math.max(-1, Math.min(1, deg / TILT_FULL_LOCK_DEG));
+  if (Math.abs(v) < TILT_DEAD_ZONE) return 0;
+  return Math.sign(v) * ((Math.abs(v) - TILT_DEAD_ZONE) / (1 - TILT_DEAD_ZONE));
+}
+
 export interface TouchControlsOptions {
   /** Which buttons to draw, bottom-right. Default: Attack, Jump, Use, Run. */
   buttons?: TouchButton[];
@@ -2564,6 +2608,16 @@ export interface TouchControlsOptions {
   force?: boolean;
   /** From the prompt: side 'right' swaps halves (buttons go left); size 0.6..2; 'fixed' or 'floating' (default); position x/y 0..1. */
   joystick?: TouchJoystickOptions;
+  /**
+   * 🚗 HOW A CAR IS DRIVEN ON A PHONE — from the user's words (admin 2026-11-23: "car control hardcore joystick se nahi honi
+   * chahiye, user jo prompt de usse ho"). Default 'pads'. The keyboard (W/A/S/D, arrows) always works on a computer.
+   *   'pads'     — Left / Right under the left thumb, Brake / Gas under the right ("buttons se chalao").
+   *   'tilt'     — tilt the phone to steer ("phone jhuka ke", "tilt", "gyro"), Brake / Gas buttons. Until the phone's
+   *                tilt sensor answers (or where it never does) the Left / Right pads stay on screen.
+   *   'auto'     — the car drives itself forward; the player only steers and brakes ("easy", "simple", "sirf steering").
+   *   'joystick' — the analogue stick steers and drives, as before. Only when the user asks for a joystick.
+   */
+  drive?: DriveControls;
   /** By action name, or 'steer' / 'pedals': CENTRE x/y as a fraction of the screen (0..1), size 0.6..2. */
   buttonPositions?: Record<string, TouchPlacement>;
   /** How see-through the controls are, 0.2..1 (default 1). */
@@ -2812,6 +2866,9 @@ export const DRIVE_TOUCH_BUTTONS: { steer: TouchButton[]; pedals: TouchButton[] 
   pedals: [{ action: 'down', label: 'Brake' }, { action: 'drift', label: 'Drift' }, { action: 'up', label: 'Gas' }],
 };
 
+/** In a car the player got into (ctx.vehicles), the drive pads carry Use too: the way out of the car. */
+export const DRIVE_EXIT_BUTTON: TouchButton = { action: 'interact', label: 'Use' };
+
 /** Is the PRIMARY pointer a finger? A touch-screen laptop answers no until it is actually touched. */
 export function prefersTouch(): boolean {
   if (typeof window === 'undefined') return false;
@@ -2856,6 +2913,13 @@ const CSS = [
   '.nbg-tc.drive .nbg-tc-pedals{display:grid;grid-template-columns:' + PAD + 'px ' + PAD + 'px;gap:' + PAD_ROW_GAP + 'px ' + BTN_GAP + 'px}',
   '.nbg-tc-pedals .nbg-tc-btn[data-action="drift"]{grid-column:1/span 2;grid-row:1;width:auto;height:' + DRIFT_H + 'px}',
   '.nbg-tc.drive .nbg-tc-move,.nbg-tc.drive .nbg-tc-look,.nbg-tc.drive .nbg-tc-buttons{display:none}',
+  // Use (out of the car) shares the Drift row, only in a car the player got into; Drift takes the other half.
+  '.nbg-tc-pedals .nbg-tc-btn[data-action="interact"]{display:none;grid-column:1;grid-row:1;width:auto;height:' + DRIFT_H + 'px}',
+  '.nbg-tc.exit .nbg-tc-pedals .nbg-tc-btn[data-action="interact"]{display:grid}',
+  '.nbg-tc.exit .nbg-tc-pedals .nbg-tc-btn[data-action="drift"]{grid-column:2/span 1}',
+  // 'auto': the car drives itself forward, so there is no Gas pedal; 'tilt': once the sensor answers, no Left / Right pads.
+  '.nbg-tc.auto .nbg-tc-pedals .nbg-tc-btn[data-action="up"]{display:none}',
+  '.nbg-tc.drive.tilting .nbg-tc-steer{display:none}',
   // The joystick under the RIGHT thumb (options.joystick.side, or the player dragged it there): the halves swap.
   '.nbg-tc.stick-right .nbg-tc-move{left:auto;right:0}',
   '.nbg-tc.stick-right .nbg-tc-look{right:auto;left:0}',
@@ -2913,6 +2977,10 @@ export class TouchControls {
   private lookY = 0;
   private shown = false;
   private current: TouchLayout = 'move';
+  /** How a car is driven on this screen (options.drive). */
+  readonly driveMode: DriveControls = 'pads';
+  private exitShown = false;
+  private tiltOff: (() => void) | null = null;
   private editor: { el: HTMLDivElement; wasShown: boolean; off: () => void; fit: HTMLElement; fixed: HTMLInputElement; fixedRow: HTMLElement } | null = null;
   private selected: string | null = null;
   private drag: { id: string; pointerId: number } | null = null;
@@ -2978,8 +3046,11 @@ export class TouchControls {
     this.pedals = document.createElement('div');
     this.pedals.className = 'nbg-tc-pedals';
     for (const b of DRIVE_TOUCH_BUTTONS.pedals) this.addButton(this.pedals, b, 'pedals');
+    this.addButton(this.pedals, DRIVE_EXIT_BUTTON, 'pedals');
     this.root.appendChild(this.pedals);
     this.controls.set('pedals', this.pedals);
+    this.driveMode = resolveDriveControls(options.drive);
+    if (this.driveMode === 'auto') this.root.classList.add('auto');
     if (options.layout === 'drive') this.setLayout('drive');
 
     const hint = document.createElement('div');
@@ -3064,6 +3135,8 @@ export class TouchControls {
     this.current = layout;
     if (layout === 'drive') this.root.classList.add('drive');
     else this.root.classList.remove('drive');
+    if (layout === 'drive' && this.driveMode === 'tilt') this.startTilt(); else this.stopTilt();
+    this.holdAutoGas();
     // The pads were hidden until now, so their size is only known from here on.
     if (this.root.parentElement) this.applyLayout();
     if (this.editor) {
@@ -3120,6 +3193,7 @@ export class TouchControls {
     this.detach.push(() => clearTimeout(t));
     // Hidden, the overlay measured 0 × 0; on screen, every control is fitted to the real size.
     this.applyLayout();
+    this.holdAutoGas();
   }
 
   // ── Layout ──────────────────────────────────────────────────────────────────────────────────────
@@ -3683,11 +3757,67 @@ export class TouchControls {
     if (e.pointerId === this.lookId) this.lookId = -1;
   }
 
+  /** Show Use on the drive pads (the shell does, while the player sits in a car it got into). */
+  setExitButton(show: boolean): void {
+    if (show === this.exitShown) return;
+    this.exitShown = show;
+    if (show) this.root.classList.add('exit'); else this.root.classList.remove('exit');
+    if (this.root.parentElement && this.current === 'drive') this.applyLayout();
+  }
+
+  /** 'auto': Gas is held for the player whenever the drive pads are up and Brake is not pressed. */
+  private holdAutoGas(): void {
+    if (this.driveMode !== 'auto') return;
+    // Only with the pads on screen (a phone): a keyboard player on a computer drives with W / ArrowUp as always.
+    const braking = [...this.buttonsDown.values()].some((b) => b.action === 'down');
+    this.input.setVirtualButton('up', this.shown && this.current === 'drive' && !braking);
+  }
+
+  /**
+   * 'tilt': listen to the phone's tilt sensor and steer with it. iOS asks the player first — that question can only be asked
+   * from a tap, so it is asked on the first press of a pedal. The Left / Right pads stay until a real reading arrives.
+   */
+  private startTilt(): void {
+    if (this.tiltOff || typeof window === 'undefined') return;
+    const onTilt = (e: Event): void => {
+      const o = e as DeviceOrientationEvent;
+      if (o.beta === null && o.gamma === null) return;
+      if (this.current !== 'drive') return;
+      this.root.classList.add('tilting');
+      const scr = window.screen;
+      const angle = (scr && scr.orientation && typeof scr.orientation.angle === 'number')
+        ? scr.orientation.angle
+        : Number((window as unknown as { orientation?: number }).orientation) || 0;
+      // Steering only: the pedals (virtual buttons) keep their own y.
+      this.input.setAnalogueMove(steerFromTilt(o.beta, o.gamma, angle), 0);
+    };
+    const ask = (): void => {
+      const D = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
+      if (D && typeof D.requestPermission === 'function') D.requestPermission().catch(() => 'denied');
+    };
+    window.addEventListener('deviceorientation', onTilt);
+    this.pedals.addEventListener('pointerdown', ask, { once: true });
+    this.tiltOff = () => {
+      window.removeEventListener('deviceorientation', onTilt);
+      this.pedals.removeEventListener('pointerdown', ask);
+      this.root.classList.remove('tilting');
+    };
+  }
+
+  private stopTilt(): void {
+    if (!this.tiltOff) return;
+    const off = this.tiltOff;
+    this.tiltOff = null;
+    off();
+    this.input.setAnalogueMove(0, 0);
+  }
+
   private pressButton(e: PointerEvent, action: string, el: HTMLElement): void {
     this.capture(el, e);
     this.buttonsDown.set(e.pointerId, { action, el });
     el.classList.add('down');
     this.input.setVirtualButton(action, true);
+    if (action === 'down') this.holdAutoGas();
   }
 
   private releaseButton(e: PointerEvent): void {
@@ -3697,6 +3827,7 @@ export class TouchControls {
     held.el.classList.remove('down');
     // Another finger may still hold the same action; release it only when none does.
     if (![...this.buttonsDown.values()].some((b) => b.action === held.action)) this.input.setVirtualButton(held.action, false);
+    if (held.action === 'down') this.holdAutoGas();
   }
 
   private releaseAll(): void {
@@ -3711,7 +3842,9 @@ export class TouchControls {
   dispose(): void {
     // An open editor holds a window key listener that swallows Esc: it must never outlive the controls.
     this.finishEditing();
+    this.stopTilt();
     this.releaseAll();
+    if (this.driveMode === 'auto') this.input.setVirtualButton('up', false);
     for (const off of this.detach) { try { off(); } catch { /* teardown never throws */ } }
     this.detach.length = 0;
     this.root.parentElement?.removeChild(this.root);
@@ -4374,7 +4507,7 @@ export function formatDistance(metres: number): string {
 
 const PLACE_COLOURS: Record<string, string> = {
   city: '#94a3b8', town: '#a8a29e', village: '#c8a97e', custom: '#c084fc',
-  desert: '#e9c46a', jungle: '#2d6a4f', mountain: '#8d7b68', snow: '#e8f1ff', beach: '#f4dca2',
+  desert: '#e9c46a', jungle: '#2d6a4f', mountain: '#8d7b68', snow: '#e8f1ff', beach: '#f4dca2', grassland: '#7cb342',
 };
 export function placeColour(kind: string): string { return PLACE_COLOURS[kind] ?? '#9ca3af'; }
 export const WAYPOINT_COLOUR = '#f472b6';
@@ -4706,9 +4839,14 @@ export function generateGameShell(include?: string[]): GameShellResult {
       "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase' and a\n" +
       "  single car, from the first frame; with rivals or a parked car, call ctx.follow(car)), and a phone\n" +
       '  gets Left/Right bottom-left and Brake/Gas bottom-right, wired to the\n' +
-      '  same actions as the arrow keys (a game that reads Attack/Jump/Use/Run itself — Use to get out of\n' +
-      '  the car — keeps the joystick and those buttons instead). Never write your own steering pad or chase\n' +
-      '  camera — a hand-written one is how LEFT ends up turning RIGHT.\n' +
+      '  same actions as the arrow keys. A player in a car it got into (ctx.vehicles) gets them too, with Use on\n' +
+      '  them to get out; a game that reads Attack/Jump/Run itself keeps the joystick and those buttons instead.\n' +
+      '  Never write your own steering pad or chase camera — a hand-written one is how LEFT ends up turning RIGHT.\n' +
+      "- CAR CONTROLS FOLLOW THE USER'S WORDS → touchControls: { drive }. Default 'pads' (Left/Right + Brake/Gas).\n" +
+      "  \"tilt\" / \"gyro\" / \"phone jhuka ke chalao\" → drive: 'tilt'; \"easy\" / \"simple\" / \"sirf steering\" / \"auto gas\"\n" +
+      "  → drive: 'auto' (it drives forward by itself, the player steers and brakes); \"joystick se\" → drive: 'joystick'\n" +
+      "  (ONLY when the user asks for a joystick); \"buttons se\" → 'pads'. A computer always drives with W/A/S/D and the\n" +
+      '  arrows. Never hand-roll tilt or auto-gas.\n' +
       '- No WebGL on the device gives an honest message, never a blank screen.',
   };
 }

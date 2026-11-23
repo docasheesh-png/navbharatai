@@ -267,6 +267,11 @@ const ISLAND = 'This battle royale stays an 8 km island (owner decision): never 
 const islandFit = ' Places and lands go only on the island\'s dry land; the kit says in the console which ones did not fit — tell the user plainly which did not fit, never drop one silently.';
 const regionOf = (i: MapGrowthIntent): string => i.place ?? 'city';
 
+/** Switch (map expansion item 7): AGENTV3_SPORTS_WORLD=on lets a cricket or football game ASKED for a world get one. OFF by default. */
+export function sportsWorldEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(?:1|on|true|yes)$/i.test(String(env.AGENTV3_SPORTS_WORLD ?? '').trim());
+}
+
 /** The smallest change that fulfils `intent` in a game of this type. PURE. Never throws. */
 export function mapGrowthRoute(intent: MapGrowthIntent, game: MapGameType, caps: MapGrowthCapabilities = {}): MapGrowthRoute {
   try {
@@ -286,10 +291,10 @@ export function mapGrowthRoute(intent: MapGrowthIntent, game: MapGameType, caps:
       }
       if (k === 'venue') return tell('This game is already played on its own ground. Do not add a second ground or a map for it; if the user wants the ground itself changed, change only the ground.');
       // An explicit world wish: add-place, grow-map, join-*, universe, multiply, duplicate, highways.
-      if (!caps.sportsWorld) {
+      if (!(caps.sportsWorld ?? sportsWorldEnabled())) {   // item 7: the switch is read here only when the caller did not say
         return tell(`The user asked for a world around this ${game} game. A world around a ${game} ground is not available in this game yet: change NOTHING about the match or the ground, build no map by hand, and tell the user plainly, in their language, that a world around the ground is not available yet (the match itself is unchanged).`);
       }
-      return edit(`The user ASKED for a world around this ${game} game, so it gets one (owner decision: only on request): mount the ${game} ground as a venue on the world and keep the match inside it exactly as it is — rules, ball and players unchanged.`);
+      return edit(`The user ASKED for a world around this ${game} game, so it gets one (owner decision: only on request): mount the ${game} ground as a venue on the world and keep the match inside it exactly as it is — rules, ball and players unchanged. The platform's note above (src/game/play/worldVenue.ts) says what it added and the ONE change to make — or why nothing was added, and then change nothing.`);
     }
 
     if (game === 'racing-library') {

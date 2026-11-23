@@ -75,6 +75,7 @@ import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
+import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
@@ -19540,6 +19541,10 @@ async function noteBuildOutcome(
           startPreview: () => startTemplatePreview(true, () => dispatcher.dispatch({ id: 'platform-done-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined)) });
         if (libraryHandoff) buildPrompt = `${libraryHandoff}\n\n---\n\n${buildPrompt}`;
       }
+      // 🏟️ A WORLD AROUND A CRICKET OR FOOTBALL GROUND, ONLY ON THE USER'S REQUEST (sportsWorld.ts, map expansion item 7): the
+      // platform adds the venue kit file and its layers; the builder stands the match on it. OFF unless AGENTV3_SPORTS_WORLD=on.
+      buildPrompt = withPlatformHandoff(await sportsWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3302/Q-3303 — failedbr #2495):
       // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
       buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),

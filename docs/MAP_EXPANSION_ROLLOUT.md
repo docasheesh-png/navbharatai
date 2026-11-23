@@ -22,6 +22,7 @@ A step that shows a glitch the owner would see stops the rollout; the switch goe
 | 2 | Late ground edits redraw terrain and plants | world option `lateEdits: true` | **off** | `GameOpenWorldGenerator.ts` (`options.lateEdits === true`), `AthreeMapGenerator.ts` |
 | 4 | Only the nearest cities stand built (phone 2, mid 5, desktop 8) | world option `liveCities: false` (all stay built) or a number | on, by device tier | `GameOpenWorldGenerator.ts` (`LIVE_CITIES`) |
 | 4 | Up to 1,000 places | `MAX_REGIONS` in the game's own `play/openWorld.ts`; an older copy reads 100 | 1,000 | `GameOpenWorldGenerator.ts`, `worldGrow.ts` (`placesTheMapHolds`) |
+| 7 | A world around a cricket or football ground, only when the user asks: the platform adds the venue kit (`play/worldVenue.ts`), the builder stands the match in one group on it | env `AGENTV3_SPORTS_WORLD=on` | **off** | `sportsWorld.ts`, `GameWorldVenueGenerator.ts`, `mapGrowthIntent.ts` |
 | 8 | A race moves onto the world's city roads: the builder asks once; the platform makes the switch (`TRACK.world = true`) only on the user's "race shehar me karo" | env `AGENTV3_RACING_WORLD=on` | **off** | `raceWorld.ts`, `mapGrowthIntent.ts`, `RacingRoadGame` (`GameShellGenerator.ts`) |
 | 10 | Map requests read by meaning, a note to the builder (#4488) | env `AGENTV3_MAP_GROWTH_NOTE=off` | on | `mapGrowthIntent.ts`, `growthTurn.ts` |
 | 11 | An edited world bridge: the builder asks first; the upgrade only on the user's "world upgrade karo", with one backup | env `AGENTV3_WORLD_UPGRADE=off` | on | `worldUpgrade.ts`, `growthTurn.ts` |
@@ -35,7 +36,7 @@ A step that shows a glitch the owner would see stops the rollout; the switch goe
 - **5 (world layer):** a refactor with identical output; the old bridge path stays for edited projects.
 
 ## Deferred items and their planned switches
-- **7 (sports on the world):** env `AGENTV3_SPORTS_WORLD`, default off; and only when the user asks (owner decision).
+- **7 (sports on the world):** env `AGENTV3_SPORTS_WORLD`, default off (table above); and only when the user asks (owner decision). Not in it yet: the 3D cricket and football engine gap in `gameKitPlan` (a 3D sports build still gets no board pack), and a walk outside the ground (`follow` is there for it).
 - **8 (racing on joined places):** `TRACK.world` in the game's `src/game/track.ts`, set only after the user says yes once — by the platform (`raceWorld.ts`), behind `AGENTV3_RACING_WORLD` (off; table above). Turning it off for one game = `world: false` in its `src/game/track.ts`.
 - **9 (battle royale):** no growth — the island stays 8 km (owner decision); places that do not fit are reported.
 - **11 (migration):** a kit file is refreshed only while it is unedited (`GAME_KIT_HISTORY`); never a silent rewrite. An edited `openWorld.ts` is upgraded only on the user's explicit words (switch above).

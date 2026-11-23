@@ -22,6 +22,7 @@ import { validateGlb, type GlbLimits } from './assetPolicy';
 import { bundleGltf, safeGltfResourcePath } from './gltfBundle';
 import type { GameAssetPersistence } from './assetProject';
 import { playerMovesOf, playerMovesLine } from '../../lib/playerMoves';
+import { splitUserMedia, userMediaNote, type UserMediaFile, type UserMediaRefusal } from './userMedia';
 
 export const USER_MODEL_LIMITS: GlbLimits = Object.freeze({
   // 8 MB: the workspace store keeps a file this size durably (a 12 MB data URI ≈ 9 MB of bytes); a larger limit would
@@ -448,18 +449,20 @@ export async function landUserModels(models: readonly UserModel[], workspaceId: 
 }
 
 /** Everything the chat handler needs before routing, in ONE call (the handler is at its branch budget, Q-979 / TS2563). */
-export async function planUserModels<T extends { name?: unknown; base64?: unknown }>(atts: readonly T[]): Promise<{ rest: T[]; attached: boolean; models: UserModel[]; refused: UserModelRefusal[]; pendingNote: string }> {
+export async function planUserModels<T extends { name?: unknown; base64?: unknown }>(atts: readonly T[]): Promise<{ rest: T[]; attached: boolean; models: UserModel[]; refused: UserModelRefusal[]; pendingNote: string; media: UserMediaFile[]; mediaRefused: UserMediaRefusal[] }> {
   const split = await splitUserModelAttachments(atts);
-  if (!split.models.length) return { rest: split.rest, attached: false, models: [], refused: [], pendingNote: '' };
+  const media = splitUserMedia(split.rest);
+  const mediaNote = userMediaNote(media.files, media.refused);
+  if (!split.models.length) return { rest: media.rest, attached: media.files.length > 0, models: [], refused: [], pendingNote: mediaNote, media: media.files, mediaRefused: media.refused };
   const files = await userModelFilesFromAttachments(split.models);
   const fbx = await convertFbxFiles(files.files);
   const plan = userModelsFromFiles(fbx.files);
   for (const m of plan.models) { const w = fbx.warnings.get(m.from); if (w) { m.warnings.push(...w); m.from = m.from.replace(/\.glb$/i, '.fbx'); } }
   const refused = [...files.refused, ...fbx.refused, ...plan.refused];
   // Until they are really in the project, the note says only that they were attached (a chat answer writes nothing).
-  const pendingNote = `[USER MODELS ATTACHED] ${plan.models.length} 3D model(s) the user attached (${plan.models.map(m => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
-    + (refused.length ? ` Not usable: ${refused.slice(0, 8).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : '');
-  return { rest: split.rest, attached: true, models: plan.models, refused, pendingNote };
+  const pendingNote = [`[USER MODELS ATTACHED] ${plan.models.length} 3D model(s) the user attached (${plan.models.map(m => JSON.stringify(m.from)).slice(0, 8).join(', ') || 'none usable'}) are added to the project when the game is built or edited in this turn — not before.`
+    + (refused.length ? ` Not usable: ${refused.slice(0, 8).map(r => `${JSON.stringify(r.from)}: ${r.reason}`).join(' · ')}` : ''), mediaNote].filter(Boolean).join('\n');
+  return { rest: media.rest, attached: true, models: plan.models, refused, pendingNote, media: media.files, mediaRefused: media.refused };
 }
 
 type LandIssue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
@@ -469,7 +472,7 @@ type LandIssue = { phase: 'build'; severity: 'info' | 'warning'; code: string; a
  * in the handler. Never throws: a failure is a named "not added", never a claimed success.
  */
 export async function landPlannedUserModels(
-  plan: { attached: boolean; models: readonly UserModel[]; refused: readonly UserModelRefusal[]; pendingNote: string },
+  plan: { attached: boolean; models: readonly UserModel[]; refused: readonly UserModelRefusal[]; pendingNote: string; media?: readonly UserMediaFile[]; mediaRefused?: readonly UserMediaRefusal[] },
   context: string,
   io: {
     workspaceId: string;
@@ -491,12 +494,38 @@ export async function landPlannedUserModels(
     });
   } catch { /* landing keeps its "not saved" default */ }
   const notAdded = [...plan.refused, ...landing.failed];
-  try {
-    io.record(landing.landed.length && !notAdded.length
-      ? { phase: 'build', severity: 'info', code: 'USER_MODELS_ADDED', autoResolved: true, message: `The user's own 3D model(s) were added to the project: ${landing.landed.map(m => m.path).join(', ')}.` }
-      : { phase: 'build', severity: 'warning', code: 'USER_MODELS_NOT_ALL_ADDED', autoResolved: false, message: `Added: ${landing.landed.map(m => m.path).join(', ') || 'none'}. Not added: ${notAdded.map(r => `${r.from} (${r.reason})`).join('; ')}.` });
-  } catch { /* observation only */ }
-  const real = userModelNote(landing.landed, notAdded);
+  if (plan.models.length) {
+    try {
+      io.record(landing.landed.length && !notAdded.length
+        ? { phase: 'build', severity: 'info', code: 'USER_MODELS_ADDED', autoResolved: true, message: `The user's own 3D model(s) were added to the project: ${landing.landed.map(m => m.path).join(', ')}.` }
+        : { phase: 'build', severity: 'warning', code: 'USER_MODELS_NOT_ALL_ADDED', autoResolved: false, message: `Added: ${landing.landed.map(m => m.path).join(', ') || 'none'}. Not added: ${notAdded.map(r => `${r.from} (${r.reason})`).join('; ')}.` });
+    } catch { /* observation only */ }
+  }
+  const mediaLanded: UserMediaFile[] = [];
+  const mediaFailed: UserMediaRefusal[] = [...(plan.mediaRefused ?? [])];
+  if (plan.media?.length) {
+    try {
+      await io.step('user media', async () => {
+        if (typeof write !== 'function') {
+          for (const f of plan.media ?? []) mediaFailed.push({ from: f.from, reason: 'this project cannot take binary files right now' });
+          return;
+        }
+        for (const f of plan.media ?? []) {
+          try {
+            const base64 = Buffer.from(f.bytes).toString('base64');
+            await io.store.saveBinary(io.workspaceId, { [f.path]: `data:application/octet-stream;base64,${base64}` });
+            const saved = await io.store.readBinary(io.workspaceId, f.path, f.bytes.byteLength + 64);
+            if (!saved || createHash('sha256').update(saved).digest('hex') !== f.sha256) throw new Error('not saved');
+            await write.call(io.actuator, io.workspaceId, f.path, base64);
+            mediaLanded.push(f);
+          } catch {
+            mediaFailed.push({ from: f.from, reason: 'it could not be saved into the project this time — attach it again in a moment' });
+          }
+        }
+      });
+    } catch { /* a failed step leaves the files in mediaFailed below */ }
+  }
+  const real = [userModelNote(landing.landed, notAdded), userMediaNote(mediaLanded, mediaFailed)].filter(Boolean).join('\n');
   return plan.pendingNote && context.includes(plan.pendingNote) ? context.replace(plan.pendingNote, real) : [context, real].filter(Boolean).join('\n\n');
 }
 

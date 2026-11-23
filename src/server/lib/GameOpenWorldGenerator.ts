@@ -30,7 +30,8 @@ import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '..
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { softwareRenderer } from '../three/surfaces';
+import { softwareRenderer, localLowestY } from '../three/surfaces';
+import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
@@ -596,7 +597,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     for (let i = 0; i < line.length; i++) {
       const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
       const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * 4.5, nz = dx / l * 4.5;
-      pos.push(line[i].x + nx, line[i].y + 0.08, line[i].z + nz, line[i].x - nx, line[i].y + 0.08, line[i].z - nz);
+      pos.push(line[i].x + nx, line[i].y + 0.02, line[i].z + nz, line[i].x - nx, line[i].y + 0.02, line[i].z - nz);
       // Wound so every face points UP (+Y): a face pointing down is culled from above, and the road was invisible from the sky.
       if (i > 0) { const k = i * 2; idx.push(k - 2, k, k - 1, k - 1, k, k + 1); }
     }
@@ -796,9 +797,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     },
     heightAt: (x, z) => map.world.heightAt(x, z),
     place(object, x, z, lift = 0) {
-      object.position.set(x - chunks.origin.x, map.world.heightAt(x, z) + lift, z - chunks.origin.z);
-      anchored.set(object, { x, z });
+      object.userData.nbBody = true;
+      object.position.set(x - chunks.origin.x, 0, z - chunks.origin.z);
       if (!object.parent) ctx.scene.add(object);
+      const lowest = object.children.length ? localLowestY(object) : 0;
+      object.position.y = restOriginY(map.world.heightAt(x, z), lowest, lift);
+      anchored.set(object, { x, z });
     },
     release(object) { anchored.delete(object); },
     frame(_ctx, delta) {

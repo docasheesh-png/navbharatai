@@ -268,6 +268,7 @@ import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type 
 import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
 import { kitLibraryRewriteRefusal } from './kitLibraryGuard';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, ownLandFindings, ownLandNote, type GroundShapeHalves } from './handWrittenGroundScan';
+import { missingGroundContact } from './groundContactRule';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
 import { shellHalves, shellBypassFinding, shellBypassNote, shellBypassWarning, type ShellHalves } from './shellBypass';
@@ -1203,6 +1204,8 @@ export class ToolDispatcher {
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
+  /** Ground without the shared contact module (groundContactRule.ts). Repeated until the call exists. */
+  private _groundContactIndex = new Map<string, string>();
   /** A feature's own map-scale land in an open world — its OWN once-flag, so it never sets or silences the note above. */
   private _ownLandNoted = false;
   private _openWorldKnown = false;
@@ -5206,6 +5209,12 @@ export class ToolDispatcher {
         if (found.length > 0) { vehicle += handWrittenGroundNote(found); this._groundShapeNoted = true; }
       } catch { /* a note is best-effort */ }
     }
+    // ⛰️ Ground without the shared contact module is not a one-time note: it is attached on every write
+    // until standOnGround / driveVehicle / groundScene is in the project (owner 2026-11-23).
+    try {
+      for (const p of paths) if (typeof files[p] === 'string') this._groundContactIndex.set(p, files[p]);
+      vehicle += missingGroundContact(this._groundContactIndex);
+    } catch { /* a note is best-effort */ }
     // 🌱 A feature that lays its own map-scale land in an OPEN WORLD (failedbr #2495) — only when src/game/world.ts exists,
     // looked up once, and only after the scan above found such a plane. Its own flag: the ground note above is untouched.
     if (!this._ownLandNoted) {

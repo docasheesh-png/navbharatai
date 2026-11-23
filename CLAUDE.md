@@ -592,6 +592,17 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
    gap. Touching/redoing already-working committed code wastes credit and
    risks reintroducing bugs into code that was already correct.
 
+## Ground contact — hard rule (owner 2026-11-23)
+
+Every game build — a template, a from-scratch build, and a follow-up edit — keeps characters, vehicles and objects on the ground. When the game creates ground, land, grass or terrain:
+
+- The ground has a physics collider.
+- An object's lowest point (its bounding box, not its origin) sits on the surface. A model whose origin is its centre must not sink.
+- Position is clamped to the surface every frame.
+- A vehicle's wheels and suspension stay on the ground, and a frame never ends with a wheel inside the surface.
+
+The one implementation is `src/server/lib/groundContact.ts`, copied into every 3D kit as `src/game/three/groundContact.ts`. `standOnGround`, `driveVehicle` and the character controller call it. The builder prompt states it, and a project that draws ground without calling it is told on every write until it does (`missingGroundContact`). A bird or a plane sets `userData.ground = false`. A code-built stand-in obeys the same rule.
+
 ## Where things live
 
 - **`CLAUDE.md`** (this file) — rules that rarely change. Auto-loaded.

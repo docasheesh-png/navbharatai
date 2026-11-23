@@ -399,7 +399,10 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
   // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
   + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','
-  + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). NEVER add a'
+  + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). A land RIGHT'
+  + ' NEXT TO a place or another land ("shehar ke bagal me registan", "city se laga hua jungle", "शहर के पास रेगिस्तान", "gaon ke peeche pahad", "a desert next to'
+  + ' the city", "snow beside the mountains") → add joinTo: \'<that region id>\' (toward: the side, when they say it): it lies against'
+  + ' that place\'s edge, no plain strip and no highway between; without joinTo a land is spread out as before. NEVER add a'
   + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 100 regions (places and lands'
   + ' together) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
   // failedbr #2490: "is map ko 50x bigger banao … isi ko duplicate kar ke merge karo" — the builder stretched sizeMeters (the SAME
@@ -413,7 +416,8 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' places stand EDGE TO EDGE, never kilometres apart: each place asked for is a'
   + ' joined tile of the FIRST region, { id: \'<new id>\', kind: \'city\', joinTo: \'<first region id>\', toward?: \'east\' … }'
   + ' (one ground level, the streets carried straight on; a village or town look is city: { style: \'town\' } on that tile),'
-  + ' and a land asked for in the same breath is a land region with NO distance (the kit lays it as near as it can, joined by a highway).'
+  + ' and a land asked for in the same breath is a land region JOINED to it, { id, kind: \'desert\' …, joinTo: \'<first region id>\' }'
+  + ' (it lies right against the city\'s edge; where that side is water the kit lays it nearby and says so in the console).'
   + ' The word "ek" alone NEVER means this, and these keep the spread behaviour above: "ek aur map jodo", "ek naya map jodo", "ek'
   + ' desert map jodo" ADD one spread place or land; "aur maps jodo" / "map bada karo" ADD spread places; "sab shehron ko aapas me'
   + ' road se jodo" means ROADS between the places (the kit\'s highways already join every place), not moving them edge to edge. "Isi map ko'

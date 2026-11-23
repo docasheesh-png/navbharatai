@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-arcade-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['lane-dash', 'dodge-fall'];
+const IDS = ['lane-dash', 'dodge-fall', 'bolt-arena'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -106,6 +106,44 @@ describe('☄️ Dodge Fall', () => {
     expect(D().fallSpeed(60)).toBeGreaterThan(D().fallSpeed(0));
     expect(D().waveGap(10)).toBeLessThan(D().waveGap(1));
     expect(D().waveGap(1000)).toBe(D().OPTIONS.fastestWave);
+  });
+});
+
+describe('⚡ Bolt Arena', () => {
+  const B = () => M['bolt-arena'];
+  it('enemies never appear close to the player, wherever the player stands', () => {
+    const r = rng(3), o = B().OPTIONS;
+    for (let k = 0; k < 300; k++) {
+      const px = r() * o.size, py = r() * o.size, p = B().spawnPoint(px, py, r);
+      expect(Math.hypot(p.x - px, p.y - py)).toBeGreaterThanOrEqual(o.spawnSafeDistance - 1);
+      expect(p.x).toBeGreaterThanOrEqual(0); expect(p.x).toBeLessThanOrEqual(o.size);
+    }
+  });
+  it('auto-aim picks the nearest living enemy; extra bolts fan evenly round the aim', () => {
+    const es = [{ kind: 'chaser', x: 100, y: 0, hp: 2 }, { kind: 'chaser', x: 10, y: 0, hp: 0 }, { kind: 'chaser', x: 50, y: 0, hp: 1 }];
+    expect(B().nearest(es, 0, 0).x).toBe(50);
+    expect(B().nearest([], 0, 0)).toBeNull();
+    expect(B().fan(1, 1)).toEqual([1]);
+    const three = B().fan(1, 3);
+    expect(three[1]).toBe(1); expect(three[0] + three[2]).toBeCloseTo(2);
+  });
+  it('waves grow and bring tougher kinds later; a splitter breaks into two minis', () => {
+    expect(B().waveMix(1).every((k: string) => k === 'chaser')).toBe(true);
+    expect(B().waveMix(5).length).toBeGreaterThan(B().waveMix(1).length);
+    expect(B().waveMix(5)).toContain('splitter'); expect(B().waveMix(3)).toContain('orbiter');
+    const sp = { kind: 'splitter', x: 0, y: 0, hp: 1, vx: 0, vy: 0, age: 0 };
+    const res = B().hitEnemy(sp, 1, 0);
+    expect(res.dead).toBe(true); expect(res.spawn.map((e: any) => e.kind)).toEqual(['mini', 'mini']);
+    const ch = { kind: 'chaser', x: 0, y: 0, hp: 2, vx: 0, vy: 0, age: 0 };
+    expect(B().hitEnemy(ch, 1, 0)).toEqual({ dead: false, spawn: [] }); expect(ch.vx).toBeGreaterThan(0);   // knocked back
+  });
+  it('a chaser closes in; upgrades are three different ones and each changes the stats', () => {
+    const e = { kind: 'chaser', x: 0, y: 0, hp: 2, vx: 0, vy: 0, age: 0 };
+    const p = B().steer(e, 100, 0, 0.1);
+    expect(p.x).toBeGreaterThan(0); expect(Math.abs(p.y)).toBeLessThan(1e-9);
+    const three = B().offer(rng(5)); expect(new Set(three).size).toBe(3);
+    const base = B().baseStats();
+    for (const [id, u] of Object.entries<any>(B().UPGRADES)) expect(u.apply(base), id).not.toEqual(base);
   });
 });
 

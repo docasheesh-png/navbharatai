@@ -16,6 +16,7 @@ import { threeLeavesAppTsx } from './games/threeLeaves';
 import { trailWalkAppTsx } from './games/trailWalk';
 import { pavilionAppTsx } from './games/pavilion';
 import { gardenMatchAppTsx } from './games/gardenMatch';
+import { boltArenaAppTsx } from './games/boltArena';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -45,7 +46,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'three-leaves', title: 'Three Leaves', category: 'Card', accent: '#1d4ed8', appTsx: threeLeavesAppTsx },
   { id: 'pavilion', title: 'Pavilion', category: 'Sports', accent: '#b45309', appTsx: pavilionAppTsx },
   { id: 'garden-match', title: 'Garden Match', category: 'Puzzle', accent: '#16a34a', appTsx: gardenMatchAppTsx },
-  { id: 'bolt-arena', title: 'Bolt Arena', category: 'Action', accent: '#dc2626', appTsx: gapScreen('bolt-arena', 'bolt-arena-best-v1') },
+  { id: 'bolt-arena', title: 'Bolt Arena', category: 'Action', accent: '#dc2626', appTsx: boltArenaAppTsx },
   { id: 'cave-steps', title: 'Cave Steps', category: 'Adventure', accent: '#365314', appTsx: gapScreen('cave-steps', 'cave-steps-best-v1') },
   { id: 'high-card', title: 'High Card', category: 'Card', accent: '#1e3a8a', appTsx: gapScreen('high-card', 'high-card-best-v1') },
   { id: 'coin-wheel', title: 'Coin Wheel', category: 'Casino', accent: '#a16207', appTsx: gapScreen('coin-wheel', 'coin-wheel-best-v1') },

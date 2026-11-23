@@ -59,6 +59,9 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   hill: ['hill', 'hills', 'पहाड़ी', 'colina'], mountain: ['mountain', 'mountains', 'पहाड़', 'पर्वत', 'montaña', 'montañas'],
   // Never the bare English 'well' or 'home': "runs well" / "home screen" would add a model nobody asked for.
   house: ['house', 'houses', 'hut', 'घर', 'मकान', 'झोपड़ी', 'casa'], well: ['water well', 'village well', 'कुआँ', 'कुआं', 'pozo'],
+  'red kurta': ['red kurta', 'red kurta style', 'maroon kurta'],
+  'saffron kurta': ['saffron kurta', 'kesari kurta', 'केसरिया कुर्ता'],
+  'blue house': ['blue house', 'blue houses', 'neela ghar', 'नीला घर'],
   windmill: ['windmill', 'windmills', 'पवनचक्की', 'molino'], target: ['target', 'targets', 'निशाना', 'लक्ष्य', 'diana'],
   barrel: ['barrel', 'barrels', 'ड्रम', 'बैरल', 'barril'], wall: ['wall', 'walls', 'दीवार', 'muro'],
   boxer: ['boxer', 'boxers', 'boxing', 'मुक्केबाज़', 'मुक्केबाज', 'बॉक्सर', 'बॉक्सिंग', 'boxeador', 'boxeo'],

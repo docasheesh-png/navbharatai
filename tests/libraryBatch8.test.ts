@@ -37,10 +37,10 @@ describe('library batch 8 — KayKit Adventurers 2.0, packaged', () => {
     }
   });
 
-  it('packaged models: Quaternius and KayKit only — any other provider is still refused', () => {
+  it('packaged models stay on the reviewed provider list — an unreviewed provider is still refused', () => {
     const bow = REVIEWED_LIBRARY_BATCH_8.find(a => a.id === 'k8-bow')!;
-    expect(() => validateCatalogue([{ ...bow, provider: 'github' } as never])).toThrow('Unreviewed packaged');
-    expect(() => validateCatalogue([{ ...bow, provider: 'kenney' } as never])).toThrow('Unreviewed packaged');
+    // Kenney and github joined the packaged list when their reviewed CC0 packs shipped in the image (2026-11-23).
+    expect(() => validateCatalogue([{ ...bow, provider: 'polyhaven' } as never])).toThrow('Unreviewed packaged');
   });
 
   it('real prompts, English and Hindi, get the new models', () => {

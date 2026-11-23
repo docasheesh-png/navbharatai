@@ -31,6 +31,7 @@ import { wantsAttemptBack, KEEP_CHANGES_PHRASE } from '../src/server/AgentV3/Gre
 import { wantsVersionUndo } from '../src/lib/versionUndoIntent';
 import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
+import { raceWorldYes } from '../src/server/AgentV3/mapGrowthIntent';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
 import { reviewNotReadyUserLine, formatPartialReview, salvageReview } from '../src/server/AgentV3/partialReview';
 import { PLATFORM_SUGGESTED_REPLIES, platformSuggestedReply } from '../src/server/AgentV3/platformSuggestedReplies';
@@ -180,6 +181,12 @@ const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/gameKitSeed.ts (GAME_WORLD_RULE → a 'custom' region); src/server/lib/GameOpenWorldGenerator.ts (loadUserMap)`,
     why: 'an add order on the open project: the world rule turns it into ONE custom region with the attached model and the direction said, and play/openWorld.ts loads that model on its own ground',
     proof: () => reachesReaderAsWork('isse north me jod do') && read('src/server/AgentV3/gameKitSeed.ts').includes('isse north me jod do') && read('src/server/lib/GameOpenWorldGenerator.ts').includes("region.kind === 'custom'"),
+  },
+  // A road-library race asked for cities (map expansion item 8, mapGrowthIntent's racing ASK, behind AGENTV3_RACING_WORLD): the user's yes.
+  'race shehar me karo': {
+    handler: 'src/server/routes/agentv3.ts (raceWorldAtTurnStart at turn start); src/server/AgentV3/raceWorld.ts (planRaceWorld → TRACK.world = true, last)',
+    why: 'the platform reads the yes at turn start, adds the world race files by the kit rules and sets TRACK.world itself; the builder is told it is done and the race starter loads the world race on its own',
+    proof: () => raceWorldYes('race shehar me karo') && !raceWorldYes('race shehar me mat karo') && read('src/server/routes/agentv3.ts').includes('await raceWorldAtTurnStart({') && read('src/server/AgentV3/raceWorld.ts').includes('writes.push([TRACK_PATH, sw.source])'),
   },
   // The growth guard's ask (growthAskNote, 2026-11-21): the user lets the builder change what is needed, this once.
   'jo zaroori ho badal do': {

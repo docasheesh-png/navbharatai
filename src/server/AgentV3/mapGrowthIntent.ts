@@ -307,7 +307,7 @@ export function mapGrowthRoute(intent: MapGrowthIntent, game: MapGameType, caps:
       if (!caps.racingWorld) {
         return tell('This race runs on the road library; moving it onto a world with cities is not available yet. Change NOTHING about the race, add no map or city by hand, and tell the user plainly, in their language, that cities on the route are not available yet — and offer a longer track (TRACK.finishKm) instead.');
       }
-      return ask(`Moving this race onto city roads changes the race (owner decision: ask once). Ask the user ONE question in their language — "Race ko shehar ki sadkon par le jaayein?" — and tell them that to agree, they reply "${RACE_WORLD_YES}". Change NOTHING this turn: do not set TRACK.world and write no world or race file yourself — the platform makes the switch when they say yes. After a no keep the road library and never ask again.`);
+      return ask(`Moving this race onto city roads changes the race (owner decision: ask once). Ask the user ONE question in their language — "Race ko shehar ki sadkon par le jaayein?" — and tell them that to agree, they reply "${RACE_WORLD_YES}" — and change NOTHING this turn: do not set TRACK.world and write no world or race file yourself — the platform makes the switch when they say yes. After a no keep the road library and never ask again.`);
     }
 
     // An open world (explore too) or a battle royale: the map's own regions list.

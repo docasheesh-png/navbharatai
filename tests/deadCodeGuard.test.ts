@@ -85,6 +85,9 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
+  // Map expansion item 8, part 1 of 3 (#4506): the world race course, held unshipped until part 2 wires it into
+  // <RacingRoadGame> behind TRACK.world (GameShellGenerator imports it then). Remove this entry with that wiring.
+  'src/server/lib/GameWorldCourseGenerator.ts',
   // Forge describe-only calls are held until admitted budget/cancellation is wired. The independently
   // tested helper is retained for that integration; remove this exemption when its caller returns.
   'src/server/lib/objectForge/forgeSelfAuthor.ts',

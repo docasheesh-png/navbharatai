@@ -52,6 +52,37 @@ describe('🛣️ every place is joined by a road you can drive', () => {
     expect(c.scene.children.find((o: any) => o.name === 'Highways')?.children.length).toBe(4);
     world.dispose();
   }, 120_000);
+  it('every highway face points UP (+Y), so the road is seen from above, and it does not flicker against the ground', () => {
+    const c = context();
+    const world = OW.createOpenWorld(c.ctx, { seed: 7, regions: [
+      { id: 'main-city', kind: 'city', city: { blocksX: 2, blocksZ: 2, ...small } },
+      { id: 'east-town', kind: 'town', toward: 'east', city: small },
+      { id: 'north-village', kind: 'village', toward: 'north', city: small },
+      { id: 'sw-town', kind: 'town', toward: 'south-west', city: small },
+    ] });
+    const roads = c.scene.children.find((o: any) => o.name === 'Highways')!.children as THREE.Mesh[];
+    expect(roads.length).toBeGreaterThan(0);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3(), n = new THREE.Vector3();
+    let faces = 0;
+    for (const mesh of roads) {
+      const pos = mesh.geometry.getAttribute('position'); const index = mesh.geometry.getIndex()!;
+      for (let t = 0; t < index.count; t += 3) {
+        a.fromBufferAttribute(pos, index.getX(t)); b.fromBufferAttribute(pos, index.getX(t + 1)); d.fromBufferAttribute(pos, index.getX(t + 2));
+        // three.js front face: counter-clockwise, normal = (b − a) × (c − a). Down-facing faces are culled from the sky.
+        n.subVectors(b, a).cross(d.clone().sub(a)).normalize();
+        expect(n.y).toBeGreaterThan(0.9);
+        faces++;
+      }
+      const vn = mesh.geometry.getAttribute('normal');
+      for (let i = 0; i < vn.count; i++) expect(vn.getY(i)).toBeGreaterThan(0.9);
+      const m = mesh.material as THREE.MeshStandardMaterial;
+      expect(m.side).toBe(THREE.FrontSide);
+      expect(m.polygonOffset).toBe(true);
+      expect(m.polygonOffsetFactor).toBeLessThan(0);
+    }
+    expect(faces).toBeGreaterThan(10);
+    world.dispose();
+  }, 120_000);
   it('a universe of 100 places and lands is one connected network', () => {
     const c = context();
     const kinds = ['city', 'town', 'village', 'desert', 'jungle', 'mountain'];

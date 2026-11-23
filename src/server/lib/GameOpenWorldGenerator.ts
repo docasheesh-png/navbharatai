@@ -389,7 +389,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // the road running out. Laid before the first frame, like the levelled ground.
   const stops = [...planned.map((p) => ({ x: p.centre.x, z: p.centre.z, r: p.reach })), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 }))];
   const roadGroup = new THREE.Group(); roadGroup.name = 'Highways';
-  const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95 });
+  // Pulled a little towards the camera in the depth test (polygonOffset), so the ribbon never flickers against the carved
+  // ground under it when seen from far away.
+  const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   const roadLines: Array<Array<{ x: number; y: number; z: number }>> = [];
   if (stops.length > 1) {
     const joined = new Set<number>([0]);
@@ -409,7 +411,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       roadLines.push(map.world.addRoad([from, to], 9));
     }
   }
-  /** One asphalt ribbon per road, a little above the carved ground, with a white centre line. */
+  /** One asphalt ribbon per road, a little above the carved ground, its faces pointing up. */
   for (const line of roadLines) {
     if (line.length < 2) continue;
     const pos: number[] = [], idx: number[] = [];
@@ -417,7 +419,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
       const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * 4.5, nz = dx / l * 4.5;
       pos.push(line[i].x + nx, line[i].y + 0.08, line[i].z + nz, line[i].x - nx, line[i].y + 0.08, line[i].z - nz);
-      if (i > 0) { const k = i * 2; idx.push(k - 2, k - 1, k, k - 1, k + 1, k); }
+      // Wound so every face points UP (+Y): a face pointing down is culled from above, and the road was invisible from the sky.
+      if (i > 0) { const k = i * 2; idx.push(k - 2, k, k - 1, k - 1, k, k + 1); }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();

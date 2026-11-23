@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-board-card-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['ladder-path', 'courtyard'];
+const IDS = ['ladder-path', 'courtyard', 'three-leaves', 'high-card'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -107,6 +107,68 @@ describe('🏯 Courtyard', () => {
       }
     }
     expect(smart).toBeGreaterThan(33);
+  });
+});
+
+const card = (txt: string) => {                         // 'A♠' '10♥' 'K♦'
+  const rank = txt.slice(0, -1), suit = txt.slice(-1);
+  return { rank: ({ A: 14, K: 13, Q: 12, J: 11 } as Record<string, number>)[rank] ?? Number(rank), suit };
+};
+const hand = (s: string) => s.split(' ').map(card);
+
+describe('🍃 Three Leaves', () => {
+  const T = () => M['three-leaves'];
+  it('a real deck: 52 different cards', () => {
+    const d = T().deck();
+    expect(new Set(d.map((c: any) => c.rank + c.suit)).size).toBe(52);
+  });
+  it('ranks every hand the way players rank them', () => {
+    const order = ['7♠ 7♥ 7♦', '5♥ 6♥ 7♥', '5♥ 6♠ 7♥', '2♣ 9♣ K♣', 'Q♠ Q♦ 4♣', 'A♠ 9♦ 4♣'];
+    for (let i = 0; i < order.length; i++) expect(T().handValue(hand(order[i])).category).toBe(i);
+    for (let i = 0; i + 1 < order.length; i++) expect(T().compareHands(hand(order[i]), hand(order[i + 1]))).toBeGreaterThan(0);
+  });
+  it('A-K-Q is the top run, A-2-3 next, then K-Q-J; ties break on the cards', () => {
+    expect(T().compareHands(hand('A♠ K♦ Q♣'), hand('A♥ 2♠ 3♦'))).toBeGreaterThan(0);
+    expect(T().compareHands(hand('A♥ 2♠ 3♦'), hand('K♠ Q♦ J♣'))).toBeGreaterThan(0);
+    expect(T().compareHands(hand('Q♠ Q♦ 9♣'), hand('Q♥ Q♣ 4♦'))).toBeGreaterThan(0);
+    expect(T().compareHands(hand('J♠ J♦ 5♣'), hand('10♥ 10♣ A♦'))).toBeGreaterThan(0);
+    expect(T().compareHands(hand('A♠ 9♦ 4♣'), hand('A♥ 9♣ 4♦'))).toBe(0);
+  });
+  it('the computer calls with strong hands, folds weak ones, and a bolder setting calls more', () => {
+    const o = T().OPTIONS;
+    expect(T().computerCalls(hand('7♠ 7♥ 7♦'), o.raise, o, () => 0.99)).toBe(true);
+    expect(T().computerCalls(hand('2♠ 5♦ 7♣'), o.raise, o, () => 0.99)).toBe(false);
+    expect(T().computerCalls(hand('2♠ 5♦ 7♣'), o.raise, o, () => 0.01)).toBe(true);           // a bluff
+    const weakish = hand('Q♠ 9♦ 4♣');
+    expect(T().computerCalls(weakish, o.show, { ...o, boldness: 1 }, () => 0.99)).toBe(true);
+  });
+  it('says Play coins only, and never offers money', () => {
+    expect(SRC['three-leaves']).toContain('Play coins only');
+    expect(SRC['three-leaves']).not.toMatch(/deposit|withdraw|cash ?out|₹|rupee|upi/i);
+  });
+});
+
+describe('🂠 High Card', () => {
+  const H = () => M['high-card'];
+  it('right, wrong and a tie', () => {
+    expect(H().judge(card('7♠'), card('9♦'), 'higher')).toBe('right');
+    expect(H().judge(card('7♠'), card('9♦'), 'lower')).toBe('wrong');
+    expect(H().judge(card('7♠'), card('7♦'), 'higher')).toBe('tie');
+    expect(H().judge(card('7♠'), card('7♦'), 'higher', { ...H().OPTIONS, tieWins: true })).toBe('right');
+  });
+  it('the odds come from the cards still in the deck', () => {
+    const o = H().odds(card('7♠'), [card('9♦'), card('2♣'), card('7♥'), card('K♠')]);
+    expect(o).toEqual({ higher: 0.5, lower: 0.25, same: 0.25 });
+    expect(H().odds(card('A♠'), [card('2♣')]).higher).toBe(0);
+  });
+  it('a streak grows by half each time', () => {
+    expect(H().streakValue(10, 0)).toBe(10);
+    expect(H().streakValue(10, 2)).toBe(23);
+    expect(H().shuffled()).toHaveLength(52);
+  });
+  it('says Play coins only, and never offers money', () => {
+    expect(SRC['high-card']).toContain('Play coins only');
+    expect(SRC['high-card']).not.toMatch(/deposit|withdraw|cash ?out|₹|rupee|upi/i);
   });
 });
 

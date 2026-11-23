@@ -18,9 +18,25 @@ export interface GeometryRead {
   slabs?: Array<{ name?: string; size?: number; above?: number; below?: number }> | null;
   roads?: Array<{ name?: string; down?: number; faces?: number }> | null;
   player?: number | null;
+  /**
+   * Map expansion item 12 (read when a kit reports them; an older kit leaves them out and nothing is said):
+   * seams — the worst height step, in metres, where two joined places or lands meet;
+   * venues — each venue's level pad against the land drawn under it (metres off);
+   * pending — terrain chunks changed after they were drawn (a late edit) and not yet redrawn.
+   */
+  seams?: { samples?: number; worst?: number } | null;
+  venues?: Array<{ name?: string; off?: number }> | null;
+  pending?: { dirty?: number; rebuilt?: number } | null;
   ms?: number;
 }
 export interface ModelsRead { pending?: number; stuck?: number }
+/** The page's JS heap (bytes, Chromium's performance.memory) after the start and at the end of a round of play. */
+export interface HeapRead { start?: number | null; end?: number | null }
+
+/** Memory that grew by at least this much over ONE short round of play (and by half again) is a leak worth naming. */
+export const HEAP_GROWTH_BYTES = 150 * 1024 * 1024;
+/** A seam or a venue this far off the ground is visible (a step, a floating pitch). */
+export const SEAM_STEP_M = 0.5;
 
 export function gameGeometryProbeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_GAME_GEOMETRY_PROBE ?? '').trim().toLowerCase() !== 'off';
@@ -43,7 +59,7 @@ export const PLAYER_SUNK_M = -1.5;
  * The findings, one plain line each with its fix, written for the builder. Empty when nothing looks wrong or nothing was
  * measured. At most 6 lines. PURE.
  */
-export function geometryFindings(geometry: GeometryRead | null | undefined, models?: ModelsRead | null): string[] {
+export function geometryFindings(geometry: GeometryRead | null | undefined, models?: ModelsRead | null, heap?: HeapRead | null): string[] {
   const out: string[] = [];
   const g = geometry && typeof geometry === 'object' ? geometry : null;
   if (g) {
@@ -57,10 +73,22 @@ export function geometryFindings(geometry: GeometryRead | null | undefined, mode
       const down = num(r?.down, 0, 1e6) ?? 0, faces = num(r?.faces, 0, 1e6) ?? 0;
       out.push(`"${name(r?.name)}": ${down} of ${faces} sampled road faces point DOWN, so from above the road is not drawn. Flip the triangle order (a, c, b instead of a, b, c), or use the kit's map.world.addRoad which draws roads facing up.`);
     }
+    const seamSamples = num(g.seams?.samples, 0, 1e6) ?? 0, seamWorst = num(g.seams?.worst, 0, 1e5) ?? 0;
+    if (seamSamples > 0 && seamWorst > SEAM_STEP_M) out.push(`Two joined places meet with a ${seamWorst.toFixed(1)} m step in the ground. Join a place with joinTo in WORLD.regions (the kit lays it at its neighbour's level); never place one by hand beside the list.`);
+    for (const v of (Array.isArray(g.venues) ? g.venues : []).slice(0, 2)) {
+      const off = num(v?.off, 0, 1e5) ?? 0;
+      if (off > SEAM_STEP_M) out.push(`The ground "${name(v?.name)}" stands ${off.toFixed(1)} m off the land drawn under it. A sports ground on the map is a venue region in WORLD.regions (kind: 'venue'), which levels its pad before the world is drawn — not a mesh laid by hand.`);
+    }
+    const dirty = num(g.pending?.dirty, 0, 1e6) ?? 0;
+    if (dirty > 0) out.push(`${dirty} piece${dirty === 1 ? '' : 's'} of ground changed after ${dirty === 1 ? 'it was' : 'they were'} drawn and ${dirty === 1 ? 'was' : 'were'} not redrawn. Make ground changes (levelGround, setLand, addRoad) before the world's first update, at the top of the world file.`);
     const p = num(g.player, -1e5, 1e5);
     if (p !== null && (p > PLAYER_FLOAT_M || p < PLAYER_SUNK_M)) out.push(p > 0 ? `The player stood ${p.toFixed(1)} m ABOVE the ground at the start. Spawn on map.world.heightAt(x, z) and let the kit's character keep it on the ground.` : `The player stood ${Math.abs(p).toFixed(1)} m UNDER the ground at the start. Spawn on map.world.heightAt(x, z), not at a fixed y.`);
   }
   const stuck = num(models?.stuck, 0, 1e4) ?? 0;
+  const h0 = num(heap?.start, 0, 1e12), h1 = num(heap?.end, 0, 1e12);
+  if (h0 !== null && h1 !== null && h0 > 0 && h1 - h0 >= HEAP_GROWTH_BYTES && h1 >= h0 * 1.5) {
+    out.push(`The page's memory grew by ${Math.round((h1 - h0) / 1048576)} MB in one short round of play (${Math.round(h0 / 1048576)} → ${Math.round(h1 / 1048576)} MB): something is made over and over and never let go — a mesh, geometry, material or texture created every frame or on every event without dispose(), or a list that only grows. Create it once and reuse it; dispose what is removed. On a phone this ends in a crash.`);
+  }
   if (stuck > 0) out.push(`${stuck} model${stuck === 1 ? '' : 's'} never got past 0% loading after a round of play. Check the model's path exists under public/models and that it is loaded once, through the kit's loader.`);
   return out.slice(0, 6);
 }

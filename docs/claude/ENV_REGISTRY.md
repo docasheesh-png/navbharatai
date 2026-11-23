@@ -4390,6 +4390,14 @@ price is not. Recorded as a queue row, not done here.
   default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
+  🔴 **RETIRED 2026-11-22 (failedbr #2494, admin-approved): the key is no longer read.** No finished build waits for
+  the offer at all now — it is a standing, non-blocking ❗️ row whose "Find and fix bugs" button starts a new
+  bug-hunt turn. A value set in Cloud Run is harmless and can be deleted. Locked in
+  `tests/aFinishedTurnHoldsNoQuestion.test.ts`.
+- **`AGENTV3_SCRATCH_COPY_REMOVE`** (NOT set; default ON; `off` disables). 2026-11-22, failedbr #2494 (Q-3291): the
+  end-of-turn net that removes a builder's scratch copy of a project file (`x.ts.backup`, `xFixed.ts`, …) that THIS build
+  created, nothing references and the request does not name. `src/server/AgentV3/scratchCopies.ts`. Locked in
+  `tests/aScratchCopyIsNotTheApp.test.ts`.
 
 - **`AGENTV3_LANE_AI_NEGATION`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18: the fast
   lane's `laneAiClient` no longer adds an in-app AI client when the prompt says "no AI" / "no API" / "offline"
@@ -5308,3 +5316,7 @@ Seed preview (`src/server/AgentV3/seedPreview.ts`, failedbr #2485 Q-3233): when 
 ### AGENTV3_GROWTH_GUARD (code default: ON; not set in Cloud Run) — 2026-11-21
 
 The growth guard (`src/server/AgentV3/growthGuard.ts`): in a game that grows by lists (`src/game/features/index.ts`, `src/game/world.ts`), a turn may not rewrite or delete a feature, drop a feature or a place from its list, replace the mount, or edit a kit file unless the user's own words ask for it. Lock 1 refuses the builder's write; lock 2 puts back at the end of the turn whatever changed without being asked. `off` disables both locks (the prompt rules remain). Admin-mandated ("isko rocksolid karo"); do not turn it off without the admin.
+
+### AGENTV3_MAP_GROWTH_NOTE (code default: ON; not set in Cloud Run) — 2026-11-23
+
+Map-request routing (`src/server/AgentV3/mapGrowthIntent.ts`, map expansion item 10): in a game with a map or a race (`src/game/world.ts`, `<RacingRoadGame>`, a cricket or football app), a short request about the map is read by its meaning (one more place spread out, joined into one, beside a place, a venue, the game itself, roads between places, bigger, N×, universe, duplicate, a longer track, smaller) and the builder is told, before the request, the smallest change for that game type, with the owner's rules (sports: a world only on request; racing: cities only after asking once; battle royale: stays an 8 km island). Unsure → ask. It writes nothing. `off` removes the note (the world rule alone, as before). No cost: no model call.

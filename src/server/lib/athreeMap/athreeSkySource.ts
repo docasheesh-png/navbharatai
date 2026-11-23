@@ -274,6 +274,12 @@ export function skyFragmentShader(): string {
     '  }',
     '  col += vec3(0.75, 0.8, 1.0) * uFlash * (0.4 + 0.6 * up);',
     '  gl_FragColor = vec4(col, 1.0);',
+    // The palette above is LINEAR, like the fog colour it meets at the horizon. A ShaderMaterial is written to the screen
+    // raw unless it asks for the output colour-space step, so the whole sky came out darker than its own palette and the
+    // night sky was drawn at about rgb(4, 6, 16), black (failedbr #2495, 2026-11-22: "aapne asmaan kala kar diya hai").
+    // Measured in the sandbox's browser: night 4,6,16 -> 34,43,71 (deep blue, stars visible), noon 72,125,213 -> 144,186,236.
+    // No tone-mapping step on purpose: it washed the day sky out to grey-blue (169,195,219).
+    '  #include <colorspace_fragment>',
     '}',
   ].join('\\n');
 }

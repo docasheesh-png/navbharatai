@@ -29,25 +29,20 @@
 import type { ApprovalOutcome } from './Approvals';
 
 /**
- * How long the build waits for the answer before carrying on WITHOUT the hunt.
+ * ⏱️ THE OFFER NEVER HOLDS THE END OF A BUILD (failedbr #2494, 2026-11-22; admin approved the fix the same day).
  *
- * Shorter than the database offer's 120 s on purpose: that question changes how the app is built and is
- * worth holding the build for, while this one is an extra look at an app that is already finished and
- * working. A user who has walked away gets their app, not a stalled build.
+ * The offer used to be a gate the finished build WAITED on — 90 s, then 30 s (autopsy 2f46a4d8). Build #2494 still
+ * showed the cost of any wait at all: "Done", then "Waiting for your answer above", then 30 s later "the deep bug
+ * hunt offer went unanswered, so it did not run". The app was finished; the user watched a spinner for a question
+ * that changes nothing about it. 🧬 THE CLASS: a question about OPTIONAL extra work holding a finished turn open.
+ * Shortening the wait never kills that class — only not waiting does.
+ *
+ * So the offer is now a standing ❗️ row (`bug_hunt_offer`, non-blocking), the turn ends the moment its work is
+ * done, and the row's "Find and fix bugs" button starts a NEW turn that runs the hunt with the yes given up front
+ * (`preApproved`, the path the ❗️ list already used for an expired offer). The user keeps the choice; nobody waits.
+ * The retired wait (`AGENTV3_BUG_HUNT_WAIT_MS`) is gone, and `tests/aFinishedTurnHoldsNoQuestion.test.ts` fails if a
+ * user wait reappears after the build's work.
  */
-export const BUG_HUNT_WAIT_MS = 30_000;
-
-/**
- * ⏱️ CUT FROM 90 s TO 30 s (owner, 2026-10-18; autopsy 2f46a4d8). The app had passed its GREEN gate at 231 s and
- * the build then sat open ~60–90 s on an unanswered offer — the user waits through every second of a build that
- * is already done. Thirty seconds is enough to tap a button that is on screen; a user who has walked away gets
- * their app sooner. `AGENTV3_BUG_HUNT_WAIT_MS` overrides it (5 s–120 s; junk ⇒ default).
- */
-export function bugHuntWaitMs(env: NodeJS.ProcessEnv = process.env): number {
-  const n = Number(String(env.AGENTV3_BUG_HUNT_WAIT_MS ?? '').trim());
-  if (!String(env.AGENTV3_BUG_HUNT_WAIT_MS ?? '').trim() || !Number.isFinite(n)) return BUG_HUNT_WAIT_MS;
-  return Math.min(120_000, Math.max(5_000, n));
-}
 
 /** Kill switch. `off` restores today's behaviour exactly: the hunt runs, unasked, as it always has. */
 export function bugHuntAskEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -81,25 +76,6 @@ export function bugHuntOfferDecision(input: {
   if (!input.hasUser) return { ask: false, why: 'no-user' };
   if (input.alreadyAsked) return { ask: false, why: 'already-asked' };
   return { ask: true };
-}
-
-/**
- * Does the hunt run? ONLY on an explicit yes.
- *
- * A timeout, a Stop and a decline are all "no" — and they are the same "no" deliberately. A build that
- * spends the user's credits because nobody answered in ninety seconds has charged them for silence.
- * PURE.
- */
-export function bugHuntRuns(answer: ApprovalOutcome): boolean {
-  return answer === 'approved';
-}
-
-/** What the four outcomes are called in the diagnostics row, so a report can tell them apart. */
-export function bugHuntAnswerWords(answer: ApprovalOutcome): string {
-  if (answer === 'approved') return 'the user asked for the bug hunt';
-  if (answer === 'denied') return 'the user declined the bug hunt';
-  if (answer === 'stopped') return 'the build was stopped while the offer was open';
-  return 'the offer went unanswered';
 }
 
 /**
@@ -139,31 +115,14 @@ export function bugHuntOfferCopy(): BugHuntOfferCopy {
   };
 }
 
-/**
- * The line the user sees when the hunt does not run.
- *
- * It says the check was NOT RUN. It must never read as a pass: the app carries no bug-hunt verdict, and
- * saying otherwise would be the fake-success the second absolute rule bans.
- */
-export function bugHuntNotRunLine(answer: ApprovalOutcome): string {
-  const why = answer === 'denied'
-    ? 'You chose not to run the deep bug hunt'
-    : answer === 'stopped'
-      ? 'The build was stopped before the deep bug hunt was answered'
-      : 'The deep bug hunt offer went unanswered';
-  return `${why}, so it did not run — your app is built and was not bug-hunted. `
-    + 'Ask for it any time and it will run on the app as it stands.';
-}
-
 /** Said when the user asked for the hunt but this turn's app never got to a state it can review. */
 export function bugHuntCouldNotRunLine(): string {
   return 'You asked for the deep bug hunt, but it could not run this time: the app has to finish building and run '
     + 'first. Nothing was charged for it. Fix what stopped the build, then ask again.';
 }
 
-/** The gate's own words, as the `permission_request` event carries them. */
-export interface BugHuntGateEvent {
-  action: string;
+/** The standing offer's own words, as the `bug_hunt_offer` event carries them. No `action` string: it is not a gate. */
+export interface BugHuntOfferEvent {
   title: string;
   why: string;
   approveLabel: string;
@@ -175,8 +134,10 @@ export interface BugHuntGateEvent {
 export interface BugHuntResult {
   /** Run the post-build review? TRUE when it was not offered at all, so an un-offered build is unchanged. */
   runReview: boolean;
-  /** The answer, when one was asked for. `null` means the question was never put. */
+  /** `approved` only when the user started THIS turn as a bug hunt; `null` otherwise (nothing is waited on). */
   answer: ApprovalOutcome | null;
+  /** TRUE when the standing ❗️ offer was put this turn — the hunt runs on a later turn, if the user taps it. */
+  offered?: boolean;
 }
 
 /**
@@ -185,7 +146,7 @@ export interface BugHuntResult {
  * 🔴 WHY IT LIVES HERE AND NOT IN THE ROUTE. The `/build` handler sits ON TypeScript's control-flow-
  * analysis ceiling (Q-979): the first version of this feature put its `let`, its nested `if`s and its two
  * `try`s inline, and the file stopped type-checking with TS2563 — the feature's own cost, paid by every
- * future change to that handler. Taking `ask` / `wait` / `say` / `record` as arguments keeps the route at
+ * future change to that handler. Taking `offer` / `say` / `record` as arguments keeps the route at
  * one call and makes every branch below unit-testable without a server, a user or a clock.
  *
  * 🔑 THE FAIL-OPEN IS DELIBERATE AND IT IS THE SAFE DIRECTION. If anything here throws, `runReview` is
@@ -194,19 +155,18 @@ export interface BugHuntResult {
  * worse than one that fails loudly.
  */
 export async function offerBugHunt(io: {
-  /** Every other condition for the review already says yes. FALSE ⇒ nothing is asked and nothing changes. */
+  /** Every other condition for the review already says yes. FALSE ⇒ nothing is offered and nothing changes. */
   eligible: boolean;
   hasUser: boolean;
   newCallId: () => string;
-  ask: (gate: BugHuntGateEvent) => void;
-  wait: (callId: string) => Promise<ApprovalOutcome>;
+  /** Puts the standing offer in front of the user (a non-blocking ❗️ row). Nothing waits on it. */
+  offer: (event: BugHuntOfferEvent) => void;
   say: (text: string) => void;
   record: (message: string) => void;
   env?: NodeJS.ProcessEnv;
   /**
    * The user already said yes, from the ❗️ list, by starting THIS turn as a bug hunt (admin 2026-11-21: "click
-   * karo, kuch bhi nahi hota"). The 30-second offer of an earlier build had expired, so its button answered a gate
-   * nobody was waiting on. A yes given up front is not asked again; an ineligible app is told why it did not run.
+   * karo, kuch bhi nahi hota"). A yes given up front is not asked again; an ineligible app is told why it did not run.
    */
   preApproved?: boolean;
 }): Promise<BugHuntResult> {
@@ -220,33 +180,37 @@ export async function offerBugHunt(io: {
     hasUser: io.hasUser,
     askEnabled: bugHuntAskEnabled(io.env ?? process.env),
     reviewEligible: io.eligible,
-    alreadyAsked: false, // the offer is scoped to this turn, so the next edit asks again
+    alreadyAsked: false, // the offer is scoped to this turn, so the next edit offers again
   });
   if (!offer.ask) return { runReview: io.eligible, answer: null };
 
-  let answer: ApprovalOutcome;
   try {
     const copy = bugHuntOfferCopy();
-    const callId = io.newCallId();
-    io.ask({
-      // The one-string form too, for anything still reading the old shape.
-      action: `${copy.title} ${copy.why}`,
+    io.offer({
       title: copy.title,
       why: copy.why,
       approveLabel: copy.approveLabel,
       denyLabel: copy.denyLabel,
-      callId,
+      callId: io.newCallId(),
     });
-    answer = await io.wait(callId);
   } catch {
+    // Fail-open, as before: an offer that could not be shown must never silently cancel the app's deepest check.
     return { runReview: true, answer: null };
   }
+  // Offered and not taken yet: it does not run THIS turn, and it is reported as NOT RUN — never as passed.
+  io.record('The deep bug hunt was offered without holding the build open, and did not run this turn: the offer stays '
+    + 'in the user\'s list and runs on a new turn only if they ask. The app\'s own end-of-build checks ran as always.');
+  io.say(bugHuntOfferedLine());
+  return { runReview: false, answer: null, offered: true };
+}
 
-  if (bugHuntRuns(answer)) return { runReview: true, answer };
-  // Offered and not taken: it does not run, and it is reported as NOT RUN — never as passed.
-  io.record(`The deep bug hunt was offered and did not run: ${bugHuntAnswerWords(answer)}. The app's own end-of-build checks ran as always.`);
-  io.say(bugHuntNotRunLine(answer));
-  return { runReview: false, answer };
+/**
+ * What the user reads at the end of a turn that offered the hunt. It says the hunt did NOT run (never a pass), that it
+ * costs, and exactly where the choice is — the turn itself is already over.
+ */
+export function bugHuntOfferedLine(): string {
+  return 'Your app is built. The deep bug hunt did not run, because it spends credits and runs only when you ask: '
+    + 'open ❗️ and tap "Find and fix bugs" whenever you want it, and it will run on the app as it stands.';
 }
 
 /** The optional offer promises an extra check on an app that already ran, never an infrastructure repair.

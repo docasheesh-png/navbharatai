@@ -55,9 +55,9 @@ import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/Temp
 import { seededForms } from './strictTrial';
 import { recipeFilePool, isKnownKitVersion } from '../lib/gameRecipeLayers';
 import { isKnownSeedVersion } from './seedVersions';
-import { isUneditedGeneratedGameAssetFile } from './gameAssets/generatedAssetFiles';
 import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GamePlayerBodyGenerator';
 import { GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
+import { isUneditedGeneratedGameAssetFile } from './gameAssets/generatedAssetFiles';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.

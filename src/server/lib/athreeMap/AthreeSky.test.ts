@@ -322,6 +322,8 @@ describe('the shaders', () => {
     for (const u of ['uSun', 'uZenith', 'uHorizon', 'uSunTint', 'uDaylight', 'uCloud', 'uTime', 'uDrift', 'uFlash']) expect(f).toContain(u);
     expect(f).toContain('fbm'); expect(f).toContain('-uSun'); expect(f).toContain('hash3');
     expect(f).not.toContain('sampler2D');
+    // failedbr #2495: without the output colour-space step the linear palette was written raw and the night sky was black.
+    expect(f).toContain('#include <colorspace_fragment>');
     expect(A.skyVertexShader()).toContain('gl_Position.z = gl_Position.w');
   });
   it('the rain falls in the shader, slanted by the wind, and fades with the amount of rain', () => {

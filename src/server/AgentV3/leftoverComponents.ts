@@ -16,6 +16,8 @@
 // it is an unfinished request, which the warning must keep showing, never a leftover to tidy away.
 // Kill switch: AGENTV3_LEFTOVER_REMOVE=off. PURE, except `applyLeftoverNet` at the end (the route's one call).
 
+import { applyScratchCopyNet, type ScratchCopyNetDeps } from './scratchCopies';
+
 export function leftoverRemovalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_LEFTOVER_REMOVE ?? '').trim().toLowerCase() !== 'off';
 }
@@ -106,8 +108,26 @@ export async function applyLeftoverNet(dispatcher: LeftoverNetDeps, report: Left
  */
 export async function applyLeftoverNetAfterBuild(
   facts: { ok: boolean; importTurn: boolean; editMode: boolean; aborted: boolean },
-  dispatcher: LeftoverNetDeps, report: LeftoverNetReport, request: string, env: NodeJS.ProcessEnv = process.env,
+  dispatcher: LeftoverNetDeps & Partial<ScratchCopyNetDeps>, report: LeftoverNetReport, request: string, env: NodeJS.ProcessEnv = process.env,
+  scratch?: { existedAtStart: readonly string[] },
 ): Promise<string[]> {
+  // 🧹 Scratch copies of project files (scratchCopies.ts, failedbr #2494) are never the app, whatever the turn's outcome
+  // or mode: only files THIS build made, that did not exist when it began, are touched. An import turn writes no code.
+  if (scratch && !facts.importTurn) await applyScratchCopyNetWith(dispatcher, report, request, scratch, env);
   if (!facts.ok || facts.importTurn || facts.editMode || facts.aborted) return [];
   return applyLeftoverNet(dispatcher, report, request, env);
+}
+
+async function applyScratchCopyNetWith(
+  dispatcher: Partial<ScratchCopyNetDeps>, report: LeftoverNetReport, request: string,
+  scratch: { existedAtStart: readonly string[] }, env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const { listProjectFiles, writtenThisBuild, mentionedOutside, removeLeftoverFiles } = dispatcher;
+  if (!listProjectFiles || !writtenThisBuild || !mentionedOutside || !removeLeftoverFiles) return;
+  await applyScratchCopyNet({
+    listProjectFiles: () => listProjectFiles.call(dispatcher),
+    writtenThisBuild: () => writtenThisBuild.call(dispatcher),
+    mentionedOutside: (p, t) => mentionedOutside.call(dispatcher, p, t),
+    removeLeftoverFiles: (ps) => removeLeftoverFiles.call(dispatcher, ps),
+  }, report, { request, existedAtStart: scratch.existedAtStart }, env);
 }

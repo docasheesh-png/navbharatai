@@ -17,6 +17,8 @@ import { trailWalkAppTsx } from './games/trailWalk';
 import { pavilionAppTsx } from './games/pavilion';
 import { gardenMatchAppTsx } from './games/gardenMatch';
 import { tapBloomAppTsx } from './games/tapBloom';
+import { countGardenAppTsx } from './games/countGarden';
+import { shapeYardAppTsx } from './games/shapeYard';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -51,7 +53,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'high-card', title: 'High Card', category: 'Card', accent: '#1e3a8a', appTsx: gapScreen('high-card', 'high-card-best-v1') },
   { id: 'coin-wheel', title: 'Coin Wheel', category: 'Casino', accent: '#a16207', appTsx: gapScreen('coin-wheel', 'coin-wheel-best-v1') },
   { id: 'tap-bloom', title: 'Tap Bloom', category: 'Casual', accent: '#db2777', appTsx: tapBloomAppTsx },
-  { id: 'count-garden', title: 'Count Garden', category: 'Educational', accent: '#0f766e', appTsx: gapScreen('count-garden', 'count-garden-best-v1') },
+  { id: 'count-garden', title: 'Count Garden', category: 'Educational', accent: '#0f766e', appTsx: countGardenAppTsx },
   { id: 'beat-steps', title: 'Beat Steps', category: 'Music', accent: '#7c3aed', appTsx: gapScreen('beat-steps', 'beat-steps-best-v1') },
   { id: 'slope-ride', title: 'Slope Ride', category: 'Racing', accent: '#9a3412', appTsx: roadRaceAppTsx('run', 'slope-ride-best-v1') },
   { id: 'camp-quest', title: 'Camp Quest', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('camp-quest', 'camp-quest-best-v1') },
@@ -61,7 +63,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'letter-link', title: 'Letter Link', category: 'Word', accent: '#4338ca', appTsx: gapScreen('letter-link', 'letter-link-best-v1') },
   { id: 'shield-rush', title: 'Shield Rush', category: 'Action', accent: '#b91c1c', appTsx: gapScreen('shield-rush', 'shield-rush-best-v1') },
   { id: 'coin-dice', title: 'Coin Dice', category: 'Casino', accent: '#a16207', appTsx: gapScreen('coin-dice', 'coin-dice-best-v1') },
-  { id: 'shape-yard', title: 'Shape Yard', category: 'Educational', accent: '#0f766e', appTsx: gapScreen('shape-yard', 'shape-yard-best-v1') },
+  { id: 'shape-yard', title: 'Shape Yard', category: 'Educational', accent: '#0f766e', appTsx: shapeYardAppTsx },
   { id: 'drum-row', title: 'Drum Row', category: 'Music', accent: '#6d28d9', appTsx: gapScreen('drum-row', 'drum-row-best-v1') },
   { id: 'road-tale', title: 'Road Tale', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('road-tale', 'road-tale-best-v1') },
   { id: 'river-ferry', title: 'River Ferry', category: 'Simulation', accent: '#92400e', appTsx: gapScreen('river-ferry', 'river-ferry-best-v1') },

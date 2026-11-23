@@ -1336,6 +1336,141 @@ export function shotFromTiming(timingError: number, ball: { onStumps: boolean; a
   if (e <= 0.2) return rng() < (big ? 0.45 : 0.25) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 0, out: null, shot: 'dot' };
   return ball.onStumps ? { runs: 0, out: 'bowled', shot: 'bowled' } : { runs: 0, out: null, shot: 'missed' };
 }
+
+// ─── THE FIELD (3D or 2D) ───────────────────────────────────────────────────────────────────────────────────────────────
+// 🏏 admin 2026-11-23 (failedbr #2504): "cricket game me player batsman wicket ki piche khada hai, bowl aur batsman ke bich me
+// wicket hai, batsman bowl ko hit karne ka action hi nahi kar raha". Every 3D cricket game placed the pitch, the stumps and
+// the players by hand, and one put the batter BEHIND his own stumps, facing away. The places come from here instead:
+//   const f = cricketLayout({ centre: { x: 0, z: 0 } });
+//   stumps at f.strikerStumps and f.bowlerStumps; batter at f.batter (rotation.y = f.batter.yaw — every kit model faces +Z,
+//   so he looks down the pitch at the bowler); bowler runs from f.bowler.runUp to f.bowler.release; keeper at f.keeper.
+//   On every shot: batter.act('bat') (the kit humanoid's bat swing), then shotFromTiming(...) for the runs.
+// The rule a cricket fan checks first: the batter stands IN FRONT of his stumps (between them and the bowler), never behind.
+
+/** Real dimensions, metres (Laws of Cricket). */
+export const PITCH_LENGTH = 20.12;
+export const PITCH_WIDTH = 3.05;
+/** The popping crease: 1.22 m in front of the stumps, towards the other end. The batter stands at it. */
+export const POPPING_CREASE = 1.22;
+export const STUMPS_HEIGHT = 0.711;
+export const STUMPS_WIDTH = 0.2286;
+
+export interface FieldSpot { x: number; z: number; /** rotation.y for a kit model (it faces +Z when 0). */ yaw: number }
+export interface CricketLayout {
+  pitchLength: number;
+  /** The unit vector from the striker's end to the bowler's end, on the ground. */
+  along: { x: number; z: number };
+  strikerStumps: FieldSpot;
+  bowlerStumps: FieldSpot;
+  /** The striker: at his popping crease, beside the line of the stumps, facing the bowler. */
+  batter: FieldSpot;
+  nonStriker: FieldSpot;
+  bowler: { runUp: FieldSpot; release: FieldSpot };
+  keeper: FieldSpot;
+  umpire: FieldSpot;
+  /** A broadcast camera behind the bowler, looking at the batter. */
+  camera: { x: number; y: number; z: number; lookAt: { x: number; y: number; z: number } };
+  boundary: number;
+}
+
+/** The yaw that turns a kit model (facing +Z) at a point to look at another. */
+export function yawTo(from: { x: number; z: number }, to: { x: number; z: number }): number {
+  return Math.atan2(to.x - from.x, to.z - from.z);
+}
+
+/**
+ * The whole field from one place: the pitch runs from the striker's stumps to the bowler's stumps along 'heading'
+ * (radians; 0 = the bowler is towards +Z). A right-hander stands on the leg side of his stumps (left-hander: the other side),
+ * at the popping crease — in FRONT of his stumps — facing the bowler. PURE.
+ */
+export function cricketLayout(o: { centre?: { x: number; z: number }; heading?: number; leftHanded?: boolean; boundary?: number } = {}): CricketLayout {
+  const c = o.centre && Number.isFinite(o.centre.x) && Number.isFinite(o.centre.z) ? o.centre : { x: 0, z: 0 };
+  const h = Number.isFinite(o.heading as number) ? (o.heading as number) : 0;
+  const along = { x: Math.sin(h), z: Math.cos(h) };
+  const side = { x: -along.z, z: along.x };                 // to the RIGHT of someone at the striker's end looking at the bowler (Y up)
+  const at = (a: number, s: number) => ({ x: c.x + along.x * a + side.x * s, z: c.z + along.z * a + side.z * s });
+  const half = PITCH_LENGTH / 2;
+  const legSide = o.leftHanded ? 0.45 : -0.45;              // a right-hander's leg side is to his left as he faces the bowler
+  const spot = (p: { x: number; z: number }, look: { x: number; z: number }): FieldSpot => ({ ...p, yaw: yawTo(p, look) });
+  const strikerStumps = at(-half, 0), bowlerStumps = at(half, 0);
+  const release = at(half - POPPING_CREASE + 0.2, 0.3);
+  const batterAt = at(-half + POPPING_CREASE - 0.15, legSide);
+  const boundary = Number.isFinite(o.boundary as number) && (o.boundary as number) > 20 ? (o.boundary as number) : 65;
+  const cam = at(half + 14, 0);
+  return {
+    pitchLength: PITCH_LENGTH,
+    along,
+    strikerStumps: spot(strikerStumps, bowlerStumps),
+    bowlerStumps: spot(bowlerStumps, strikerStumps),
+    batter: spot(batterAt, release),
+    nonStriker: spot(at(half - POPPING_CREASE + 0.3, -legSide * 2.2), strikerStumps),
+    bowler: { runUp: spot(at(half + 16, 0.6), strikerStumps), release: spot(release, strikerStumps) },
+    keeper: spot(at(-half - 2.5, 0.2), bowlerStumps),
+    umpire: spot(at(half + 1.6, -0.6), strikerStumps),
+    camera: { x: cam.x, y: 4.2, z: cam.z, lookAt: { x: batterAt.x, y: 1.1, z: batterAt.z } },
+    boundary,
+  };
+}
+
+/**
+ * Where the ball is during a delivery: released at shoulder height at the bowler's end, it bounces 'lengthFromBatter' metres
+ * in front of the batter and reaches him at bat height, then goes on to the stumps. speed in m/s (25 ≈ 90 km/h). PURE.
+ */
+export function deliveryPath(f: CricketLayout, o: { speed?: number; lengthFromBatter?: number; line?: number } = {}): {
+  at: (t: number) => { x: number; y: number; z: number };
+  bounceTime: number; batTime: number; stumpsTime: number;
+} {
+  const speed = Math.max(8, Math.min(45, Number.isFinite(o.speed as number) ? (o.speed as number) : 25));
+  const length = Math.max(0.5, Math.min(14, Number.isFinite(o.lengthFromBatter as number) ? (o.lengthFromBatter as number) : 5));
+  const line = Number.isFinite(o.line as number) ? (o.line as number) : 0;
+  const from = f.bowler.release, bat = f.batter, stumps = f.strikerStumps;
+  const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(b.x - a.x, b.z - a.z);
+  // Straight from the release at the striker's stumps (plus the line), passing the batter's crease on the way.
+  const toStumps = Math.max(1, dist(from, stumps));
+  const dx = (stumps.x - from.x) / toStumps, dz = (stumps.z - from.z) / toStumps;
+  const toBat = Math.max(1, Math.min(toStumps - 0.3, (bat.x - from.x) * dx + (bat.z - from.z) * dz));
+  const bounceAt = Math.max(1, toBat - length);
+  const bounceTime = bounceAt / speed, batTime = toBat / speed, stumpsTime = toStumps / speed;
+  const sideX = -dz, sideZ = dx;                            // + line = towards the batter's right
+  const at = (t: number) => {
+    const d = Math.max(0, t) * speed;
+    const x = from.x + dx * d + sideX * line * Math.min(1, d / toStumps);
+    const z = from.z + dz * d + sideZ * line * Math.min(1, d / toStumps);
+    let y: number;
+    if (d <= bounceAt) { const u = d / bounceAt; y = 2.1 * (1 - u) + 0.04 * u - 0.6 * u * (1 - u); }
+    else { const u = (d - bounceAt) / Math.max(0.01, toStumps - bounceAt); y = 0.04 + 1.6 * u * (1 - 0.5 * u) * Math.max(0, 1 - u * 0.4); }
+    return { x, y: Math.max(0.036, y), z };
+  };
+  return { at, bounceTime, batTime, stumpsTime };
+}
+
+/**
+ * The checks a cricket fan makes at a glance, for the game's own positions (WORLD x/z; yaw as rotation.y of a +Z model):
+ * the batter is between his stumps and the bowler, within a step of the crease and beside the stumps (not on them), the
+ * stumps are not between him and the bowler, and he faces the bowler. Returns the problems in plain words; [] = right. PURE.
+ */
+export function checkCricketLayout(p: {
+  batter: { x: number; z: number; yaw?: number };
+  strikerStumps: { x: number; z: number };
+  bowler: { x: number; z: number };
+}): string[] {
+  const out: string[] = [];
+  const ax = p.bowler.x - p.strikerStumps.x, az = p.bowler.z - p.strikerStumps.z;
+  const L = Math.hypot(ax, az);
+  if (!(L > 1)) return ['the bowler is on top of the stumps'];
+  const ux = ax / L, uz = az / L;
+  const bx = p.batter.x - p.strikerStumps.x, bz = p.batter.z - p.strikerStumps.z;
+  const along = bx * ux + bz * uz;                         // metres from his stumps towards the bowler
+  const across = Math.abs(bx * uz - bz * ux);
+  if (along < 0.3) out.push('the batter stands behind (or level with) his own stumps — he must stand in front of them, at the crease');
+  else if (along > POPPING_CREASE + 1.2) out.push('the batter stands too far down the pitch — he takes guard at the popping crease');
+  if (across > 1.5) out.push('the batter stands too far to the side of his stumps');
+  if (typeof p.batter.yaw === 'number' && Number.isFinite(p.batter.yaw)) {
+    const fx = Math.sin(p.batter.yaw), fz = Math.cos(p.batter.yaw);
+    if (fx * ux + fz * uz < 0.3) out.push('the batter does not face the bowler');
+  }
+  return out;
+}
 `;
 
 const BUSINESS = String.raw`/**
@@ -2077,8 +2212,8 @@ export { createDeck, shuffleCards, deal, cardName, isRed, SUITS, teenPattiHand, 
 export type { Card, Suit, TeenPattiCategory, TeenPattiHand, MeldType, Declaration } from './cards';
 export { createCarrom, placeStriker, strikerFits, shoot, stepPhysics, BOARD as CARROM_BOARD, BASELINE, BASELINE_HALF_LENGTH, COIN_RADIUS, STRIKER_RADIUS, POCKET_RADIUS } from './carrom';
 export type { CarromState, Disc, DiscKind, QueenState, ShotResult } from './carrom';
-export { createMatch, bowl, summary, runRates, oversText, shotFromTiming } from './cricket';
-export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra } from './cricket';
+export { createMatch, bowl, summary, runRates, oversText, shotFromTiming, cricketLayout, deliveryPath, checkCricketLayout, yawTo, PITCH_LENGTH, PITCH_WIDTH, POPPING_CREASE, STUMPS_HEIGHT, STUMPS_WIDTH } from './cricket';
+export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra, CricketLayout, FieldSpot } from './cricket';
 export { createBusiness, roll as rollBusiness, buy, decline, endTurn, payJailFine, build, sellHouse, mortgage, unmortgage, cannotBuild, rentFor, netWorth, ownsGroup, groupSquares, computerWantsToBuy, computerTurn, BUSINESS_BOARD, CHANCE_CARDS, DEFAULT_BUSINESS_RULES } from './business';
 export type { BusinessState, BusinessPlayer, BusinessRules, BusinessPhase, BusinessEvent, BusinessResult, BoardSquare, SquareKind, ChanceCard } from './business';
 export { createMatch3, swapTiles, hint as match3Hint, findRuns } from './match3';
@@ -2146,6 +2281,12 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
       + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders, chess, Business or match-3 logic. For Business, every roll goes through rollBusiness(game, d1, d2), then follow game.phase: \'buy\' shows Buy / Skip (buy / decline), \'end\' shows End turn (endTurn), \'roll\' again means doubles; show each event in r.events (rent paid, chance card, jail, bankrupt), draw owners and houses from game.owner and game.houses, and let the player build (cannotBuild says why not) and mortgage; a computer player plays with computerTurn. Money in Business is pretend money. For match-3, every swap goes through swapTiles(game, a, b): ok false means swap the two back on screen; otherwise animate r.steps in order (cleared, then the fall, chain by chain) and show game.score, game.movesLeft and game.status; a Hint button uses match3Hint(game). For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
-      + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',
+      + 'uses chooseMove. House rules are options (rules: { ... }), not new code.\n'
+      + 'CRICKET IN 3D: every place comes from cricketLayout() — stumps at strikerStumps / bowlerStumps, the batter at f.batter'
+      + ' (rotation.y = f.batter.yaw: IN FRONT of his stumps at the crease, facing the bowler — never behind his stumps), the bowler'
+      + ' from f.bowler.runUp to f.bowler.release, the keeper behind the striker\'s stumps, the camera at f.camera. The ball follows'
+      + ' deliveryPath(f, { speed, lengthFromBatter }); the perfect moment is its batTime. On every shot call batter.act(\'bat\') (the'
+      + ' kit humanoid\'s bat swing) so the batter visibly plays it, then shotFromTiming for the runs. checkCricketLayout(...) must'
+      + ' return [] for the positions you used.',
   };
 }

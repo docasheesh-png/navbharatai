@@ -2167,7 +2167,8 @@ export interface Humanoid {
   /**
    * Play a one-shot ACTION pose over the walk, so the body visibly does what the button did: 'punch', 'swing'
    * (a melee weapon), 'fire' (a gun's recoil), 'kick', 'throw', 'jump' (the launch), 'land' (the squash, also
-   * automatic after a fall), 'hit' (a flinch), 'use' (a reach). Call it on the frame the action happens; keep
+   * automatic after a fall), 'hit' (a flinch), 'use' (a reach), 'bat' (a cricket or baseball shot: both hands lift
+   * the bat back, then drive it through the line of the ball and follow through). Call it on the frame the action happens; keep
    * calling update() every frame. strength 0–1.5 scales it (default 1).
    */
   act: (action: HumanoidAction, strength?: number) => void;
@@ -2186,11 +2187,11 @@ export interface Humanoid {
 }
 
 /** The one-shot action poses a humanoid can play (see Humanoid.act). */
-export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use';
+export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use' | 'bat';
 
 /** How long each action pose lasts, in seconds — short enough to never delay the next press. */
 export const ACTION_SECONDS: Readonly<Record<HumanoidAction, number>> = {
-  punch: 0.3, swing: 0.45, fire: 0.16, kick: 0.45, throw: 0.5, jump: 0.25, land: 0.24, hit: 0.32, use: 0.4,
+  punch: 0.3, swing: 0.45, fire: 0.16, kick: 0.45, throw: 0.5, jump: 0.25, land: 0.24, hit: 0.32, use: 0.4, bat: 0.55,
 };
 
 /**
@@ -2444,6 +2445,19 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
         mix(RS, 'x', -2.7, wind * k); mix(RE, 'x', -1.0, wind * k);
         mix(RS, 'x', -0.9, sweep * k); mix(RS, 'z', 0.65, sweep * k); mix(RE, 'x', -0.15, sweep * k);
         chest.rotation.y += (0.4 * wind - 0.55 * sweep) * k;
+        break;
+      }
+      case 'bat': {
+        // 🏏 admin 2026-11-23 (failedbr #2504: "batsman bowl ko hit karne ka action hi nahi kar raha"). Both hands on the
+        // handle: the back-lift (first 35%), then the bat comes down and THROUGH the line of the ball — level, in front of
+        // the body, not the sword's overhead chop — and the shoulders turn into the follow-through.
+        const lift = u < 0.35 ? u / 0.35 : 0;
+        const drive = u < 0.35 ? 0 : 1 - (u - 0.35) / 0.65;
+        mix(RS, 'x', -1.75, lift * k); mix(RE, 'x', -1.25, lift * k); mix(RS, 'z', 0.35, lift * k);
+        mix(LS, 'x', -1.45, lift * k); mix(LE, 'x', -1.35, lift * k); mix(LS, 'z', 0.55, lift * k);
+        mix(RS, 'x', -1.2, drive * k); mix(RE, 'x', -0.2, drive * k); mix(RS, 'z', -0.25, drive * k);
+        mix(LS, 'x', -1.35, drive * k); mix(LE, 'x', -0.15, drive * k); mix(LS, 'z', 0.15, drive * k);
+        chest.rotation.y += (0.55 * lift - 0.85 * drive) * k; spine.rotation.x += (0.06 * lift + 0.16 * drive) * k;
         break;
       }
       case 'fire': {

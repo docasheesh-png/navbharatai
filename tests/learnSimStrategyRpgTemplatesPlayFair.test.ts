@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-learn-sim-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['count-garden', 'shape-yard', 'tea-stall', 'river-ferry', 'seed-row', 'tower-line'];
+const IDS = ['count-garden', 'shape-yard', 'tea-stall', 'river-ferry', 'seed-row', 'tower-line', 'camp-quest'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -220,6 +220,73 @@ describe('🏹 Tower Line', () => {
       runWave(g);
       expect(g.lives).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('🏕️ Camp Quest', () => {
+  const Q = () => M['camp-quest'];
+  /** A plain sensible player: heal the hurt, cleave a crowd, aim at the weakest, otherwise hit the weakest. */
+  const heroMove = (b: any) => {
+    const me = b.units[Q().actor(b)], foes = Q().living(b, 'foe'), heroes = Q().living(b, 'hero');
+    const weakFoe = foes.slice().sort((x: number, y: number) => b.units[x].hp - b.units[y].hp)[0];
+    const hurt = heroes.slice().sort((x: number, y: number) => b.units[x].hp / b.units[x].maxHp - b.units[y].hp / b.units[y].maxHp)[0];
+    const sk = Q().HEROES[me.kind].skill, low = b.units[hurt].hp < b.units[hurt].maxHp * 0.45;
+    if (me.kind === 'healer' && low && me.mp >= sk.cost) return { kind: 'skill', target: hurt };
+    if (low && b.units[hurt].hp < b.units[hurt].maxHp * 0.25 && b.potions > 0) return { kind: 'potion', target: hurt };
+    if (me.kind === 'warrior' && foes.length >= 2 && me.mp >= sk.cost) return { kind: 'skill' };
+    if (me.kind === 'archer' && me.mp >= sk.cost) return { kind: 'skill', target: weakFoe };
+    return { kind: 'attack', target: weakFoe };
+  };
+  const fight = (camp: number, level: number, potions: number, rnd: () => number, heroTurn = heroMove) => {
+    const heroes = Object.keys(Q().HEROES).map((k) => Q().makeHero(k, level));
+    let b = Q().newBattle(camp, heroes, potions);
+    for (let n = 0; n < 500 && !Q().outcome(b); n++) {
+      const a = b.units[Q().actor(b)].side === 'hero' ? heroTurn(b) : Q().foeChoice(b, rnd);
+      expect(Q().allowed(b, a)).toBe(true); b = Q().act(b, a, rnd);
+    }
+    return b;
+  };
+  const campaign = (rnd: () => number, player = heroMove) => {
+    let xp = 0, potions = Q().OPTIONS.potions;
+    for (let c = 0; c < Q().CAMPS.length; c++) {
+      const b = fight(c, Q().levelOf(xp), potions, rnd, player);
+      if (Q().outcome(b) !== 'won') return c;
+      xp += Q().xpFrom(c); potions = b.potions + Q().OPTIONS.potionsPerCamp;
+    }
+    return Q().CAMPS.length;
+  };
+  it('hits always do at least 1, guarding halves a hit, and healing never goes past full', () => {
+    const w = Q().makeHero('warrior', 1), f = Q().makeFoe('bat', 0);
+    for (const roll of [0, 0.5, 0.999]) {
+      expect(Q().damage(f, { ...w, def: 99 }, 1, roll)).toBe(1);
+      expect(Q().damage(w, { ...f, guard: true }, 1, roll)).toBeLessThanOrEqual(Math.ceil(Q().damage(w, f, 1, roll) / 2));
+    }
+    let b = Q().newBattle(0, ['warrior', 'healer', 'archer'].map((k) => Q().makeHero(k, 1)), 2);
+    while (b.units[Q().actor(b)].kind !== 'healer') b = Q().act(b, { kind: 'guard' });
+    const healed = Q().act(b, { kind: 'skill', target: 0 });
+    expect(healed.units[0].hp).toBe(healed.units[0].maxHp);
+  });
+  it('turns go in speed order, the dead lose their turn, and actions follow the rules', () => {
+    const b = Q().newBattle(2, ['warrior', 'healer', 'archer'].map((k) => Q().makeHero(k, 1)), 0);
+    const speeds = b.queue.map((i: number) => b.units[i].spd);
+    expect(speeds).toEqual(speeds.slice().sort((x: number, y: number) => y - x));
+    const archer = b.units.findIndex((u: any) => u.kind === 'archer');
+    expect(Q().allowed(b, { kind: 'potion', target: archer })).toBe(false);
+    expect(Q().allowed(b, { kind: 'attack', target: archer })).toBe(b.units[Q().actor(b)].side === 'foe');
+    const dead = { ...b, units: b.units.map((u: any, i: number) => (i === b.queue[1] ? { ...u, hp: 0 } : u)) };
+    expect(Q().act(dead, { kind: 'guard' }).queue).not.toContain(b.queue[1]);
+  });
+  it('levels grow with experience and every camp gives some, except the last', () => {
+    expect(Q().levelOf(0)).toBe(1); expect(Q().levelOf(Q().xpFor(1))).toBe(2); expect(Q().levelOf(Q().xpFor(2))).toBe(3);
+    expect(Q().makeHero('warrior', 3).maxHp).toBeGreaterThan(Q().makeHero('warrior', 1).maxHp);
+    for (let c = 0; c < Q().CAMPS.length - 1; c++) expect(Q().xpFrom(c)).toBeGreaterThan(0);
+  });
+  it('a sensible player usually finishes the quest, but only attacking usually does not', () => {
+    let finished = 0, mashed = 0;
+    for (let s = 1; s <= 40; s++) if (campaign(rng(s)) === Q().CAMPS.length) finished++;
+    const mash = (b: any) => ({ kind: 'attack', target: Q().living(b, 'foe')[0] });
+    for (let s = 1; s <= 40; s++) if (campaign(rng(s), mash) === Q().CAMPS.length) mashed++;
+    expect(finished).toBeGreaterThanOrEqual(28); expect(mashed).toBeLessThanOrEqual(finished / 2);
   });
 });
 

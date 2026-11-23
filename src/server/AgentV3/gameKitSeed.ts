@@ -716,6 +716,36 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
  * Pure snapshot handoff. No reads, writes, recipes, provider calls or continuation after Stop.
  * Module/import scopes remain independent; the seed's preservation/refresh gates are untouched.
  */
+/** How a car is driven on a phone (the kit's touchControls.drive). */
+export type DriveControlsWord = 'pads' | 'tilt' | 'auto' | 'joystick';
+const NEGATED_JOYSTICK = /\b(no|not|without|bina|mat)\b[^.!?\n]{0,20}joystick|joystick[^.!?\n]{0,30}\b(nahi|nahin|nhi|mat|not|na|nahi\s+chahiye)\b|जॉयस्टिक[^।.!?\n]{0,30}(नहीं|मत)/i;
+/**
+ * 🚗 THE CAR CONTROLS THE USER ASKED FOR (admin 2026-11-23: "car control hardcore joystick se nahi honi chahiye, user jo
+ * prompt de usse ho"). Read from the request in English, Hinglish or Hindi; null when it names none (the kit default,
+ * Left/Right + Brake/Gas pads, then holds). A joystick only when it is asked for and not refused. PURE.
+ */
+export function driveControlsFromWords(text: string | null | undefined): DriveControlsWord | null {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return null;
+  if (/\b(tilt|gyro|gyroscope|accelerometer|motion\s+control)\b|jhuka|jhukaa|झुका/i.test(t)) return 'tilt';
+  if (/\bjoystick\b|जॉयस्टिक/i.test(t) && !NEGATED_JOYSTICK.test(t)) return 'joystick';
+  if (/\bauto[\s-]?(gas|accelerat\w*|drive|race)\b|\b(sirf|only|just)\s+steer\w*|\b(easy|simple|aasan|asaan)\s+(control|controls|driving|steering)\b|अपने\s*आप\s*(चले|चलेगी)/i.test(t)) return 'auto';
+  if (/\b(button|buttons|batan)\b[^.!?\n]{0,30}\b(chala\w*|drive|steer\w*|control\w*)\b|\b(left|right)\s*\/\s*(right|left)\s+button/i.test(t)) return 'pads';
+  return null;
+}
+
+/** The line a game turn carries when the user named how the car is driven. */
+export function driveControlsLine(text: string | null | undefined): string {
+  const mode = driveControlsFromWords(text);
+  if (!mode) return '';
+  const what = mode === 'tilt' ? 'tilt the phone to steer, Brake / Gas buttons'
+    : mode === 'auto' ? 'the car drives forward by itself; the player steers and brakes'
+    : mode === 'joystick' ? 'the analogue joystick steers and drives'
+    : 'Left / Right and Brake / Gas buttons';
+  return `🚗 CAR CONTROLS THE USER ASKED FOR: ${what}. Set touchControls: { drive: '${mode}' } in the Game options (keep any other`
+    + ' touchControls fields); never hand-roll them. A computer still drives with W/A/S/D and the arrows.';
+}
+
 export function gameTurnHandoff(
   prompt: string,
   files: Readonly<Record<string, string>>,
@@ -736,6 +766,7 @@ export function gameTurnHandoff(
   const grows = projectGrowthRules(files);
   return { contract, block: [
     grows,
+    driveControlsLine(prompt),
     contract ? gameContractBlock(contract) : '',
     api ? '[GAME KIT API SNAPSHOT — saved start-of-turn source plus acknowledged seed/refresh writes; '
       + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '

@@ -598,21 +598,24 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     }
   }
   // 🧭 EVERY PLACE ASKED FOR GETS GROUND (reviewer of #4472: a list of 1,000 villages planned only 399 — the rest pointed at the
-  // sea). A place with no dry ground in its own direction takes the nearest free, dry, level-enough ground around the first
-  // place, ring by ring outward: never on another place, never across a highway already planned, never past the edge of the
-  // map (half a looping world, so it never wraps onto the far side). It joins the network by one road to its nearest stop.
-  // The places that found ground before, their roads and the ground under them are exactly what they were.
+  // sea). A place with no dry ground where it was asked takes the nearest free, dry, level-enough ground around the first
+  // place, ring by ring outward, staying as close as it can to the direction it was asked (a 45° cone first, then any side):
+  // never on another place, never across a highway already planned (including a road just laid for a place that waited before
+  // it), never past the edge of the map (half a looping world, so it never wraps onto the far side). It joins the network by
+  // one road to its nearest stop that does not cut through another place. The places that found ground before, their roads
+  // and the ground under them are exactly what they were.
   const rescued: PlannedPlace[] = [];
   if (waiting.length && planned[0]) {
     const home = planned[0].centre;
     const limit = map.world.mode === 'bounded' ? map.world.sizeMeters / 2 : Math.min(50000, map.world.sizeMeters * 0.45);
     // The planned roads in 1 km cells (by the box each one spans), so a spot looks only at the roads near it.
     const roadCells = new Map<string, number[]>(), RC = 1000;
-    roads.forEach((r, i) => {
+    const indexRoad = (r: (typeof roads)[number], i: number): void => {
       for (let cx = Math.floor(Math.min(r.from.x, r.to.x) / RC); cx <= Math.floor(Math.max(r.from.x, r.to.x) / RC); cx++)
         for (let cz = Math.floor(Math.min(r.from.z, r.to.z) / RC); cz <= Math.floor(Math.max(r.from.z, r.to.z) / RC); cz++)
           (roadCells.get(cx + ',' + cz) || roadCells.set(cx + ',' + cz, []).get(cx + ',' + cz)!).push(i);
-    });
+    };
+    roads.forEach(indexRoad);
     const nearRoad = (x: number, z: number, clear: number): boolean => {
       for (let cx = Math.floor((x - clear) / RC); cx <= Math.floor((x + clear) / RC); cx++)
         for (let cz = Math.floor((z - clear) / RC); cz <= Math.floor((z + clear) / RC); cz++) {
@@ -624,53 +627,78 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         }
       return false;
     };
+    const angDiff = (a: number, b: number): number => { let d = Math.abs(a - b) % (Math.PI * 2); return d > Math.PI ? Math.PI * 2 - d : d; };
+    const CONE = Math.PI / 4;                                                                // 45°: "in the direction it was asked"
     // A ring every rejected spot of which stays rejected for a place of the same size (taken ground only grows; water and
-    // roads stay): the next place of that size starts there.
+    // roads stay): the next place of that size starts there — only for the any-side fallback, so a later place can still
+    // take nearer ground in its own direction.
     const fromRing = new Map<number, number>();
+    const roadClear = (reach: number) => reach * 1.5 + 150;                                  // pad and slopes stay off the road
+    const segmentHitsAPad = (ax: number, az: number, bx: number, bz: number, ignoreX: number, ignoreZ: number, ignoreR: number): boolean => {
+      const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+      return taken.some((ax + bx) / 2, (az + bz) / 2, Math.hypot(dx, dz) / 2 + 400, (t) => {
+        if (Math.hypot(t.x - ignoreX, t.z - ignoreZ) < 1 && Math.abs(t.r - ignoreR) < 1) return false;
+        if (Math.hypot(t.x - ax, t.z - az) < 1 || Math.hypot(t.x - bx, t.z - bz) < 1) return false;
+        const u = Math.max(0, Math.min(1, ((t.x - ax) * dx + (t.z - az) * dz) / l2));
+        return Math.hypot(t.x - (ax + dx * u), t.z - (az + dz * u)) < t.r + 150;
+      });
+    };
     for (const w of waiting) {
       const step = w.reach + 200, key = Math.round(w.reach);
-      let found: { x: number; z: number; cost: number } | null = null;
-      let ring = fromRing.get(key) ?? 1;
-      for (; ring * step <= limit && !found; ring++) {
-        const r = ring * step, spots = Math.max(8, Math.ceil((2 * Math.PI * r) / step));
-        for (let k = 0; k < spots; k++) {
-          const a = w.angle + (k / spots) * Math.PI * 2;
-          const cx = home.x + Math.sin(a) * r, cz = home.z - Math.cos(a) * r;
-          if (taken.some(cx, cz, w.reach + 140, (t) => Math.hypot(cx - t.x, cz - t.z) < t.r + w.reach + 140)) continue;
-          if (nearRoad(cx, cz, w.reach * 1.5 + 150)) continue;                                 // its pad and slopes stay off the road
-          let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
-          for (let i = -2; i <= 2 && !wet; i++) for (let j = -2; j <= 2; j++) {
-            const x = cx + (i / 2) * w.hx, z = cz + (j / 2) * w.hz, h = map.world.heightAt(x, z);
-            if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) { wet = true; break; }
-            low = Math.min(low, h); high = Math.max(high, h);
+      const look = (maxAng: number, start: number): { x: number; z: number; cost: number; ring: number } | null => {
+        let found: { x: number; z: number; cost: number; ring: number } | null = null;
+        for (let ring = start; ring * step <= limit && !found; ring++) {
+          const r = ring * step, spots = Math.max(8, Math.ceil((2 * Math.PI * r) / step));
+          for (let k = 0; k < spots; k++) {
+            const a = w.angle + (k / spots) * Math.PI * 2, ad = angDiff(a, w.angle);
+            if (ad > maxAng) continue;
+            const cx = home.x + Math.sin(a) * r, cz = home.z - Math.cos(a) * r;
+            if (taken.some(cx, cz, w.reach + 140, (t) => Math.hypot(cx - t.x, cz - t.z) < t.r + w.reach + 140)) continue;
+            if (nearRoad(cx, cz, roadClear(w.reach))) continue;
+            let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
+            for (let i = -2; i <= 2 && !wet; i++) for (let j = -2; j <= 2; j++) {
+              const x = cx + (i / 2) * w.hx, z = cz + (j / 2) * w.hz, h = map.world.heightAt(x, z);
+              if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) { wet = true; break; }
+              low = Math.min(low, h); high = Math.max(high, h);
+            }
+            if (wet || high - low > 25) continue;                                             // a cliff is not a place to build
+            const cost = ad * 1e6 + (high - low);                                             // the asked direction first, then flatter
+            if (!found || cost < found.cost) found = { x: cx, z: cz, cost, ring };
           }
-          if (wet || high - low > 25) continue;                                               // a cliff is not a place to build
-          if (!found || high - low < found.cost) found = { x: cx, z: cz, cost: high - low };
         }
-        if (found) break;
-      }
-      fromRing.set(key, ring);
+        return found;
+      };
+      let found = look(CONE, 1) || look(Math.PI, fromRing.get(key) ?? 1);
+      if (found) fromRing.set(key, found.ring);
       if (!found) { console.error('[world] no dry ground was found for "' + w.region.id + '" anywhere on the map; it was left out.'); continue; }
       const y = map.world.levelGround(found.x, found.z, w.hx, w.hz, 60);
       taken.push({ x: found.x, z: found.z, r: w.reach });
-      rescued.push({ region: w.region, preset: w.preset, cityOptions: w.cityOptions, centre: { x: found.x, y, z: found.z }, reach: w.reach, built: -1 });
+      const p: PlannedPlace = { region: w.region, preset: w.preset, cityOptions: w.cityOptions, centre: { x: found.x, y, z: found.z }, reach: w.reach, built: -1 };
+      rescued.push(p);
+      // One road to the nearest stop that does not cut through another place (a place that waited before it is already a stop).
+      const pl = planCity(p.cityOptions);
+      const me = { x: p.centre.x, z: p.centre.z, r: p.reach, hw: pl.width / 2, hd: pl.depth / 2 };
+      const candidates = stops.map((s) => ({ s, d: Math.hypot(s.x - me.x, s.z - me.z) })).sort((a, b) => a.d - b.d);
+      let chosen: { s: (typeof stops)[number]; d: number } | null = null;
+      for (const c of candidates) {
+        const road = roadBetween(c.s, me, c.d);
+        if (road && segmentHitsAPad(road.from.x, road.from.z, road.to.x, road.to.z, me.x, me.z, me.r)) continue;
+        chosen = c; break;
+      }
+      if (!chosen && candidates[0]) chosen = candidates[0];
+      if (chosen) {
+        const road = roadBetween(chosen.s, me, chosen.d);
+        if (road) { roads.push(road); indexRoad(road, roads.length - 1); }
+      }
+      stops.push(me);
+      planned.push(p);
     }
   }
   if (rescued.length) {
     const ids = rescued.slice(0, 8).map((p) => '"' + p.region.id + '"').join(', ') + (rescued.length > 8 ? ' and ' + (rescued.length - 8) + ' more' : '');
-    console.error('[world] ' + rescued.length + ' place(s) had no dry ground in their own direction and stand on the nearest dry ground instead: ' + ids + '.');
+    console.error('[world] ' + rescued.length + ' place(s) had no dry ground where they were asked and stand on the nearest dry ground, as close as they can to the direction they were asked: ' + ids + '.');
   }
   for (const road of roads) roadLines.push(map.world.addRoad([road.from, road.to], 9));
-  // A place that waited: one road to its nearest stop (a place, a land, a user map, or a place that waited before it).
-  for (const p of rescued) {
-    const pl = planCity(p.cityOptions);
-    const me = { x: p.centre.x, z: p.centre.z, r: p.reach, hw: pl.width / 2, hd: pl.depth / 2 };
-    let near: (typeof stops)[number] | null = null, nd = Infinity;
-    for (const s of stops) { const d = Math.hypot(s.x - me.x, s.z - me.z); if (d < nd) { near = s; nd = d; } }
-    if (near) { const road = roadBetween(near, me, nd); if (road) roadLines.push(map.world.addRoad([road.from, road.to], 9)); }
-    stops.push(me);
-    planned.push(p);
-  }
   /** One asphalt ribbon per road, a little above the carved ground, its faces pointing up. */
   for (const line of roadLines) {
     if (line.length < 2) continue;

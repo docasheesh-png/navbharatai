@@ -55,7 +55,7 @@ describe('🧭 every place asked for gets ground', () => {
     }
     expect(overlaps).toBe(0);
     expect(Math.max(...world.places.map((p: any) => Math.hypot(p.centre.x - world.places[0].centre.x, p.centre.z - world.places[0].centre.z)))).toBeLessThan(45000);
-    expect(text).toMatch(/\d+ place\(s\) had no dry ground in their own direction and stand on the nearest dry ground instead: "v\d+"/);
+    expect(text).toMatch(/\d+ place\(s\) had no dry ground where they were asked and stand on the nearest dry ground, as close as they can to the direction they were asked: "v\d+"/);
     expect(text.split('\n').filter((l) => /stand on the nearest dry ground/.test(l)).length).toBe(1);
     world.dispose();
   }, 180_000);
@@ -100,10 +100,48 @@ describe('🧭 every place asked for gets ground', () => {
     expect(text).toMatch(/no dry ground was found for "c\d+" anywhere on the map; it was left out/);
     world.dispose();
   }, 180_000);
+  it('a place that was asked to lie toward a direction keeps that direction when it has to move', () => {
+    const dirs = ['north', 'east', 'south', 'west'] as const;
+    const regions = [
+      { id: 'home', kind: 'city', city: { blocksX: 2, blocksZ: 2 } },
+      ...dirs.flatMap((d) => Array.from({ length: 8 }, (_, k) => ({ id: d + k, kind: 'village', toward: d, distance: 3000 + k * 1500, city: { blocksX: 2, blocksZ: 2 } }))),
+    ];
+    const a = make({ seed: 7, regions });
+    const waited = rescuedIds(a);
+    expect(waited.size).toBeGreaterThan(0);
+    const home = a.world.places[0];
+    const COMPASS: Record<string, number> = { north: 0, east: Math.PI / 2, south: Math.PI, west: 3 * Math.PI / 2 };
+    const angDiff = (x: number, z: number, want: number) => { const a0 = Math.atan2(x, -z); let d = Math.abs(a0 - want) % (Math.PI * 2); return d > Math.PI ? Math.PI * 2 - d : d; };
+    for (const p of a.world.places) {
+      if (!waited.has(p.id) || !/^(north|east|south|west)/.test(p.id)) continue;
+      const want = COMPASS[p.id.replace(/\d+$/, '')];
+      expect(angDiff(p.centre.x - home.centre.x, p.centre.z - home.centre.z, want)).toBeLessThanOrEqual(Math.PI / 4 + 1e-6);
+    }
+    a.world.dispose();
+  }, 180_000);
+  it('a moved place never sits on another highway — only its own road meets its edge', () => {
+    const a = make({ seed: 7, regions: [
+      { id: 'home', kind: 'city', city: { blocksX: 2, blocksZ: 2 } },
+      ...(['north', 'east', 'south', 'west'] as const).flatMap((d) => Array.from({ length: 8 }, (_, k) => ({ id: d + k, kind: 'village', toward: d, distance: 3000 + k * 1500, city: { blocksX: 2, blocksZ: 2 } }))),
+    ] });
+    const waited = rescuedIds(a);
+    expect(waited.size).toBeGreaterThan(0);
+    for (const p of a.world.places) {
+      if (!waited.has(p.id)) continue;
+      for (const line of a.world.highways) {
+        const d = distToLine(p.centre, line);
+        const meets = line.some((pt: { x: number; z: number }) => Math.hypot(pt.x - p.centre.x, pt.z - p.centre.z) <= p.radius + 30);
+        if (meets) expect(d).toBeGreaterThan(p.radius * 0.5);  // a road that joins here meets the edge, never through the middle
+        else expect(d).toBeGreaterThanOrEqual(p.radius);      // a road to somewhere else never sits on the pad
+      }
+      expect(dry(a.world, p)).toBe(true);
+    }
+    a.world.dispose();
+  }, 180_000);
 });
 /** The places that waited: the console says how many, and they are the last ones planned. */
 function rescuedIds(made: { world: any; text: string }): Set<string> {
-  const m = /(\d+) place\(s\) had no dry ground in their own direction/.exec(made.text);
+  const m = /(\d+) place\(s\) had no dry ground where they were asked/.exec(made.text);
   const n = m ? Number(m[1]) : 0;
   return new Set(n ? made.world.places.slice(-n).map((p: any) => p.id) : []);
 }

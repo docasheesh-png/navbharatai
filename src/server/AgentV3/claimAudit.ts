@@ -160,12 +160,32 @@ export interface MeasuredFacts {
    * URLs in localStorage and was described as having "drag-and-drop uploads" that work.
    */
   uploadsInSmallStore?: boolean;
+  /**
+   * THE MAP, measured (worldTurn.worldClaimFacts — Q-3305, failedbr #2494 / #2495). "World ko 50x bada kiya (707 km × 707 km),
+   * 12 regions add kiye" over a turn whose map file was put back exactly as it began; "All conditions met" over a request for
+   * a 40 km × 40 km map that was never set. Omitted ⇒ the game has no map file, nothing judged.
+   */
+  world?: WorldFacts;
+}
+
+/** The open-world map at the start and the end of the turn (src/game/world.ts). */
+export interface WorldFacts {
+  regionsBefore: number;
+  regionsAfter: number;
+  /** Places, lands and tiles whose id is new this turn. */
+  added: number;
+  sizeKmBefore: number | null;
+  sizeKmAfter: number | null;
+  spreadKmBefore: number | null;
+  spreadKmAfter: number | null;
+  /** The map size the user's request named, if any. */
+  askedKm: number | null;
 }
 
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'visual-fix-unseen';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored' | 'visual-fix-unseen';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -742,6 +762,9 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
     });
   }
 
+  // THE MAP (Q-3305): a size or a number of places the turn did not produce, or a size the user named that it never set.
+  if (facts.world) out.push(...worldClaims(text, facts.world));
+
   // A kit capability named as the app's (autopsy db07e0af) — judged only against the whole app's own source.
   if (facts.sourceIsWholeApp !== false && typeof facts.sourceText === 'string' && facts.sourceText.trim()) {
     for (const k of KIT_FEATURE_CLAIMS) {
@@ -780,6 +803,55 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
     }
   }
 
+  return out;
+}
+
+const KM_BY_KM = /(\d+(?:[.,]\d+)?)\s*(?:km|kms|kilomet\w*)?\s*[×x*]\s*(\d+(?:[.,]\d+)?)\s*(?:km|kms|kilomet\w*)/i;
+const TIMES_BIGGER = /\b(\d+)\s*(?:x|×|guna|gunaa|times)\s*(?:bada|badi|bade|bigger|larger|zyada\s+bada)/i;
+const PLACE_COUNT = /\b(\d+)\s+(?:new\s+|naye\s+|nayi\s+|aur\s+)?(?:regions?|places?|jagah\w*|cities|citys|city|shehar|towns?|villages?|gaon|lands?)\b/i;
+const ADDED_WORD = /✅|\b(?:add|added|adds|adding|jod\w*|joda|jode|banaye|banaya|banayi|bana\s+di\w*|kiye|kiya|new|naye|nayi|created)\b/i;
+const ADMITS_NOT = /\b(?:not|nahi|nahin|cannot|can't|couldn't|could\s+not|unable|baaki|pending|abhi\s+nahi|isn't|wasn't)\b/i;
+const ALL_DONE = /✅|\ball\s+(?:conditions|requirements|requests?)\s+(?:are\s+)?(?:met|done|fulfilled|complete)|\bsab\s+(?:kuch\s+)?(?:ho\s+gaya|done|poora|pura|complete)|\beverything\s+(?:is\s+)?(?:done|complete)|\b(?:kaam\s+)?poora\s+(?:ho\s+gaya|kiya)/i;
+const near = (a: number | null, km: number): boolean => a !== null && km > 0 && Math.abs(a - km) / km < 0.1;
+
+/** The summary's map claims, weighed against the map file at the start and the end of the turn. PURE. */
+export function worldClaims(text: string, w: WorldFacts): ClaimContradiction[] {
+  const out: ClaimContradiction[] = [];
+  const lines = String(text ?? '').split(/\n+/);
+  const sizeChanged = w.sizeKmAfter !== w.sizeKmBefore || w.spreadKmAfter !== w.spreadKmBefore;
+  const sizeNow = w.spreadKmAfter !== null ? `its places spread across ${w.spreadKmAfter} km` : w.sizeKmAfter !== null ? `it is ${w.sizeKmAfter} km across` : 'it is the default size';
+  const unchanged = w.added === 0 && !sizeChanged;
+  for (const line of lines) {
+    if (ADMITS_NOT.test(line)) continue;
+    const m = [...line.matchAll(new RegExp(KM_BY_KM.source, 'gi'))].pop();
+    if (m) {
+      const km = Math.max(Number(m[1].replace(',', '.')), Number(m[2].replace(',', '.')));
+      if (!(sizeChanged && (near(w.sizeKmAfter, km) || near(w.spreadKmAfter, km)))) {
+        out.push({ kind: 'world-size-claimed', claimed: `that the map was made ${m[1]} km × ${m[2]} km`,
+          measured: sizeChanged ? `this turn set the map so that ${sizeNow}, not ${km} km` : `this turn did not change the map's size (${sizeNow})` });
+        break;
+      }
+    }
+    const t = TIMES_BIGGER.exec(line);
+    if (t && unchanged) {
+      out.push({ kind: 'world-size-claimed', claimed: `that the map was made ${t[1]}× bigger`, measured: 'this turn added no place to the map and did not change its size' });
+      break;
+    }
+  }
+  for (const line of lines) {
+    if (ADMITS_NOT.test(line)) continue;
+    const c = PLACE_COUNT.exec(line);
+    if (c && ADDED_WORD.test(line) && w.added === 0) {
+      out.push({ kind: 'region-count-claimed', claimed: `that ${c[1]} ${c[0].replace(/^\d+\s+/, '')} were added to the map`,
+        measured: `this turn added no place to the map — it has the same ${w.regionsAfter} it began with` });
+      break;
+    }
+  }
+  if (w.askedKm !== null && !near(w.spreadKmAfter, w.askedKm) && !near(w.sizeKmAfter, w.askedKm) && ALL_DONE.test(text)
+    && !lines.some((l) => l.includes(String(w.askedKm)) && ADMITS_NOT.test(l))) {
+    out.push({ kind: 'world-size-ignored', claimed: 'that everything asked was done',
+      measured: `a ${w.askedKm} km × ${w.askedKm} km map was asked for, and this turn did not set that size (${sizeNow})` });
+  }
   return out;
 }
 

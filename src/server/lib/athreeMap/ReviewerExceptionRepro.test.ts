@@ -6,7 +6,7 @@ import {HUMAN_ADAPTER} from './athreeHumanAdapterSource';
 function load() {
  const emitted=generateGame3D(['humanoid']).files;
  const strings={HUMANOID:emitted['src/game/three/humanoid.ts'],SURFACES:emitted['src/game/three/surfaces.ts']};
- const files:Record<string,string>={'adapter':HUMAN_ADAPTER,'../three/humanoid':strings.HUMANOID,'./surfaces':strings.SURFACES};
+ const files:Record<string,string>={'adapter':HUMAN_ADAPTER,'../three/humanoid':strings.HUMANOID,'./surfaces':strings.SURFACES,'./groundContact':emitted['src/game/three/groundContact.ts']};
  const cache:Record<string,any>={};
  const get=(name:string):any=>{
    if(name==='three')return THREE;

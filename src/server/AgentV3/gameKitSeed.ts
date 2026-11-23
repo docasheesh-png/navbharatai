@@ -52,12 +52,12 @@
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
-import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
+import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
-import { GTA_TITLE } from '../lib/wellKnownGameTitles';
+import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
@@ -71,8 +71,8 @@ import { ACTION_VISIBLE_RULE } from './actionVisibility';
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d'
   | 'generate_game_2d' | 'generate_board_games' | 'generate_athree_map' | 'generate_open_world';
 
-/** 2D games that MOVE a body on screen — they get the 2D kit (sprites, platformer physics, camera, tilemap, particles). */
-const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
+// 2D games that MOVE a body on screen get the 2D kit (sprites, platformer physics, camera, tilemap, particles): MOVING_2D_GENRES,
+// in gameIntent beside the big-world rule that reads it.
 /** Cricket is in the India games pack's rules engines, in English or Hindi. */
 /** A match-3 request in its usual words (it reads as genre 'puzzle'). */
 const MATCH3 = /\bmatch[-\s]?(?:3|three)\b|\bcandy\s*crush\b|\bbejewell?ed\b|\b(?:gems?|jewels?|candies|candy|tiles?)\b[^.!?\n]{0,40}\bmatch(?:ing)?\b|\bmatch(?:ing)?\b[^.!?\n]{0,40}\b(?:gems?|jewels?|candies|candy|tiles?)\b/i;
@@ -165,7 +165,7 @@ export function openWorldWantsCity(prompt: string | null | undefined): boolean {
   try {
     const c = buildGameContract(text);
     if ((c.subjects ?? []).some((s) => s === 'building' || s === 'road')) return true;
-    if (GTA_TITLE.test(text)) return true;   // the ONE GTA reader (glued "gta5" too)
+    if (namesGtaTitle(text)) return true;   // the ONE GTA reader ("gta5", "gtaa", "g.t.a" too)
   } catch { /* no contract: the words below still decide */ }
   return CITY_HINGLISH.test(text);
 }
@@ -192,6 +192,14 @@ export function gameKitOwnsTheBuild(prompt: string | null | undefined, framework
   try { return gameKitPlan(prompt, framework).length > 0; } catch { return false; }
 }
 
+/** The turn text without the lines the platform itself writes into a game's milestone turn (gameIdentityLines). PURE. */
+function withoutPlatformLines(text: string): string {
+  return text.split(/\r?\n/).filter((l) => {
+    const t = l.trim();
+    return t !== ON_FOOT_LINE && t !== CITY_LINE && t !== GAME_MILESTONE_LINE && !t.startsWith('The user\'s game needs a big map') && !t.startsWith('The game the user named:');
+  }).join('\n');
+}
+
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
 const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
 /**
@@ -199,10 +207,24 @@ const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
  * 2026-09-14 bike-racing report and build 46e2d74b are this kind. Precision-first on purpose: a game this
  * misses keeps the 2D-safe layers and its builder may still run the 3D recipes, exactly as before the seed
  * existed; a game this wrongly matches gets three.js laid down under it.
- * BR1966: glued GTA titles (gta5 / gtav / gta-5) match the same 3D kit as spaced "gta 5"; a bare
- * "gta" word-boundary misses them.
+ * The GTA and Minecraft titles are read by the shared tolerant title matcher (lib/wellKnownGameTitles), never by a private
+ * spelling here: BR1966 found glued "gta5" missed, failedbr #2497 found every typo missed ("gtaa", "maincraft").
  */
-const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta(?:\s*[-_]?\s*[5v])?|minecraft|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+
+/**
+ * 🗺️ A big map is drawn in 3D unless 2D was asked (failedbr #2497). The rule itself is gameIntent.bigWorldWantsThreeD — the
+ * contract's view reads it too, so the kit and the contract cannot disagree; this reads the turn the kit seed is handed. PURE.
+ */
+export function bigWorldIsDrawnIn3D(prompt: string | null | undefined): boolean {
+  // The USER's words decide, never the identity lines the platform writes into a milestone turn ("The player is on foot on
+  // the big map."): a milestone keeps its own view (BR1958 F3), and our own sentence is not a wish.
+  const text = withoutPlatformLines(String(prompt ?? ''));
+  try {
+    const c = buildGameContract(text);
+    return c.dimension !== '2d' && bigWorldWantsThreeD(text, c.genre, c.camera ?? 'unspecified');
+  } catch { return false; }
+}
 
 /**
  * Does the REQUEST say this game is drawn in 3D? PURE.
@@ -221,6 +243,11 @@ export function gameKitWants3D(prompt: string | null | undefined): boolean {
   if (namedNonSmartphone(text)) return false;
   // A royale is drawn in 3D — the ONE royale reader (failedbr #2475: the private list here had no "bgmi").
   if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text) || asksForBattleRoyale(text)) return true;
+  // A named title read by the shared tolerant matcher (failedbr #2497): GTA, Minecraft, and a first-person shooter title
+  // (Valorant, Call of Duty, Counter-Strike — the contract already says 3D first-person for those, and the kit must agree).
+  // A runner title stays with its genre's 2D kit, as the 2D kit was designed ("temple run jaisa").
+  if (namesGtaTitle(text) || namesGameTitleOfKind(text, 'sandbox') || findGameTitles(text).some((m) => m.kind === 'fps' && !m.plainWord)) return true;
+  if (bigWorldIsDrawnIn3D(text)) return true;
   try {
     return heroObjectContract(text).categories.some((c) => c === 'vehicle-land' || c === 'vehicle-water');
   } catch { return false; }
@@ -372,19 +399,54 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   // failedbr #2488: asked for "a village, a desert, a jungle and a mountain", the builder added three TOWNS named "Desert",
   // "Jungle" and "Mountain". A name is not a land: a land is its own kind now, and the map really is that land there.
   + ' A desert / jungle / mountains / snow / beach is a LAND region: { id, kind: \'desert\' | \'jungle\' | \'mountain\' | \'snow\' | \'beach\','
-  + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). NEVER add a'
-  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 100 regions (places and lands'
-  + ' together) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
+  + ' toward?, radius? } — the ground there really becomes that land (sand, dense trees, rising mountains, snow, beach). A land RIGHT'
+  + ' NEXT TO a place or another land ("shehar ke bagal me registan", "city se laga hua jungle", "शहर के पास रेगिस्तान", "gaon ke peeche pahad", "a desert next to'
+  + ' the city", "snow beside the mountains") → add joinTo: \'<that region id>\' (toward: the side, when they say it): it lies against'
+  + ' that place\'s edge, no plain strip and no highway between; without joinTo a land is spread out as before. NEVER add a'
+  + ' town and name it "Desert"/"Jungle"/"Mountain". The WHOLE map\'s land is WORLD.style. Up to 1000 regions (places and lands'
+  + ' together; an older src/game/play/openWorld.ts reads only its own MAX_REGIONS, 100) — a whole universe; only the nearest cities are built while playing, so a big list costs nothing until it is reached.'
   // failedbr #2490: "is map ko 50x bigger banao … isi ko duplicate kar ke merge karo" — the builder stretched sizeMeters (the SAME
   // terrain, 7× wider) to the 1000 km cap and stopped at 12 places, all near the start. Bigger means MORE places, not a stretch.
   + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
-  + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land). "Isi map ko'
+  + ' in every direction) up to 1000 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land).'
+  // failedbr #2494 autopsy: "4 bade map jod ke ek bada giant world" became places spread 2.6–3.5 km apart, each on its own
+  // levelled ground at its own height — the user saw maps that never joined. JOINED INTO ONE means edge to edge.
+  + ' JOINED INTO ONE — only when the maps are to BECOME ONE map ("N map jod ke ek (bada) map / world banao", "sab maps ko jod ke ek'
+  + ' hi map bana do", "ek hi map bana do", "mila ke ek karo", "chipka ke ek kar do", "join / merge the maps into one world") → the'
+  + ' places stand EDGE TO EDGE, never kilometres apart: each place asked for is a'
+  + ' joined tile of the FIRST region, { id: \'<new id>\', kind: \'city\', joinTo: \'<first region id>\', toward?: \'east\' … }'
+  + ' (one ground level, the streets carried straight on; a village or town look is city: { style: \'town\' } on that tile),'
+  + ' and a land asked for in the same breath is a land region JOINED to it, { id, kind: \'desert\' …, joinTo: \'<first region id>\' }'
+  + ' (it lies right against the city\'s edge; where that side is water the kit lays it nearby and says so in the console).'
+  + ' The word "ek" alone NEVER means this, and these keep the spread behaviour above: "ek aur map jodo", "ek naya map jodo", "ek'
+  + ' desert map jodo" ADD one spread place or land; "aur maps jodo" / "map bada karo" ADD spread places; "sab shehron ko aapas me'
+  + ' road se jodo" means ROADS between the places (the kit\'s highways already join every place), not moving them edge to edge. "Isi map ko'
   + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
   + ' the original. A MAP THE USER ATTACHED (a .glb / .gltf / .obj, loose or in a .zip — it lands at public/models/<name>.glb) and asks'
   + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'
   + ' across, default 400); the map loads it when the player comes near and joins it by road. An .fbx or a game-engine project cannot be'
   + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
   + ' map to make it bigger.';
+/**
+ * 🌱 A FEATURE NEVER LAYS MAP-SCALE LAND IN AN OPEN WORLD (failedbr #2495/#2501 autopsy: asked for a grass field in the middle,
+ * the builder added a feature with a flat 2 km PlaneGeometry at y = -0.1, not anchored; the hilly map's slopes cut through it
+ * and the sea showed grass under it — the user saw maps "on different planes"). Said on every turn of a game that has BOTH
+ * the features list and src/game/world.ts (an open world), never in other games. Only MAP-SCALE land is banned (about 300 m
+ * or more, or a flat plane at a fixed y that neither follows heightAt nor is anchored); a sized ground object the user asks
+ * for — a cricket ground, a football field, a court, a pool or talaab, a parking lot, a race track — is allowed and built
+ * (re-review 2026-11-23: the first wording over-blocked those, and forbade water outright).
+ */
+export const OPEN_WORLD_FEATURE_GROUND_RULE = '🌱 IN THIS OPEN WORLD A FEATURE NEVER LAYS MAP-SCALE LAND: no plane of about 300 m or more across'
+  + ' spread as ground, grass, terrain or sea, and no flat plane at a fixed y (0, -0.1) that neither follows world.heightAt nor is'
+  + ' anchored with world.place — the map\'s hills, sea and levelled places sit at their own heights, so such a plane floats over'
+  + ' valleys, the hills cut through it, and it stays behind when the world re-centres. A different land ("registan", "jungle",'
+  + ' "pahad", "barf", "beach" / desert, jungle, mountain, snow, beach) is a LAND region in src/game/world.ts; roads between places'
+  + ' are the kit\'s highways (world.highways). A SIZED GROUND OBJECT IS FINE and is built as asked: a cricket ground, a football'
+  + ' field, a court, a swimming pool, a talaab / pond, a parking lot, a race track or a grass field ("ghaas ka maidan") is a'
+  + ' feature at its real size (under about 300 m), put down with world.place(object, x, z) (WORLD metres) so it sits on the'
+  + ' ground there and follows world.heightAt(x, z); its water, grass or tarmac is part of it. Signs, decals, screens, markers and'
+  + ' the HUD are fine too. GRASS, FLOWERS OR BUSHES a feature scatters go ONLY where map.world.plantableAt(x, z) is true — never'
+  + ' where surfaceAt says \'grass\' (a city\'s streets read as grass there), so nothing green ever grows on a road.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the
@@ -455,7 +517,7 @@ export const OPEN_WORLD_HANDOFF = '🗺️ THE GAME ALREADY PLAYS ON THE BIG MAP
   + ' the joystick and keys, streaming terrain, traffic, people and parked cars to get into (Use / E). Unless the user asks for it,'
   + ' do not rewrite src/App.tsx\'s world, and NEVER write a second world, ground, player, character controller, camera or game component'
   + ' beside it (no CustomGame, no WorldSetup, no characterController of your own): a different one the user asks for is made by'
-  + ' changing the kit\'s own, in this game. ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' In a feature, setup(ctx, world) adds things with'
+  + ' changing the kit\'s own, in this game. ' + GAME_FEATURES_RULE + ' ' + GAME_WORLD_RULE + ' ' + OPEN_WORLD_FEATURE_GROUND_RULE + ' In a feature, setup(ctx, world) adds things with'
   + ' world.place(object, x, z) (WORLD metres, on the ground) and update(ctx, world, dt) runs its rules with world.playerWorld();'
   + ' world.city gives the city, its traffic, people, parked cars and'
   + ' toWorld(x, z); world.heightAt(x, z) is the ground — never y = 0. The corner map (roads, named places; tap or M for the full'
@@ -511,7 +573,7 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
             + (/src\/game\/LaneRunnerGame\.tsx/.test(done.find((r) => r.recipe === 'generate_game_shell')?.content ?? '')
               ? ' This is an ENDLESS RUNNER and its game is already on disk: render <LaneRunnerGame title="…" /> from src/game/LaneRunnerGame.tsx'
                 + ' (lanes, obstacles, jump, slide, coins, swipes, start screen, game over) and make it the user\'s game through its props'
-                + ' (colours, title, lanes, speed) or createLaneRunnerScene() — never hand-write the runner\'s rules, lanes or swipes.'
+                + ' (colours, title, lanes, speed) or createLaneRunnerScene(). A follow-up that asks to change the character, the rules, a level, the graphics, the sounds or the controls edits LaneRunnerGame.tsx; do not refuse it as a template limit.'
               : '')
           : ' For a car, bike or ridden animal, keep the camera BEHIND it, opposite its nose.')
         + (has('generate_game_3d')
@@ -636,6 +698,8 @@ export function projectGrowthRules(files: Readonly<Record<string, string>>): str
     // Asked, never guessed, in every game that grows by the user's requests — a road-library race included (2026-11-22).
     typeof files[GAME_FEATURES_INDEX_FILE] === 'string' || /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? GAME_NO_GUESS_RULE : '',
     typeof files[GAME_WORLD_FILE] === 'string' ? GAME_WORLD_RULE : '',
+    // An open world = the features list AND the map's regions file: features there never lay land of their own.
+    typeof files[GAME_WORLD_FILE] === 'string' && typeof files[GAME_FEATURES_INDEX_FILE] === 'string' ? OPEN_WORLD_FEATURE_GROUND_RULE : '',
     typeof files[GAME_PLAYER_FILE_PATH_IN_GAME] === 'string' ? GAME_PLAYER_RULE : '',
     /<RacingRoadGame\b/.test(String(files['src/App.tsx'] ?? '')) ? RACE_ROAD_RULE : '',
     // Every later turn of a game made on the kit: nothing passes through anything (admin 2026-11-22). A game = the kit's loop

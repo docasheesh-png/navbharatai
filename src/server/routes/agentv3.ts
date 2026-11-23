@@ -88,7 +88,8 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
+import { resolveBuildScaffold } from '../AgentV3/gameLibrary/match';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths, isPlatformSeededFile } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -105,6 +106,7 @@ import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptR
 import { answeringModel, answerTimeOf } from '../AgentV3/answeringModel';
 import { recordedTextCall } from '../AgentV3/recordedTextCall';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { builderTrafficEnabled, orderBuilderRungs, presentBuilderRungs } from '../AI/ProviderHealth/builderTraffic';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
@@ -738,6 +740,7 @@ import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, 
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { gameMeasureFromIssues, gameGotWorse, versionBeforeTurn, gameUndoMessage } from '../AgentV3/gameRegression';
+import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage, geometryRepairNote } from '../AgentV3/gameGeometryProbe';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -3883,6 +3886,9 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   // Owner Weak order applies to main, plan, heal and complex lanes; explicit retry/escalation
   // may advance past a failed rung. Other bands retain their existing transformations.
   if (level === 'weak' && !opts.afterLeadRung && !opts.fromProvider) rungs = weakGlmFirst(rungs);
+  // Health order stays inside this tier and inside one price. The owner prefix above is unchanged.
+  if (builderTrafficEnabled()) rungs = orderBuilderRungs(rungs);
+  rungs = presentBuilderRungs(rungs);
   // Owner t357u + t359u: Weak is Surplus (above) → Router One → BluesMinds → the tier ladder, all default on.
   // Owner 2026-11-17: Moyi sits right after BluesMinds (moyiBuilder.ts; present once its key, model and rate are set).
   // Owner 2026-11-17 ("apke sabhi suggestion approved"): Qubax is third, right after Router One and before BluesMinds —
@@ -19362,7 +19368,7 @@ async function noteBuildOutcome(
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
           // A chip the user ADDED words to seeds its template too (chipExtensionFor, autopsy ca99778e).
-          const golden = seedableScaffoldFor(prompt);
+          const golden = await resolveBuildScaffold(prompt);
           if (golden) {
             const existingSrc = await seedSourceInventory(() => finalSteps.step('template check', () => actuator.listFiles(workspaceId)));
             // "Nothing of anybody's is here", not "src/ is empty" — setup writes our own starter into a fresh
@@ -19698,6 +19704,12 @@ async function noteBuildOutcome(
         gameContract = gameHandoff.contract;
         requestContractRef.contract = gameContract;
         if (gameHandoff.block) buildPrompt = `${gameHandoff.block}\n\n---\n\n${buildPrompt}`;
+        // The last playtest's geometry look, for the builder only (gameGeometryProbe.ts) — a game turn reads it, nobody else.
+        if (gameHandoff.block && gameGeometryProbeEnabled()) {
+          // Bounded (re-review 2026-11-23): a slow or hung report read must never hold the turn's start — after 1.5 s no note.
+          const geometryNote = geometryRepairNote((await raceTimeout(previousReportAtStart, 1500, 'geometryNote').catch(() => null))?.issues);
+          if (geometryNote) buildPrompt = `${geometryNote}\n\n---\n\n${buildPrompt}`;
+        }
         if (gameContract) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true,
           message: `Game scope contract: ${JSON.stringify(gameContract)}` });
       } catch { /* unavailable contract is not permission to change an existing project */ }
@@ -24828,6 +24840,12 @@ async function noteBuildOutcome(
               gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playedFiles).missing : [], played: gameProof.outcome !== 'not-run' };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
+              // 🔎 The read-only geometry look (gameGeometryProbe.ts): an info line for the admin report, handed to the builder
+              // as a builder-only note on the next turn. Never scored, never a gate, never shown to the user.
+              if (gameGeometryProbeEnabled()) {
+                const geometryMsg = geometryFindingsMessage(geometryFindings(playRun.geometry, playRun.models));
+                if (geometryMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: GAME_GEOMETRY_CODE, message: geometryMsg, autoResolved: true });
+              }
               // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
               const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');
               if (heavy) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: ${heavy.evidence}.`, autoResolved: false });

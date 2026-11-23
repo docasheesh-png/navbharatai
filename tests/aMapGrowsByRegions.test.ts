@@ -96,14 +96,14 @@ describe('🗺️ several places on one map', () => {
     errors.mockRestore();
   }, 120_000);
 
-  it('🌌 a universe: 100 places and lands on one map, planned at once, started fast, only the first city built', () => {
+  it('🌌 a universe: 110 places and lands on one map, planned at once, started fast, only the first city built', () => {
     const c = context();
     const kinds = ['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach'];
     const regions = Array.from({ length: 110 }, (_, i) => ({ id: `r${i}`, kind: kinds[i % kinds.length], city: small }));
     const t0 = Date.now();
     const world = OW.createOpenWorld(c.ctx, { seed: 5, regions });
     const took = Date.now() - t0;
-    expect(world.places.length + world.lands.length).toBe(100);                        // the limit is 100, not 12
+    expect(world.places.length + world.lands.length).toBe(110);                        // the limit is 1,000 (100 before), not 12
     expect(world.regions.length).toBe(1);                                               // one city built; the rest when reached
     expect(took).toBeLessThan(20_000);
     // Spread over the land, never stacked: every pair of places stands apart.

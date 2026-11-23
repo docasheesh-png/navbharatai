@@ -148,17 +148,19 @@ describe('the two paths cannot drift', () => {
   });
 });
 
-describe('import.meta.glob is refused, not answered with a wrong value', () => {
-  it('an app using it is not browser-runnable', () => {
+describe('import.meta.glob is refused when it cannot be PROVEN, not answered with a wrong value', () => {
+  it('an app whose glob cannot be expanded is not browser-runnable', () => {
     /**
-     * The one part of import.meta a value cannot fix. It is a BUILD-TIME directory expansion; with no
-     * `glob` on the object, an app that builds its routes from one renders with NO routes — which
-     * looks like it worked. An honest refusal is strictly better.
+     * A BUILD-TIME directory expansion. Since 2026-11-22 the React renderer expands literal calls itself
+     * (tests/previewImportMetaGlob.test.ts covers acceptance). A NON-literal pattern cannot be expanded,
+     * and with no `glob` on the object the app would render with NO routes — which looks like it worked.
+     * An honest refusal is strictly better.
      */
     const app = {
-      'package.json': JSON.stringify({ dependencies: { react: '18' } }),
-      'index.html': '<div id=root></div>',
-      'src/routes.ts': 'const pages = import.meta.glob("./pages/*.tsx");',
+      'package.json': JSON.stringify({ dependencies: { react: '18', 'react-dom': '18' } }),
+      'index.html': '<div id=root></div><script type="module" src="/src/main.tsx"></script>',
+      'src/main.tsx': 'import App from "./App"; import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<App />);',
+      'src/routes.ts': 'const dir = "./pages/"; const pages = import.meta.glob(dir + "*.tsx");',
       'src/App.tsx': 'export default () => null;',
     };
     const c = proveBrowserRunnable(app);

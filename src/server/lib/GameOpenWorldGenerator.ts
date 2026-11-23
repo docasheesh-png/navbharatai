@@ -182,6 +182,35 @@ export function userMapUrl(model: string): string {
 export let loadUserMap = (model: string): Promise<THREE.Object3D> => new GLTFLoader().loadAsync(userMapUrl(model)).then((g) => g.scene);
 export function setUserMapLoader(loader: (model: string) => Promise<THREE.Object3D>): void { loadUserMap = loader; }
 
+/**
+ * The highway network's tree: each new stop joined to its nearest stop already on the network (from the first), in the order
+ * they join — [from, to, metres]. The same pairs, in the same order, as trying every joined stop against every other stop each
+ * time (ties go to the stop that joined first, then the lower index), but in n² steps instead of n³, so a map of a thousand
+ * places lays its roads in a blink.
+ */
+export function spanningPairs(stops: ReadonlyArray<{ x: number; z: number }>): Array<[number, number, number]> {
+  const n = stops.length, out: Array<[number, number, number]> = [];
+  if (n < 2) return out;
+  const joinedAt = new Array<number>(n).fill(-1), near = new Array<number>(n).fill(Infinity), from = new Array<number>(n).fill(-1);
+  joinedAt[0] = 0;
+  for (let count = 1, last = 0; count < n; count++) {
+    for (let b = 0; b < n; b++) {
+      if (joinedAt[b] >= 0) continue;
+      const d = Math.hypot(stops[last].x - stops[b].x, stops[last].z - stops[b].z);
+      if (d < near[b]) { near[b] = d; from[b] = last; }
+    }
+    let pick = -1;
+    for (let b = 0; b < n; b++) {
+      if (joinedAt[b] >= 0 || from[b] < 0) continue;
+      if (pick < 0 || near[b] < near[pick] || (near[b] === near[pick] && joinedAt[from[b]] < joinedAt[from[pick]])) pick = b;
+    }
+    if (pick < 0) break;
+    joinedAt[pick] = count; last = pick;
+    out.push([from[pick], pick, near[pick]]);
+  }
+  return out;
+}
+
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
   const { patchSize = 96, city: cityOption = false, regions: regionList, ...mapOptions } = options;
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
@@ -231,7 +260,31 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const userRoots: THREE.Object3D[] = [];
   let disposed = false;
   const locals: THREE.Object3D[] = [];
-  const taken: Array<{ x: number; z: number; r: number }> = [];
+  // The ground already given to a place, a land or a user map. Kept in 1 km cells as well as in order, so "is anything here?"
+  // looks only at the cells near the spot — the same answer as asking every entry (the cells reach as far as the widest one),
+  // in a few steps instead of a thousand.
+  const taken = (() => {
+    const all: Array<{ x: number; z: number; r: number }> = [], cells = new Map<string, number[]>(), CELL = 1000;
+    let widest = 0;
+    return {
+      push(t: { x: number; z: number; r: number }): void {
+        const i = all.push(t) - 1, key = Math.floor(t.x / CELL) + ',' + Math.floor(t.z / CELL);
+        (cells.get(key) || cells.set(key, []).get(key)!).push(i);
+        widest = Math.max(widest, t.r);
+      },
+      /** Whether any entry passes the test — the same entries the test would pass over the whole list, in list order. */
+      some(x: number, z: number, extra: number, test: (t: { x: number; z: number; r: number }) => boolean): boolean {
+        const reach = widest + extra;
+        if (!(reach >= 0) || !Number.isFinite(reach) || !Number.isFinite(x) || !Number.isFinite(z) || reach > CELL * 40) return all.some(test);
+        const cx0 = Math.floor((x - reach) / CELL), cx1 = Math.floor((x + reach) / CELL), cz0 = Math.floor((z - reach) / CELL), cz1 = Math.floor((z + reach) / CELL);
+        for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) {
+          const list = cells.get(cx + ',' + cz);
+          if (list) for (const i of list) if (test(all[i])) return true;
+        }
+        return false;
+      },
+    };
+  })();
   const seenIds = new Set<string>();
   const landList: OpenWorldLand[] = [];
   const userMaps: Array<{ id: string; model: string; centre: { x: number; y: number; z: number }; size: number; status: OpenWorldUserMap['status']; reason?: string; root?: THREE.Object3D }> = [];
@@ -280,7 +333,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const border = shape.radius !== undefined ? shape.radius * 0.85 : Math.min(shape.hw! / Math.max(1e-6, Math.abs(ux)), shape.hd! / Math.max(1e-6, Math.abs(uz)));
       const at = { x: shape.x + ux * (border + r * 0.8), z: shape.z + uz * (border + r * 0.8) };
       const isBase = (t: { x: number; z: number }) => shape!.skip.some((c) => c.x === t.x && c.z === t.z);
-      if (taken.some((t) => !isBase(t) && Math.hypot(at.x - t.x, at.z - t.z) < t.r + r * 0.8)) continue;
+      if (taken.some(at.x, at.z, r * 0.8, (t) => !isBase(t) && Math.hypot(at.x - t.x, at.z - t.z) < t.r + r * 0.8)) continue;
       let dry = 0;
       for (const [dx, dz] of [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
         const x = at.x + dx * r, z = at.z + dz * r;
@@ -306,7 +359,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
       let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 200, (size + 400) * Math.sqrt(n));
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
-      for (let tries = 0; tries < 8 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+      for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
       const y = map.world.levelGround(at.x, at.z, r, r, 60);
@@ -333,7 +386,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
       let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 300, (r * 2 + 400) * Math.sqrt(n));
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
-      for (let tries = 0; tries < 8 && taken.some((t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+      for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
       map.world.setLand(at.x, at.z, r, LAND_BIOME[region.kind]);
@@ -396,7 +449,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     for (const ring of [0, 1, 2, 3, 4]) for (let k = 0; k < (ring ? 8 : 1); k++) {
       const a = (k / 8) * Math.PI * 2, r = ring * reach * 0.9;
       const cx = home.x + Math.cos(a) * r, cz = home.z + Math.sin(a) * r;
-      if (taken.some((t) => Math.hypot(cx - t.x, cz - t.z) < t.r + reach + 140)) continue;   // never on top of another place
+      if (taken.some(cx, cz, reach + 140, (t) => Math.hypot(cx - t.x, cz - t.z) < t.r + reach + 140)) continue;   // never on top of another place
       let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
       for (let i = -samples; i <= samples && !wet; i++) for (let j = -samples; j <= samples; j++) {
         const x = cx + (i / samples) * hx, z = cz + (j / samples) * hz, h = map.world.heightAt(x, z);
@@ -467,16 +520,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const joinedPairs = new Set<string>();
   landList.forEach((l, i) => { if (l.joinedTo) for (const j of stopIndex(l.joinedTo)) { joinedPairs.add((planned.length + i) + ',' + j); joinedPairs.add(j + ',' + (planned.length + i)); } });
   if (stops.length > 1) {
-    const joined = new Set<number>([0]);
-    while (joined.size < stops.length) {
-      let best: [number, number, number] | null = null;
-      for (const a of joined) for (let b = 0; b < stops.length; b++) {
-        if (joined.has(b)) continue;
-        const d = Math.hypot(stops[a].x - stops[b].x, stops[a].z - stops[b].z);
-        if (!best || d < best[2]) best = [a, b, d];
-      }
-      if (!best) break;
-      joined.add(best[1]);
+    for (const best of spanningPairs(stops)) {
       if (joinedPairs.has(best[0] + ',' + best[1])) continue;                                // a joined land touches it
       const A0 = stops[best[0]], B0 = stops[best[1]], len = best[2] || 1;
       const ux = (B0.x - A0.x) / len, uz = (B0.z - A0.z) / len;

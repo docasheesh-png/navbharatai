@@ -42,7 +42,7 @@ function beep(freq: number) {
 export default function App() {
   const [lang, setLang] = useState<Lang>('en');
   const [phase, setPhase] = useState<'menu' | 'play' | 'over'>('menu');
-  const [score, setScore] = useState(KIND === 'coin-wheel' || KIND === 'tea-stall' || KIND === 'high-card' ? 20 : 0);
+  const [score, setScore] = useState(KIND === 'coin-wheel' || KIND === 'coin-dice' || KIND === 'tea-stall' || KIND === 'high-card' || KIND === 'river-ferry' ? 20 : 0);
   const [level, setLevel] = useState(1);
   const [best, setBest] = useState(0);
   const [mark, setMark] = useState(0);
@@ -77,8 +77,8 @@ export default function App() {
     const next = score + n;
     setScore(next);
     beep(n >= 0 ? 640 : 240);
-    if (next >= level * 30 && KIND !== 'coin-wheel' && KIND !== 'tea-stall' && KIND !== 'high-card') setLevel((lv) => lv + 1);
-    if ((KIND === 'coin-wheel' || KIND === 'tea-stall' || KIND === 'high-card') && next <= 0) lose();
+    if (next >= level * 30 && KIND !== 'coin-wheel' && KIND !== 'coin-dice' && KIND !== 'tea-stall' && KIND !== 'high-card' && KIND !== 'river-ferry') setLevel((lv) => lv + 1);
+    if ((KIND === 'coin-wheel' || KIND === 'coin-dice' || KIND === 'tea-stall' || KIND === 'high-card' || KIND === 'river-ferry') && next <= 0) lose();
   }
 
   function tapZone() {
@@ -121,7 +121,21 @@ export default function App() {
     }
     if (KIND === 'tea-stall') { gain(value === 'serve' ? 4 : -1); return; }
     if (KIND === 'tower-line') { gain(2); setStep((s) => s + 1); if (step + 1 >= 6 + level) lose(); return; }
-    if (KIND === 'cave-steps') { gain(1); setStep((s) => s + 1); return; }
+    if (KIND === 'cave-steps' || KIND === 'shield-rush' || KIND === 'drum-row' || KIND === 'seed-row') { gain(value === 'miss' ? -2 : 3); setStep((s) => s + 1); return; }
+    if (KIND === 'shape-yard' || KIND === 'rhyme-pair') {
+      if (value !== 'yes') { lose(); return; }
+      gain(5);
+      setStep((s) => s + 1);
+      return;
+    }
+    if (KIND === 'road-tale') { gain(value === 'help' ? 3 : 2); setStep((s) => s + 1); return; }
+    if (KIND === 'coin-dice') {
+      const roll = 1 + Math.floor(Math.random() * 6);
+      setPicked(String(roll));
+      gain(roll % 2 === 0 ? roll : -roll);
+      return;
+    }
+    if (KIND === 'river-ferry') { gain(value === 'load' ? 4 : -2); return; }
   }
 
   function onKey(e: { key: string }) {
@@ -143,7 +157,7 @@ export default function App() {
         <span className="badge">{t.level} {level}</span>
         <button className="badge" onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}>{t.lang}</button>
       </div>
-      {phase !== 'play' && <button className="primary" onClick={() => { setScore(KIND === 'coin-wheel' || KIND === 'tea-stall' || KIND === 'high-card' ? 20 : 0); setStep(0); setPicked(''); setPhase('play'); }}>{phase === 'over' ? t.again : t.play}</button>}
+      {phase !== 'play' && <button className="primary" onClick={() => { setScore(KIND === 'coin-wheel' || KIND === 'coin-dice' || KIND === 'tea-stall' || KIND === 'high-card' || KIND === 'river-ferry' ? 20 : 0); setStep(0); setPicked(''); setPhase('play'); }}>{phase === 'over' ? t.again : t.play}</button>}
       {phase === 'over' && <p>{t.over}</p>}
       {phase === 'play' && (KIND === 'bolt-arena' || KIND === 'beat-steps' || KIND === 'tap-bloom' || KIND === 'slope-ride') && (
         <div>
@@ -173,12 +187,19 @@ export default function App() {
           {word.split('').map((ch) => <button key={ch} className="primary" style={{ marginRight: 8 }} onClick={() => act(ch)}>{ch}</button>)}
         </div>
       )}
-      {phase === 'play' && (KIND === 'high-card' || KIND === 'coin-wheel' || KIND === 'tea-stall' || KIND === 'tower-line' || KIND === 'camp-quest' || KIND === 'cave-steps') && (
+      {phase === 'play' && (KIND === 'shape-yard' || KIND === 'rhyme-pair') && (
         <div>
-          {KIND === 'coin-wheel' && <p>Play coins only. Nothing here pays real money.</p>}
+          <p>{KIND === 'shape-yard' ? 'How many sides does a square have?' : 'Which word rhymes with play?'}</p>
+          <button className="primary" onClick={() => act('yes')}>{KIND === 'shape-yard' ? '4' : 'day'}</button>
+          <button className="primary" style={{ marginLeft: 8 }} onClick={() => act('no')}>{KIND === 'shape-yard' ? '3' : 'boat'}</button>
+        </div>
+      )}
+      {phase === 'play' && (KIND === 'high-card' || KIND === 'coin-wheel' || KIND === 'coin-dice' || KIND === 'tea-stall' || KIND === 'river-ferry' || KIND === 'tower-line' || KIND === 'camp-quest' || KIND === 'cave-steps' || KIND === 'shield-rush' || KIND === 'drum-row' || KIND === 'seed-row' || KIND === 'road-tale') && (
+        <div>
+          {(KIND === 'coin-wheel' || KIND === 'coin-dice') && <p>Play coins only. Nothing here pays real money.</p>}
           <p>{picked || KIND}</p>
-          <button className="primary" onClick={() => act(KIND === 'camp-quest' ? 'rest' : KIND === 'tea-stall' ? 'serve' : 'go')}>Go</button>
-          {KIND === 'camp-quest' && <button className="primary" style={{ marginLeft: 8 }} onClick={() => act('fight')}>Onward</button>}
+          <button className="primary" onClick={() => act(KIND === 'camp-quest' ? 'rest' : KIND === 'tea-stall' ? 'serve' : KIND === 'river-ferry' ? 'load' : KIND === 'road-tale' ? 'help' : KIND === 'shield-rush' ? 'block' : 'go')}>Go</button>
+          {(KIND === 'camp-quest' || KIND === 'road-tale' || KIND === 'drum-row' || KIND === 'seed-row') && <button className="primary" style={{ marginLeft: 8 }} onClick={() => act(KIND === 'drum-row' || KIND === 'seed-row' ? 'miss' : 'fight')}>Onward</button>}
         </div>
       )}
     </div>

@@ -405,7 +405,15 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   // failedbr #2490: "is map ko 50x bigger banao … isi ko duplicate kar ke merge karo" — the builder stretched sizeMeters (the SAME
   // terrain, 7× wider) to the 1000 km cap and stopped at 12 places, all near the start. Bigger means MORE places, not a stretch.
   + ' "Map N guna / N× bada karo", "universe banao", "aur maps jodo" → ADD regions (several at once, a mix of places and lands, spread'
-  + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land). "Isi map ko'
+  + ' in every direction) up to 100 — NEVER raise sizeMeters to make the map bigger (it only stretches the same land).'
+  // failedbr #2494 autopsy: "4 bade map jod ke ek bada giant world" became places spread 2.6–3.5 km apart, each on its own
+  // levelled ground at its own height — the user saw maps that never joined. JOINED INTO ONE means edge to edge.
+  + ' JOINED INTO ONE ("N map jod ke ek (bada) map / world banao", "maps ko aapas me jodo / chipka do / mila ke ek karo",'
+  + ' "join / merge the maps into one world") → the places stand EDGE TO EDGE, never kilometres apart: each place asked for is a'
+  + ' joined tile of the FIRST region, { id: \'<new id>\', kind: \'city\', joinTo: \'<first region id>\', toward?: \'east\' … }'
+  + ' (one ground level, the streets carried straight on; a village or town look is city: { style: \'town\' } on that tile),'
+  + ' and a land asked for in the same breath is a land region with NO distance (the kit lays it as near as it can, joined by a highway). "Aur maps'
+  + ' jodo" / "map bada karo" with no "ek" / "aapas me" still ADDS spread places as above. "Isi map ko'
   + ' duplicate karke jodo" → add copies of the existing regions with new ids (same kind and the same city options), spread around'
   + ' the original. A MAP THE USER ATTACHED (a .glb / .gltf / .obj, loose or in a .zip — it lands at public/models/<name>.glb) and asks'
   + ' to add ("isse north me jod do", "@add kar do") → ONE region { id, kind: \'custom\', model: \'<name>\', toward?, size? } (size = metres'

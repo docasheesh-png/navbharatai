@@ -1,4 +1,4 @@
-// 🌱 GRASS NEVER GROWS ON A ROAD (admin 2026-11-23, failedbr #2503: "road par ghas jam gayi hai"). Three holes, each closed here:
+// 🌱 GRASS NEVER GROWS ON A ROAD (admin 2026-11-23: grass was growing on the roads). Three holes, each closed here:
 //   1. the kit's grass density is a 2 m lattice blended between nodes, so beside a road's edge it said "some grass" ON the road;
 //   2. surfaceAt() reads a city's streets (levelled ground) by their biome — 'grass' — and a builder that planted its own grass
 //      "where surfaceAt says grass" covered every street: plantableAt() is the question to ask;

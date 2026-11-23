@@ -126,6 +126,8 @@ export interface MapOptions {
   sizeMeters?: number;
   style?: { relief?: number; seaShift?: number; aridity?: number; warmth?: number; rivers?: number };
   roads?: boolean;
+  /** false: plain ground colours and no bushes or stones (see AthreeWorldOptions.nature). Default on. */
+  nature?: boolean;
 }
 
 export interface QualityTier {
@@ -205,7 +207,7 @@ import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './r
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
 export interface GroundEdit { x0: number; z0: number; x1: number; z1: number }
-/** A land a game can lay on part of the map (setLand). 'grassland' is an open field: grass to the horizon, no trees. */
+/** A land a game can lay on part of the map (setLand). 'grassland' is an open field: thick grass with bushes, stones and a few lone trees. */
 export type LandBiome = 'beach' | 'desert' | 'forest' | 'grassland' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
 
@@ -222,6 +224,13 @@ export interface AthreeWorldOptions {
   roads?: boolean;
   /** The character of the land. Every field is optional; the neutral style is the original world, exactly. */
   style?: Partial<AthreeStyle>;
+  /**
+   * 🌿 NATURE (admin 2026-11-23: "ghaas ke maidan simple green field ban rahe hai … real ghaas, bush, tree, patthar sab randomly
+   * bikhre rahe"). On by default: the ground's green is patchy (lush, dry, dark, bare earth) instead of one flat colour, bushes and
+   * stones are scattered in clumps, and an open grass field gets a few lone trees. Set false for the plain look (one colour per
+   * land, no bushes or stones, an open field with no tree). Nothing is ever put on a road, levelled ground (a city, a venue) or water.
+   */
+  nature?: boolean;
 }
 
 /** The knobs that make one map a desert, another a jungle, another an archipelago. All neutral at 0 (relief and rivers at 1). */
@@ -299,8 +308,10 @@ export interface AthreeWorld {
    * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
    */
   setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void;
-  /** True inside an open field a game laid with setLand(..., 'grassland'): thick grass and no trees (a maidan, a meadow). */
+  /** True inside an open field a game laid with setLand(..., 'grassland'): thick grass, bushes, stones and a few lone trees (a maidan, a meadow). */
   openFieldAt(x: number, z: number): boolean;
+  /** False when the game passed nature: false (plain ground colours, no bushes or stones, no tree in an open field). */
+  readonly nature?: boolean;
   /**
    * Lay a ROAD the game asks for (a highway between two of its places), through these points. The ground is cut and filled
    * to it (a smooth grade, a shoulder) so it can be driven, roadAt answers it, and the returned centre line (with heights)
@@ -886,7 +897,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -926,6 +937,7 @@ const CHUNKS = `// Athree map — chunk streaming, levels of detail, skirts and 
 // (floating origin), so 32-bit float vertex precision never degrades far from the start. Own implementation.
 
 import { QUALITY, lodResolution, type AthreeQuality } from './config';
+import { fieldNoise } from './noise';
 import type { AthreeWorld, Biome } from './world';
 
 // three.js is passed in by the caller (import * as THREE from 'three'); it is typed loosely here on purpose.
@@ -944,6 +956,39 @@ const BIOME_COLOR: Record<Biome, [number, number, number]> = {
   snow: [0.93, 0.95, 0.97],
 };
 
+/**
+ * 🌿 THE GROUND IS NEVER ONE FLAT GREEN (admin 2026-11-23: "ghaas ke maidan simple green field ban rahe hai"). A land's colour is
+ * varied by world-aligned noise: broad lush / dry patches, darker hollows, and on grass and forest a few patches of bare earth, so a
+ * field reads as ground and not as a painted board even where the grass tufts have faded out. A pure function of the place, so two
+ * chunks (and two levels of detail) agree along their shared edge. A world made with nature: false keeps the one colour per land.
+ */
+export function groundColor(world: AthreeWorld, x: number, z: number, biome: Biome): [number, number, number] {
+  const c = BIOME_COLOR[biome];
+  if ((world as { nature?: boolean }).nature === false || biome === 'ocean' || biome === 'snow') return c;
+  const period = world.mode === 'loop' ? world.sizeMeters : 0;
+  const broad = fieldNoise(x, z, world.seed + 21, 3, 90, period);
+  const fine = fieldNoise(x, z, world.seed + 22, 2, 26, period);
+  let r = c[0], g = c[1], b = c[2];
+  if (biome === 'grassland' || biome === 'forest') {
+    // Lush (deeper, greener) where broad is low; dry (yellow-olive) where it is high.
+    const dry = Math.min(1, Math.max(0, (broad - 0.5) * 2.6));
+    const lush = Math.min(1, Math.max(0, (0.5 - broad) * 2.6));
+    const dryC = biome === 'grassland' ? [0.55, 0.53, 0.27] : [0.3, 0.36, 0.17];
+    const lushC = biome === 'grassland' ? [0.27, 0.46, 0.15] : [0.12, 0.29, 0.11];
+    r += (dryC[0] - r) * dry * 0.85 + (lushC[0] - r) * lush * 0.85;
+    g += (dryC[1] - g) * dry * 0.85 + (lushC[1] - g) * lush * 0.85;
+    b += (dryC[2] - b) * dry * 0.85 + (lushC[2] - b) * lush * 0.85;
+    // Bare earth: a few soft patches where a third noise peaks.
+    const soil = fieldNoise(x, z, world.seed + 23, 2, 34, period);
+    const e = Math.min(1, Math.max(0, (soil - 0.68) * 5)) * (biome === 'grassland' ? 0.55 : 0.35);
+    r += (0.43 - r) * e; g += (0.36 - g) * e; b += (0.24 - b) * e;
+  }
+  // Mottling at two scales: a few metres (clumps of darker and lighter grass under the tufts) and tens of metres.
+  const mottle = fieldNoise(x, z, world.seed + 24, 2, 9, period);
+  const shade = 0.82 + 0.2 * fine + 0.16 * mottle;
+  return [Math.min(1, r * shade), Math.min(1, g * shade), Math.min(1, b * shade)];
+}
+
 /** One chunk's geometry in WORLD-ALIGNED local coordinates: x, z run 0..size from the chunk's corner; y is the true height. */
 export function buildChunkGeometry(THREE: ThreeLike, world: AthreeWorld, cx: number, cz: number, size: number, res: number) {
   const x0 = cx * size;
@@ -958,7 +1003,7 @@ export function buildChunkGeometry(THREE: ThreeLike, world: AthreeWorld, cx: num
     const wz = z0 + lz;
     const y = world.heightAt(wx, wz);
     const nm = world.normalAt(wx, wz);
-    const c = BIOME_COLOR[world.biomeAt(wx, wz)];
+    const c = groundColor(world, wx, wz, world.biomeAt(wx, wz));
     pos[i * 3] = lx;
     pos[i * 3 + 1] = y - drop;
     pos[i * 3 + 2] = lz;
@@ -1331,7 +1376,7 @@ export function athreeFiles(chosen: readonly string[], excludedModules: readonly
 const RULE_CORE = 'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. The world is always there: terrain, biomes, wind, spawns, heightfield colliders, desert dunes (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), rivers and lakes as DATA (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real; rivers always end in the sea, a lake or another river; the water level only goes down along a river; nothing grows or spawns in the water; pass rivers: false for a world without them), roads as DATA (map.world.homeRoads() gives the villages, highways and, for the racing profile, the closed banked race circuit with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; roads are made region by region (12.5 km) as you travel, with no junctions; pass roads: false for a world without them) and map.world.surfaceAt (what a wheel runs on).';
 const RULE_BY_MODULE: Record<string, string> = {
   sea: 'SEA: a real wave ocean (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour) and map.ocean.floatAt for boats. Do not add your own water plane: the ocean is already in map.chunks.group.',
-  plants: 'PLANTS: grass and trees (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map; a flower bed or bush you must add goes only where map.world.plantableAt(x, z) is true (never on a road, a city street or water).',
+  plants: 'PLANTS: grass, trees, bushes and stones (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, bushes and stones scattered in clumps, placed by biome and slope, streamed in tiles, three levels of budget per quality tier; the ground colour is patchy — lush, dry, bare earth — never one flat green; an open grass field holds a few lone trees). Never on a road, levelled ground (a city, a venue), water or where the player starts. Trees, bushes and stones are visual only: they have no collider yet, so a car drives through them (treesInRect / propsInRect(world, x0, z0, x1, z1, cell) give their positions if you need to keep clear of them); pass nature: false for the plain look (one colour per land, no bushes or stones, no tree in an open field) and vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map; a flower bed or bush you must add goes only where map.world.plantableAt(x, z) is true (never on a road, a city street or water).',
   rivers: 'RIVERS: map.riverWater draws the rivers and lakes with a flowing-water shader and gives boats floatAt; they are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Do not draw your own rivers or lakes.',
   sky: 'SKY: map.sky gives the sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. Do not draw your own sky.',
   roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers. Do not draw your own roads.',

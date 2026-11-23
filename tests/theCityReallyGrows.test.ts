@@ -219,14 +219,22 @@ describe('🏙️ the real kit, headless', () => {
     expect(huge.map.world.sizeMeters).toBe(300000);                                         // raised, never lowered
     huge.dispose();
   }, 180_000);
-  it('Q-3306: a grassland land is really an open grass field — grass biome, no tree in it, the map colours it', () => {
-    const world = OW.createOpenWorld(context(), { seed: 7, regions: [{ id: 'main-city', kind: 'city', city: small }, { id: 'maidan', kind: 'grassland', toward: 'east', radius: 600 }] });
+  it('Q-3306: a grassland land is really an open grass field — grass biome, only a few lone trees in it (never a copse), the map colours it', () => {
+    const regions = [{ id: 'main-city', kind: 'city', city: small }, { id: 'maidan', kind: 'grassland', toward: 'east', radius: 600 }];
+    const world = OW.createOpenWorld(context(), { seed: 7, regions });
     expect(world.lands.map((l: any) => l.kind)).toEqual(['grassland']);
     const c = world.lands[0].centre, w = world.map.world;
     if (w.heightAt(c.x, c.z) >= 3) expect(w.biomeAt(c.x, c.z)).toBe('grassland');
     expect(w.openFieldAt(c.x, c.z)).toBe(true);
-    expect(VEG.treesInRect(w, c.x - 150, c.z - 150, c.x + 150, c.z + 150)).toEqual([]);
+    // 🌿 (admin 2026-11-23: "bush, tree, patthar sab randomly bikhre rahe"): an open field is grass to the horizon with a FEW lone
+    // trees — at most one candidate cell in twenty-five, far thinner than plain grassland — and none at all with nature: false.
+    const inField = VEG.treesInRect(w, c.x - 150, c.z - 150, c.x + 150, c.z + 150).filter((t: any) => w.openFieldAt(t.x, t.z));
+    expect(inField.length).toBeLessThanOrEqual(Math.ceil((300 / 12.5) ** 2 / 25));
     world.dispose();
+    const plain = OW.createOpenWorld(context(), { seed: 7, regions, nature: false });
+    const pc = plain.lands[0].centre;
+    expect(VEG.treesInRect(plain.map.world, pc.x - 150, pc.z - 150, pc.x + 150, pc.z + 150).filter((t: any) => plain.map.world.openFieldAt(t.x, t.z))).toEqual([]);
+    plain.dispose();
     expect(readFileSync('src/server/lib/GameShellGenerator.ts', 'utf8')).toMatch(/grassland: '#[0-9a-f]{6}'/);
     expect(GAME_WORLD_RULE).toMatch(/"Ghas ka maidan", "khula maidan", "field", "meadow", "grassland" → \{ kind: 'grassland' \} — never a feature that draws a green circle/);
   }, 180_000);

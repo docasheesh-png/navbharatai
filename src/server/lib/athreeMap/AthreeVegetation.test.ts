@@ -325,10 +325,11 @@ describe('the vegetation manager (real three.js)', () => {
     throw new Error('no lush place found');
   }
 
-  it('draws one mesh per species, variant and detail level plus one for grass', () => {
+  it('draws one mesh per species, variant and detail level, one for bushes, one for stones and one for grass', () => {
     const { veg } = setup('mid');
-    const expected = A.SPECIES.reduce((n: number, s: string) => n + A.VARIANTS[s] * 2, 0) + 1;
+    const expected = A.SPECIES.reduce((n: number, s: string) => n + A.VARIANTS[s] * 2, 0) + 3;
     expect(veg.group.children.length).toBe(expected);
+    expect(veg.group.children[veg.group.children.length - 1].name).toBe('plants:grass');
   });
   it('streams in a few tiles per update, nearest first, and never more than tilesPerUpdate', () => {
     const { world, veg } = setup('phone');
@@ -353,7 +354,9 @@ describe('the vegetation manager (real three.js)', () => {
       expect(s.tufts).toBeLessThanOrEqual(t.maxTufts);
       expect(s.triangles).toBeLessThanOrEqual(A.vegetationTriangles(t));
       expect(s.triangles).toBeLessThanOrEqual(A.vegetationBudget(q));
-      expect(s.drawCalls).toBeLessThanOrEqual(11);
+      expect(s.bushes).toBeLessThanOrEqual(t.maxBushes);
+      expect(s.rocks).toBeLessThanOrEqual(t.maxRocks);
+      expect(s.drawCalls).toBeLessThanOrEqual(13);
       veg.dispose();
     }
   });
@@ -361,7 +364,8 @@ describe('the vegetation manager (real three.js)', () => {
     const { world, veg } = setup('mid');
     const p = lushPlace(world);
     settle(veg, p.x, p.z);
-    const lod0 = [...veg.group.children].filter((m: any, i: number) => m.count > 0 && i % 2 === 0);
+    const lod0 = [...veg.group.children].filter((m: any) => m.count > 0 && m.name.endsWith(':0'));
+    expect(lod0.length).toBeGreaterThan(0);
     const r = A.VEGETATION_TIERS.mid.lod0Radius;
     for (const mesh of lod0) {
       const arr = mesh.instanceMatrix.array;

@@ -1,0 +1,134 @@
+{
+  "checkedAt": "2026-11-23",
+  "added": 87,
+  "skipped": [
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/Simulator/Modular-Apartment-Interior-Kit/GLB/Living/ap_table_lamp.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/First-Person-Items/GLB/Lights/px_fp_candle.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/First-Person-Items/GLB/Paper/px_fp_note.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/First-Person-Items/GLB/Tools/px_fp_battery.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/First-Person-Items/GLB/Tools/px_fp_keycard.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/Horror-Props-Kit/GLB/Electronics/px_vhs_tape.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/Horror-Props-Kit/GLB/Items/px_note_paper.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/Horror-Props-Kit/GLB/Lighting/px_candle.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/Horror-Props-Kit/GLB/Furniture/px_chair_wood.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/Horror-Props-Kit/GLB/Industrial/px_barrel.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/PSX-Horror/Horror-Props-Kit/GLB/Industrial/px_crate_wood.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/Animals/GLB/animal_owl.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/Animals/GLB/animal_fox.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "vuena-mega",
+      "file": "Vuena-Free-Mega-Starter/Animals/GLB/animal_cat.glb",
+      "reason": "Unsafe GLB: references or extensions"
+    },
+    {
+      "pack": "n1",
+      "file": "Superhero_Female_FullBody",
+      "reason": "missing T_Eye_Normal_png.png"
+    },
+    {
+      "pack": "n1",
+      "file": "Superhero_Male_FullBody",
+      "reason": "missing T_Hair_1_Normal_png.png"
+    },
+    {
+      "pack": "n1",
+      "file": "Eyebrows_Female",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Eyebrows_Regular",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Hair_Beard",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Hair_Buns",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Hair_Buzzed",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Hair_BuzzedFemale",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Hair_Long",
+      "reason": "glTF byte budget"
+    },
+    {
+      "pack": "n1",
+      "file": "Hair_SimpleParted",
+      "reason": "glTF byte budget"
+    }
+  ],
+  "packs": {
+    "vuenaMega": 54,
+    "vuenaMarket": 8,
+    "kaykit": 17,
+    "psx": 8,
+    "n1": 0
+  },
+  "bytes": 26148536
+}

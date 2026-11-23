@@ -103,7 +103,7 @@ describe('🏟️ the open world: a venue region', () => {
     err.mockRestore();
   }, 300_000);
 
-  it('joined toward the sea: said in the console, laid on its own instead (never in the water)', () => {
+  it('unknown joinTo: said in the console, laid on its own instead', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const world = OW.createOpenWorld(context(), { seed: 7, regions: [city, { id: 'ghost', kind: 'venue', venue: 'arena', joinTo: 'nowhere' }] });
     expect(err.mock.calls.some((c) => /venue "ghost".*not on the map/.test(String(c[0])))).toBe(true);
@@ -112,6 +112,21 @@ describe('🏟️ the open world: a venue region', () => {
     err.mockRestore();
     world.dispose();
   }, 120_000);
+
+  it('a highway that would cross a venue is bent around the nearest corner of its pad', () => {
+    const box = { x0: -70, x1: 70, z0: -40, z1: 40 };
+    expect(OW.routeAroundVenues({ x: -200, z: 0 }, { x: 200, z: 0 }, [])).toEqual([{ x: -200, z: 0 }, { x: 200, z: 0 }]);
+    const miss = OW.routeAroundVenues({ x: -200, z: 80 }, { x: 200, z: 80 }, [box]);
+    expect(miss).toEqual([{ x: -200, z: 80 }, { x: 200, z: 80 }]);
+    const bent = OW.routeAroundVenues({ x: -200, z: 0 }, { x: 200, z: 0 }, [box]);
+    expect(bent.length).toBeGreaterThanOrEqual(4);
+    expect(bent[0]).toEqual({ x: -200, z: 0 });
+    expect(bent[bent.length - 1]).toEqual({ x: 200, z: 0 });
+    // Every leg stays outside the pad (a single corner is not enough: the second leg of a long road still clipped it).
+    for (let i = 1; i < bent.length; i++) expect(OW.segmentCrossesVenue(bent[i - 1], bent[i], box)).toBe(false);
+    // A road that already ends on the pad (the venue's own access) is left alone.
+    expect(OW.routeAroundVenues({ x: 0, z: 0 }, { x: 200, z: 0 }, [box])).toEqual([{ x: 0, z: 0 }, { x: 200, z: 0 }]);
+  });
 
   it('is drawn when the player comes near (markings at real sizes, goals solid), moves with the origin, and leaves with the world', () => {
     const c = context();

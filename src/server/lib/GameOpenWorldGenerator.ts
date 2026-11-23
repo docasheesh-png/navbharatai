@@ -279,6 +279,47 @@ export function spanningPairs(stops: ReadonlyArray<{ x: number; z: number }>): A
   return out;
 }
 
+/** An axis-aligned pad, already including any clearance (the world uses a 12 m shoulder). */
+export type VenueBox = { x0: number; x1: number; z0: number; z1: number };
+
+const inVenueBox = (p: { x: number; z: number }, b: VenueBox): boolean => p.x >= b.x0 && p.x <= b.x1 && p.z >= b.z0 && p.z <= b.z1;
+
+/** Liang–Barsky: whether the segment a→c enters the box. PURE. */
+export function segmentCrossesVenue(a: { x: number; z: number }, c: { x: number; z: number }, b: VenueBox): boolean {
+  let t0 = 0, t1 = 1;
+  const dx = c.x - a.x, dz = c.z - a.z;
+  for (const [pp, q] of [[-dx, a.x - b.x0], [dx, b.x1 - a.x], [-dz, a.z - b.z0], [dz, b.z1 - a.z]]) {
+    if (pp === 0) { if (q < 0) return false; continue; }
+    const t = q / pp;
+    if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+  }
+  return t0 <= t1;
+}
+
+/**
+ * A highway from one stop to the other, bent around a full side (two corners) of the first venue pad it would cross.
+ * A single corner is not enough: the second leg of a long straight road can still clip the pad. Unchanged when it does
+ * not cross any pad, when an end already sits in a pad, or when there are no venues. PURE.
+ */
+export function routeAroundVenues(from: { x: number; z: number }, to: { x: number; z: number }, boxes: ReadonlyArray<VenueBox>): Array<{ x: number; z: number }> {
+  const clear = 30;
+  for (const b of boxes) {
+    if (inVenueBox(from, b) || inVenueBox(to, b) || !segmentCrossesVenue(from, to, b)) continue;
+    const sw = { x: b.x0 - clear, z: b.z0 - clear }, se = { x: b.x1 + clear, z: b.z0 - clear };
+    const nw = { x: b.x0 - clear, z: b.z1 + clear }, ne = { x: b.x1 + clear, z: b.z1 + clear };
+    // Around the south, north, west or east face — never a single corner, so a long second leg cannot clip the pad.
+    const sides = [[sw, se], [nw, ne], [sw, nw], [se, ne]];
+    let best: Array<{ x: number; z: number }> | null = null, bestLen = Infinity;
+    for (const [a, c] of sides) {
+      if (segmentCrossesVenue(from, a, b) || segmentCrossesVenue(a, c, b) || segmentCrossesVenue(c, to, b)) continue;
+      const len = Math.hypot(a.x - from.x, a.z - from.z) + Math.hypot(c.x - a.x, c.z - a.z) + Math.hypot(to.x - c.x, to.z - c.z);
+      if (len < bestLen) { best = [from, a, c, to]; bestLen = len; }
+    }
+    if (best) return best;
+  }
+  return [from, to];
+}
+
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
   const { patchSize = 96, city: cityOption = false, regions: regionList, liveCities, ...mapOptions } = options;
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
@@ -829,31 +870,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   }
   // A highway never runs across a venue's ground: one that would is bent around the nearest corner of its pad.
   const venueBoxes = venueList.map((v) => ({ x0: v.centre.x - v.width / 2 - 12, x1: v.centre.x + v.width / 2 + 12, z0: v.centre.z - v.depth / 2 - 12, z1: v.centre.z + v.depth / 2 + 12 }));
-  const inBox = (p: { x: number; z: number }, b: (typeof venueBoxes)[number]) => p.x >= b.x0 && p.x <= b.x1 && p.z >= b.z0 && p.z <= b.z1;
-  const crossesBox = (a: { x: number; z: number }, c: { x: number; z: number }, b: (typeof venueBoxes)[number]): boolean => {
-    let t0 = 0, t1 = 1;
-    const dx = c.x - a.x, dz = c.z - a.z;
-    for (const [pp, q] of [[-dx, a.x - b.x0], [dx, b.x1 - a.x], [-dz, a.z - b.z0], [dz, b.z1 - a.z]]) {
-      if (pp === 0) { if (q < 0) return false; continue; }
-      const t = q / pp;
-      if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
-    }
-    return t0 <= t1;
-  };
-  const routeOf = (from: { x: number; z: number }, to: { x: number; z: number }): Array<{ x: number; z: number }> => {
-    for (const b of venueBoxes) {
-      if (inBox(from, b) || inBox(to, b) || !crossesBox(from, to, b)) continue;
-      let best: { x: number; z: number } | null = null, bestLen = Infinity;
-      for (const c of [{ x: b.x0 - 30, z: b.z0 - 30 }, { x: b.x1 + 30, z: b.z0 - 30 }, { x: b.x0 - 30, z: b.z1 + 30 }, { x: b.x1 + 30, z: b.z1 + 30 }]) {
-        if (crossesBox(from, c, b) || crossesBox(c, to, b)) continue;
-        const len = Math.hypot(c.x - from.x, c.z - from.z) + Math.hypot(to.x - c.x, to.z - c.z);
-        if (len < bestLen) { best = c; bestLen = len; }
-      }
-      if (best) return [from, best, to];
-    }
-    return [from, to];
-  };
-  for (const road of roads) roadLines.push(map.world.addRoad(venueBoxes.length ? routeOf(road.from, road.to) : [road.from, road.to], 9));
+  for (const road of roads) roadLines.push(map.world.addRoad(venueBoxes.length ? routeAroundVenues(road.from, road.to, venueBoxes) : [road.from, road.to], 9));
   /** One asphalt ribbon per road, a little above the carved ground, its faces pointing up. */
   for (const line of roadLines) {
     if (line.length < 2) continue;

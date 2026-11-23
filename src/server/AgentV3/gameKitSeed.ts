@@ -445,7 +445,8 @@ export const OPEN_WORLD_FEATURE_GROUND_RULE = '🌱 IN THIS OPEN WORLD A FEATURE
   + ' field, a court, a swimming pool, a talaab / pond, a parking lot, a race track or a grass field ("ghaas ka maidan") is a'
   + ' feature at its real size (under about 300 m), put down with world.place(object, x, z) (WORLD metres) so it sits on the'
   + ' ground there and follows world.heightAt(x, z); its water, grass or tarmac is part of it. Signs, decals, screens, markers and'
-  + ' the HUD are fine too.';
+  + ' the HUD are fine too. GRASS, FLOWERS OR BUSHES a feature scatters go ONLY where map.world.plantableAt(x, z) is true — never'
+  + ' where surfaceAt says \'grass\' (a city\'s streets read as grass there), so nothing green ever grows on a road.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

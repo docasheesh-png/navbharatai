@@ -13,6 +13,7 @@
 interface RecipeOutput { files: Record<string, string>; dependencies?: Array<{ name: string; version: string }>; instructions: string }
 
 import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from './GamePlayerBodyGenerator';
+import { GAME_WORLD_LAYER, WORLD_LAYER_PATH } from './GameWorldLayerGenerator';
 
 export const GAME_OPEN_WORLD_BRIDGE = String.raw`// THE BRIDGE BETWEEN THE BIG MAP AND THE GAME — the player, the camera and everything the game adds stand ON the Athree
 // world. The map streams terrain around the player and re-bases its render origin far from the start; the character
@@ -31,6 +32,8 @@ import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../th
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
+import { localLowestY } from '../three/surfaces';
+import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
@@ -706,7 +709,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     for (let i = 0; i < line.length; i++) {
       const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
       const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * 4.5, nz = dx / l * 4.5;
-      pos.push(line[i].x + nx, line[i].y + 0.08, line[i].z + nz, line[i].x - nx, line[i].y + 0.08, line[i].z - nz);
+      pos.push(line[i].x + nx, line[i].y + 0.02, line[i].z + nz, line[i].x - nx, line[i].y + 0.02, line[i].z - nz);
       // Wound so every face points UP (+Y): a face pointing down is culled from above, and the road was invisible from the sky.
       if (i > 0) { const k = i * 2; idx.push(k - 2, k, k - 1, k - 1, k, k + 1); }
     }
@@ -906,9 +909,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     },
     heightAt: (x, z) => map.world.heightAt(x, z),
     place(object, x, z, lift = 0) {
-      object.position.set(x - chunks.origin.x, map.world.heightAt(x, z) + lift, z - chunks.origin.z);
-      anchored.set(object, { x, z });
+      object.userData.nbBody = true;
+      object.position.set(x - chunks.origin.x, 0, z - chunks.origin.z);
       if (!object.parent) ctx.scene.add(object);
+      const lowest = object.children.length ? localLowestY(object) : 0;
+      object.position.y = restOriginY(map.world.heightAt(x, z), lowest, lift);
+      anchored.set(object, { x, z });
     },
     release(object) { anchored.delete(object); },
     frame(_ctx, delta) {
@@ -1132,7 +1138,7 @@ export function gameWorldFileSource(options: { city?: boolean } = {}): string {
 
 export function generateOpenWorld(): RecipeOutput {
   return {
-    files: { [OPEN_WORLD_BRIDGE_PATH]: GAME_OPEN_WORLD_BRIDGE, [OPEN_WORLD_STARTER_PATH]: GAME_OPEN_WORLD_STARTER, [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY },
+    files: { [OPEN_WORLD_BRIDGE_PATH]: GAME_OPEN_WORLD_BRIDGE, [OPEN_WORLD_STARTER_PATH]: GAME_OPEN_WORLD_STARTER, [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY, [WORLD_LAYER_PATH]: GAME_WORLD_LAYER },
     dependencies: [],
     instructions: [
       'Added the open-world starter: src/game/OpenWorldGame.tsx and src/game/play/openWorld.ts. It JOINS the Athree map and the game shell —',

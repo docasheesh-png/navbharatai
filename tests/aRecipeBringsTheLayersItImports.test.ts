@@ -31,6 +31,8 @@ describe('a recipe brings the layers it imports', () => {
       'src/game/three/buildings.ts',
       'src/game/three/camera.ts',
       'src/game/three/collision.ts',
+      // surfaces.ts places every body with standOnGround, which lives in groundContact.ts (2026-11-23).
+      'src/game/three/groundContact.ts',
       // Game.ts keeps enemy health bars facing the camera (updateHealthBars) since 2026-11-19 (the shooter HUD) — so
       // the closure brings healthbar.ts too.
       'src/game/three/healthbar.ts',

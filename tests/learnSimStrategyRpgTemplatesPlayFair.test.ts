@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-learn-sim-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['count-garden', 'shape-yard', 'tea-stall', 'river-ferry'];
+const IDS = ['count-garden', 'shape-yard', 'tea-stall', 'river-ferry', 'seed-row', 'tower-line'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -117,6 +117,109 @@ describe('⛵ River Ferry', () => {
   });
   it('stars follow the fewest crossings', () => {
     expect(F().starsFor(7, 7)).toBe(3); expect(F().starsFor(10, 7)).toBe(2); expect(F().starsFor(20, 7)).toBe(1);
+  });
+});
+
+describe('🌰 Seed Row', () => {
+  const S = () => M['seed-row'];
+  it('sowing keeps every seed, skips the other store, and a last seed in your store gives another turn', () => {
+    const b = S().newBoard(), first = S().sow(b, 2, 0);
+    expect(S().total(first.board)).toBe(S().total(b));
+    expect(first.again).toBe(true); expect(first.board[S().storeOf(0)]).toBe(1);
+    const big = S().newBoard(); big[5] = 20;
+    const r = S().sow(big, 5, 0);
+    expect(r.path).not.toContain(S().storeOf(1)); expect(S().total(r.board)).toBe(S().total(big));
+  });
+  it('a last seed in an empty pit of yours takes it and the pit across', () => {
+    const b = S().newBoard(); b[4] = 0; b[3] = 1;
+    const across = b[S().opposite(4)], r = S().sow(b, 3, 0);
+    expect(r.captured).toBe(across + 1); expect(r.board[4]).toBe(0); expect(r.board[S().opposite(4)]).toBe(0);
+    expect(r.board[S().storeOf(0)]).toBe(across + 1);
+  });
+  it('when one side runs empty the game ends and the rest is swept to its owner', () => {
+    const b = Array(14).fill(0); b[5] = 1; b[8] = 3; b[12] = 2;
+    const r = S().sow(b, 5, 0);
+    expect(r.over).toBe(true); expect(r.again).toBe(false);
+    expect(r.board[S().storeOf(0)]).toBe(1); expect(r.board[S().storeOf(1)]).toBe(5);
+    expect(S().pitsOf(1).every((p: number) => r.board[p] === 0)).toBe(true);
+  });
+  it('the computer always picks a legal pit and takes an open capture', () => {
+    const r = rng(9);
+    for (let g = 0; g < 20; g++) {
+      let b = S().newBoard(), side: 0 | 1 = 0;
+      for (let turn = 0; turn < 200; turn++) {
+        const legal = S().legal(b, side); if (!legal.length) break;
+        const pit = side === 1 ? S().bestMove(b, 1, 2) : legal[Math.floor(r() * legal.length)];
+        expect(legal).toContain(pit);
+        const res = S().sow(b, pit, side); expect(S().total(res.board)).toBe(48); b = res.board;
+        if (res.over) break; if (!res.again) side = side === 0 ? 1 : 0;
+      }
+    }
+    const b = Array(14).fill(0); b[7] = 1; b[8] = 0; b[S().opposite(8)] = 9; b[10] = 2; b[2] = 1;
+    expect(S().bestMove(b, 1, 1)).toBe(7);
+  });
+  it('the look-ahead computer beats a random player most of the time', () => {
+    const r = rng(4); let wins = 0;
+    for (let g = 0; g < 20; g++) {
+      let b = S().newBoard(), side: 0 | 1 = 0;
+      for (let turn = 0; turn < 300; turn++) {
+        const legal = S().legal(b, side); if (!legal.length) break;
+        const res = S().sow(b, side === 1 ? S().bestMove(b, 1, 3) : legal[Math.floor(r() * legal.length)], side); b = res.board;
+        if (res.over) break; if (!res.again) side = side === 0 ? 1 : 0;
+      }
+      if (b[S().storeOf(1)] > b[S().storeOf(0)]) wins++;
+    }
+    expect(wins).toBeGreaterThanOrEqual(16);
+  });
+});
+
+describe('🏹 Tower Line', () => {
+  const T = () => M['tower-line'];
+  const field = () => ({ towers: [] as any[], walkers: [] as any[], coins: T().OPTIONS.coins, lives: T().OPTIONS.lives, wave: 0, toSpawn: 0, spawnIn: 0 });
+  const runWave = (g: any) => { g.wave++; g.toSpawn = T().waveOf(g.wave).count; g.spawnIn = 0;
+    for (let i = 0; i < 20000; i++) { const ev = T().stepWave(g, 0.02); if (ev.cleared || g.lives <= 0) return; } throw new Error('wave never ended'); };
+  const spots = () => { const out: [number, number, number][] = []; const o = T().OPTIONS;
+    for (let c = 0; c < o.cols; c++) for (let r = 0; r < o.rows; r++) {
+      let near = 0; for (let d = 0; d <= T().roadLength(); d += 0.5) { const [x, y] = T().pointAt(d); if (Math.hypot(x - c, y - r) <= 2.4) near++; }
+      out.push([c, r, near]);
+    } return out.sort((a, b) => b[2] - a[2]); };
+  it('the road starts and ends at its corners, and no tower can stand on it', () => {
+    expect(T().pointAt(0)).toEqual(T().ROAD[0]); expect(T().pointAt(T().roadLength() + 5)).toEqual(T().ROAD[T().ROAD.length - 1]);
+    for (const [x, y] of T().ROAD) expect(T().canBuild(x, y, [])).toBe(false);
+    expect(T().canBuild(0, 0, [])).toBe(true); expect(T().canBuild(0, 0, [{ kind: 'arrow', col: 0, row: 0, level: 1, cool: 0 }])).toBe(false);
+  });
+  it('towers aim at the walker furthest along within range; frost slows; a cannon splashes', () => {
+    const tw = { kind: 'arrow', col: 5, row: 2, level: 1, cool: 0 };
+    const ws = [4.2, 5, 6, 30].map((d) => ({ hp: 10, max: 10, speed: 1, dist: d, slowFor: 0, reward: 1 }));
+    expect(T().target(tw, ws).dist).toBe(6);
+    const frost = { ...tw, kind: 'frost' }; T().shoot(frost, ws[1], ws); expect(ws[1].slowFor).toBeGreaterThan(0);
+    expect(T().walkerSpeed(ws[1])).toBeLessThan(ws[1].speed);
+    const before = ws.map((w) => w.hp); T().shoot({ ...tw, kind: 'cannon' }, ws[1], ws);
+    expect(ws[0].hp).toBeLessThan(before[0]); expect(ws[2].hp).toBeLessThan(before[2]); expect(ws[3].hp).toBe(before[3]);
+  });
+  it('upgrades cost more each level and selling gives back less than was spent', () => {
+    const tw = { kind: 'cannon', col: 0, row: 0, level: 1, cool: 0 };
+    expect(T().upgradeCost({ ...tw, level: 2 })).toBeGreaterThan(T().upgradeCost(tw));
+    expect(T().statsOf({ ...tw, level: 3 }).damage).toBeGreaterThan(T().statsOf(tw).damage);
+    expect(T().sellValue({ ...tw, level: 2 })).toBeLessThan(T().TOWERS.cannon.cost + T().upgradeCost(tw));
+    for (let n = 2; n <= T().WAVE_COUNT; n++) expect(T().waveOf(n).hp * T().waveOf(n).count).toBeGreaterThan(T().waveOf(n - 1).hp * T().waveOf(n - 1).count);
+  });
+  it('with no towers the gate falls early, but a sensible builder holds all ten waves', () => {
+    const empty = field(); let w = 0; while (empty.lives > 0 && w < 10) { runWave(empty); w++; }
+    expect(empty.lives).toBeLessThanOrEqual(0); expect(w).toBeLessThanOrEqual(3);
+    const g = field(), order = ['arrow', 'arrow', 'cannon', 'frost', 'cannon', 'arrow'];
+    const good = spots();
+    for (let n = 0; n < T().WAVE_COUNT; n++) {
+      for (let guard = 0; guard < 20; guard++) {
+        const kind = order[g.towers.length % order.length], spot = good.find(([c, r]) => T().canBuild(c, r, g.towers));
+        if (spot && g.coins >= T().TOWERS[kind].cost && g.towers.length < 12) { g.towers.push({ kind, col: spot[0], row: spot[1], level: 1, cool: 0 }); g.coins -= T().TOWERS[kind].cost; continue; }
+        const up = g.towers.filter((t: any) => t.level < 3).sort((a: any, b: any) => a.level - b.level)[0];
+        if (up && g.coins >= T().upgradeCost(up)) { g.coins -= T().upgradeCost(up); up.level++; continue; }
+        break;
+      }
+      runWave(g);
+      expect(g.lives).toBeGreaterThan(0);
+    }
   });
 });
 

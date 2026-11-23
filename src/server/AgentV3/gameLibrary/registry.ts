@@ -21,6 +21,8 @@ import { countGardenAppTsx } from './games/countGarden';
 import { shapeYardAppTsx } from './games/shapeYard';
 import { teaStallAppTsx } from './games/teaStall';
 import { riverFerryAppTsx } from './games/riverFerry';
+import { seedRowAppTsx } from './games/seedRow';
+import { towerLineAppTsx } from './games/towerLine';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -60,7 +62,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'slope-ride', title: 'Slope Ride', category: 'Racing', accent: '#9a3412', appTsx: roadRaceAppTsx('run', 'slope-ride-best-v1') },
   { id: 'camp-quest', title: 'Camp Quest', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('camp-quest', 'camp-quest-best-v1') },
   { id: 'tea-stall', title: 'Tea Stall', category: 'Simulation', accent: '#92400e', appTsx: teaStallAppTsx },
-  { id: 'tower-line', title: 'Tower Line', category: 'Strategy', accent: '#334155', appTsx: gapScreen('tower-line', 'tower-line-best-v1') },
+  { id: 'tower-line', title: 'Tower Line', category: 'Strategy', accent: '#334155', appTsx: towerLineAppTsx },
   { id: 'odd-one', title: 'Odd One', category: 'Trivia', accent: '#0369a1', appTsx: gapScreen('odd-one', 'odd-one-best-v1') },
   { id: 'letter-link', title: 'Letter Link', category: 'Word', accent: '#4338ca', appTsx: gapScreen('letter-link', 'letter-link-best-v1') },
   { id: 'shield-rush', title: 'Shield Rush', category: 'Action', accent: '#b91c1c', appTsx: gapScreen('shield-rush', 'shield-rush-best-v1') },
@@ -69,7 +71,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'drum-row', title: 'Drum Row', category: 'Music', accent: '#6d28d9', appTsx: gapScreen('drum-row', 'drum-row-best-v1') },
   { id: 'road-tale', title: 'Road Tale', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('road-tale', 'road-tale-best-v1') },
   { id: 'river-ferry', title: 'River Ferry', category: 'Simulation', accent: '#92400e', appTsx: riverFerryAppTsx },
-  { id: 'seed-row', title: 'Seed Row', category: 'Strategy', accent: '#334155', appTsx: gapScreen('seed-row', 'seed-row-best-v1') },
+  { id: 'seed-row', title: 'Seed Row', category: 'Strategy', accent: '#334155', appTsx: seedRowAppTsx },
   { id: 'rhyme-pair', title: 'Rhyme Pair', category: 'Word', accent: '#4338ca', appTsx: gapScreen('rhyme-pair', 'rhyme-pair-best-v1') },
 ];
 

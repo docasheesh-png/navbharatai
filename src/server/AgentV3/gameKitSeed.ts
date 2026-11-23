@@ -413,20 +413,24 @@ export const GAME_WORLD_RULE = '🗺️ THIS GAME\'S MAP GROWS BY REGIONS (src/g
   + ' loaded in a web game: tell the user to export it as .glb first. Never build a place by hand beside the list, and never replace the'
   + ' map to make it bigger.';
 /**
- * 🌱 A FEATURE NEVER LAYS ITS OWN LAND IN AN OPEN WORLD (failedbr #2495/#2501 autopsy: asked for a grass field in the middle,
+ * 🌱 A FEATURE NEVER LAYS MAP-SCALE LAND IN AN OPEN WORLD (failedbr #2495/#2501 autopsy: asked for a grass field in the middle,
  * the builder added a feature with a flat 2 km PlaneGeometry at y = -0.1, not anchored; the hilly map's slopes cut through it
  * and the sea showed grass under it — the user saw maps "on different planes"). Said on every turn of a game that has BOTH
- * the features list and src/game/world.ts (an open world), never in other games. Only land-like meshes are meant: a flat plane
- * for a sign, a decal, a screen or the HUD is fine.
+ * the features list and src/game/world.ts (an open world), never in other games. Only MAP-SCALE land is banned (about 300 m
+ * or more, or a flat plane at a fixed y that neither follows heightAt nor is anchored); a sized ground object the user asks
+ * for — a cricket ground, a football field, a court, a pool or talaab, a parking lot, a race track — is allowed and built
+ * (re-review 2026-11-23: the first wording over-blocked those, and forbade water outright).
  */
-export const OPEN_WORLD_FEATURE_GROUND_RULE = '🌱 IN THIS OPEN WORLD A FEATURE NEVER LAYS ITS OWN LAND: no ground, grass, field, water, terrain or road mesh of its own'
-  + ' (no big flat PlaneGeometry spread as land, nothing at a fixed y = 0 / -0.1, nothing added to ctx.scene at the map\'s scale) — it'
-  + ' would sit flat while the map\'s hills, sea and levelled places sit at their own heights, and stay behind when the world re-centres.'
-  + ' Stand things on the land with world.place(object, x, z) (WORLD metres; world.heightAt(x, z) is the ground). A different land'
-  + ' ("registan", "jungle", "pahad", "barf", "beach" / desert, jungle, mountain, snow, beach) is a LAND region in src/game/world.ts;'
-  + ' roads between places are the kit\'s highways (world.highways), never a road mesh of your own. "Ghaas ka maidan", "a grass field",'
-  + ' "park" with no such land kind → ask the user (one short question) instead of laying a plane. A small flat plane for a sign,'
-  + ' a decal, a screen, a marker or the HUD is fine.';
+export const OPEN_WORLD_FEATURE_GROUND_RULE = '🌱 IN THIS OPEN WORLD A FEATURE NEVER LAYS MAP-SCALE LAND: no plane of about 300 m or more across'
+  + ' spread as ground, grass, terrain or sea, and no flat plane at a fixed y (0, -0.1) that neither follows world.heightAt nor is'
+  + ' anchored with world.place — the map\'s hills, sea and levelled places sit at their own heights, so such a plane floats over'
+  + ' valleys, the hills cut through it, and it stays behind when the world re-centres. A different land ("registan", "jungle",'
+  + ' "pahad", "barf", "beach" / desert, jungle, mountain, snow, beach) is a LAND region in src/game/world.ts; roads between places'
+  + ' are the kit\'s highways (world.highways). A SIZED GROUND OBJECT IS FINE and is built as asked: a cricket ground, a football'
+  + ' field, a court, a swimming pool, a talaab / pond, a parking lot, a race track or a grass field ("ghaas ka maidan") is a'
+  + ' feature at its real size (under about 300 m), put down with world.place(object, x, z) (WORLD metres) so it sits on the'
+  + ' ground there and follows world.heightAt(x, z); its water, grass or tarmac is part of it. Signs, decals, screens, markers and'
+  + ' the HUD are fine too.';
 /**
  * 🛑 NOTHING IS CHANGED ON A GUESS (admin 2026-11-21, verbatim: "andaze se kuch bhi change/update na ho. Jab bhi baat clear
  * na ho, to user se puch li jaye"). A game that already works is changed only for what the user clearly asked; where the

@@ -1,5 +1,6 @@
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { IMAGE_ENGINE_FAMILY, legacyPathAllows } from '../AI/TrafficRegistry/legacyControl';
+import { catalogueSteps } from '../AI/ProviderHealth/mediaCatalogue';
 import { imageEngineProvider, mediaTrafficEnabled, orderMediaProviders } from '../AI/ProviderHealth/mediaTraffic';
 import { noteProviderCall } from '../AI/ProviderHealth/trafficHealth';
 // NAVBHARATAI'S OWN IMAGE ENGINE, FOR SOMEBODY ELSE'S CALLER — an app built on NavBharatAI, or a
@@ -73,7 +74,7 @@ export async function drawWithNavBharat(
   // Traffic Manager V2 (P9): an engine the admin drained or disabled is skipped — only when the control store covers
   // the image path (off by default). Holds, quotas and safety guards are unchanged. Health may reorder the engines.
   const allowed = (engine: keyof typeof IMAGE_ENGINE_FAMILY) => legacyPathAllows('image', IMAGE_ENGINE_FAMILY[engine]);
-  const imageEngines = ['cloudflare', 'pollinations', 'grok'] as const;
+  const imageEngines = catalogueSteps('app');
   const orderedEngines = mediaTrafficEnabled() ? orderMediaProviders(imageEngines, imageEngineProvider) : imageEngines;
   const record = (provider: string, started: number, ok: boolean, error?: unknown) => {
     noteProviderCall({ provider, surface: 'image', ok, totalMs: Date.now() - started, ...(error ? { error } : {}) });

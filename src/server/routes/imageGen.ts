@@ -31,7 +31,9 @@ import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { initImageTooLarge, parseDataUrl } from '../lib/imageDataUrl';
 import { scanPollinationsPrompt, POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
+import { catalogueSteps, mediaFamily } from '../AI/ProviderHealth/mediaCatalogue';
 import { imageEngineProvider, mediaTrafficEnabled, orderMediaProviders } from '../AI/ProviderHealth/mediaTraffic';
+import { legacyPathAllows } from '../AI/TrafficRegistry/legacyControl';
 import { noteProviderCall } from '../AI/ProviderHealth/trafficHealth';
 
 /**
@@ -356,9 +358,10 @@ export function registerImageGenRoutes(app: Express): void {
         const px = imagePixelsFor(req.body.size, req.body.width, req.body.height);
         // Health may move a suspended engine to the end. It never moves a dearer engine ahead of a cheaper one.
         // `AGENTV3_MEDIA_TRAFFIC=off` keeps this list exactly as written.
-        const imageSteps = ['cloudflare', 'pollinations', 'pro-host', 'gemini', 'grok'] as const;
+        const imageSteps = catalogueSteps('generator');
         const orderedImageSteps = mediaTrafficEnabled() ? orderMediaProviders(imageSteps, imageEngineProvider) : imageSteps;
         for (const step of orderedImageSteps) {
+        if (!legacyPathAllows('image', mediaFamily(step))) continue;
 
         // 1 — FLUX on Cloudflare Workers AI (`cloudflareImage.ts`): about 170 pictures a day inside the
         // account's free allowance, then a fraction of a paisa each. It makes only 1024×1024. Near-free,

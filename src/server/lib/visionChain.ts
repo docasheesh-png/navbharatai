@@ -27,6 +27,7 @@ import { nextPoolKeyEntry } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
 import { tryCheaperInferenceVision, tryQubaxVision } from './visionSuppliers';
 import { noteProviderCall, providerInFlight, providerPoolSlot, shouldSkipProvider } from '../AI/ProviderHealth/trafficHealth';
+import { keepListed } from '../AI/ProviderHealth/mediaCatalogue';
 import { mediaTrafficEnabled, orderMediaProviders } from '../AI/ProviderHealth/mediaTraffic';
 
 export interface VisionAttachment {
@@ -350,7 +351,7 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
     GROK: tryGrok,
     CLAUDE: tryClaude,
   };
-  const visionOrder = visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true);
+  const visionOrder = keepListed(visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true), 'vision');
   const orderedVision = mediaTrafficEnabled() ? orderMediaProviders(visionOrder, (id) => id) : visionOrder;
   for (const provider of orderedVision) {
     o.signal?.throwIfAborted();

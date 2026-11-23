@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { catalogueSteps, keepListed } from './mediaCatalogue';
 import { imageEngineProvider, mediaTrafficEnabled, orderMediaProviders } from './mediaTraffic';
+import { visionProviderOrder } from '../../lib/visionChain';
 import { noteProviderCall, resetTrafficHealthForTests } from './trafficHealth';
 
 afterEach(() => resetTrafficHealthForTests());
@@ -20,14 +22,25 @@ describe('image and vision health order', () => {
     noteProviderCall({ provider: 'GROK', surface: 'image', ok: true, totalMs: 40, at: 1 });
     noteProviderCall({ provider: 'GEMINI', surface: 'image', ok: true, totalMs: 900, at: 2 });
     noteProviderCall({ provider: 'POLLINATIONS', surface: 'image', ok: true, totalMs: 20, at: 3 });
-    const steps = ['cloudflare', 'pollinations', 'pro-host', 'gemini', 'grok'] as const;
+    const steps = catalogueSteps('generator');
     expect(orderMediaProviders(steps, imageEngineProvider, 4)).toEqual([...steps]);
   });
 
   it('parks a suspended cheap image engine after the ones that can still answer', () => {
     noteProviderCall({ provider: 'CLOUDFLARE', surface: 'image', ok: false, error: new Error('account is suspended due to insufficient balance'), at: 1_000 });
-    const steps = ['cloudflare', 'pollinations', 'grok'] as const;
+    const steps = catalogueSteps('app');
     expect(orderMediaProviders(steps, imageEngineProvider, 1_000)).toEqual(['pollinations', 'grok', 'cloudflare']);
+  });
+
+  it('removing one catalogue row drops that rung and leaves the rest in order', () => {
+    expect(catalogueSteps('generator', ['pollinations'])).toEqual(['cloudflare', 'pro-host', 'gemini', 'grok']);
+    expect(catalogueSteps('app', ['cloudflare'])).toEqual(['pollinations', 'grok']);
+    expect(keepListed(['GLM', 'NOT_A_PROVIDER', 'VERTEX'] as const, 'vision')).toEqual(['GLM', 'VERTEX']);
+  });
+
+  it('lists every vision provider the chain can already call, so none disappear by accident', () => {
+    const ids = visionProviderOrder(true, 'paid', true);
+    expect(keepListed(ids, 'vision')).toEqual(ids);
   });
 
   it('vision and both image ladders consult this order, and the admin drain check stays', () => {
@@ -39,6 +52,10 @@ describe('image and vision health order', () => {
     expect(image).toContain('orderMediaProviders');
     expect(image).toContain("legacyPathAllows('image'");
     expect(route).toContain('orderMediaProviders');
+    expect(route).toContain("catalogueSteps('generator')");
+    expect(route).toContain("legacyPathAllows('image'");
+    expect(image).toContain("catalogueSteps('app')");
+    expect(vision).toContain("keepListed(");
     expect(route).toContain("surface: 'image'");
   });
 });

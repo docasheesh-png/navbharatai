@@ -5,6 +5,7 @@
 // is a separate check and is not changed. `AGENTV3_MEDIA_TRAFFIC=off` restores the existing order.
 
 import { parseEnvFlag } from '../../lib/envFlag';
+import { mediaProviderName } from './mediaCatalogue';
 import { orderChatByHealth } from './chatTrafficOrder';
 import { professionalPriceIn } from './professionalTraffic';
 
@@ -23,14 +24,7 @@ export function mediaPriceIn(provider: string): number | null {
 
 /** Health name for one image-ladder step. Shared with the token card when it is the same account. */
 export function imageEngineProvider(step: string): string {
-  switch (step) {
-    case 'cloudflare': return 'CLOUDFLARE';
-    case 'pollinations': return 'POLLINATIONS';
-    case 'pro-host': return 'IMAGE_PRO';
-    case 'gemini': return 'GEMINI';
-    case 'grok': return 'GROK';
-    default: return step.trim().toUpperCase();
-  }
+  return mediaProviderName(step);
 }
 
 export function orderMediaProviders<T extends string>(ids: readonly T[], providerOf: (id: T) => string, now = Date.now()): T[] {

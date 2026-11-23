@@ -6,7 +6,7 @@
 import { asksForEnterableHouses } from './gameIntent';
 
 export const ENTERABLE_HOUSE_RULE = '🚪 ENTERABLE HOUSES. When the game is an action game, a shooter or an open world'
-  + ' (PUBG, Free Fire, BGMI or GTA style, in any language), call createActionTown() from src/game/three/buildings.ts.'
+  + ' (a named battle-royale title or a city sandbox, in any language), call createActionTown() from src/game/three/buildings.ts.'
   + ' It places at least 100 houses in villages on roads. No identical model sits on an adjacent plot, and no identical'
   + ' model-plus-colour sits among the six nearest houses. Shells are instanced. The hollow interior, swinging door,'
   + ' furniture and floor collider are built only when the player is near, then removed again. The door opens with the'
@@ -16,7 +16,7 @@ export const ENTERABLE_HOUSE_RULE = '🚪 ENTERABLE HOUSES. When the game is an 
   + ' house is scenery: enterableShellFor(model) builds the walkable shell from its footprint. Do not leave a solid box'
   + ' as the only house.';
 
-const ACTION_FILE = /createHouse\s*\(|battle royale|open[\s-]?world|BGMI|Free Fire|PUBG|\bGTA\b|createActionTown\s*\(/i;
+const ACTION_FILE = /createHouse\s*\(|createActionTown\s*\(/;
 const ENTERS = /createActionTown\s*\(|createEnterableHouse\s*\(|enterable\s*:\s*true|enterableShellFor\s*\(/;
 const KIT = /\/three\/(buildings|objects)\.ts$/;
 

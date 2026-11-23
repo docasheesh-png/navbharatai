@@ -16,6 +16,7 @@ import { threeLeavesAppTsx } from './games/threeLeaves';
 import { trailWalkAppTsx } from './games/trailWalk';
 import { pavilionAppTsx } from './games/pavilion';
 import { gardenMatchAppTsx } from './games/gardenMatch';
+import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
   | 'Action' | 'Adventure' | 'Arcade' | 'Board' | 'Card' | 'Casino' | 'Casual' | 'Educational'
@@ -44,6 +45,19 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'three-leaves', title: 'Three Leaves', category: 'Card', accent: '#1d4ed8', appTsx: threeLeavesAppTsx },
   { id: 'pavilion', title: 'Pavilion', category: 'Sports', accent: '#b45309', appTsx: pavilionAppTsx },
   { id: 'garden-match', title: 'Garden Match', category: 'Puzzle', accent: '#16a34a', appTsx: gardenMatchAppTsx },
+  { id: 'bolt-arena', title: 'Bolt Arena', category: 'Action', accent: '#dc2626', appTsx: gapScreen('bolt-arena', 'bolt-arena-best-v1') },
+  { id: 'cave-steps', title: 'Cave Steps', category: 'Adventure', accent: '#365314', appTsx: gapScreen('cave-steps', 'cave-steps-best-v1') },
+  { id: 'high-card', title: 'High Card', category: 'Card', accent: '#1e3a8a', appTsx: gapScreen('high-card', 'high-card-best-v1') },
+  { id: 'coin-wheel', title: 'Coin Wheel', category: 'Casino', accent: '#a16207', appTsx: gapScreen('coin-wheel', 'coin-wheel-best-v1') },
+  { id: 'tap-bloom', title: 'Tap Bloom', category: 'Casual', accent: '#db2777', appTsx: gapScreen('tap-bloom', 'tap-bloom-best-v1') },
+  { id: 'count-garden', title: 'Count Garden', category: 'Educational', accent: '#0f766e', appTsx: gapScreen('count-garden', 'count-garden-best-v1') },
+  { id: 'beat-steps', title: 'Beat Steps', category: 'Music', accent: '#7c3aed', appTsx: gapScreen('beat-steps', 'beat-steps-best-v1') },
+  { id: 'slope-ride', title: 'Slope Ride', category: 'Racing', accent: '#9a3412', appTsx: gapScreen('slope-ride', 'slope-ride-best-v1') },
+  { id: 'camp-quest', title: 'Camp Quest', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('camp-quest', 'camp-quest-best-v1') },
+  { id: 'tea-stall', title: 'Tea Stall', category: 'Simulation', accent: '#92400e', appTsx: gapScreen('tea-stall', 'tea-stall-best-v1') },
+  { id: 'tower-line', title: 'Tower Line', category: 'Strategy', accent: '#334155', appTsx: gapScreen('tower-line', 'tower-line-best-v1') },
+  { id: 'odd-one', title: 'Odd One', category: 'Trivia', accent: '#0369a1', appTsx: gapScreen('odd-one', 'odd-one-best-v1') },
+  { id: 'letter-link', title: 'Letter Link', category: 'Word', accent: '#4338ca', appTsx: gapScreen('letter-link', 'letter-link-best-v1') },
 ];
 
 export function gameById(id: string, library: readonly GameTemplate[] = GAME_LIBRARY): GameTemplate | undefined {

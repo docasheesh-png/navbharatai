@@ -468,6 +468,12 @@ export function actionsFromEvent(
       const one = approveAction(collapse(event.callId), event.action, buildId, now, event);
       return one ? [one] : [];
     }
+    case 'bug_hunt_offer': {
+      // A STANDING OFFER, not a gate (failedbr #2494): nothing waits on it, so it never claims the build is stopped.
+      // Its button starts a new bug-hunt turn (the ❗️ list's expired-offer path), never an answer to a dead gate.
+      const one = approveAction(collapse(event.callId), event.title, buildId, now, event);
+      return one ? [{ ...one, blocking: false }] : [];
+    }
     case 'clarify':
       return questionActions(Array.isArray(event.questions) ? event.questions : [], buildId, now);
     default:

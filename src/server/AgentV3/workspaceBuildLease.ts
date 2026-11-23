@@ -225,6 +225,22 @@ export async function renewWorkspaceBuild(
   return (await renewWorkspaceBuildDetailed(store, { ...opts, attempts: opts.attempts ?? 1 })).renewal;
 }
 
+/** A holder this long without a heartbeat has missed two beats: no live build goes that quiet (failedbr #2497). */
+export const SILENT_HOLDER_MS = 2 * LEASE_HEARTBEAT_MS + 5_000;
+/** The longest a new request waits for a silent holder's lease to lapse. The preflight stream pings meanwhile. */
+export const SILENT_HOLDER_MAX_WAIT_MS = 60_000;
+
+/**
+ * Until when a claim should keep waiting for a SILENT holder: its lease lapses at `heartbeatAt + LEASE_STALE_MS`, so
+ * wait just past that, never past `startedAt + SILENT_HOLDER_MAX_WAIT_MS`. A holder that is still heartbeating (or
+ * an unreadable heartbeat) adds no wait — it keeps today's honest "still running". PURE.
+ */
+export function silentHolderWaitUntil(holderHeartbeatAt: number, startedAt: number, nowMs: number): number {
+  if (!Number.isFinite(holderHeartbeatAt) || holderHeartbeatAt <= 0) return 0;
+  if (nowMs - holderHeartbeatAt < SILENT_HOLDER_MS) return 0;
+  return Math.min(startedAt + SILENT_HOLDER_MAX_WAIT_MS, holderHeartbeatAt + LEASE_STALE_MS + 2_000);
+}
+
 /**
  * Claim, but WAIT (bounded) for a draining previous run to release instead of refusing at once.
  * DNA (failedbr 629 → 628): a user's Continue arrived while the interrupted run was still draining its
@@ -236,10 +252,15 @@ export async function claimWorkspaceBuildAwaitingRelease(
   opts: { workspaceId: string; token: string; owner: string; userId?: string | null; nowMs?: number; waitMs?: number; pollMs?: number },
   claim: typeof claimWorkspaceBuild = claimWorkspaceBuild,
 ): Promise<LeaseClaimResult> {
-  const waitUntil = Date.now() + Math.max(0, opts.waitMs ?? 12_000);
+  const startedAt = Date.now();
+  let waitUntil = startedAt + Math.max(0, opts.waitMs ?? 12_000);
   let nowMs = opts.nowMs;
   for (;;) {
     const result = await claim(store, { ...opts, nowMs });
+    // A holder that has missed two heartbeats is almost certainly gone (failedbr #2497: its instance died at ~1 min
+    // and its lease still blocked the workspace). Refusing now would tell the user "your earlier build is still
+    // running" about a build that is not. Wait for the lease to lapse instead — bounded — so the message goes through.
+    if (!result.ok && result.reason === 'busy') waitUntil = Math.max(waitUntil, silentHolderWaitUntil(result.holderHeartbeatAt, startedAt, Date.now()));
     // Only a live holder ('busy') is waited for; 'unavailable' stays an immediate honest 503.
     if (result.ok || result.reason !== 'busy' || Date.now() >= waitUntil || !store) return result;
     await new Promise((resolve) => setTimeout(resolve, (opts.pollMs ?? 1_500) + Math.floor(Math.random() * 300)));
@@ -315,9 +336,8 @@ export async function workspaceBuildIsLive(
  * names, and it states the two facts the user needs: the earlier build is still working (so their work
  * is not lost), and how to get their message through.
  */
-export const BUILD_RUNNING_ELSEWHERE_MESSAGE =
-  'Your earlier build for this app is still running — it keeps going even when the connection drops. ' +
-  'Reopen this chat in a moment to see it, or press ⏹ Stop and then send your message again.';
+// Defined once in src/lib so the client and the server's notice guard read the same sentence (failedbr #2498).
+export { BUILD_RUNNING_ELSEWHERE_MESSAGE } from '../../lib/platformAdmissionNotices';
 
 /** The machine-readable code on that refusal, so a client can offer Stop instead of a dead end. */
 export const BUILD_RUNNING_ELSEWHERE_CODE = 'BUILD_RUNNING_ELSEWHERE';

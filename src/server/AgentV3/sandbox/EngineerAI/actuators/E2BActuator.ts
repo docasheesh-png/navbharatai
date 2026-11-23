@@ -547,6 +547,22 @@ ${attachConsoleJs('page').trimEnd()}
 })().catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
 `.trim();
 
+/**
+ * Before a browser daemon is started: reuse one that already answers on the CDP port, otherwise kill every stale
+ * daemon and every Chromium still holding that port (failedbr #2495/#2496 — a second daemon cannot bind the port, never
+ * answers and never exits, so each relaunch leaked a whole browser). Prints exactly one marker line. PURE.
+ */
+export function browserDaemonPrecheckCommand(): string {
+  return `if curl -s --max-time 3 http://localhost:${CDP_PORT}/json/version | grep -q webSocketDebuggerUrl; then echo NBAI_DAEMON_ALIVE; `
+    // The bracket in each pattern keeps pkill -f from matching THIS shell's own command line (which contains the text).
+    + `else pkill -f '${TOOLS_DIR}/daemon[.]js' ; pkill -f -- '--remote-debugging-port=[${String(CDP_PORT)[0]}]${String(CDP_PORT).slice(1)}' ; echo NBAI_DAEMON_START; fi`;
+}
+
+/** Did the precheck find a daemon that answers? Only an explicit marker counts. PURE. */
+export function browserDaemonAlive(stdout: string | null | undefined): boolean {
+  return /^NBAI_DAEMON_ALIVE$/m.test(String(stdout ?? ''));
+}
+
 // Connects to the persistent browser via CDP, performs ONE action, screenshots,
 // then exits WITHOUT closing the browser (so state survives for the next action).
 // Also emits cursorX/cursorY: the pixel coordinates of the element interacted with
@@ -558,12 +574,21 @@ const {chromium}=require('playwright');
   const a=JSON.parse(process.argv[2]||'{}');
 ${persistentBrowserPageJs()}
   let result='';
+  let reopened='';
   let cursorX=640,cursorY=360;
   async function elCenter(sel){
     try{const el=await page.$(sel);if(el){const b=await el.boundingBox();if(b){return{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};}}return null;}catch(e){return null;}
   }
   try{
-    if(a.action!=='navigate' && page.url()==='about:blank') throw new Error('No app page is open in the shared browser. Navigate to the preview first; no interaction was performed.');
+    // failedbr #2498: the shared browser can come back blank between calls (a relaunched daemon starts on about:blank).
+    // Reopen the page this build was last looking at — or the URL this call names — instead of failing the action.
+    if(a.action!=='navigate' && page.url()==='about:blank'){
+      const reopen=a.url||a.reopenUrl||'';
+      if(!reopen) throw new Error('No app page is open in the shared browser. Navigate to the preview first; no interaction was performed.');
+      await page.goto(reopen,{waitUntil:'domcontentloaded',timeout:15000});
+      await page.waitForTimeout(1200);
+      reopened='The shared browser had no page open, so it reopened '+reopen+' first (the page started fresh). ';
+    }
     if(a.action==='navigate'){await page.goto(a.url,{waitUntil:'networkidle',timeout:20000});result='Navigated to '+a.url;}
     else if(a.action==='click_xy'){cursorX=a.x;cursorY=a.y;await page.mouse.click(a.x,a.y);await page.waitForLoadState('networkidle',{timeout:8000}).catch(()=>{});result='Clicked ('+a.x+','+a.y+')';}
     else if(a.action==='type_text'){await page.keyboard.type(a.text||'');result='Typed text';}
@@ -578,6 +603,7 @@ ${persistentBrowserPageJs()}
     else{result='Unknown browser action: '+a.action;}
     await page.waitForTimeout(600);
   }catch(e){result='ERROR: '+String(e&&e.message||e);}
+  if(reopened)result=result.startsWith('ERROR: ')?'ERROR: '+reopened+result.slice(7):reopened+result;
   const url=page.url();
   const buf=await page.screenshot({type:'png'});
   // Write the PNG to a FILE instead of embedding its base64 in stdout. The sandbox caps commands.run
@@ -602,6 +628,14 @@ ${persistentBrowserPageJs()}
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
+
+/**
+ * The JSON handed to BROWSER_ACTION_SCRIPT. `reopenUrl` is the page this build last opened in the shared browser, used
+ * only when the browser is found blank (failedbr #2498); a `navigate` never needs it. PURE.
+ */
+export function browserActionPayload(action: string, args: Record<string, unknown>, reopenUrl?: string): string {
+  return JSON.stringify({ action, ...args, ...(action !== 'navigate' && reopenUrl ? { reopenUrl } : {}) });
+}
 
 /** The exact bounded element scan, using the action browser's live state (BR1956). */
 export function uiScanScript(url: string): string {
@@ -792,6 +826,9 @@ export class E2BActuator implements IEngineerActuator {
   private _playwrightReady = new Map<string, Promise<boolean>>();
   // Tracks per-sandbox persistent-browser daemon launch
   private _browserDaemon = new Map<string, Promise<boolean>>();
+  // The last page each workspace's builder opened in the shared browser (screenshot, element scan, navigate), so an
+  // action that finds the browser blank can reopen it instead of failing (failedbr #2498).
+  private _lastBrowserUrl = new Map<string, string>();
   // Phase 12E — last activity timestamp per workspace, drives idle auto-pause.
   private _lastActivity = new Map<string, number>();
   // Warm-sandbox durability (2026-07-05): a bounded write-through cache of the SOURCE files written to
@@ -3074,6 +3111,7 @@ export class E2BActuator implements IEngineerActuator {
    */
   async scanUiElements(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }> {
     const sandbox = await this.getSandbox(workspaceId);
+    if (url) this._lastBrowserUrl.set(workspaceId, url);
     if (!this._playwrightReady.has(workspaceId)) this._kickoffPlaywright(sandbox, workspaceId);
     const ready = await Promise.race([
       this._playwrightReady.get(workspaceId)!,
@@ -3128,6 +3166,7 @@ export class E2BActuator implements IEngineerActuator {
   async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     const sandbox = await this.getSandbox(workspaceId);
     usageTracker.record(workspaceId, 'screenshot');
+    if (url) this._lastBrowserUrl.set(workspaceId, url);
     const vw = viewport?.width ?? 1280;
     const vh = viewport?.height ?? 720;
 
@@ -3195,6 +3234,14 @@ export class E2BActuator implements IEngineerActuator {
     if (existing) return existing;
 
     const promise: Promise<boolean> = (async () => {
+      // ONE BROWSER PER SANDBOX (failedbr #2495/#2496). This cache is per server process, and a sandbox outlives it:
+      // it is paused, resumed and reached from a different Cloud Run instance on a later build, and the action retry
+      // drops the cache after one failed action. Each time, a second `daemon.js` used to start — its Chromium cannot
+      // bind the CDP port the first one holds, so it never answers, yet it never exits either (the script idles
+      // forever). One whole headless browser leaked per occurrence, for the life of the sandbox. Now: a daemon that
+      // already answers is reused, and a dead or hung one is killed before the fresh one starts.
+      const pre = await sandbox.commands.run(browserDaemonPrecheckCommand(), { timeoutMs: 10_000 }).catch(() => ({ stdout: '' } as { stdout: string }));
+      if (browserDaemonAlive(pre.stdout)) return true;
       // daemon.js is written during playwright install; rewrite defensively in case.
       await sandbox.files.write(`${TOOLS_DIR}/daemon.js`, BROWSER_DAEMON_SCRIPT).catch(() => {});
       await sandbox.commands
@@ -3245,7 +3292,8 @@ export class E2BActuator implements IEngineerActuator {
       throw new Error('Playwright not ready yet (still installing or failed).');
     }
 
-    const payload = JSON.stringify({ action, ...args });
+    if (args.url) this._lastBrowserUrl.set(workspaceId, args.url);
+    const payload = browserActionPayload(action, args, this._lastBrowserUrl.get(workspaceId));
     // ONE attempt: ensure the CDP daemon is genuinely reachable, then drive the action against it.
     const attempt = async (): Promise<{ result: string; url?: string; screenshot: string; cursorX?: number; cursorY?: number }> => {
       await this._ensureBrowserDaemon(sandbox, workspaceId);

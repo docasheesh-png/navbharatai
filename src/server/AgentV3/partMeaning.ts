@@ -70,7 +70,7 @@ const MEANINGS: readonly string[][] = [
   ['power', 'powerup', 'powerups', 'shakti', 'boost', 'booster', 'taakat', 'शक्ति'],
   ['shield', 'kavach', 'dhal', 'armor', 'armour', 'कवच'],
   ['win', 'jeet', 'victory', 'jeetna', 'जीत'], ['lose', 'haar', 'gameover', 'harna', 'हार'],
-  ['menu', 'pause', 'settings', 'setting', 'मेन्यू'],
+  ['menu', 'menus', 'pause', 'settings', 'setting', 'ui', 'interface', 'मेन्यू'],
   ['camera', 'view', 'nazara', 'firstperson', 'thirdperson', 'topdown', 'कैमरा'],
   ['controls', 'control', 'joystick', 'keyboard', 'button', 'buttons', 'touch', 'input', 'keybind', 'keybinds', 'कंट्रोल'],
   ['hud', 'healthbar', 'display', 'overlay'],
@@ -115,7 +115,7 @@ export function tellingWords(text: string): string[] {
   for (const raw of norm(text).replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^\p{L}\p{M}\p{N}]+/u)) {
     if (!raw || SAYS_NOTHING.has(raw)) continue;
     const w = stem(raw);
-    if (w.length < 3 && /^[a-z0-9]+$/.test(w)) continue;
+    if (w.length < 3 && /^[a-z0-9]+$/.test(w) && !MEANING_OF.has(w)) continue;
     if (!SAYS_NOTHING.has(w)) out.add(w);
   }
   return [...out];
@@ -189,14 +189,13 @@ const KIT_PART_ABOUT: Readonly<Record<string, readonly string[]>> = {
   'src/game/core/keybinds.ts': ['controls', 'keyboard'],
   'src/game/ui/touchControls.ts': ['controls', 'joystick', 'touch buttons'],
   'src/game/2d/touch.ts': ['controls', 'joystick', 'touch buttons'],
-  'src/game/ui/Hud.tsx': ['hud', 'health bar', 'minimap', 'score display'],
+  'src/game/ui/Hud.tsx': ['hud', 'ui', 'health bar', 'minimap', 'score display', 'language'],
   'src/game/three/healthbar.ts': ['health bar'],
-  'src/game/OpenWorldGame.tsx': ['camera', 'controls', 'hud'],
   'src/game/play/openWorld.ts': ['camera', 'ground'],
   'src/game/GameCanvas.tsx': ['camera', 'controls', 'hud'],
   'src/game/Game.ts': ['camera', 'controls', 'hud'],
   'src/game/play/motor.ts': ['movement', 'walking', 'running', 'jump', 'speed'],
-  'src/game/play/character.ts': ['movement', 'walking', 'running', 'jump'],
+  'src/game/play/character.ts': ['character', 'hero', 'player', 'movement', 'walking', 'running', 'jump'],
   'src/game/three/lighting.ts': ['light', 'day', 'night', 'sun'],
   'src/game/three/atmosphere.ts': ['weather', 'fog', 'sky'],
   'src/game/three/citytraffic.ts': ['city traffic', 'traffic'],
@@ -205,6 +204,12 @@ const KIT_PART_ABOUT: Readonly<Record<string, readonly string[]>> = {
   'src/game/fx/audio.ts': ['sound'],
   'src/game/fx/synth.ts': ['sound'],
   'src/game/fx/soundLibrary.ts': ['sound'],
+  // The playable starters are a starting point. A follow-up that names what they contain opens the file.
+  'src/game/LaneRunnerGame.tsx': ['character', 'hero', 'rules', 'mechanics', 'level', 'levels', 'graphics', 'language', 'ui', 'runner'],
+  'src/game/RacingRoadGame.tsx': ['character', 'car', 'rules', 'mechanics', 'level', 'levels', 'graphics', 'language', 'ui', 'track'],
+  'src/game/OpenWorldGame.tsx': ['character', 'hero', 'rules', 'mechanics', 'level', 'levels', 'graphics', 'language', 'ui', 'camera', 'controls', 'hud'],
+  'src/game/core/runner.ts': ['rules', 'mechanics', 'runner', 'lanes', 'jump', 'slide'],
+  'src/game/play/playerBody.ts': ['character', 'hero', 'player'],
 };
 /** Words a kit file's path carries that name no part of it ("index"; "world" is every map's; "game" every game's). */
 const KIT_PATH_SAYS_NOTHING = new Set(['index', 'world', 'game', 'values', 'open']);

@@ -19,6 +19,7 @@
 import { countEnumeratedFeatures, notAFeatureLine, isQualityAcceptanceLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
 import { requestSubject } from './requestSubject';
+import { gameTitleRegexIn } from './wellKnownGameTitles';
 import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
 import { MEDIA_PLAYER_APP, withoutDeclinedSentences } from './RequirementGapAnalyzer';
 import { megaProjectSignals, MEGA_SCALE_MIN, MEGA_BULLETS_WITH_NOUN, MEGA_BULLETS_ALONE, type MegaProjectSignals } from '../AgentV3/ProjectPlan';
@@ -68,18 +69,20 @@ export function scopeDispute(scope: AppScope, opts: { complex: boolean }): strin
  * foundation model, real-time everything). A match always escalates to the LLM, which decides the honest
  * achievable core + roadmap. Boundary-anchored where a bare word would over-match ordinary English.
  */
-const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
-  { name: 'PUBG', re: /\bpubg\b/i },
-  // BGMI is PUBG's India edition — the same scope (failedbr #2475's user typed both).
-  { name: 'BGMI', re: /\bbgmi\b/i },
-  { name: 'Free Fire', re: /\bfree\s?fire\b/i },
-  { name: 'Fortnite', re: /\bfortnite\b/i },
-  { name: 'Call of Duty', re: /\bcall of duty\b|\bcod\s?mobile\b/i },
-  // BR1966: "gta5" / "gtav" / "gta-5" are the same title as "gta 5"; word-boundary \bgta\b fails because 5/v is a word character. Does not match gta50 or gta5cheats.
-  { name: 'GTA', re: /\bgta(?:\s*[-_]?\s*[5v])?\b|grand theft auto/i },
-  { name: 'Minecraft', re: /\bminecraft\b/i },
-  { name: 'Clash of Clans', re: /clash of clans|\bcoc\b/i },
-  { name: 'Among Us', re: /\bamong us\b/i },
+// 🎮 GAME TITLES ARE READ BY THE SHARED TOLERANT MATCHER (failedbr #2497): `title` names the catalogue entry in
+// lib/wellKnownGameTitles, which knows "bubg", "pabji", "bgmii", "frie fire", "gtaa", "maincraft" — a private exact spelling
+// here missed them. The regex for each request is built from the spellings that request actually used, so the words around
+// every mention are still read below exactly as before. BGMI is PUBG's India edition — the same scope (failedbr #2475).
+const FAMOUS_APPS: Array<{ name: string; re?: RegExp; title?: string }> = [
+  { name: 'PUBG', title: 'PUBG' },
+  { name: 'BGMI', title: 'BGMI' },
+  { name: 'Free Fire', title: 'Free Fire' },
+  { name: 'Fortnite', title: 'Fortnite' },
+  { name: 'Call of Duty', title: 'Call of Duty' },
+  { name: 'GTA', title: 'GTA' },
+  { name: 'Minecraft', title: 'Minecraft' },
+  { name: 'Clash of Clans', title: 'Clash of Clans', re: /\bcoc\b/i },
+  { name: 'Among Us', title: 'Among Us' },
   { name: 'Instagram', re: /\binstagram\b|\binsta\b/i },
   { name: 'WhatsApp', re: /\bwhatsapp\b/i },
   { name: 'Telegram', re: /\btelegram\b/i },
@@ -314,6 +317,13 @@ function featureCount(raw: string): number {
 
 const FEATURE_COUNT_MEGA = 8; // a spec asking for ~8+ distinct features is treated as large
 
+/** One famous entry's regex for THIS text: its own pattern, its game title's spellings in this text, or both. null when neither. */
+function famousAppRegex(f: { re?: RegExp; title?: string }, text: string): RegExp | null {
+  const title = f.title ? gameTitleRegexIn(text, [f.title]) : null;
+  if (f.re && title) return new RegExp(`${title.source}|${f.re.source}`, 'i');
+  return title ?? f.re ?? null;
+}
+
 /** Classify a build prompt's scope. Pure. */
 export function analyzeAppScope(prompt: string): AppScope {
   const text = String(prompt || '');
@@ -322,7 +332,10 @@ export function analyzeAppScope(prompt: string): AppScope {
   // Predicates read a Hindi request in English too (Q-104); the feature COUNT reads the request itself.
   const readable = withEnglishReading(text);
   const subject = withEnglishReading(requestSubject(text));
-  const famous = FAMOUS_APPS.find((f) => namesAsProduct(readable, f.re, { needsIntent: true, subject }));
+  const famous = FAMOUS_APPS.find((f) => {
+    const re = famousAppRegex(f, readable);
+    return re !== null && namesAsProduct(readable, re, { needsIntent: true, subject });
+  });
   // Infrastructure the user DECLINED is not infrastructure the app needs (autopsy 958aa1ec: "no login, multiplayer,
   // purchases or backend" was read as "needs multiplayer / online play" and the racing game became a LARGE build).
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(withEnglishReading(withoutDeclinedSentences(text))));

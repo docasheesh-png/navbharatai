@@ -267,7 +267,7 @@ import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './t
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
 import { kitLibraryRewriteRefusal } from './kitLibraryGuard';
-import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
+import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, ownLandFindings, ownLandNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
 import { shellHalves, shellBypassFinding, shellBypassNote, shellBypassWarning, type ShellHalves } from './shellBypass';
@@ -1203,6 +1203,9 @@ export class ToolDispatcher {
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
+  /** A feature's own map-scale land in an open world — its OWN once-flag, so it never sets or silences the note above. */
+  private _ownLandNoted = false;
+  private _openWorldKnown = false;
   /** A race whose course the request did not describe must stream the endless track (endlessRaceCourse.ts, 2026-11-18). */
   private _endlessRaceCourse = false;
   private _raceCourseIndex = new Map<string, RaceCourseHalves>();
@@ -5201,6 +5204,21 @@ export class ToolDispatcher {
         for (const p of paths) this._groundShapeIndex.set(p, groundShapeHalves(p, files[p]));
         const found = groundShapeFindings(this._groundShapeIndex);
         if (found.length > 0) { vehicle += handWrittenGroundNote(found); this._groundShapeNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
+    // 🌱 A feature that lays its own map-scale land in an OPEN WORLD (failedbr #2495) — only when src/game/world.ts exists,
+    // looked up once, and only after the scan above found such a plane. Its own flag: the ground note above is untouched.
+    if (!this._ownLandNoted) {
+      try {
+        for (const p of paths) this._groundShapeIndex.set(p, groundShapeHalves(p, files[p]));
+        if (ownLandFindings(this._groundShapeIndex, true).length > 0) {
+          if (!this._openWorldKnown) {
+            this._openWorldKnown = typeof files[GAME_WORLD_FILE_PATH] === 'string'
+              || await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH).then(() => true, () => false);
+          }
+          const own = ownLandFindings(this._groundShapeIndex, this._openWorldKnown);
+          if (own.length > 0) { vehicle += ownLandNote(own); this._ownLandNoted = true; }
+        }
       } catch { /* a note is best-effort */ }
     }
     // 🛣️ A race the user did not describe that drives a car on no endless track (owner 2026-11-18: "race bas 10-12

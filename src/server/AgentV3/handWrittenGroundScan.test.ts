@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote } from './handWrittenGroundScan';
+import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, ownLandFindings, ownLandNote, LAND_METRES } from './handWrittenGroundScan';
 
 const idx = (files: Record<string, string>) => new Map(Object.entries(files).map(([p, c]) => [p, groundShapeHalves(p, c)]));
 
@@ -30,8 +30,8 @@ describe('handWrittenGroundScan — a hand-written road/rail/driven y on hilly t
   });
 });
 
-// 🌱 failedbr #2495/#2501 autopsy — a feature that lays its own big flat land in a kit game (synthetic fixtures).
-describe('handWrittenGroundScan — a feature that lays its own big flat land is a note (never a failure)', () => {
+// 🌱 failedbr #2495/#2501 autopsy — a feature that lays its own MAP-SCALE flat land in an open world (synthetic fixtures).
+describe('handWrittenGroundScan — a feature that lays its own map-scale land is its own note (never a failure)', () => {
   const F = 'src/game/features/meadow.ts';
   const grassField = [
     "import * as THREE from 'three';",
@@ -42,28 +42,41 @@ describe('handWrittenGroundScan — a feature that lays its own big flat land is
     'field.position.set(0, -0.1, 0);',
     'ctx.scene.add(field);',
   ].join('\n');
-  it('flags the #2495 shape: a 2 km plane laid flat in a feature, with no hilly terrain written this build', () => {
-    const f = groundShapeFindings(idx({ [F]: grassField }));
+  it('flags the #2495 shape in an open world only, with its own note', () => {
+    const f = ownLandFindings(idx({ [F]: grassField }), true);
     expect(f.map((x) => x.kind)).toEqual(['own-land']);
     expect(f[0].path).toBe(F);
-    const note = handWrittenGroundNote(f);
+    const note = ownLandNote(f);
     expect(note).toContain('A FEATURE LAYS ITS OWN LAND');
     expect(note).toContain('world.place(object, x, z)');
     expect(note).toContain('LAND region');
     expect(note).toContain('not an error');
+    // A features-only game (no src/game/world.ts) is never told.
+    expect(ownLandFindings(idx({ [F]: grassField }), false)).toEqual([]);
+    // And it never enters the road / rail note's findings.
+    expect(groundShapeFindings(idx({ [F]: grassField }))).toEqual([]);
   });
-  it('flags literal sizes, a rotateX-laid plane and a big disc', () => {
-    expect(groundShapeFindings(idx({ [F]: 'const g = new THREE.PlaneGeometry(300, 40);\ng.rotateX(-Math.PI / 2);' })).length).toBe(1);
-    expect(groundShapeFindings(idx({ [F]: 'const lake = new THREE.Mesh(new THREE.CircleGeometry(80, 48), water);\nlake.rotation.x = -Math.PI/2;' })).length).toBe(1);
+  it('flags literal map-scale sizes, a rotateX-laid plane and a big disc', () => {
+    expect(ownLandFindings(idx({ [F]: 'const g = new THREE.PlaneGeometry(400, 350);\ng.rotateX(-Math.PI / 2);' }), true).length).toBe(1);
+    expect(ownLandFindings(idx({ [F]: 'const lake = new THREE.Mesh(new THREE.CircleGeometry(200, 48), water);\nlake.rotation.x = -Math.PI/2;' }), true).length).toBe(1);
+    expect(LAND_METRES).toBe(300);
   });
-  it('false positives stay silent: decals, signs, screens, markers, HUD quads, unknown sizes', () => {
+  it('sized ground objects and false positives stay silent', () => {
     const quiet: Record<string, string> = {
+      // sized ground objects (re-review 2026-11-23): a pitch, a court, a pool, a parking lot, a race-track strip
+      'src/game/features/stadium.ts': 'const pitch = new THREE.Mesh(new THREE.PlaneGeometry(105, 68), grass);\npitch.rotation.x = -Math.PI / 2;',
+      'src/game/features/cricket.ts': 'const ground = new THREE.Mesh(new THREE.CircleGeometry(75, 64), grass);\nground.rotation.x = -Math.PI / 2;',
+      'src/game/features/court.ts': 'const court = new THREE.Mesh(new THREE.PlaneGeometry(28, 15), mat);\ncourt.rotation.x = -Math.PI / 2;',
+      'src/game/features/pool.ts': 'const pool = new THREE.Mesh(new THREE.PlaneGeometry(50, 25), water);\npool.rotation.x = -Math.PI / 2;',
+      'src/game/features/parking.ts': 'const lot = new THREE.Mesh(new THREE.PlaneGeometry(120, 80), tarmac);\nlot.rotation.x = -Math.PI / 2;',
+      'src/game/features/raceTrack.ts': 'const strip = new THREE.Mesh(new THREE.PlaneGeometry(8, 800), tarmac);\nstrip.rotation.x = -Math.PI / 2;',
+      'src/game/features/oneArg.ts': 'const g = new THREE.PlaneGeometry(900);\ng.rotateX(-Math.PI / 2);',
       // a small flat decal / marker on the ground
       'src/game/features/skidMarks.ts': 'const decal = new THREE.Mesh(new THREE.PlaneGeometry(2, 0.4), mat);\ndecal.rotation.x = -Math.PI / 2;',
       'src/game/features/waypoint.ts': 'const ring = new THREE.Mesh(new THREE.CircleGeometry(3, 32), mat);\nring.rotation.x = -Math.PI / 2;',
       // a big UPRIGHT sign / screen (never laid flat)
-      'src/game/features/billboard.ts': 'const sign = new THREE.Mesh(new THREE.PlaneGeometry(120, 40), mat);\nsign.position.y = 30;',
-      'src/game/features/cinemaScreen.ts': 'const screen = new THREE.PlaneGeometry(200, 90);',
+      'src/game/features/billboard.ts': 'const sign = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat);\nsign.position.y = 30;',
+      'src/game/features/cinemaScreen.ts': 'const screen = new THREE.PlaneGeometry(500, 300);',
       // a size the scan cannot read is never guessed
       'src/game/features/unknownSize.ts': 'const g = new THREE.PlaneGeometry(opts.width, opts.depth);\nm.rotation.x = -Math.PI / 2;',
       // a HUD or UI quad, and the kit's own files, are not feature files
@@ -71,17 +84,16 @@ describe('handWrittenGroundScan — a feature that lays its own big flat land is
       'src/components/Background.tsx': 'const bg = new THREE.PlaneGeometry(500, 500);\nbg.rotation.x = -Math.PI / 2;',
       'src/game/play/openWorld.ts': 'const geometry = new THREE.PlaneGeometry(patchSize, patchSize, 32, 32);\ngeometry.rotateX(-Math.PI / 2);\nconst patchSize = 960;',
     };
-    expect(groundShapeFindings(idx(quiet))).toEqual([]);
+    expect(ownLandFindings(idx(quiet), true)).toEqual([]);
+    expect(ownLandNote([])).toBe('');
   });
-  it('the road / rail note is unchanged byte for byte when no feature lays land', () => {
+  it('the road / rail note is unchanged byte for byte, and never carries a land line', () => {
     const hilly = "const terrain = createTerrain({ palette: 'indianVillage', size: 400 });";
-    const f = groundShapeFindings(idx({ 'src/game/racing/Scene.ts': `${hilly}\nconst road = new THREE.Mesh(new THREE.PlaneGeometry(8, 800), mat);\n` }));
+    const files = { 'src/game/racing/Scene.ts': `${hilly}\nconst road = new THREE.Mesh(new THREE.PlaneGeometry(8, 800), mat);\n`, [F]: grassField };
+    const f = groundShapeFindings(idx(files));
     expect(f.map((x) => x.kind)).toEqual(['flat-road']);
     expect(handWrittenGroundNote(f).startsWith('\n\n⛰️ HAND-WRITTEN GROUND — this will sink into the hills')).toBe(true);
-    // Both at once: the road note leads, the land line is listed with it.
-    const both = groundShapeFindings(idx({ 'src/game/racing/Scene.ts': `${hilly}\nconst road = new THREE.Mesh(new THREE.PlaneGeometry(8, 800), mat);\n`, [F]: grassField }));
-    expect(both.map((x) => x.kind)).toEqual(['flat-road', 'own-land']);
-    expect(handWrittenGroundNote(both)).toContain('⛰️ HAND-WRITTEN GROUND');
+    expect(handWrittenGroundNote(f)).not.toContain('OWN LAND');
   });
   it('never throws on junk feature files', () => {
     expect(() => groundShapeHalves(F, 'new THREE.PlaneGeometry($$, ' + 'x'.repeat(5000))).not.toThrow();

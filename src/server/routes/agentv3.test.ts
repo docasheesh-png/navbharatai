@@ -2587,13 +2587,18 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      grown by joined tiles, a named map size) — `skip: isImportTurn || !!projectModuleRef`, and it writes only
     //      src/game/world.ts of a game that already has one, only when the request asks exactly that; never on a read-only
     //      import/survey turn. Entered in preseededGolden (the platform's work, not billed as the model's). Considered ✓.
+    // +1 (2026-11-24, map expansion item 8 part 3): the race's yes at turn start (raceWorld.raceWorldAtTurnStart: the world
+    //      race files and TRACK.world = true, last) — `skip: isImportTurn || !!projectModuleRef`, OFF unless
+    //      AGENTV3_RACING_WORLD=on, only in a <RacingRoadGame> project on the user's explicit "race shehar me karo"; it adds
+    //      only files READ as absent and refuses on any hand-edited file. Entered in preseededGolden. Considered ✓.
     expect(SRC).toContain('worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
     // +1 (2026-11-24, map expansion item 7): a world around a cricket or football ground (sportsWorld.sportsWorldAtTurnStart:
     //      the venue kit file and its layers only, never the game's own code) — `skip: isImportTurn || !!projectModuleRef`,
     //      OFF unless AGENTV3_SPORTS_WORLD=on, only on the user's explicit world wish in a 3D match on the kit; it adds only
     //      files READ as absent and refuses on any hand-edited one. Entered in preseededGolden. Considered ✓.
     expect(SRC).toContain('sportsWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
-    expect(count).toBe(43);
+    expect(SRC).toContain('raceWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
+    expect(count).toBe(44);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

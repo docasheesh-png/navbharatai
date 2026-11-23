@@ -61,6 +61,11 @@ export interface TrackChoice {
   roadNames?: readonly string[];
   /** The name shown in the HUD. */
   name?: string;
+  /**
+   * Race on the open world's highways, from the first place through the others (src/game/world.ts), instead of the road
+   * library. Only when the game has src/game/play/worldRace.ts (written after the user says yes); otherwise the road library.
+   */
+  world?: boolean;
 }
 
 /** Turns a model name into its 3D object, or rejects with a reason a person can read. */
@@ -115,6 +120,28 @@ export const loadRaceModel: RaceModelLoader = async (source) => {
 };
 
 /** The game's own car.ts / track.ts, when they exist (an eager import: no file, no entry, never a broken build). */
+/** What <RacingRoadGame> needs from src/game/play/worldRace.ts (typed here, so a game without that file still compiles). */
+export interface WorldRaceHandle {
+  readonly startPose: TrackPose;
+  readonly race: import('../three/race').Race;
+  groundAt(x: number, z: number): number;
+  update(ctx: import('../Game').GameContext, dt: number): { distance: number; standing: import('../three/race').RaceStatus; km: number; totalKm: number };
+  reset(): void;
+  dispose(): void;
+}
+export interface WorldRaceModule {
+  startWorldRace(ctx: import('../Game').GameContext, options: { car: THREE.Object3D; opponents?: number; finishKm?: number | null }): WorldRaceHandle;
+}
+
+/** The game's world race (src/game/play/worldRace.ts), or null when the game does not have it. Never rejects. */
+export function loadWorldRace(): Promise<WorldRaceModule | null> {
+  try {
+    const found = import.meta.glob('./worldRace.ts') as Record<string, () => Promise<WorldRaceModule>>;
+    const load = Object.values(found)[0];
+    return load ? load().then((m) => (m && typeof m.startWorldRace === 'function' ? m : null), () => null) : Promise.resolve(null);
+  } catch { return Promise.resolve(null); }
+}
+
 export function projectRaceChoices(): { car: CarChoice | null; track: TrackChoice | null } {
   try {
     const cars = import.meta.glob('../car.ts', { eager: true, import: 'CAR' }) as Record<string, CarChoice | undefined>;

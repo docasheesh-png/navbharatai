@@ -49,17 +49,28 @@ export interface VegetationTier {
   tilesPerUpdate: number;
   /** The instance buffers are rebuilt when the camera moved this far (metres). */
   rebuildDistance: number;
+  /** 🌿 Bushes and stones: jittered-grid spacing (metres), the radius they are drawn to, and a cap for each. */
+  propCell: number;
+  propRadius: number;
+  maxBushes: number;
+  maxRocks: number;
 }
 
 export const VEGETATION_TIERS: Record<AthreeQuality, VegetationTier> = {
-  phone: { treeRadius: 300, lod0Radius: 45, maxTrees: 450, maxLod0: 8, grassCell: 1.25, grassRadius: 30, maxTufts: 3000, tilesPerUpdate: 3, rebuildDistance: 15 },
-  mid: { treeRadius: 500, lod0Radius: 70, maxTrees: 1000, maxLod0: 24, grassCell: 1, grassRadius: 45, maxTufts: 8000, tilesPerUpdate: 5, rebuildDistance: 20 },
-  desktop: { treeRadius: 800, lod0Radius: 110, maxTrees: 3600, maxLod0: 80, grassCell: 0.625, grassRadius: 70, maxTufts: 40000, tilesPerUpdate: 8, rebuildDistance: 25 },
+  phone: { treeRadius: 300, lod0Radius: 45, maxTrees: 450, maxLod0: 8, grassCell: 1, grassRadius: 30, maxTufts: 3000, tilesPerUpdate: 3, rebuildDistance: 15, propCell: 5.5, propRadius: 70, maxBushes: 220, maxRocks: 110 },
+  mid: { treeRadius: 500, lod0Radius: 70, maxTrees: 1000, maxLod0: 24, grassCell: 1, grassRadius: 45, maxTufts: 8000, tilesPerUpdate: 5, rebuildDistance: 20, propCell: 5, propRadius: 110, maxBushes: 700, maxRocks: 350 },
+  desktop: { treeRadius: 800, lod0Radius: 110, maxTrees: 3600, maxLod0: 80, grassCell: 0.625, grassRadius: 70, maxTufts: 40000, tilesPerUpdate: 8, rebuildDistance: 25, propCell: 4, propRadius: 170, maxBushes: 2000, maxRocks: 900 },
 };
+
+/** A bush is twelve leaf cards (two triangles each); a stone is a once-subdivided icosahedron, faceted (80 triangles). */
+export const BUSH_TRIANGLES = 24;
+export const ROCK_TRIANGLES = 80;
+export const PROP_TILE = 48;
 
 /** The most triangles the vegetation can draw at a tier: every tuft, every full-detail tree, every other tree at the cheap level. */
 export function vegetationTriangles(tier: VegetationTier): number {
-  return tier.maxTufts * TUFT_TRIANGLES + tier.maxLod0 * TREE_TRIANGLES_MAX.lod0 + (tier.maxTrees - tier.maxLod0) * TREE_TRIANGLES_MAX.lod1;
+  return tier.maxTufts * TUFT_TRIANGLES + tier.maxLod0 * TREE_TRIANGLES_MAX.lod0 + (tier.maxTrees - tier.maxLod0) * TREE_TRIANGLES_MAX.lod1
+    + tier.maxBushes * BUSH_TRIANGLES + tier.maxRocks * ROCK_TRIANGLES;
 }
 
 /** What is left of the tier's triangle budget once the terrain and the sea have taken their worst case. */
@@ -86,6 +97,11 @@ function wrapIndex(world: AthreeWorld, cell: number, i: number): number {
 
 function periodOf(world: AthreeWorld): number {
   return world.mode === 'loop' ? world.sizeMeters : 0;
+}
+
+/** Nature is on unless the game said nature: false (an older world.ts has no such member: on). */
+function natureOn(world: AthreeWorld): boolean {
+  return (world as { nature?: boolean }).nature !== false;
 }
 
 export interface TreeSpec {
@@ -127,15 +143,19 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       if (h < 0.8) continue;
       const biome = world.biomeAt(px, pz);
       if (biome !== 'forest' && biome !== 'grassland' && biome !== 'mountain' && biome !== 'beach') continue;
-      // An open field the game laid (a maidan, a meadow) is grass to the horizon: no tree stands in it. Read through an optional
-      // member, so this file still compiles beside an older world.ts that has no open fields.
-      if (biome === 'grassland' && (world as { openFieldAt?: (x: number, z: number) => boolean }).openFieldAt?.(px, pz)) continue;
+      // An open field the game laid (a maidan, a meadow) is grass to the horizon with only a few LONE trees and small groups in it
+      // (admin 2026-11-23: "bush, tree, patthar sab randomly bikhre rahe"), never a copse; with nature: false, no tree at all. Read
+      // through optional members, so this file still compiles beside an older world.ts that has no open fields.
+      const field = biome === 'grassland' && !!(world as { openFieldAt?: (x: number, z: number) => boolean }).openFieldAt?.(px, pz);
+      if (field && !natureOn(world)) continue;
       const grove = fieldNoise(px, pz, seed + 11, 3, 140, period);
       let p = 0;
       let species: Species = 'broadleaf';
       let minUp = 0.8;
       if (biome === 'forest') {
         p = 0.85 * smoothstep(0.3, 0.45, grove);
+      } else if (field) {
+        p = 0.012 + 0.16 * smoothstep(0.7, 0.86, grove);
       } else if (biome === 'grassland') {
         p = 0.04 + 0.5 * smoothstep(0.6, 0.78, grove);
       } else if (biome === 'mountain') {
@@ -258,6 +278,104 @@ export function grassInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
     }
   }
   return Float32Array.from(out);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 🌿 BUSHES AND STONES (admin 2026-11-23: "real ghaas, bush, tree, patthar sab randomly bikhre rahe … jisse nature feel aye").
+
+export type PropKind = 'bush' | 'rock';
+
+export interface PropSpec {
+  x: number;
+  y: number;
+  z: number;
+  rot: number;
+  /** Uniform size. */
+  scale: number;
+  /** Height over width: a low wide stone, a tall narrow bush. */
+  stretch: number;
+  kind: PropKind;
+  /** 0..1 colour variation. */
+  tint: number;
+}
+
+/** How far a bush's leaves or a stone's side reach from its middle at the largest scale, plus a metre to spare (metres). */
+export const PROP_REACH = { bush: 2.4, rock: 2 } as const;
+
+/** A circle nothing is scattered in (where the player starts). */
+export interface KeepClear { x: number; z: number; r: number }
+
+/** True when a bush or stone here would touch a road, levelled ground (a city, a venue pad) or water: its middle or any point PROP_REACH around it. */
+export function propBlocked(world: AthreeWorld, x: number, z: number, kind: PropKind = 'bush'): boolean {
+  const r = PROP_REACH[kind];
+  if (plantBlocked(world, x, z)) return true;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    if (plantBlocked(world, x + Math.cos(a) * r, z + Math.sin(a) * r)) return true;
+  }
+  return false;
+}
+
+/**
+ * Every bush and stone whose middle stands inside [x0, x1) x [z0, z1). One candidate per cell (jittered), its random numbers from its
+ * CELL alone, so any two rectangles agree and the same seed always gives the same layout. Two slow noise fields gather them in clumps
+ * (a thicket of bushes, a scatter of stones round an outcrop) with lone ones between. Grass and forest hold most bushes; mountains
+ * most stones; beaches and deserts a few stones; snow and the sea none. Never on a road, levelled ground, water, steep ground or in
+ * a keepClear circle; none at all with nature: false.
+ */
+export function propsInRect(world: AthreeWorld, x0: number, z0: number, x1: number, z1: number, cell: number, keepClear: readonly KeepClear[] = []): PropSpec[] {
+  const out: PropSpec[] = [];
+  if (!natureOn(world)) return out;
+  const period = periodOf(world);
+  const seed = world.seed;
+  for (let iz = Math.floor(z0 / cell); iz <= Math.floor(z1 / cell); iz++) {
+    for (let ix = Math.floor(x0 / cell); ix <= Math.floor(x1 / cell); ix++) {
+      const rng = mulberry32(mix32(wrapIndex(world, cell, ix), wrapIndex(world, cell, iz), seed, 303));
+      const px = (ix + 0.1 + 0.8 * rng()) * cell;
+      const pz = (iz + 0.1 + 0.8 * rng()) * cell;
+      const rollBush = rng();
+      const rollRock = rng();
+      const rot = rng() * Math.PI * 2;
+      const sizeR = rng();
+      const stretchR = rng();
+      const tint = rng();
+      if (px < x0 || px >= x1 || pz < z0 || pz >= z1) continue;
+      // The densest land admits at most half the candidates: reject before the costly terrain queries.
+      if (rollBush >= 0.5 && rollRock >= 0.4) continue;
+      const h = world.heightAt(px, pz);
+      if (h < 1) continue;
+      const biome = world.biomeAt(px, pz);
+      if (biome === 'ocean' || biome === 'snow') continue;
+      const thicket = fieldNoise(px, pz, seed + 15, 2, 55, period);
+      const outcrop = fieldNoise(px, pz, seed + 16, 2, 80, period);
+      let pb = 0;
+      let pr = 0;
+      if (biome === 'grassland') {
+        pb = 0.07 + 0.4 * smoothstep(0.56, 0.8, thicket);
+        pr = 0.03 + 0.3 * smoothstep(0.66, 0.86, outcrop);
+      } else if (biome === 'forest') {
+        pb = 0.18 + 0.3 * smoothstep(0.45, 0.75, thicket);
+        pr = 0.04 + 0.15 * smoothstep(0.66, 0.86, outcrop);
+      } else if (biome === 'mountain') {
+        pb = 0.06 * Math.min(1, Math.max(0, 1 - (h - 150) / 400));
+        pr = 0.1 + 0.3 * smoothstep(0.5, 0.8, outcrop);
+      } else if (biome === 'beach') {
+        pr = h > 1.5 ? 0.02 + 0.1 * smoothstep(0.7, 0.9, outcrop) : 0;
+      } else if (biome === 'desert') {
+        pr = 0.02 + 0.12 * smoothstep(0.66, 0.88, outcrop);
+      }
+      const kind: PropKind | null = rollBush < pb ? 'bush' : rollRock < pr ? 'rock' : null;
+      if (!kind) continue;
+      if (world.normalAt(px, pz).y < (kind === 'bush' ? 0.78 : 0.6)) continue;
+      let clear = true;
+      for (const c of keepClear) if (Math.hypot(px - c.x, pz - c.z) < c.r) { clear = false; break; }
+      if (!clear || propBlocked(world, px, pz, kind)) continue;
+      const scale = kind === 'bush' ? 0.6 + 0.8 * sizeR * sizeR : 0.45 + 1.15 * sizeR * sizeR;
+      const stretch = kind === 'bush' ? 0.75 + 0.5 * stretchR : 0.45 + 0.45 * stretchR;
+      out.push({ x: px, y: h, z: pz, rot, scale, stretch, kind, tint });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -556,6 +674,74 @@ export function buildTreeArrays(species: Species, lod: 0 | 1, variant = 0): Plan
   return b.finish();
 }
 
+/**
+ * A bush: twelve round leaf cards on a dome about 1.6 m wide and 1 m tall, facing out (the broad-leaf mask cuts each card into a
+ * ragged leafy blob). The cards near the top sway a little in the wind, the ones at the root do not.
+ */
+export function buildBushArrays(): PlantArrays {
+  const rng = mulberry32(4243);
+  const b = new Builder();
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + rng() * 0.4;
+    const up = i < 8 ? 0.25 + 0.2 * rng() : 0.6 + 0.25 * rng();
+    const rr = i < 8 ? 0.55 : 0.25;
+    const centre: V3 = [Math.cos(a) * rr, up, Math.sin(a) * rr];
+    const out = norm([Math.cos(a), i < 8 ? 0.3 : 1, Math.sin(a)]);
+    const side = norm(cross([0, 1, 0], out));
+    const size = 0.75 + 0.25 * rng();
+    const shade: V3 = [0.17 + 0.05 * rng(), 0.33 + 0.08 * rng(), 0.12];
+    const p0 = sub(centre, mul([0, 1, 0], size * 0.5));
+    const p1 = add(centre, mul([0, 1, 0], size * 0.5));
+    ribbon(b, [p0, p1], [size, size], side, out, KIND.broad, shade, Math.min(1, p0[1] * 0.5), Math.min(1, p1[1] * 0.6), rng());
+  }
+  return b.finish();
+}
+
+/**
+ * A stone: a once-subdivided icosahedron, its corners pushed in and out by a fixed random amount, flattened and sunk a little into
+ * the ground, drawn FACETED (each face its own three vertices and normal) so it reads as broken rock. Grey, a touch of moss on top.
+ * Unit size about 1 m across. Never moves in the wind.
+ */
+export function buildRockArrays(): PlantArrays {
+  const rng = mulberry32(9091);
+  const t = (1 + Math.sqrt(5)) / 2;
+  let verts: V3[] = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map((v) => norm(v as V3));
+  let faces: number[][] = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  const mid = new Map<string, number>();
+  const midpoint = (a: number, c: number): number => {
+    const key = a < c ? a + ':' + c : c + ':' + a;
+    const hit = mid.get(key);
+    if (hit !== undefined) return hit;
+    verts.push(norm(mul(add(verts[a], verts[c]), 0.5)));
+    mid.set(key, verts.length - 1);
+    return verts.length - 1;
+  };
+  const next: number[][] = [];
+  for (const [a, c, d] of faces) {
+    const ab = midpoint(a, c), bc = midpoint(c, d), ca = midpoint(d, a);
+    next.push([a, ab, ca], [c, bc, ab], [d, ca, bc], [ab, bc, ca]);
+  }
+  faces = next;
+  verts = verts.map((v) => {
+    const k = 0.78 + 0.4 * rng();
+    return [v[0] * 0.5 * k, Math.max(-0.2, v[1] * 0.5 * k * 0.8) + 0.12, v[2] * 0.5 * k];
+  });
+  const b = new Builder();
+  for (const [a, c, d] of faces) {
+    const pa = verts[a], pb = verts[c], pc = verts[d];
+    const n = norm(cross(sub(pb, pa), sub(pc, pa)));
+    const g = 0.42 + 0.1 * rng();
+    const moss = n[1] > 0.7 ? 0.5 : 0;
+    const col: V3 = [g * (1 - moss * 0.35), g * (1 - moss * 0.05), g * (1 - moss * 0.45)];
+    const i0 = b.vert(pa, n, col, 0, 0, 0, 0, KIND.bark);
+    const i1 = b.vert(pb, n, col, 1, 0, 0, 0, KIND.bark);
+    const i2 = b.vert(pc, n, col, 0, 1, 0, 0, KIND.bark);
+    b.tri(i0, i1, i2);
+  }
+  return b.finish();
+}
+
 /** A grass tuft: three crossed cards (the fragment shader cuts blades out of each card). Roughly 0.5 m wide and 0.45 m tall. */
 export function buildTuftArrays(): PlantArrays {
   const b = new Builder();
@@ -573,9 +759,9 @@ export const PLANTS = `// Athree map — plants on screen: wind shaders, instanc
 
 import { type AthreeQuality } from './config';
 import {
-  SPECIES, VARIANTS, VEGETATION_TIERS, TREE_TILE, GRASS_TILE, TUFT_TRIANGLES,
-  buildTreeArrays, buildTuftArrays, treesInRect, grassInRect, tuftBlocked, treeBlocked,
-  type PlantArrays, type TreeSpec,
+  SPECIES, VARIANTS, VEGETATION_TIERS, TREE_TILE, GRASS_TILE, TUFT_TRIANGLES, PROP_TILE,
+  buildTreeArrays, buildTuftArrays, buildBushArrays, buildRockArrays, treesInRect, grassInRect, propsInRect, tuftBlocked, treeBlocked, propBlocked,
+  type PlantArrays, type TreeSpec, type PropSpec, type KeepClear,
 } from './vegetation';
 import type { AthreeWorld } from './world';
 
@@ -587,6 +773,9 @@ export interface VegetationStats {
   trees: number;
   treesLod0: number;
   tufts: number;
+  /** Bushes and stones drawn right now (0 with nature: false). */
+  bushes: number;
+  rocks: number;
   /** Triangles drawn right now by the vegetation. */
   triangles: number;
   drawCalls: number;
@@ -741,6 +930,9 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
   };
   const treeMaterial = makeMaterial(0.55, 1e8, 2e8);
   const grassMaterial = makeMaterial(0.38, tier.grassRadius * 0.55, tier.grassRadius * 0.95);
+  // Bushes and stones fade (sink) out between 75 and 100 percent of their radius, so nothing pops at the edge.
+  const nature = (world as { nature?: boolean }).nature !== false;
+  const propMaterial = nature ? makeMaterial(0.3, tier.propRadius * 0.75, tier.propRadius) : null;
 
   const slots = new Map<string, Slot>();
   const geometries: ThreeLike[] = [];
@@ -750,6 +942,7 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     const mesh = new THREE.InstancedMesh(geometry, material, cap);
     mesh.frustumCulled = false;
     mesh.count = 0;
+    mesh.name = 'plants:' + key;
     group.add(mesh);
     slots.set(key, { mesh, tris: arrays.triangles, count: 0 });
   };
@@ -759,22 +952,36 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
       addSlot(species + v + ':1', buildTreeArrays(species, 1, v), treeMaterial, tier.maxTrees);
     }
   }
+  if (propMaterial) {
+    addSlot('bush', buildBushArrays(), propMaterial, tier.maxBushes);
+    addSlot('rock', buildRockArrays(), propMaterial, tier.maxRocks);
+  }
+  // The grass stays the LAST mesh of the group (games and tests find it there).
   addSlot('grass', buildTuftArrays(), grassMaterial, tier.maxTufts);
 
   const treeTiles = new Map<string, TreeSpec[]>();
   const grassTiles = new Map<string, Float32Array>();
+  const propTiles = new Map<string, PropSpec[]>();
+  // Where the player starts stays clear of bushes and stones (found once, when the first stone tile is scattered).
+  let keepClear: KeepClear[] | null = null;
+  const clearOfSpawn = (): KeepClear[] => {
+    if (keepClear) return keepClear;
+    keepClear = [];
+    try { for (const p of world.spawnPoints('player', 1)) keepClear.push({ x: p.x, z: p.z, r: 8 }); } catch { /* a world with no spawn: nothing to keep clear */ }
+    return keepClear;
+  };
   const anchor = { x: 0, z: 0 };
   let rebuiltAt = { x: Infinity, z: Infinity };
   let dirty = true;
   let sinceRebuild = 0;
   let scanTile = { x: Infinity, z: Infinity };
-  let pending: Array<{ grass: boolean; i: number; j: number; d: number }> = [];
+  let pending: Array<{ grass: boolean; i: number; j: number; d: number; props?: boolean }> = [];
 
   const tileKey = (i: number, j: number): string => i + ',' + j;
 
   function scan(cx: number, cz: number): void {
     pending = [];
-    const want = (size: number, radius: number, grass: boolean, loaded: Map<string, unknown>): void => {
+    const want = (size: number, radius: number, grass: boolean, loaded: Map<string, unknown>, props = false): void => {
       const reach = radius + size * 0.71;
       const i0 = Math.floor((cx - reach) / size);
       const i1 = Math.floor((cx + reach) / size);
@@ -783,7 +990,7 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
       for (let j = j0; j <= j1; j++) {
         for (let i = i0; i <= i1; i++) {
           const d = Math.hypot((i + 0.5) * size - cx, (j + 0.5) * size - cz);
-          if (d <= reach && !loaded.has(tileKey(i, j))) pending.push({ grass, i, j, d });
+          if (d <= reach && !loaded.has(tileKey(i, j))) pending.push(props ? { grass, i, j, d, props } : { grass, i, j, d });
         }
       }
       for (const key of Array.from(loaded.keys())) {
@@ -793,6 +1000,7 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     };
     want(TREE_TILE, tier.treeRadius, false, treeTiles);
     want(GRASS_TILE, tier.grassRadius, true, grassTiles);
+    if (propMaterial) want(PROP_TILE, tier.propRadius, false, propTiles, true);
     pending.sort((a, b) => a.d - b.d);
   }
 
@@ -800,7 +1008,9 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     let built = 0;
     while (pending.length > 0 && built < tier.tilesPerUpdate) {
       const p = pending.shift()!;
-      if (p.grass) {
+      if (p.props) {
+        propTiles.set(tileKey(p.i, p.j), propsInRect(world, p.i * PROP_TILE, p.j * PROP_TILE, (p.i + 1) * PROP_TILE, (p.j + 1) * PROP_TILE, tier.propCell, clearOfSpawn()));
+      } else if (p.grass) {
         grassTiles.set(tileKey(p.i, p.j), grassInRect(world, p.i * GRASS_TILE, p.j * GRASS_TILE, (p.i + 1) * GRASS_TILE, (p.j + 1) * GRASS_TILE, tier.grassCell));
       } else {
         treeTiles.set(tileKey(p.i, p.j), treesInRect(world, p.i * TREE_TILE, p.j * TREE_TILE, (p.i + 1) * TREE_TILE, (p.j + 1) * TREE_TILE));
@@ -851,6 +1061,24 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
       const { i, tile } = tufts[n];
       writeInstance(grass, tile[i], tile[i + 1] - 0.03, tile[i + 2], tile[i + 3], tile[i + 4], tile[i + 4], tile[i + 5]);
     }
+    if (propMaterial) {
+      const pr2 = tier.propRadius * tier.propRadius;
+      const near2: Array<{ p: PropSpec; d2: number }> = [];
+      for (const tile of propTiles.values()) {
+        for (const p of tile) {
+          const d2 = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz);
+          if (d2 <= pr2) near2.push({ p, d2 });
+        }
+      }
+      near2.sort((a, b) => a.d2 - b.d2);
+      const bush = slots.get('bush')!;
+      const rock = slots.get('rock')!;
+      for (const { p } of near2) {
+        const slot = p.kind === 'bush' ? bush : rock;
+        if (slot.count >= (p.kind === 'bush' ? tier.maxBushes : tier.maxRocks)) continue;
+        writeInstance(slot, p.x, p.y - (p.kind === 'rock' ? 0.08 * p.scale : 0.05), p.z, p.rot, p.scale * p.stretch, p.scale, p.tint);
+      }
+    }
     for (const s of slots.values()) {
       s.mesh.count = s.count;
       s.mesh.instanceMatrix.needsUpdate = true;
@@ -897,16 +1125,19 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     let trees = 0;
     let treesLod0 = 0;
     let tufts = 0;
+    let bushes = 0;
+    let rocks = 0;
     let triangles = 0;
     let drawCalls = 0;
     for (const [key, s] of slots) {
       if (s.count > 0) drawCalls++;
       if (key === 'grass') { tufts = s.count; triangles += s.count * TUFT_TRIANGLES; continue; }
+      if (key === 'bush' || key === 'rock') { if (key === 'bush') bushes = s.count; else rocks = s.count; triangles += s.count * s.tris; continue; }
       trees += s.count;
       if (key.endsWith(':0')) treesLod0 += s.count;
       triangles += s.count * s.tris;
     }
-    return { trees, treesLod0, tufts, triangles, drawCalls, tilesLoaded: treeTiles.size + grassTiles.size };
+    return { trees, treesLod0, tufts, bushes, rocks, triangles, drawCalls, tilesLoaded: treeTiles.size + grassTiles.size + propTiles.size };
   }
 
   function setLight(sun: { x: number; y: number; z: number }, sunColor?: number, ambientColor?: number): void {
@@ -920,9 +1151,11 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     for (const g of geometries) g.dispose();
     treeMaterial.dispose();
     grassMaterial.dispose();
+    propMaterial?.dispose();
     slots.clear();
     treeTiles.clear();
     grassTiles.clear();
+    propTiles.clear();
   }
 
   function invalidate(x0: number, z0: number, x1: number, z1: number): number {
@@ -937,6 +1170,7 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     };
     drop(treeTiles, TREE_TILE);
     drop(grassTiles, GRASS_TILE);
+    drop(propTiles, PROP_TILE);
     if (dropped > 0) { scanTile = { x: Infinity, z: Infinity }; dirty = true; }
     return dropped;
   }
@@ -964,6 +1198,13 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
       if (!touches(key, TREE_TILE)) continue;
       const kept = list.filter((t) => !treeBlocked(world, t.x, t.z));
       if (kept.length !== list.length) { treeTiles.set(key, kept); removed += list.length - kept.length; }
+    }
+    for (const [key, list] of propTiles) {
+      // A bush reaches 2.4 m from its middle: a tile that far outside the rectangle is checked too.
+      const [pi, pj] = key.split(',').map(Number);
+      if (!all && (pi * PROP_TILE > x1 + 3 || (pi + 1) * PROP_TILE < x0 - 3 || pj * PROP_TILE > z1 + 3 || (pj + 1) * PROP_TILE < z0 - 3)) continue;
+      const kept = list.filter((p) => !propBlocked(world, p.x, p.z, p.kind));
+      if (kept.length !== list.length) { propTiles.set(key, kept); removed += list.length - kept.length; }
     }
     if (removed > 0) dirty = true;
     return removed;

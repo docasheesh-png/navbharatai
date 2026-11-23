@@ -19,7 +19,8 @@
 //   • a battle royale stays an 8 km island: places are added only on its dry land, and the island never grows.
 // When the reading is unsure it ASKS (never edits on a guess). A game type with no map to grow gets no note at all.
 //
-// PURE. No I/O, no clock, no env (the turn-start port in growthTurn.ts reads the switch). Never throws.
+// PURE. No I/O, no clock, and no env except ONE default: mapGrowthNote without caps reads AGENTV3_RACING_WORLD (item 8, default
+// off). The turn-start port in growthTurn.ts reads the note's own switch. Never throws.
 
 export type MapGrowthKind =
   | 'add-place' | 'join-one' | 'join-to' | 'venue' | 'game-itself' | 'highways'
@@ -210,9 +211,50 @@ export type MapGameType = 'open-world' | 'battle-royale' | 'racing-library' | 'c
 export interface MapGrowthCapabilities {
   /** A sports game can be given a world around its ground (map expansion item 7). Off until that ships. */
   sportsWorld?: boolean;
-  /** A race can move onto the world's city roads (map expansion item 8, TRACK.world). Off until that ships. */
+  /** A race can move onto the world's city roads (map expansion item 8, TRACK.world). Off unless AGENTV3_RACING_WORLD=on. */
   racingWorld?: boolean;
+  /** This race ALREADY runs on the world's city roads (its src/game/track.ts says world: true). Read from the files. */
+  raceOnWorld?: boolean;
 }
+
+// ── item 8, part 3: the race's ONE question and the user's yes ──────────────────────────────────────────────────────────────
+/** Switch: AGENTV3_RACING_WORLD=on lets a race be asked (once) about city roads, and the yes carried out. OFF by default. */
+export function racingWorldEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(?:1|on|true|yes)$/i.test(String(env.AGENTV3_RACING_WORLD ?? '').trim());
+}
+
+/** The reply the user is told to send to say yes (the platform makes the switch itself when it comes). */
+export const RACE_WORLD_YES = 'race shehar me karo';
+
+const RACE_WORD = String.raw`(?:race|racing|रेस|रेसिंग)`;
+const CITY_ROADS = String.raw`(?:shehar|sheher|shahar|shehron|shaharon|city|cities|शहर|शहरों)(?:\s+(?:ki|ke|की|के))?(?:\s+(?:sadkon|sadko|sadak|sadkein|roads?|streets?|सड़कों|सड़क|सड़कें))?`;
+const RACE_WORLD_HI = new RegExp(String.raw`(?:^|[\s,.!])${RACE_WORD}(?:\s+(?:ko|ka|bhi|ab|abhi|को))?\s+${CITY_ROADS}\s+(?:me|mein|main|par|pe|pr|में|पर|पे)\s+(?:le\s+(?:jao|jaao|chalo|chalein|jaaiye|jaiye)|kar\s*(?:o|do|dijiye)|karo|kardo|chalao|daudao|ले\s+(?:जाओ|चलो)|करो|कर\s+दो|चलाओ)(?=$|[\s,.!])`, 'u');
+const RACE_WORLD_EN = /\b(?:move|put|take|run|switch)\s+(?:the\s+|my\s+|this\s+)?race\s+(?:onto|on\s+to|on|into|to|through)\s+(?:the\s+)?(?:city|cities)(?:'s)?\s+(?:roads|streets)\b|\brace\s+on\s+(?:the\s+)?city\s+roads\s*(?:please|plz)?\s*$/i;
+const RACE_WORLD_NOT = /(?:^|[\s,.!])(?:nahi|nahin|nai|mat|no|not|don'?t|dont|never|na\s+karo|नहीं|नही|मत)(?=$|[\s,.!])/iu;
+const RACE_WORLD_QUESTION = /\?|(?:^|\s)(?:kya|kyun|kyon|should|can|could|would|will|shall|do\s+you|kaise|क्या|क्यों)(?=$|\s)/iu;
+const RACE_WORLD_NEW_GAME = /\b(?:game|games|banao|banaiye|bana\s+do|make|build|create)\b|गेम|बनाओ|बना\s+दो/iu;
+
+/**
+ * Did the user say YES to moving this race onto the world's city roads — in the words they were told to use, or the same
+ * thing said plainly ("race ko shehar ki sadkon par le jao", "move the race onto city roads")? Never on a "no", a question,
+ * a new game ("shehar me race game banao") or a long message (a specification is the builder's to read). PURE.
+ */
+export function raceWorldYes(text: string | null | undefined): boolean {
+  try {
+    const t = String(text ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 200) return false;
+    if (RACE_WORLD_NOT.test(t) || RACE_WORLD_QUESTION.test(t) || RACE_WORLD_NEW_GAME.test(t)) return false;
+    return RACE_WORLD_HI.test(t) || RACE_WORLD_EN.test(t);
+  } catch { return false; }
+}
+
+/** The race's src/game/track.ts already puts it on the world (TRACK.world = true). PURE. */
+export function trackOnWorld(track: string | null | undefined): boolean {
+  return typeof track === 'string' && /\bworld\s*:\s*true\b/.test(track);
+}
+
+/** The places of a world race when the game has no src/game/world.ts yet (play/worldRace.ts TOWNS — a test keeps them equal). */
+export const WORLD_RACE_TOWNS = "{ id: 'start-town', kind: 'town' }, { id: 'east-town', kind: 'town', toward: 'east' }, { id: 'north-town', kind: 'town', toward: 'north' }, { id: 'far-town', kind: 'town', toward: 'north-east' }";
 
 export interface MapGrowthRoute {
   /** edit: make this one change · ask: ask the user ONE question, change nothing · tell: change nothing, say why · none: no note. */
@@ -256,6 +298,11 @@ export function mapGrowthRoute(intent: MapGrowthIntent, game: MapGameType, caps:
     }
 
     if (game === 'racing-library') {
+      if (caps.raceOnWorld && k !== 'track-longer' && k !== 'game-itself' && k !== 'shrink' && k !== 'unsure') {
+        // The user already said yes: the race runs on the world's highways, so a place is ONE more region of src/game/world.ts.
+        if (k === 'highways') return tell('The race already runs on the highways that join every place. Nothing to connect: change nothing, and say so in one sentence.');
+        return edit(`This race ALREADY runs on the world's city roads (TRACK.world = true): a place is ONE more region in WORLD.regions of src/game/world.ts — { id: '<new id>', kind: '${regionOf(intent)}' }${k === 'join-to' || k === 'join-one' || k === 'grow-city' ? ", joinTo: '<the id of the place they named>'" : ''} — and the race reaches it along the highways by itself. If src/game/world.ts does not exist yet, create it as: export const WORLD = { regions: [${WORLD_RACE_TOWNS}, <the new region>] }; — those four are the towns the race runs through now. Never raise sizeMeters. Change NOTHING in src/game/RacingRoadGame.tsx, src/game/play/ or src/game/track.ts.`);
+      }
       if (k === 'track-longer') return edit('A longer race is the race\'s own road: change TRACK.finishKm (or null for endless) in src/game/track.ts — nothing else. No cities, no map, no venue.');
       if (k === 'game-itself' || k === 'shrink' || k === 'unsure') {
         return k === 'game-itself' ? none : ask('Ask the user ONE short question before changing anything: a longer or shorter race (the road), or something else? Change nothing until they answer.');
@@ -265,7 +312,7 @@ export function mapGrowthRoute(intent: MapGrowthIntent, game: MapGameType, caps:
       if (!caps.racingWorld) {
         return tell('This race runs on the road library; moving it onto a world with cities is not available yet. Change NOTHING about the race, add no map or city by hand, and tell the user plainly, in their language, that cities on the route are not available yet — and offer a longer track (TRACK.finishKm) instead.');
       }
-      return ask('Moving this race onto city roads changes the race (owner decision: ask once). Ask the user ONE question in their language — "Race ko shehar ki sadkon par le jaayein?" — and change NOTHING this turn. Only after a clear yes set TRACK.world; after a no keep the road library and never ask again.');
+      return ask(`Moving this race onto city roads changes the race (owner decision: ask once). Ask the user ONE question in their language — "Race ko shehar ki sadkon par le jaayein?" — and tell them that to agree, they reply "${RACE_WORLD_YES}" — and change NOTHING this turn: do not set TRACK.world and write no world or race file yourself — the platform makes the switch when they say yes. After a no keep the road library and never ask again.`);
     }
 
     // An open world (explore too) or a battle royale: the map's own regions list.
@@ -309,9 +356,15 @@ export function mapGameTypeOf(files: Readonly<Record<string, string>> | null | u
 }
 
 /** The note the builder is told at the start of a turn, or '' (no note: nothing about the map, or a game with no map). PURE. */
-export function mapGrowthNote(request: string, files: Readonly<Record<string, string>> | null | undefined, caps: MapGrowthCapabilities = {}): string {
+export function mapGrowthNote(request: string, files: Readonly<Record<string, string>> | null | undefined, givenCaps?: MapGrowthCapabilities): string {
   const game = mapGameTypeOf(files);
   if (game === 'other') return '';
+  const caps: MapGrowthCapabilities = { racingWorld: racingWorldEnabled(), ...givenCaps };
+  if (game === 'racing-library') {
+    if (caps.raceOnWorld === undefined) caps.raceOnWorld = trackOnWorld(files?.['src/game/track.ts']);
+    // The user's yes to city roads is the platform's to carry out (raceWorld.ts): no note that would ask the question again.
+    if (caps.racingWorld && raceWorldYes(request)) return '';
+  }
   const intent = mapGrowthIntent(request);
   const route = mapGrowthRoute(intent, game, caps);
   if (route.action === 'none' || !route.note) return '';

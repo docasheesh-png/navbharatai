@@ -79,6 +79,7 @@ import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
+import { raceWorldAtTurnStart } from '../AgentV3/raceWorld';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
@@ -19547,6 +19548,10 @@ async function noteBuildOutcome(
       // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3302/Q-3303 — failedbr #2495):
       // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
       buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
+      // 🏁 "RACE SHEHAR ME KARO" — the user's yes moves a road-library race onto the world's city roads (raceWorld.ts, map
+      // expansion item 8): the platform writes the switch itself, last, after the files it needs. OFF unless AGENTV3_RACING_WORLD=on.
+      buildPrompt = withPlatformHandoff(await raceWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();

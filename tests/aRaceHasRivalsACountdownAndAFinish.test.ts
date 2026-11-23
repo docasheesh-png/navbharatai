@@ -166,7 +166,8 @@ describe('the racing starter and the Hud use it', () => {
     expect(src).toMatch(/race = createRace\(ctx\.scene, \{ stream: stream!, opponents, finishDistance: finishKm != null && finishKm > 0 \? finishKm \* 1000 : null \}\)/);
     // On the user's own track model the same race runs for its laps (play/raceCustom.ts).
     expect(src).toMatch(/race = createRace\(ctx\.scene, \{ stream: custom, opponents, finishDistance: custom\.laps \* custom\.length \}\)/);
-    expect(src.match(/if \(!race \|\| race\.canDrive\(\)\) drive = driveVehicle\(car, drive, ctx\.input\.axis\(\), dt, tuning\);/g)).toHaveLength(2);
+    // Three ways to race, each held at the line the same way: the road library, the user's track, and TRACK.world (item 8).
+    expect(src.match(/if \(!race \|\| race\.canDrive\(\)\) drive = driveVehicle\(car, drive, ctx\.input\.axis\(\), dt, tuning\);/g)).toHaveLength(3);
     expect(src).toMatch(/'P' \+ standing\.position \+ '\/' \+ standing\.total/);
   });
   it('the Hud shows the countdown and the place, and lists a finished race\'s results on the end screen', () => {

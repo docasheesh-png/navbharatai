@@ -2276,7 +2276,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'generate_stand_in',
-      description: 'When the NavBharatAI library has no model for an object, ask for a simple low-poly plan and write that geometry. The object is placed with standOnGround so its lowest point sits on the ground. If the library already has the object, this does not invent a replacement. Call it only after the library was checked.',
+      description: 'Three steps for a missing object, and the build never waits. First adjust the closest library model: scale, recolour, retexture, combine parts. When nothing fits, write a simple low-poly object and tell the user, in their language, where a free file is and how to upload it. standOnGround places the result. Call through run_recipe.',
       input_schema: { type: 'object', required: ['subject'], properties: {
         subject: { type: 'string', description: 'What the user asked for, in a few words, such as "market stall" or "wooden cart".' },
         plan_json: { type: 'string', description: 'Leave empty. The tool asks the model. A caller that already holds a checked plan may pass it.' },
@@ -3792,6 +3792,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'request_secrets',
   'generate_game_systems',
+  'generate_stand_in',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',
@@ -4027,6 +4028,7 @@ export const RECIPE_TOOLS = [
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',
+  'generate_stand_in',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',

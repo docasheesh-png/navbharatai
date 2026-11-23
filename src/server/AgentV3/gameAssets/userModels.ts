@@ -243,13 +243,14 @@ export function userModelsFromFiles(files: ReadonlyMap<string, Uint8Array>, take
     const raw = files.get(from)!; const warnings: string[] = [];
     try {
       let glb: Uint8Array;
+      if (raw.length > USER_MODEL_LIMITS.bytes) throw new UserModelError(`it is larger than ${USER_MODEL_LIMITS.bytes / 1024 / 1024} MB — reduce its textures or polygons and attach it again`);
       if (/\.glb$/i.test(from)) {
-        if (raw.length < 12 || raw[0] !== 0x67 || raw[1] !== 0x6c || raw[2] !== 0x54 || raw[3] !== 0x46) throw new UserModelError('this is not a .glb file');
+        if (raw.length < 12 || raw[0] !== 0x67 || raw[1] !== 0x6c || raw[2] !== 0x54 || raw[3] !== 0x46) throw new UserModelError('this is not a valid 3D model (.glb file)');
         glb = raw;
       }
       else if (/\.gltf$/i.test(from)) {
         const text = new TextDecoder('utf-8', { fatal: false }).decode(raw.slice(0, 400));
-        if (!/"asset"/.test(text) || !/"version"\s*:\s*"2\.0"/.test(text)) throw new UserModelError('this is not a .gltf file');
+        if (!/"asset"/.test(text) || !/"version"\s*:\s*"2\.0"/.test(text)) throw new UserModelError('this is not a valid 3D model (.gltf file)');
         glb = gltfToGlb(files, from, raw, warnings);
       }
       else if (/\.obj$/i.test(from)) glb = objToGlb(files, from, raw);

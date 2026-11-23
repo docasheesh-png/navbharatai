@@ -16,7 +16,7 @@ export const GROUND_CONTACT_RULE = '⛰️ GROUND CONTACT IS MANDATORY. Whenever
   + ' clampOriginY from src/game/three/groundContact.ts every frame, and a vehicle keeps its wheel bottoms on the ground'
   + ' (the kit\'s suspension never finishes a frame below the surface). A bird, a plane or a projectile sets userData.ground'
   + ' = false. Take models, sounds and textures from the NavBharatAI library first. When the library has no match,'
-  + ' call generate_stand_in: one model call designs a simple low-poly object and standOnGround places it.'
+  + ' call run_recipe({ name: "generate_stand_in" }): one model call designs a simple low-poly object and standOnGround places it.'
   + ' An uploaded .glb or .gltf is checked for type, size and triangles, then placed with standOnGround too.'
   + ' Do not set position.y to a constant on something that moves across the ground.';
 

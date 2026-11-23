@@ -10,7 +10,7 @@ function load() {
  const emitted=generateGame3D(['objects','humanoid']).files;
  const strings={HUMANOID:emitted['src/game/three/humanoid.ts'],SURFACES:emitted['src/game/three/surfaces.ts'],OBJECTS:emitted['src/game/three/objects.ts'],MATERIALS:emitted['src/game/three/materials.ts'],COLLISION:emitted['src/game/three/collision.ts']};
  const build={GAME_BUILDINGS:emitted['src/game/three/buildings.ts']};
- const files:Record<string,string>={adapter:OBJECT_ADAPTER,'./humanAdapter':HUMAN_ADAPTER,'../three/humanoid':strings.HUMANOID,'../three/objects':strings.OBJECTS+OBJECT_DISPOSAL,'./surfaces':strings.SURFACES,'./materials':strings.MATERIALS,'./collision':strings.COLLISION,'./buildings':build.GAME_BUILDINGS};
+ const files:Record<string,string>={adapter:OBJECT_ADAPTER,'./humanAdapter':HUMAN_ADAPTER,'../three/humanoid':strings.HUMANOID,'../three/objects':strings.OBJECTS+OBJECT_DISPOSAL,'./surfaces':strings.SURFACES,'./groundContact':emitted['src/game/three/groundContact.ts'],'./materials':strings.MATERIALS,'./collision':strings.COLLISION,'./buildings':build.GAME_BUILDINGS};
  const cache:Record<string,any>={};
  const get=(name:string):any=>{
    if(name==='three')return THREE;

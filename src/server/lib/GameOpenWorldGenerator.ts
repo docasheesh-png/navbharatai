@@ -30,7 +30,8 @@ import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '..
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { softwareRenderer, localLowestY } from '../three/surfaces';
+import { softwareRenderer } from '../three/surfaces';
+import { localLowestY } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 

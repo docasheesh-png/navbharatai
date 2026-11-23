@@ -64,9 +64,9 @@ describe('an uploaded model is checked and told to sit on the ground', () => {
     expect(userModelNote(ok.models, [])).toContain('standOnGround');
     const bad = userModelsFromFiles(new Map([['notes.glb', new TextEncoder().encode('hello')]]));
     expect(bad.models).toEqual([]);
-    expect(bad.refused[0].reason).toMatch(/not a \.glb/);
+    expect(bad.refused[0].reason).toMatch(/not a valid 3D model \(\.glb/);
     const notGltf = userModelsFromFiles(new Map([['scene.gltf', new TextEncoder().encode('{ "not": "a model" }')]]));
-    expect(notGltf.refused[0].reason).toMatch(/not a \.gltf/);
+    expect(notGltf.refused[0].reason).toMatch(/not a valid 3D model \(\.gltf/);
   });
 });
 

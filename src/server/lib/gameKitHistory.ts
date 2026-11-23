@@ -99,7 +99,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c8b7adf9e5ab555aeebc5162530a9041dea66b99c5e8ddab3da9f27a435ffd6c",
     "2df11aaa176f46699c79849fc82d90ce30550f56478214ccf0dba6aa65053925",
     "07e6ffff4f5275a773fd7d76632c63889253a8ae85edf0faff30211d143cfbed",
-    "b1e8325ed84ef3627b7154824edce27be9657f42dcbbf2a96d36dc081ca0f8fe"
+    "66d89dc2ece435f4e8ca3aeb4ed74dd6ecc8b15650c5a553e01e4c05cb83cb41",
+    "b1e8325ed84ef3627b7154824edce27be9657f42dcbbf2a96d36dc081ca0f8fe",
+    "f039244202b5aeae8aed796cf8214b96c21bd8b79922b07d45b1474e698b74fb"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -147,7 +149,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1140f56ef6eaf36c82fe1c15e9967ff83bc73c9133fbfab4f27bb91da5333208"
   ],
   "src/game/athree/collider.ts": [
-    "0c1bd77b86a85155ce889d4c87367b305f46e2dbbe4de704c0cc603076788b08"
+    "0c1bd77b86a85155ce889d4c87367b305f46e2dbbe4de704c0cc603076788b08",
+    "2850d2e45da49fe157853599556dc526ec3a4e30964284c895a34d53a29f86ac"
   ],
   "src/game/athree/config.ts": [
     "0daa780af7666b5884ab80dc784accc7928edd551c23a01a108e54a78da53202",
@@ -169,7 +172,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6d325fe1c544bda8000946312877dd7456e809c8e4ff7a0c929e398e017aec86",
     "b8559a47de4724c631b800270fbb5263acbec65b0796cf2430fc451b86f94392",
     "7c6f13c98b3d0c53abce1731b3748947f9b6bb083d442ddff0719eb6ca3eda36",
-    "2896e49d8c8bb27921a91908ce1368e9464bb96c28f2159761acc7d6d8c1e6c9"
+    "2896e49d8c8bb27921a91908ce1368e9464bb96c28f2159761acc7d6d8c1e6c9",
+    "c6dbce9eba777633cbc4a77e234b578176ca94fe7cca0fbbe4bd9b06b31ca055"
   ],
   "src/game/athree/noise.ts": [
     "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
@@ -269,6 +273,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/board/dice.ts": [
     "ab07024bd0487471a0a2c903e1cdb1bafbb10650ae89494080819345970278bf"
   ],
+  "src/game/board/football.ts": [
+    "5a3983937fdaf94853d7eede3d14a9a97884322547878ad9210fb018a1c18e3c"
+  ],
   "src/game/board/index.ts": [
     "905e8c74c0e029a99fae267cbc835304b5c2c519dfd0057d7db1adc79164e2f3",
     "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc",
@@ -277,7 +284,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b",
     "053e9f9b909528b10107e48248a2de3f134d11ceb5b03c5663ef2137f4d04c94",
     "9572512cb4e1f447ac37f7f03642d2e777a64f6dc1bb5d382808ebbc69aef98c",
-    "8a88801150fb5209b305cb9ae82f8c96ca98db0b2688140ed7089fd1ade6e51d"
+    "8a88801150fb5209b305cb9ae82f8c96ca98db0b2688140ed7089fd1ade6e51d",
+    "254d4b6ce2ca1925877aad9498e1e96f804ca8b64665112cc6f302d55fcb46ed",
+    "b366258e80e6a739ab54a2f9a79ad664f55f7a471ec1a873c0ea66ec0aa948e7",
+    "bcef20916547c8d4ebb906c5be1b0d94466bb9e22c7d3ab55dff2e1ba0b854bc"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"
@@ -509,7 +519,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "ea47b40c8bdcc92df5fec541606d3653a9cf1e1c703ff6440ff5775b96244c7c",
     "835fed33d38ab81405e88c71a75f6e23a1a8f1ac0e426e5530e3f67253e03722",
     "e9533310341993946c144ec6a822e70e33c6cf4bd47ad966b2ff639d2e4ec13e",
-    "6d80b500ea8d37419509dbe014f7a727fd94d82915a50cf2a0214f63396797af"
+    "e410e66970b2279a5f20581103af5b9e53dfc5df3ff7927aaf5f93724bb90bdf",
+    "d95ed61c4b329c4319342b76f4e46958fcf168c9c24b5d3fb9f26f835e56402e"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -570,7 +581,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8c9bc3850ef3a475216d51172d92e99f1dfbab848ec2c6ad82b4db8687e5ca7f"
   ],
   "src/game/three/buildings.ts": [
-    "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f"
+    "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f",
+    "9d12b3a208ad65fd8f050d5a18ab47d1a6039c64f95804348fb5e42a8e703b98"
   ],
   "src/game/three/camera.ts": [
     "2563e14758586a40217ed8efca551ed71133223b9f4775a025360afd060715b0",
@@ -623,7 +635,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "f824eab134e9159d672a848eb66f1407629dc1d4e656906320e5032cffee5e95",
     "6e2d317b6d609072819df5a88fb996b9476d59bc554312ad7ee13d3eb2b7b33d",
     "09e4f076799fb5409fd3f302c41cac19aef10a2a76ab611f02b93bc378bacc91",
-    "3381d0f99263d649beb5dad8d0825b113f5c35238d81386ba0e621075cf93e2b"
+    "3381d0f99263d649beb5dad8d0825b113f5c35238d81386ba0e621075cf93e2b",
+    "acbab8f429256085a555f09af7027d3732ae93bf53f69a9639ed6cee5ca94ff9",
+    "044ae868f88e435ed88f1257f11e9a7f7c2617263be49ccced5b36ecec66ddc3",
+    "0eb6aebfb9d10b6dc8aa6cc6f3eefc23312d6d4515015b8324fd1776a64e2b22"
   ],
   "src/game/three/lighting.ts": [
     "7b1f89bdc9398b48a10fcc2fd1fb77a9577a2925dee1e14120857e5ac3e8be96"

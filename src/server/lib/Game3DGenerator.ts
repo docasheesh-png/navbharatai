@@ -2235,7 +2235,8 @@ export interface Humanoid {
    * Play a one-shot ACTION pose over the walk, so the body visibly does what the button did: 'punch', 'swing'
    * (a melee weapon), 'fire' (a gun's recoil), 'kick', 'throw', 'jump' (the launch), 'land' (the squash, also
    * automatic after a fall), 'hit' (a flinch), 'use' (a reach), 'bat' (a cricket or baseball shot: both hands lift
-   * the bat back, then drive it through the line of the ball and follow through). Call it on the frame the action happens; keep
+   * the bat back, then drive it through the line of the ball and follow through), 'dive' / 'dive-left' (a goalkeeper's
+   * full-length dive to his own right / left, arms stretched). Call it on the frame the action happens; keep
    * calling update() every frame. strength 0–1.5 scales it (default 1).
    */
   act: (action: HumanoidAction, strength?: number) => void;
@@ -2254,11 +2255,12 @@ export interface Humanoid {
 }
 
 /** The one-shot action poses a humanoid can play (see Humanoid.act). */
-export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use' | 'bat';
+export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use' | 'bat' | 'dive' | 'dive-left';
 
 /** How long each action pose lasts, in seconds — short enough to never delay the next press. */
 export const ACTION_SECONDS: Readonly<Record<HumanoidAction, number>> = {
   punch: 0.3, swing: 0.45, fire: 0.16, kick: 0.45, throw: 0.5, jump: 0.25, land: 0.24, hit: 0.32, use: 0.4, bat: 0.55,
+  dive: 0.8, 'dive-left': 0.8,
 };
 
 /**
@@ -2486,6 +2488,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   const act = (name: HumanoidAction, strength = 1) => {
     const dur = ACTION_SECONDS[name];
     if (dur === undefined) return;
+    hips.rotation.z = 0;                                  // a dive cut short does not leave the body tipped
     action = { name, t: 0, dur, strength: Math.max(0, Math.min(1.5, strength)) };
   };
   // Move a joint angle toward a target by weight w (0 = the walk's own pose, 1 = the action's).
@@ -2564,6 +2567,18 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
         spine.rotation.x += -0.35 * pulse; neck.rotation.x = -0.3 * pulse;
         mix(LS, 'z', -0.55, pulse); mix(RS, 'z', 0.55, pulse); mix(LS, 'x', -0.4, pulse); mix(RS, 'x', -0.4, pulse);
         break;
+      case 'dive':
+      case 'dive-left': {
+        // A keeper's dive: the body lays out sideways toward the ball, both arms reach past the head, then he gets up.
+        const side = action.name === 'dive' ? 1 : -1;            // rotation.z > 0 tips a +Z-facing body to its right (−X)
+        const out = (u < 0.3 ? u / 0.3 : u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) * k;
+        hips.rotation.z = side * 1.2 * out;
+        hips.position.y -= 0.35 * H * out;
+        mix(RS, 'x', -2.9, out); mix(LS, 'x', -2.9, out); mix(RE, 'x', -0.05, out); mix(LE, 'x', -0.05, out);
+        mix(leftLeg.knee.rotation, 'x', 0.2, out); mix(rightLeg.knee.rotation, 'x', 0.2, out);
+        if (u >= 1) hips.rotation.z = 0;
+        break;
+      }
       case 'use':
         mix(RS, 'x', -1.25, pulse); mix(LS, 'x', -1.25, pulse); mix(RE, 'x', -0.45, pulse); mix(LE, 'x', -0.45, pulse);
         spine.rotation.x += 0.1 * pulse;
@@ -2578,7 +2593,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
       const u = down.t / FALL_SECONDS;
       const e = u * u * (3 - 2 * u);                      // ease in and out: a collapse, not a hinge
       hips.rotation.x = -down.dir * (Math.PI / 2) * e;    // backward (from the front) or forward
-      hips.rotation.y = 0;
+      hips.rotation.y = 0; hips.rotation.z = 0;
       hips.position.y = legH - (legH - 0.12 * H) * e;     // down to the ground
       leftLeg.knee.rotation.x = 0.9 * e; rightLeg.knee.rotation.x = 0.6 * e;
       leftLeg.hip.rotation.x = 0.3 * e; rightLeg.hip.rotation.x = 0.1 * e;
@@ -7356,7 +7371,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // chal rahi hai" — the headlights faced the player and LEFT turned the car RIGHT.
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
-      'Explorable houses: createHouse({ enterable: true }) or createEnterableHouse(). Flat roof, one/two storeys, real doorway and stairs. Legacy createHouse() is solid scenery. Game shell wires E/mobile Use; custom loops must call interactHouseDoor and updateHouseDoors. Supply all NPC occupants. Do not replace interiors with decorative assets.\n' +
+      'Enterable houses: an action, shooter or open-world game calls createActionTown() — at least 100 varied houses on roads, instanced until the player is near, then a hollow interior with a swinging door. createHouse({ enterable: true }) or createEnterableHouse() is one house. enterableShellFor(model) wraps a solid library mesh. Furniture uses library subjects (bed, sofa, chair, table, kitchen counter, fridge, lamp, cabinet, shelf). The shell wires E and the phone Use button. Legacy createHouse() is solid scenery and is not enough for an action world.\n' +
       (files['src/game/three/city.ts'] ? 'City: const city = createCity({ blocksX: 5, blocksZ: 5, style: \'mixed\' }); scene.add(city.root) — streets, crossings, pavements, shops, apartments, offices, houses, parks, street lights, centred on the origin. Put the player at city.spawn facing city.spawnHeading. Driving: pass { ground: city.heightAt } to driveVehicle; driveVehicle already stops a car at the city\'s buildings and poles (they are solid), so nothing more is needed — city.solidAt(x, z, radius) is only for a mover your own code positions by hand. city.route(from, to) gives left-lane waypoints for AI cars, taxis and deliveries; city.lotsOf(\'shop\') and lot.entrance give mission targets; lot.sign is where to write a shop name. Never hand-place a street grid.\n' : '') +
       (files['src/game/three/physics.ts'] ? 'Physics: const physics = createPhysics(scene) (gravity, a ground at y = 0, the scene\'s solid colliders as fixed walls); physics.add(mesh, { mass }) for anything that should fall, roll, stack or topple (0 = fixed); physics.explode(point, strength, radius) throws nearby bodies outward; const doll = physics.ragdoll(humanoid) makes a kit character go limp and fall (doll.push(impulse), doll.remove()); call physics.step(dt) every frame. Never fake a fall with a hand-written tween, and never add physics to the player\'s own walking capsule or a driven car (those already collide).\n' : '') +
       (files['src/game/three/citytraffic.ts'] ? 'City traffic: const traffic = createCityTraffic(city, { count: 15 }); scene.add(traffic.root); then traffic.update(dt, [playerObject]) every frame — cars, autos and buses drive the grid in the left lane, turn at crossings, obey the traffic lights (traffic.lightAt), keep their gap and stop for the player. Never animate city traffic by hand.\n' : '') +

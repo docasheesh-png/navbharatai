@@ -1389,10 +1389,11 @@ export function compassWay(from: Flat, to: Flat): string {
   return words[((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8];
 }
 /**
- * Where the relics go: spread along the highways by length (a road is always open ground), else in a ring 40–140 m
- * around the start (open country, or a single place — then outside its radius). PURE given its inputs.
+ * Where the relics go: spread along the highways by length, else in a ring 40–140 m around the start (open country, or
+ * a single place — then outside its radius). Optional ok (the exploration uses land: height at least 2 and not water)
+ * retries a point that fails; without ok the first pick is kept, so a seed still matches. PURE given its inputs.
  */
-export function relicSpots(count: number, highways: ReadonlyArray<ReadonlyArray<Flat>>, spawn: Flat, seed: number, keepOut = 0): Flat[] {
+export function relicSpots(count: number, highways: ReadonlyArray<ReadonlyArray<Flat>>, spawn: Flat, seed: number, keepOut = 0, ok?: (p: Flat) => boolean): Flat[] {
   const n = Math.max(0, Math.min(200, Math.floor(count)));
   if (!n) return [];
   const rand = exploreRandom(seed);
@@ -1400,17 +1401,27 @@ export function relicSpots(count: number, highways: ReadonlyArray<ReadonlyArray<
   for (const line of highways) for (let i = 1; i < line.length; i++) { const d = Math.hypot(line[i].x - line[i - 1].x, line[i].z - line[i - 1].z); if (d > 0) segs.push([line[i - 1], line[i], d]); }
   const total = segs.reduce((t, s) => t + s[2], 0);
   const out: Flat[] = [];
+  const take = (p: Flat) => !ok || ok(p);
   if (total > 50) {
     for (let k = 0; k < n; k++) {
-      let at = ((k + 0.25 + rand() * 0.5) / n) * total;
-      for (const [a, b, d] of segs) { if (at <= d) { const f = at / d; out.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f }); break; } at -= d; }
+      let hit: Flat | undefined;
+      for (let t = 0; t < 16 && !hit; t++) {
+        let at = (t === 0 ? (k + 0.25 + rand() * 0.5) / n : rand()) * total;
+        for (const [a, b, d] of segs) { if (at <= d) { const f = at / d; const p = { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f }; if (take(p)) hit = p; break; } at -= d; }
+      }
+      if (hit) out.push(hit);
     }
     return out;
   }
   const inner = Math.max(40, keepOut + 15);
   for (let k = 0; k < n; k++) {
-    const angle = (k / n) * Math.PI * 2 + rand() * 0.4, r = inner + rand() * 100;
-    out.push({ x: spawn.x + Math.sin(angle) * r, z: spawn.z - Math.cos(angle) * r });
+    let hit: Flat | undefined;
+    for (let t = 0; t < 16 && !hit; t++) {
+      const angle = (k / n) * Math.PI * 2 + rand() * 0.4, r = inner + rand() * (100 + t * 20);
+      const p = { x: spawn.x + Math.sin(angle) * r, z: spawn.z - Math.cos(angle) * r };
+      if (take(p)) hit = p;
+    }
+    if (hit) out.push(hit);
   }
   return out;
 }
@@ -1446,7 +1457,8 @@ export function createExploration(ctx: GameContext, world: OpenWorld, options: E
   const keep = () => { try { storage?.setItem(key, JSON.stringify(save)); } catch { /* storage can be blocked */ } };
   const nameOf = (id: string) => options.names?.[id] ?? placeName(id);
   const first = world.places[0];
-  const spots = relicSpots(options.relics ?? 12, world.highways, world.spawn, options.seed ?? world.map.world.seed, first && world.places.length === 1 ? first.radius : 0);
+  const onLand = (p: Flat) => world.heightAt(p.x, p.z) >= 2 && !world.map?.world?.waterAt?.(p.x, p.z);
+  const spots = relicSpots(options.relics ?? 12, world.highways, world.spawn, options.seed ?? world.map.world.seed, first && world.places.length === 1 ? first.radius : 0, onLand);
   const reach = Math.max(0.5, options.reach ?? 2.5);
   // RELIC LOOK: a slowly turning golden gem on a soft glow. Change it here.
   const gem = new THREE.OctahedronGeometry(0.45);

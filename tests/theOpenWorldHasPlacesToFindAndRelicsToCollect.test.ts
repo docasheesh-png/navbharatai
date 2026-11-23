@@ -55,6 +55,8 @@ describe('🧭 the pure parts', () => {
     for (const p of ring) { const d = Math.hypot(p.x - 100, p.z + 50); expect(d).toBeGreaterThanOrEqual(75); expect(d).toBeLessThanOrEqual(176); }
     expect(OW.relicSpots(0, road, { x: 0, z: 0 }, 1)).toEqual([]);
     expect(OW.relicSpots(1e6, road, { x: 0, z: 0 }, 1)).toHaveLength(200);
+    const kept = OW.relicSpots(10, road, { x: 0, z: 0 }, 7, 0, (p: { x: number; z: number }) => p.x >= 80);
+    expect(kept).toHaveLength(10); for (const p of kept) expect(p.x).toBeGreaterThanOrEqual(80);
   });
   it('compass words match the corner map (north is -z, east is +x)', () => {
     const o = { x: 0, z: 0 };
@@ -140,8 +142,27 @@ describe('🌍 on the real map', () => {
       expect(relics[i].position.x).toBeCloseTo(p.x - (origin.x ?? 0), 3);
       expect(relics[i].position.y).toBeGreaterThan(world.heightAt(p.x, p.z) - (origin.y ?? 0) + 0.5);
     });
+    relics.forEach((m: any, i: number) => {
+      const p = spots[i];
+      expect(world.heightAt(p.x, p.z)).toBeGreaterThanOrEqual(2);
+      expect(world.map.world.waterAt(p.x, p.z)).toBeNull();
+    });
     ex.update(ctx, 1 / 60);
     expect(ex.status().places).toBe(2);
+    ex.dispose(); world.dispose();
+  }, 60_000);
+  it('open-country relics sit on land, even for a seed whose first ring pick had a dip', () => {
+    const scene = new THREE.Scene(), player = new CH.CharacterController({}); scene.add(player.object);
+    const ctx: any = { scene, camera: new THREE.PerspectiveCamera(60, 16 / 9, 0.5, 500), player, vehicles: { add() {}, seated: null } };
+    const world = OW.createOpenWorld(ctx, { seed: 2026 });
+    const ex = OW.createExploration(ctx, world, { relics: 12 });
+    const relics = scene.children.filter((c) => /^Relic /.test(c.name));
+    expect(relics).toHaveLength(12);
+    for (const m of relics) {
+      const x = m.position.x + (world.map.chunks?.origin.x ?? 0), z = m.position.z + (world.map.chunks?.origin.z ?? 0);
+      expect(world.heightAt(x, z)).toBeGreaterThanOrEqual(2);
+      expect(world.map.world.waterAt(x, z)).toBeNull();
+    }
     ex.dispose(); world.dispose();
   }, 60_000);
 });

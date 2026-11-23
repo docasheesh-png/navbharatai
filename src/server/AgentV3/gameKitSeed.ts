@@ -497,6 +497,17 @@ export function gameWorldRule(openWorldSource?: string | null): string {
     + ' only gets the world that is already there. Never write a feature that claims to add regions, expand, stream or enlarge the map —'
     + ' the change goes in src/game/world.ts or it is not made. Never build a place by hand beside the list, and never replace the'
     + ' map to make it bigger.');
+  // Map expansion item 6: a sports ground or venue is a place ON the map, at its real size, on its own level ground.
+  if (typeof openWorldSource !== 'string' || /'venue'/.test(openWorldSource)) {
+    parts.push('A SPORTS GROUND / VENUE on the map ("cricket ground jodo", "football ka maidan banao", "शहर में स्टेडियम बनाओ", "stadium next'
+      + ' to the city", "race track / circuit add karo", "ek arena banao") → ONE region { id, kind: \'venue\', venue: \'cricket-ground\' |'
+      + ' \'football-field\' | \'stadium\' | \'race-circuit\' | \'arena\', joinTo?: \'<region id>\' (beside that place, when they say'
+      + ' next to / in / near it), toward?, size? } — standard size (size = metres along its longer side), marked out, on level dry'
+      + ` ground, joined by road. It counts toward the ${cap.maxRegions}. Not a venue: "cricket game banao", "football khelna hai", "racing game`
+      + ' banao" ask for the GAME itself, not a ground added to the map.');
+  } else {
+    missing.push('add a sports ground or venue (kind \'venue\')');
+  }
   if (missing.length) {
     parts.push(`⚠️ THIS GAME'S MAP FILE (src/game/play/openWorld.ts) is an older or edited copy and CANNOT: ${missing.join('; ')}. Do not write`
       + ' those into src/game/world.ts (the game will not compile) and do not fake them with a feature or a hand-made shape: do what it CAN'

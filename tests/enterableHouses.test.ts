@@ -113,5 +113,79 @@ describe('enterable houses',()=>{
     expect(buildings.houseDoor(objects.createHouse({detail:'lite'}))).toBeUndefined(); expect(buildings.houseDoor(objects.createHouse({enterable:true}))).toBeDefined();
     const files=generateGame3D(['objects']).files; expect(files['src/game/three/buildings.ts']).toBeTruthy(); expect(files['src/game/three/collision.ts']).toBeTruthy();
     const shell=Object.values(generateGameShell().files).join('\n'); expect(shell).toContain("wasPressed('interact')"); expect(shell).toContain('updateHouseDoors(this.scene');
+    expect(shell).toContain('updateIndoorCamera(this.scene');
+  });
+
+  it('opens the door, walks inside, and stays on the floor clear of walls and furniture', () => {
+    const { scene, house, player, door } = setup();
+    const before = door.leaf.getWorldPosition(new THREE.Vector3());
+    door.setOpen(true);
+    for (let i = 0; i < 40; i++) door.update(1 / 60);
+    expect(door.leaf.getWorldPosition(new THREE.Vector3()).distanceTo(before)).toBeGreaterThan(0.3);
+    player.reset(0, 0.2, 6.2);
+    walk(player, 100, -1);
+    const local = house.worldToLocal(player.object.position.clone());
+    expect(Math.abs(local.x)).toBeLessThan(house.userData.enterableHouse.width / 2 - 0.2);
+    expect(Math.abs(local.z)).toBeLessThan(house.userData.enterableHouse.depth / 2 - 0.2);
+    expect(player.object.position.y).toBeGreaterThan(0.1);
+    expect(player.object.position.y).toBeLessThan(0.45);
+    const body = player.object.position.clone().add(new THREE.Vector3(0, 0.9, 0));
+    for (const piece of house.userData.furniture as THREE.Mesh[]) {
+      expect(new THREE.Box3().setFromObject(piece).containsPoint(body)).toBe(false);
+    }
+    scene.traverse(object => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData.furniture || mesh === house.userData.indoorRoof) return;
+    });
+  });
+
+  it('places at least 100 varied houses, and a far shell becomes a house when the player arrives', () => {
+    const town = buildings.createActionTown(100, 11);
+    const scene = new THREE.Scene();
+    scene.add(town.root);
+    const ground = new THREE.Mesh(new THREE.BoxGeometry(400, 0.2, 400));
+    ground.position.y = -0.1;
+    scene.add(collision.markWorldCollider(ground, 'ground'));
+    expect(town.houses.length).toBeGreaterThanOrEqual(100);
+    const footprint = (h: { x: number; z: number; scale: number }) => ({
+      minX: h.x - 3.4 * h.scale, maxX: h.x + 3.4 * h.scale, minZ: h.z - 2.9 * h.scale, maxZ: h.z + 2.9 * h.scale,
+    });
+    for (let i = 0; i < town.houses.length; i++) for (let j = i + 1; j < town.houses.length; j++) {
+      const a = footprint(town.houses[i]), b = footprint(town.houses[j]);
+      const overlap = a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
+      expect(overlap).toBe(false);
+    }
+    const id = (h: { design: { model: string; colour: string } }) => `${h.design.model}|${h.design.colour}`;
+    const adjacent = town.houses.filter(h => town.houses.some(o => o.index !== h.index && o.village === h.village
+      && Math.max(Math.abs(o.col - h.col), Math.abs(o.row - h.row)) === 1 && id(o) === id(h)));
+    expect(adjacent).toEqual([]);
+    expect(new Set(town.houses.map(id)).size).toBeGreaterThanOrEqual(15);
+    const far = town.houses.reduce((a: { x: number; z: number; index: number }, b: { x: number; z: number; index: number }) => Math.hypot(a.x, a.z) > Math.hypot(b.x, b.z) ? a : b);
+    expect(town.isLive(far.index)).toBe(false);
+    const started = performance.now();
+    for (let i = 0; i < 90; i++) town.update(0, 0);
+    const idleMs = (performance.now() - started) / 90;
+    expect(town.drawCalls()).toBeLessThan(40);
+    expect(idleMs).toBeLessThan(8);
+    town.update(far.x, far.z);
+    expect(town.isLive(far.index)).toBe(true);
+    const house = town.liveHouse(far.index);
+    const door = buildings.houseDoor(house);
+    const closed = door.leaf.getWorldPosition(new THREE.Vector3());
+    door.setOpen(true);
+    for (let i = 0; i < 40; i++) door.update(1 / 60);
+    expect(door.leaf.getWorldPosition(new THREE.Vector3()).distanceTo(closed)).toBeGreaterThan(0.2);
+    const player = new character.CharacterController();
+    scene.add(player.object);
+    house.updateWorldMatrix(true, true);
+    const entrance = house.localToWorld(new THREE.Vector3(0, 0.2, house.userData.enterableHouse.depth / 2 + 1.1));
+    player.reset(entrance.x, 0.2, entrance.z);
+    for (let i = 0; i < 90; i++) player.update(1 / 60, { ...still, moveZ: -1 }, house.rotation.y);
+    const local = house.worldToLocal(player.object.position.clone());
+    expect(Math.abs(local.x)).toBeLessThan(house.userData.enterableHouse.width / 2 - 0.15);
+    expect(Math.abs(local.z)).toBeLessThan(house.userData.enterableHouse.depth / 2 - 0.15);
+    expect(player.object.position.y).toBeGreaterThan(0.1);
+    const body = player.object.position.clone().add(new THREE.Vector3(0, 0.9, 0));
+    for (const piece of house.userData.furniture as THREE.Mesh[]) expect(new THREE.Box3().setFromObject(piece).containsPoint(body)).toBe(false);
   });
 });

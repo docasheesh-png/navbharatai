@@ -1695,7 +1695,7 @@ export function generateOpenWorld(): RecipeOutput {
       'stands each place on its own levelled ground, spread across the map with open country and roads between them (up to ' + OPEN_WORLD_MAX_REGIONS + ', places and lands together;',
       'a far place\'s city is built only when the player comes near). Keep the list in src/game/world.ts; a bigger map is ONE more entry.',
       'A bigger CITY is tiles that join it: { id: \'main-city-2\', kind: \'city\', joinTo: \'main-city\' }. A land is a region',
-      'of kind desert, jungle, mountain, snow, beach or grassland (an open grass field, no trees). spreadMeters: 40000 lays the places',
+      'of kind desert, jungle, mountain, snow, beach or grassland (an open grass field: thick grass, bushes, stones, a few lone trees). spreadMeters: 40000 lays the places',
       'across 40 km x 40 km. world.regions lists them and world.nearestRegion() says where the player is.',
       'world={{ city: true }} levels ground near the start and stands a city on it (streets, crossings, pavements, shops, apartments, offices,',
       'parks), with traffic that obeys the lights, people who cross on the zebras, and parked cars the player gets into with Use (E). world.city',

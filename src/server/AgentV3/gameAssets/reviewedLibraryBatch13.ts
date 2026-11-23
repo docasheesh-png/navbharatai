@@ -3054,5 +3054,495 @@ export const REVIEWED_LIBRARY_BATCH_13: readonly ReviewedAsset[] = [
       "redistributeInGame": true,
       "redistributeSource": true
     }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-animal-cat",
+    "revision": "6ee0d19a14d55dd503c9305c09c5b5407215bf1a",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "0382e72df5201adfd3b1c0b2c485d887e7afe285dd96f9083c071bcd87bd0787",
+    "bytes": 916804,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "animal cat"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "6ee0d19a14d55dd503c9305c09c5b5407215bf1af1f7fc9b4d3c29ada018990b",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "animal cat: Vuena, free mega starter (animal_cat). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-animal-fox",
+    "revision": "bc7b70f7885f7dc07585aaee47b779bdc3d86914",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "815615db486e03dfbf91b381f1ffecdb5819872459ecfd7e705059f9a27d00dc",
+    "bytes": 899784,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "animal fox"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "bc7b70f7885f7dc07585aaee47b779bdc3d869141394dd1e867e1ac0ad4dd06c",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "animal fox: Vuena, free mega starter (animal_fox). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-animal-owl",
+    "revision": "0c445b7364fcf88b81c8300e4b953947bc911ee4",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "375610b093e81bd493c49ed891491a2e9a06126c65fcb3ca70a0c6126ea5e98b",
+    "bytes": 848304,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "animal owl"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "0c445b7364fcf88b81c8300e4b953947bc911ee4dff2d51bb6a81fa7ceda0a22",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "animal owl: Vuena, free mega starter (animal_owl). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-fp-candle",
+    "revision": "691dbd2799668dd4365f485477f2da86047add17",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "79b782298a703f5b16afacba9ca7e095ad55f5d6a648794015e2a48350ebc9fd",
+    "bytes": 32856,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px fp candle"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "691dbd2799668dd4365f485477f2da86047add1784d3b93f45257b8e08d59bb8",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px fp candle: Vuena, free mega starter (px_fp_candle). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-fp-note",
+    "revision": "3378c1edcad8dc9f9d21be5c7bf5905ffeef8cdd",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "7dc0777bb34d06bdf2844aaab6e1e114c4896f391d55faa7d88caf37ba5ae3e8",
+    "bytes": 20424,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px fp note"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "3378c1edcad8dc9f9d21be5c7bf5905ffeef8cdd1b2e5c324a2a475dc6a737c5",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px fp note: Vuena, free mega starter (px_fp_note). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-fp-battery",
+    "revision": "bd6a56c542c80bf32a22346d4cca204d2dc7bfe3",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "19f3411023acac55e8fc65f937abfe8964f97c7395775cd12fa345782937e8e0",
+    "bytes": 25284,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px fp battery"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "bd6a56c542c80bf32a22346d4cca204d2dc7bfe370e3b5f2732684fd2023cc85",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px fp battery: Vuena, free mega starter (px_fp_battery). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-fp-keycard",
+    "revision": "d21396fdd98525ecc938ae024f0add8582ec6859",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "e738b4c7e0f4ce7315ed3c2b4dc1d66d0d36c5fc6a98ac8a2fdde74f1ff1c65d",
+    "bytes": 22284,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px fp keycard"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "d21396fdd98525ecc938ae024f0add8582ec6859f89e90b9241171a9de5e67e0",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px fp keycard: Vuena, free mega starter (px_fp_keycard). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-vhs-tape",
+    "revision": "0878d2ddd320f5325c8fd03d0836c5f1e61f6cdc",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "ca85a89b1e80bf605e9509f71f195590525c2db1689b23b7c2a31ea309b47f45",
+    "bytes": 26764,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px vhs tape"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "0878d2ddd320f5325c8fd03d0836c5f1e61f6cdcfc3a708eda2947508ac22baa",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px vhs tape: Vuena, free mega starter (px_vhs_tape). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-chair-wood",
+    "revision": "bda2d393a662d85b6370ed6bbf4b0a31f2924e02",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "01b875bac3e87d8806b5a2b7b684881c21050584393d529bb0a83ad15b76e270",
+    "bytes": 94076,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px chair wood"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "bda2d393a662d85b6370ed6bbf4b0a31f2924e02df5e7ecc87706dbd2bc4cda8",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px chair wood: Vuena, free mega starter (px_chair_wood). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-barrel",
+    "revision": "29ba7d942143a62525426d00f55d131c16be846d",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "e33ccc4712bb1038f274366b538b61d6fa616ea4df07baa38fe099cc004d8f12",
+    "bytes": 102836,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px barrel"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "29ba7d942143a62525426d00f55d131c16be846de13847d591306790aaabfe65",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px barrel: Vuena, free mega starter (px_barrel). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-crate-wood",
+    "revision": "78d8fc0b80ac406b6592b45df3b0b206715a37de",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "e407d5852805ea5c8e90b58247daaa5ac5ce844bdc9231a1a80428371fee904e",
+    "bytes": 103292,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px crate wood"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "78d8fc0b80ac406b6592b45df3b0b206715a37de868d2f87ffa1849dfdac0376",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px crate wood: Vuena, free mega starter (px_crate_wood). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-note-paper",
+    "revision": "c0f7892f55e2437edfdd3ef8c231e154442bb99d",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "4ac317dd1baef25428df653b5f2459440e6ed655429ee4b70627c669b12722e5",
+    "bytes": 26704,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px note paper"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "c0f7892f55e2437edfdd3ef8c231e154442bb99d7356011b54792d48c86c0688",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px note paper: Vuena, free mega starter (px_note_paper). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-px-candle",
+    "revision": "13aba4b771f829d04010edc70ab1538714c26e9d",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "3e08d5b6470ce69dec0a80242817e5dc43de65a8b20a39c348c062a6f19a384f",
+    "bytes": 31784,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "px candle"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "13aba4b771f829d04010edc70ab1538714c26e9deac32117f179390f30f5a724",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "px candle: Vuena, free mega starter (px_candle). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "vuena",
+    "id": "vuena-ap-table-lamp",
+    "revision": "eda82eb6ba98629eaf134ae8c8bc404db87cd7c1",
+    "sourceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "downloadUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+    "packaged": true,
+    "sha256": "0dc2e691c8959143f2003572be1174b12cbf14363a76be6a91e7767d08742050",
+    "bytes": 34084,
+    "libraryCategory": "street-prop",
+    "subjects": [
+      "ap table lamp"
+    ],
+    "animations": [],
+    "height": 1,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://creativecommons.org"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "eda82eb6ba98629eaf134ae8c8bc404db87cd7c1fa2073b91ee880b5430372f0",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+      "reviewedAt": "2026-11-23",
+      "author": "Vuena",
+      "attribution": "ap table lamp: Vuena, free mega starter (ap_table_lamp). CC0 1.0 Universal per LICENSE.txt. Material-only extensions removed so the file passes the library GLB check.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
   }
 ];

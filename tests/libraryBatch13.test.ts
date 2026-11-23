@@ -16,7 +16,7 @@ describe('drive pack models', () => {
     validateCatalogue(REVIEWED_GAME_ASSETS);
     expect(catalogueStorageBytes(REVIEWED_GAME_ASSETS)).toBeLessThanOrEqual(CATALOGUE_STORAGE_BUDGET_BYTES);
     const ids = REVIEWED_LIBRARY_BATCH_13.map(a => a.id);
-    expect(ids.filter(id => id.startsWith('vuena-'))).toHaveLength(54);
+    expect(ids.filter(id => id.startsWith('vuena-'))).toHaveLength(68);
     expect(ids.filter(id => id.startsWith('market-'))).toHaveLength(8);
     expect(ids).toContain('k13-ranger');
     expect(ids.filter(id => id.startsWith('psx-car-'))).toHaveLength(8);

@@ -221,7 +221,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     ...(regionList || []),
   ];
   const towns: OpenWorldCity[] = [];
+  // One root per BUILT PLACE, in step with towns[] and locals[] (index i is the same place in all three). A user's map has its
+  // own list: it was pushed here once, and every place built after it then moved, hid and disposed its neighbour's root.
   const roots: THREE.Group[] = [];
+  const userRoots: THREE.Object3D[] = [];
+  let disposed = false;
   const locals: THREE.Object3D[] = [];
   const taken: Array<{ x: number; z: number; r: number }> = [];
   const seenIds = new Set<string>();
@@ -577,6 +581,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         ctx.camera.position.x -= shift.dx; ctx.camera.position.z -= shift.dz;
         for (const [object] of anchored) { object.position.x -= shift.dx; object.position.z -= shift.dz; }
         for (const root of roots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
+        for (const root of userRoots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
       }
       if (lateEdits && map.world.editCount) {
@@ -595,6 +600,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (m.status !== 'waiting' || Math.hypot(at.x - m.centre.x, at.z - m.centre.z) > m.size / 2 + BUILD_AHEAD) continue;
         m.status = 'loading';
         loadUserMap(m.model).then((object) => {
+          if (disposed) return;                                                  // the game ended while it loaded
           // Sized to the ground it was given, standing on it, solid to walk and drive on.
           const box = new THREE.Box3().setFromObject(object), w = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) || 1;
           object.scale.multiplyScalar(m.size / w);
@@ -602,7 +608,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           object.position.set(m.centre.x - chunks.origin.x - (fit.min.x + fit.max.x) / 2, m.centre.y - fit.min.y, m.centre.z - chunks.origin.z - (fit.min.z + fit.max.z) / 2);
           object.traverse((o) => { if ((o as THREE.Mesh).isMesh) markWorldCollider(o, 'solid'); });
           object.name = 'User map ' + m.id;
-          ctx.scene.add(object); roots.push(object as THREE.Group); m.root = object; m.status = 'loaded';
+          ctx.scene.add(object); userRoots.push(object); m.root = object; m.status = 'loaded';
         }).catch((error) => { m.status = 'failed'; m.reason = String(error instanceof Error ? error.message : error).slice(0, 200); console.error('[world] the map "' + m.id + '" could not be loaded from ' + userMapUrl(m.model) + ': ' + m.reason); });
       }
       // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
@@ -621,7 +627,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     },
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();
+      disposed = true;
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
+      for (const root of userRoots) ctx.scene.remove(root);
+      userRoots.length = 0;
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
       unregisterMap();
@@ -707,6 +716,8 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
 export default OpenWorldGame;
 `;
 
+/** The bridge's own MAX_REGIONS (places and lands on one map), for the recipe's words — a test keeps the two equal. */
+export const OPEN_WORLD_MAX_REGIONS = 100;
 export const OPEN_WORLD_BRIDGE_PATH = 'src/game/play/openWorld.ts';
 export const OPEN_WORLD_STARTER_PATH = 'src/game/OpenWorldGame.tsx';
 
@@ -788,7 +799,7 @@ export function generateOpenWorld(): RecipeOutput {
       'another names it in needs: [\'coins\'] and reads what it shared with api.get(\'coins\'). Each feature is guarded: one that throws is switched',
       'off and named in the console, and the rest of the game keeps running. To add the next thing, add the next file — never rewrite the others.',
       'GROW THE MAP BY REGIONS: world={{ regions: [{ id: \'main-city\', kind: \'city\' }, { id: \'old-town\', kind: \'town\', toward: \'east\' }, { id: \'hill-village\', kind: \'village\' }] }}',
-      'stands each place on its own levelled ground, spread across the map with open country and roads between them (up to 12; far places are',
+      'stands each place on its own levelled ground, spread across the map with open country and roads between them (up to ' + OPEN_WORLD_MAX_REGIONS + ', places and lands together; far places are',
       'not drawn, only near ones run their traffic). Keep the list in src/game/world.ts; a bigger map is ONE more entry. world.regions lists',
       'them and world.nearestRegion() says where the player is.',
       'world={{ city: true }} levels ground near the start and stands a city on it (streets, crossings, pavements, shops, apartments, offices,',

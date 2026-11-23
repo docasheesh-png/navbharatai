@@ -8,6 +8,7 @@
 // separate and still off until an admin turns that path on.
 //
 // How to add or remove a provider: docs/claude/ADD_OR_REMOVE_A_PROVIDER.md
+import { withoutUnplugged } from './providerPlug';
 
 export type MediaDoor = 'vision' | 'generator' | 'app';
 
@@ -39,9 +40,10 @@ export const MEDIA_CATALOGUE: readonly MediaCatalogueEntry[] = [
 ];
 
 /** The engines one door tries, in the ladder's own cost order. `except` drops rows without reordering the rest. */
-export function catalogueSteps(door: MediaDoor, except: readonly string[] = []): string[] {
+export function catalogueSteps(door: MediaDoor, except: readonly string[] = [], unplugged?: readonly string[]): string[] {
   const skip = new Set(except);
-  return MEDIA_CATALOGUE.filter((entry) => entry.doors.includes(door) && !skip.has(entry.id)).map((entry) => entry.id);
+  const listed = MEDIA_CATALOGUE.filter((entry) => entry.doors.includes(door) && !skip.has(entry.id));
+  return withoutUnplugged(listed, (entry) => entry.family, unplugged).map((entry) => entry.id);
 }
 
 /** Keep only the ids this door still lists. An id that was removed drops out; the others stay in their order. */

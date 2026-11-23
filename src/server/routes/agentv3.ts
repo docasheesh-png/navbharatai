@@ -776,7 +776,7 @@ import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type 
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
 import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS, GAME_AUTO_REPAIR_SUSPENSION_REASON } from '../AgentV3/gameRepair';
 import { scopeMatch } from '../AgentV3/gameIntent';
-import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, withKitLayersFromDisk, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -24812,7 +24812,7 @@ async function noteBuildOutcome(
       // started the game for the explorer is the one the playtest presses first.
       let gamePlaytestDone = false;
       // Game Engine Ultra Phase 3 inputs (gameRepair.ts): the last measured defects and still-missing named features.
-      type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[] };
+      type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[]; played: boolean };
       const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
       const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
@@ -24827,7 +24827,8 @@ async function noteBuildOutcome(
           try {
             const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
             const playRun = parsePlaytest(out.stdout);
-            const verdict = playtestVerdict(playRun, replayFromCode(playtestFiles));
+            const playedFiles = await withKitLayersFromDisk(playtestFiles, (p) => actuator.readFile(workspaceId, p));
+            const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
             if (gameProof.outcome === 'not-run') gameProof.unplayed = true; // the runner's own "never played" answer
@@ -24835,8 +24836,8 @@ async function noteBuildOutcome(
             gateEvidence.game = gameProof.outcome;
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
-              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles), replayFromCode(playtestFiles));
-              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
+              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playedFiles), replayFromCode(playedFiles));
+              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playedFiles).missing : [], played: gameProof.outcome !== 'not-run' };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
               // 🔎 The read-only geometry look (gameGeometryProbe.ts): an info line for the admin report, handed to the builder
@@ -24863,7 +24864,7 @@ async function noteBuildOutcome(
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
             try {
-              const scope = gameContract ? gameScopeVerdict(gameContract, playtestFiles) : null;
+              const scope = gameContract ? gameScopeVerdict(gameContract, playedFiles) : null;
               if (scope) buildDiag.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
             } catch { /* observation only */ }
           } catch (err) {
@@ -25104,7 +25105,7 @@ async function noteBuildOutcome(
             barrenPhases.add(PHASE_GAME_REPAIR);
             buildDiag.record({ phase: 'preview', ...gameRepairRecord(outcome) });
             if (outcome.kept && outcome.after) {
-              gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing };
+              gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing, played: outcome.proof ? true : gamePlayed.played };
               // The repaired game was PLAYED again and nothing hard remains: that replay is the gate's game proof.
               if (outcome.proof) {
                 gameProof = { ...outcome.proof };
@@ -25122,7 +25123,7 @@ async function noteBuildOutcome(
         }
         if (gameCompleteGateEnabled()) {
           try {
-            const why = gameIncompleteReason(gamePlayed.defects, gamePlayed.scopeMissing);
+            const why = gameIncompleteReason(gamePlayed.defects, gamePlayed.scopeMissing, { played: gamePlayed.played });
             if (why) {
               gateEvidence.gameIncomplete = why;
               buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_COMPLETE_GATE_BLOCKED', autoResolved: false, message: `Not reported complete: ${why}.` });

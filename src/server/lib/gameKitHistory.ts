@@ -204,7 +204,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/athree/sky.ts": [
     "32c209e29681a69852896fea713e956df10c8aa3253eccd7ec2f1d3354eb70c3",
-    "bf7ee7343ed16b154eefd4544df21e821270d1bbfb825be24de227de1e66708d"
+    "bf7ee7343ed16b154eefd4544df21e821270d1bbfb825be24de227de1e66708d",
+    "74f5a9029a5848c13817fe9af089e2c4d841268356581e80fce8ce847445eee5"
   ],
   "src/game/athree/vegetation.ts": [
     "71c7521d01db7f34b81a475b05071360015946eb6e5e43e3171e5471f14ac115",

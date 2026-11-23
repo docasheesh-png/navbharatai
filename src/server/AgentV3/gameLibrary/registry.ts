@@ -18,6 +18,7 @@ import { pavilionAppTsx } from './games/pavilion';
 import { gardenMatchAppTsx } from './games/gardenMatch';
 import { oddOneAppTsx } from './games/oddOne';
 import { letterLinkAppTsx } from './games/letterLink';
+import { rhymePairAppTsx } from './games/rhymePair';
 import { gapScreen } from './games/gapScreens';
 
 export type PlayCategory =
@@ -67,7 +68,7 @@ export const GAME_LIBRARY: readonly GameTemplate[] = [
   { id: 'road-tale', title: 'Road Tale', category: 'Role Playing', accent: '#3f6212', appTsx: gapScreen('road-tale', 'road-tale-best-v1') },
   { id: 'river-ferry', title: 'River Ferry', category: 'Simulation', accent: '#92400e', appTsx: gapScreen('river-ferry', 'river-ferry-best-v1') },
   { id: 'seed-row', title: 'Seed Row', category: 'Strategy', accent: '#334155', appTsx: gapScreen('seed-row', 'seed-row-best-v1') },
-  { id: 'rhyme-pair', title: 'Rhyme Pair', category: 'Word', accent: '#4338ca', appTsx: gapScreen('rhyme-pair', 'rhyme-pair-best-v1') },
+  { id: 'rhyme-pair', title: 'Rhyme Pair', category: 'Word', accent: '#4338ca', appTsx: rhymePairAppTsx },
 ];
 
 export function gameById(id: string, library: readonly GameTemplate[] = GAME_LIBRARY): GameTemplate | undefined {

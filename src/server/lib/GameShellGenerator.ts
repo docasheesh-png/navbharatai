@@ -3718,7 +3718,8 @@ export class TouchControls {
 }
 `;
 
-const RACING_ROAD_GAME = `import { useEffect, useRef, useState } from 'react';
+const RACING_ROAD_GAME = `// STARTING POINT. A later request may change the car, the track, the rules, a level, the graphics, the sounds or the genre. Edit this file when its props do not reach the ask.
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Game } from './Game';
 import { events } from './core/events';
@@ -3921,8 +3922,8 @@ import { createHumanoid } from './three/humanoid';
 import { createPlayerCharacter, resolvePlayerChoice, type PlayerChoice } from './play/playerBody';
 
 /**
- * ORIGINAL ENDLESS-RUNNER STARTER (admin 2026-11-20 engine plan: a complete, working game per genre, so the builder
- * changes the theme and rules instead of wiring a loop, a camera and controls and getting one of them wrong).
+ * ORIGINAL ENDLESS-RUNNER STARTER — a starting point, not a locked template. A later request may change the character,
+ * the rules, a level, the graphics, the sounds, the language, the UI or the genre by editing this file.
  * The rules are the kit's LaneRunner (a row always has a way through; no tunnelling at speed); this file draws them
  * and wires the kit: start screen, pause, game over with Play again, settings, language, swipes and keys.
  *

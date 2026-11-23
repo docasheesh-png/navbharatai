@@ -796,6 +796,7 @@ import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { rateIsConfigured } from '../AgentV3/sandboxRate';
+import { refuseUnusableBuildPrompt } from '../AgentV3/platformNoticePrompt';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -10770,10 +10771,8 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
     }
-    if (prompt.length > MAX_PROMPT_LEN) {
-      res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
-      return;
-    }
+    // Too long, or only our own status notice sent back (failedbr #2498): a clean 400 before any work.
+    if (refuseUnusableBuildPrompt(res, prompt, MAX_PROMPT_LEN)) return;
     // P-AI.10 + P-PE.3 — adversarial/abuse detection. Every abusive prompt is recorded (audit +
     // ledger). Length/repetition NEVER block (they can be legitimate). The UNAMBIGUOUS jailbreak/
     // extraction kinds DO hard-block, but only after repeated attempts (≥3 within 1h) — the ledger

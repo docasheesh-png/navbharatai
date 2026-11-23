@@ -1350,6 +1350,141 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     },
   };
 }
+
+// ── EXPLORATION — what there is to DO on the big map before the game adds its own rules (template round R6; ideas studied
+// from open-source open-world games, our own code). Discover each place by walking into it ("Discovered: Rampur"), collect
+// relics laid along the highways (or around the start in open country), and follow a hint to the nearest place not found
+// yet. Progress is saved on the device. Every number below is an option; <OpenWorldGame explore={false} /> turns it all off.
+export interface ExploreOptions {
+  /** Relics laid on the map (along the highways, else in a ring around the start). Default 12; 0 = none. */
+  relics?: number;
+  /** How close the player must come to take a relic, metres. Default 2.5. */
+  reach?: number;
+  /** Where progress is kept on the device. Default 'open-world-explore-v1'. */
+  saveKey?: string;
+  /** Names for places (region id → name); a place without one is named from its id. */
+  names?: Record<string, string>;
+  /** Seed for where relics go (default: the map's seed, so a map always has the same relics). */
+  seed?: number;
+}
+export interface ExploreSave { found: string[]; relics: number[] }
+export interface ExploreStatus {
+  found: number; places: number; relics: number; relicsTotal: number;
+  /** The nearest place not found yet: its name, metres away and a compass word; null when all are found. */
+  next: { name: string; distance: number; way: string } | null;
+  /** The last thing that happened ("Discovered: Rampur", "Relic 3 of 12"), for a moment. */
+  toast: string;
+}
+type Flat = { x: number; z: number };
+
+/** A small seeded random source (mulberry32), so a map's relics always stand in the same places. */
+export function exploreRandom(seed: number): () => number {
+  let a = (Math.floor(seed) >>> 0) || 0x6d2b79f5;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/** Eight compass words for a heading from a to b (north is -z, east is +x, as on the corner map). */
+export function compassWay(from: Flat, to: Flat): string {
+  const words = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  const angle = Math.atan2(to.x - from.x, -(to.z - from.z));
+  return words[((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8];
+}
+/**
+ * Where the relics go: spread along the highways by length (a road is always open ground), else in a ring 40–140 m
+ * around the start (open country, or a single place — then outside its radius). PURE given its inputs.
+ */
+export function relicSpots(count: number, highways: ReadonlyArray<ReadonlyArray<Flat>>, spawn: Flat, seed: number, keepOut = 0): Flat[] {
+  const n = Math.max(0, Math.min(200, Math.floor(count)));
+  if (!n) return [];
+  const rand = exploreRandom(seed);
+  const segs: Array<[Flat, Flat, number]> = [];
+  for (const line of highways) for (let i = 1; i < line.length; i++) { const d = Math.hypot(line[i].x - line[i - 1].x, line[i].z - line[i - 1].z); if (d > 0) segs.push([line[i - 1], line[i], d]); }
+  const total = segs.reduce((t, s) => t + s[2], 0);
+  const out: Flat[] = [];
+  if (total > 50) {
+    for (let k = 0; k < n; k++) {
+      let at = ((k + 0.25 + rand() * 0.5) / n) * total;
+      for (const [a, b, d] of segs) { if (at <= d) { const f = at / d; out.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f }); break; } at -= d; }
+    }
+    return out;
+  }
+  const inner = Math.max(40, keepOut + 15);
+  for (let k = 0; k < n; k++) {
+    const angle = (k / n) * Math.PI * 2 + rand() * 0.4, r = inner + rand() * 100;
+    out.push({ x: spawn.x + Math.sin(angle) * r, z: spawn.z - Math.cos(angle) * r });
+  }
+  return out;
+}
+/** Read a save safely: anything broken starts fresh. */
+export function readExploreSave(raw: unknown): ExploreSave {
+  const s = raw as Partial<ExploreSave> | null;
+  const found = Array.isArray(s?.found) ? s.found.filter((x): x is string => typeof x === 'string').slice(0, 2000) : [];
+  const relics = Array.isArray(s?.relics) ? s.relics.filter((x): x is number => Number.isInteger(x) && x >= 0 && x < 1000) : [];
+  return { found: [...new Set(found)], relics: [...new Set(relics)] };
+}
+/** Places the player stands in now (inside the radius) that were not found before. PURE. */
+export function newlyFound(places: ReadonlyArray<{ id: string; centre: Flat; radius: number }>, found: ReadonlyArray<string>, at: Flat): string[] {
+  return places.filter((p) => !found.includes(p.id) && Math.hypot(p.centre.x - at.x, p.centre.z - at.z) <= Math.max(20, p.radius)).map((p) => p.id);
+}
+/** The nearest place not found yet, or null. PURE. */
+export function nearestUnfound(places: ReadonlyArray<{ id: string; centre: Flat }>, found: ReadonlyArray<string>, at: Flat): { id: string; distance: number; way: string } | null {
+  let best: { id: string; distance: number; way: string } | null = null;
+  for (const p of places) {
+    if (found.includes(p.id)) continue;
+    const d = Math.hypot(p.centre.x - at.x, p.centre.z - at.z);
+    if (!best || d < best.distance) best = { id: p.id, distance: Math.round(d), way: compassWay(at, p.centre) };
+  }
+  return best;
+}
+
+export interface Exploration { update(ctx: GameContext, delta: number): void; status(): ExploreStatus; dispose(): void }
+/** Discovery, relics and the next-place hint on an OpenWorld. The starter runs it; a game of your own can too. */
+export function createExploration(ctx: GameContext, world: OpenWorld, options: ExploreOptions = {}): Exploration {
+  const key = options.saveKey ?? 'open-world-explore-v1';
+  const storage = (globalThis as { localStorage?: Storage }).localStorage;
+  let save: ExploreSave;
+  try { save = readExploreSave(JSON.parse(storage?.getItem(key) ?? 'null')); } catch { save = readExploreSave(null); }
+  const keep = () => { try { storage?.setItem(key, JSON.stringify(save)); } catch { /* storage can be blocked */ } };
+  const nameOf = (id: string) => options.names?.[id] ?? placeName(id);
+  const first = world.places[0];
+  const spots = relicSpots(options.relics ?? 12, world.highways, world.spawn, options.seed ?? world.map.world.seed, first && world.places.length === 1 ? first.radius : 0);
+  const reach = Math.max(0.5, options.reach ?? 2.5);
+  // RELIC LOOK: a slowly turning golden gem on a soft glow. Change it here.
+  const gem = new THREE.OctahedronGeometry(0.45);
+  const gold = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0x8a5a00, metalness: 0.5, roughness: 0.3 });
+  const meshes = spots.map((p, i) => {
+    const m = new THREE.Mesh(gem, gold); m.name = 'Relic ' + (i + 1);
+    m.visible = !save.relics.includes(i);
+    ctx.scene.add(m); world.place(m, p.x, p.z, 1.1);
+    return m;
+  });
+  let toast = '', toastT = 0, spin = 0;
+  const say = (line: string) => { toast = line; toastT = 3; };
+  return {
+    update(_ctx, delta) {
+      const dt = Number.isFinite(delta) && delta > 0 ? Math.min(delta, 0.25) : 0;
+      toastT = Math.max(0, toastT - dt); spin += dt;
+      const at = world.playerWorld();
+      const fresh = newlyFound(world.places, save.found, at);
+      if (fresh.length) { save.found.push(...fresh); say('Discovered: ' + nameOf(fresh[0])); keep(); }
+      spots.forEach((p, i) => {
+        const m = meshes[i];
+        if (!m.visible) return;
+        m.rotation.y = spin * 1.5 + i;
+        if (Math.hypot(p.x - at.x, p.z - at.z) <= reach && Math.abs(world.heightAt(p.x, p.z) - at.y) < 4) {
+          m.visible = false; save.relics.push(i); keep();
+          say(save.relics.length === spots.length ? 'All ' + spots.length + ' relics found!' : 'Relic ' + save.relics.length + ' of ' + spots.length);
+        }
+      });
+    },
+    status() {
+      const at = world.playerWorld(), next = nearestUnfound(world.places, save.found, at);
+      return { found: save.found.filter((id) => world.places.some((p) => p.id === id)).length, places: world.places.length,
+        relics: save.relics.filter((i) => i < spots.length).length, relicsTotal: spots.length,
+        next: next ? { name: nameOf(next.id), distance: next.distance, way: next.way } : null, toast: toastT > 0 ? toast : '' };
+    },
+    dispose() { for (const m of meshes) { world.release(m); ctx.scene.remove(m); } gem.dispose(); gold.dispose(); },
+  };
+}
 `;
 
 // The player's body now ships with the shell (every game on the kit swaps its character in src/game/player.ts); the open
@@ -1361,10 +1496,12 @@ export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — 
 // THIS FILE IS A STARTING POINT. A later request may change any of it: the character, the rules, a level, the controls,
 // the graphics, the sounds, the language, the UI, or the whole genre. Edit this file when its props do not reach the ask.
 // Make the first version through its props: setup() adds things (cars, enemies, pickups, missions) and update() runs rules.
-import React, { useMemo, useRef } from 'react';
+// EXPLORING comes built in (explore prop): discover places by walking into them, collect relics along the roads, and a hint
+// to the nearest place not found yet — saved on the device. explore={false} turns it off; explore={{ relics: 30 }} tunes it.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions, MinimapOptions } from './Game';
-import { createOpenWorld, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
+import { createExploration, createOpenWorld, type Exploration, type ExploreOptions, type ExploreStatus, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
 import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
 import type { PlayerChoice } from './play/playerBody';
 
@@ -1395,12 +1532,19 @@ export interface OpenWorldGameProps {
    * small only; false turns the map off. The player can also hide the corner map in Settings → Minimap.
    */
   map?: MinimapOptions | boolean;
+  /**
+   * EXPLORING: places to discover, relics to collect (12 along the roads) and a hint to the nearest place not found yet.
+   * On by default; false turns it off; { relics: 0 } keeps discovery without relics; { names: { 'old-town': 'Rampur' } }.
+   */
+  explore?: ExploreOptions | boolean;
   /** Any other shell option (camera, touch buttons, language, music …). */
   options?: Omit<GameOptions, 'container' | 'setup' | 'update'>;
 }
 
-export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, map = true, setup, update, options }: OpenWorldGameProps) {
+export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOptions, features, player, map = true, explore = true, setup, update, options }: OpenWorldGameProps) {
   const world = useRef<OpenWorld | null>(null);
+  const exploring = useRef<Exploration | null>(null);
+  const [found, setFound] = useState<ExploreStatus | null>(null);
   const host = useRef<FeatureHost<OpenWorld> | null>(null);
   const listed = useRef(features); listed.current = features;
   const hooks = useRef({ setup, update }); hooks.current = { setup, update };
@@ -1411,6 +1555,12 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     ...options,
     setup(ctx) {
       world.current = createOpenWorld(ctx, worldOptions);
+      exploring.current?.dispose(); exploring.current = null;
+      if (explore !== false) {
+        const names: Record<string, string> = {};
+        for (const r of worldOptions?.regions ?? []) if (r.name) names[r.id] = r.name;
+        exploring.current = createExploration(ctx, world.current, { names, ...(explore === true ? {} : explore) });
+      }
       hooks.current.setup?.(ctx, world.current);
       host.current = createFeatureHost<OpenWorld>(listed.current || []);
       host.current.setup(ctx, world.current);
@@ -1418,12 +1568,27 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     update(ctx, delta) {
       if (!world.current) return;
       world.current.frame(ctx, delta);
+      exploring.current?.update(ctx, delta);
       hooks.current.update?.(ctx, world.current, delta);
       host.current?.update(ctx, world.current, delta);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
-  return <GameCanvas options={gameOptions} />;
+  useEffect(() => {
+    const id = setInterval(() => { if (exploring.current) setFound(exploring.current.status()); }, 250);
+    return () => { clearInterval(id); exploring.current?.dispose(); exploring.current = null; };
+  }, []);
+  const chip = { background: '#0f172acc', color: 'white', borderRadius: 8, padding: '4px 10px', fontSize: 13 } as const;
+  return <>
+    <GameCanvas options={gameOptions} />
+    {/* THE EXPLORING BAR — places found, relics, the next place and the last discovery. Move or restyle it here. */}
+    {found && <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }}>
+      {found.places > 0 && <span style={chip}>📍 {found.found}/{found.places} places</span>}
+      {found.relicsTotal > 0 && <span style={chip}>💎 {found.relics}/{found.relicsTotal}</span>}
+      {found.next && <span style={chip}>Next: {found.next.name} · {found.next.distance} m {found.next.way}</span>}
+      {found.toast && <span style={{ ...chip, background: '#15803dee', fontWeight: 600 }}>{found.toast}</span>}
+    </div>}
+  </>;
 }
 
 export default OpenWorldGame;

@@ -32,6 +32,7 @@
 
 import { isSandboxRecoveryRefusalMessage } from './sandboxRecoveryMessages';
 import { isPlatformStopNotice } from './platformStopNotices';
+import { isPlatformAdmissionNotice } from './platformAdmissionNotices';
 
 /**
  * The opening line of the platform's own preview-fix request.
@@ -172,7 +173,36 @@ export function errorCanBeFixedByEditingTheApp(opts: {
   // are about the user's connection, never the app. Offered as "Fix with AI", one became a five-minute build "fixing"
   // an app that had rendered at 56 s. Exact message only; any text that says more keeps today's behaviour.
   if (isClientConnectionError(opts.message)) return false;
+  // failedbr #2498: "Your earlier build for this app is still running…" arrived in the stream and was offered
+  // "Fix with AI"; the press ran a 15-minute build on that sentence. A status notice is never the app's fault.
+  if (isPlatformAdmissionNotice(opts.message)) return false;
   return String(opts.message ?? '').trim() !== '';
+}
+
+/** Is this text one of the platform's own notices — never something an edit to the app can answer? PURE. */
+export function isPlatformNotice(message: string | null | undefined): boolean {
+  return isPlatformStopNotice(message) || isPlatformAdmissionNotice(message)
+    || isSandboxRecoveryRefusalMessage(message) || isClientConnectionError(message);
+}
+
+/**
+ * 🔴 A PLATFORM NOTICE SENT BACK AS THE USER'S REQUEST (failedbr #2498, 2026-11-22). The server-side net under the
+ * client one: an old phone bundle, a copy-paste or any future button can still send our own sentence — bare, or
+ * wrapped in our own "Fix this error and continue building the app:" template — and the builder would treat it
+ * as an app request. True when the whole message is such a notice (after removing our template's opening line),
+ * or the template wraps nothing at all. A user who adds their own words after the notice is talking to us and
+ * keeps today's behaviour. PURE.
+ */
+export function platformNoticeAsBuildRequest(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '').trim();
+  if (!text) return false;
+  const wrapped = text.toLowerCase().startsWith(FIX_ERROR_AND_CONTINUE_PREFIX.toLowerCase());
+  const body = wrapped ? text.slice(FIX_ERROR_AND_CONTINUE_PREFIX.length).trim() : text;
+  if (wrapped && !body) return true;
+  // A bare "network error" typed by a person may describe THEIR app's screen; only our template proves it is ours.
+  const notice = (part: string) => (wrapped ? isPlatformNotice(part) : isPlatformNotice(part) && !isClientConnectionError(part));
+  // Only notices: a paragraph the user typed AFTER one is a real message and keeps today's behaviour.
+  return body.split(/\n\s*\n/).every(notice);
 }
 
 /**

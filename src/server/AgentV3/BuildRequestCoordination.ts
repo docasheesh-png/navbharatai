@@ -288,8 +288,11 @@ export function createBuildPreflightStream(res: PreflightResponse, publish: (eve
     reject(status: number, payload: Record<string, unknown>): void {
       if (!res.headersSent) { res.setHeader('Retry-After', '2'); res.status(status).json(payload); return; }
       if (!res.writableEnded) {
-        res.write(JSON.stringify({ type: 'error', message: payload.error, code: payload.code, requestState: payload.requestState, retryable: payload.retryable === true }) + '\n');
-        res.write(JSON.stringify({ type: 'result', ok: false, summary: payload.error, steps: 0, billedInr: 0 }) + '\n');
+        // `beforeBuildStarted`: an admission refusal is a STATUS NOTICE, not an error in the app (failedbr #2498). Once
+        // the stream is open the HTTP status can no longer say so, so the events carry it and the client offers no
+        // "Fix with AI" — that button once sent this very sentence back as a build request.
+        res.write(JSON.stringify({ type: 'error', message: payload.error, code: payload.code, requestState: payload.requestState, retryable: payload.retryable === true, beforeBuildStarted: true }) + '\n');
+        res.write(JSON.stringify({ type: 'result', ok: false, summary: payload.error, steps: 0, billedInr: 0, beforeBuildStarted: true }) + '\n');
         res.end();
       }
     },
@@ -315,6 +318,11 @@ export function startBuildLeaseHeartbeat(opts: {
   // though the lease survives LEASE_STALE_MS (four beats) and no other worker may claim it before then.
   // Abort only once the last CONFIRMED renewal is old enough that the lease could lapse before the next beat.
   let lastConfirmedAt = opts.admittedAt;
+  // Holding the lease proves every OLDER unfinished build of this workspace is gone: give their reports an honest end
+  // now (failedbr #2497 — a build whose server died stayed "still running" in its report forever). Best-effort.
+  if (opts.store) {
+    void import('./DiagnosticsStore').then((m) => m.settleOrphanedBuildReports(opts.workspaceId, opts.admittedAt)).catch(() => {});
+  }
   const timer = setInterval(() => {
     void (async () => {
       const build = opts.build();

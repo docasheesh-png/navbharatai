@@ -41,6 +41,7 @@ import { CHAT_INPUT_WEIGHT } from '../freeTierCostCeiling';
 import { realRateFor } from '../../AgentV3/providerRates';
 import { getBreaker } from '../Router/CircuitBreaker';
 import { acquireSlot, releaseSlot, recordProviderLatency } from '../Router/AIRouter';
+import { chatTrafficEnabled, orderChatByHealth } from '../ProviderHealth/chatTrafficOrder';
 import { watchdogLimits } from '../Router/streamWatchdog';
 import type { RoutedCall } from '../UniversalAIRouter';
 import type { AIProviderResponse } from '../Router/ProviderTypes';
@@ -209,6 +210,17 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     if (!exclusiveAdmin && order.includes('openrouter') && !order.includes('qubax')) {
       const at = order.indexOf('openrouter') + 1;
       order = [...order.slice(0, at), 'mitrify', 'qubax', ...order.slice(at)];
+    }
+    // Health, speed and load inside the ladder that was already chosen. A kill switch restores that
+    // ladder exactly. Every later rung in this turn still receives `history` from historyForChain.
+    if (!cfg.fixedOrder && !exclusiveAdmin && chatTrafficEnabled()) {
+      const facts = order.map((id) => {
+        if (id === 'mitrify') return { id, provider: 'MITRIFY', priceIn: null as number | null };
+        if (id === 'qubax') return { id, provider: 'ENGINE_QX', priceIn: null as number | null };
+        const rung = cfg.rungs.find((item) => item.id === id);
+        return { id, provider: names[id], priceIn: rung ? rung.priceIn : null };
+      });
+      order = orderChatByHealth(facts).map((fact) => fact.id);
     }
     // Owner preference applies only after existing enrollment and route selection.
     // Keep exclusive tests, provider switches, admission and supplier adapters unchanged.

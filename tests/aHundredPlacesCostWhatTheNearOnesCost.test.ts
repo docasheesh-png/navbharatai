@@ -2,7 +2,7 @@
 // vertex, collider sample and plant — visited every levelled pad and every land on the map at every point, so a map of hundreds
 // of places paid for all of them everywhere. The place index lists each pad and land only in the cells it can reach. Its answers
 // must be the old answers to the last bit: every test here compares the indexed world with the same code and PLACE_INDEX = false
-// (the old full scan), with Object.is, over pads that overlap, touch cell borders, are not finite, or are wider than the index.
+// (the old full scan), with Object.is, over pads that overlap, touch cell borders, are not finite, or are wider than the index (4 km a side).
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 import { generateAthreeMap } from '../src/server/lib/athreeMap/AthreeMapGenerator';
@@ -45,6 +45,8 @@ function lay(world: any, seed: number): void {
   world.levelGround(256, 512, 128, 128, 0);                       // edges exactly on cell borders
   world.levelGround(300, 520, 200, 50, 60, 12);                   // overlaps the one above (order matters)
   world.levelGround(-1000, 1000, 9000, 20000, 40);                // wider than the index: checked everywhere
+  world.levelGround(6000, -7000, 5000, 300, 50);                 // wider than the index on one axis only
+  world.levelGround(-6000, -7000, 3900, 3900, 60, 9);             // just inside the index's widest reach
   world.levelGround(4000, -4000, Number.POSITIVE_INFINITY, 10, 40);
   for (let i = 0; i < 12; i++) world.setLand((rnd() - 0.5) * 20000, (rnd() - 0.5) * 20000, 100 + rnd() * 1500, ['desert', 'forest', 'mountain', 'snow', 'beach'][i % 5]);
   world.setLand(0, 0, Number.NaN, 'desert');

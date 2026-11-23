@@ -506,7 +506,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // one, to the last bit. Anything not finite (or wider than the index) is checked at every point, as before; a point that is
   // not finite takes the old full scan. PLACE_INDEX = false is the old scan everywhere (the reference the tests compare to).
   const PLACE_INDEX = true;
-  const INDEX_CELL = 256, INDEX_MAX_REACH = 256 * 64;
+  const INDEX_CELL = 256, INDEX_MAX_REACH = 256 * 16;   // wider than 4 km a side: checked everywhere (bounds the index to ~1,100 cells a pad)
   const NO_IDS: number[] = [];
   const padCells = new Map<string, number[]>(); const padsEverywhere: number[] = [];
   const landCells = new Map<string, number[]>(); const landsEverywhere: number[] = [];

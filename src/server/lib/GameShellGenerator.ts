@@ -55,7 +55,7 @@ import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
 import { groundScene, softwareRenderer } from './three/surfaces';
-import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
+import { interactHouseDoor, updateHouseDoors, updateIndoorCamera, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
@@ -905,6 +905,7 @@ export class Game {
     const p = chased ? chased.position : this.player.object.position;
     if (chased) this.rig.follow(chased, frameDelta);
     else this.rig.update(p, frameDelta);
+    if (!chased) updateIndoorCamera(this.scene, this.rig.camera, p);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
     // Reduce motion (Settings, or the device's own setting on a first visit): the camera never shakes.

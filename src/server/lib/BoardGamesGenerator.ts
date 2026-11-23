@@ -24,6 +24,9 @@
 //               mortgages, automatic fund-raising and bankruptcy, a winner, and a computer player (2026-11-20).
 //   match3.ts — match-3: no starting matches, always a move (reshuffles when stuck), cascades with chain scoring, line /
 //               area / bomb tiles, a hint, moves-and-target levels, and cascade steps for animation (2026-11-20).
+//   football.ts — football (2026-11-23): a pitch with real markings and each team in its own half facing the goal it
+//               attacks, a ball that rolls and bounces and scores only between the posts, restarts, a keeper that
+//               narrows the angle and dives, team shape, a match clock and a penalty shoot-out. Our own code.
 //   snakes.ts — Snakes & Ladders: the classic board, exact roll to finish (or bounce back), a six rolls again, and the
 //               boustrophedon square → grid position for drawing.
 //   index.ts  — one import.
@@ -2064,6 +2067,375 @@ export function swapTiles(state: Match3State, a: Cell, b: Cell): SwapResult {
 }
 `;
 
+const FOOTBALL = String.raw`/**
+ * FOOTBALL — the pitch, the ball and the match, written once and tested, so a football game looks and plays like the real
+ * thing: a pitch with real markings, each team in its own half facing the goal it attacks, a ball that rolls, bounces and
+ * goes in only between the posts and under the bar, a goalkeeper that moves to the angle and dives, team-mates that keep
+ * their shape, the restart a referee would give, a match clock, and a penalty shoot-out. PURE — no DOM, no three.js.
+ *
+ *   const pitch = footballLayout({ players: 7 });          // every spot in WORLD x/z, yaw = rotation.y of a +Z model
+ *   let match = createFootballMatch({ teams: ['Mumbai', 'Pune'], minutesPerHalf: 3 });
+ *   let ball = { ...pitch.centreSpot, y: BALL_RADIUS, vx: 0, vy: 0, vz: 0 };
+ *   ball = kickBall(ball, pitch.goals.away.centre, { power: 0.8, loft: 0.2 });   // a shot
+ *   const r = stepBall(ball, dt, pitch);  ball = r.ball;   // r.goal → 'home' | 'away' (who scored), r.out → the restart
+ *   if (r.goal) match = scoreGoal(match, r.goal, scorerName);
+ *   match = tickMatch(match, dt);                          // halves, half time, full time, match.result
+ */
+
+export const PITCH_LENGTH = 105;
+export const PITCH_WIDTH = 68;
+export const GOAL_WIDTH = 7.32;
+export const GOAL_HEIGHT = 2.44;
+export const PENALTY_AREA_DEPTH = 16.5;
+export const PENALTY_AREA_WIDTH = 40.32;
+export const GOAL_AREA_DEPTH = 5.5;
+export const GOAL_AREA_WIDTH = 18.32;
+export const PENALTY_SPOT = 11;
+export const CENTRE_CIRCLE = 9.15;
+export const BALL_RADIUS = 0.11;
+
+export type Team = 'home' | 'away';
+export type Role = 'GK' | 'DF' | 'MF' | 'FW';
+export interface Spot { x: number; z: number }
+export interface PlayerSpot extends Spot { team: Team; role: Role; number: number; yaw: number }
+export interface Goal { team: Team; centre: Spot; leftPost: Spot; rightPost: Spot; /** Unit vector from this goal into the pitch. */ into: Spot }
+export interface Pitch {
+  centre: Spot; heading: number; length: number; width: number;
+  /** Unit vector the HOME team attacks along, and the unit vector to its right. */
+  along: Spot; side: Spot;
+  centreSpot: Spot;
+  goals: Record<Team, Goal>;
+  penaltySpots: Record<Team, Spot>;
+  corners: Spot[];
+  /** Kick-off positions, home team first. Home defends goals.home and attacks goals.away. */
+  players: PlayerSpot[];
+  /** A broadcast camera: high on the touchline, looking at the centre. */
+  camera: { position: { x: number; y: number; z: number }; lookAt: Spot };
+}
+
+/** Kick-off shapes as [role, share of the half from own goal line (0…1), share of the width from the left (−1…1)]. */
+export const FORMATIONS: Record<number, Array<[Role, number, number]>> = {
+  5: [['GK', 0.03, 0], ['DF', 0.35, -0.4], ['DF', 0.35, 0.4], ['FW', 0.8, -0.25], ['FW', 0.8, 0.25]],
+  7: [['GK', 0.03, 0], ['DF', 0.3, -0.55], ['DF', 0.28, 0], ['DF', 0.3, 0.55], ['MF', 0.6, -0.35], ['MF', 0.6, 0.35], ['FW', 0.9, 0]],
+  11: [
+    ['GK', 0.03, 0], ['DF', 0.3, -0.7], ['DF', 0.25, -0.22], ['DF', 0.25, 0.22], ['DF', 0.3, 0.7],
+    ['MF', 0.6, -0.65], ['MF', 0.55, -0.2], ['MF', 0.55, 0.2], ['MF', 0.6, 0.65], ['FW', 0.92, -0.18], ['FW', 0.92, 0.18],
+  ],
+};
+
+const yawTo = (from: Spot, to: Spot) => Math.atan2(to.x - from.x, to.z - from.z);
+const dist = (a: Spot, b: Spot) => Math.hypot(a.x - b.x, a.z - b.z);
+
+/**
+ * The whole pitch from its centre and heading (the direction the HOME team attacks; 0 = +Z). Sizes default to a full
+ * pitch; a small game passes { length: 40, width: 25 } and the markings scale, the goal does not. PURE.
+ */
+export function footballLayout(o: { centre?: Spot; heading?: number; length?: number; width?: number; players?: 5 | 7 | 11 } = {}): Pitch {
+  const c = o.centre ?? { x: 0, z: 0 }, heading = o.heading ?? 0;
+  const length = Math.max(20, o.length ?? PITCH_LENGTH), width = Math.max(14, o.width ?? PITCH_WIDTH);
+  const along = { x: Math.sin(heading), z: Math.cos(heading) };
+  const side = { x: -along.z, z: along.x };           // the right-hand side of someone facing along (Y up)
+  const at = (a: number, s: number): Spot => ({ x: c.x + along.x * a + side.x * s, z: c.z + along.z * a + side.z * s });
+  const half = length / 2;
+  const goal = (team: Team): Goal => {
+    const sign = team === 'home' ? -1 : 1;
+    return {
+      team, centre: at(sign * half, 0),
+      leftPost: at(sign * half, -sign * GOAL_WIDTH / 2), rightPost: at(sign * half, sign * GOAL_WIDTH / 2),
+      into: { x: -sign * along.x, z: -sign * along.z },
+    };
+  };
+  const goals = { home: goal('home'), away: goal('away') };
+  const spot = Math.min(PENALTY_SPOT, length * 0.12);
+  const shape = FORMATIONS[o.players ?? 11] ?? FORMATIONS[11];
+  const players: PlayerSpot[] = [];
+  for (const team of ['home', 'away'] as Team[]) {
+    const sign = team === 'home' ? -1 : 1;
+    shape.forEach(([role, depth, across], i) => {
+      // depth 0 = own goal line, 1 = halfway; stay a step inside the own half at kick-off.
+      const a = sign * (half - Math.min(0.97, depth) * half);
+      const p = at(a, -sign * across * (width / 2) * 0.9);
+      players.push({ ...p, team, role, number: i + 1, yaw: yawTo(p, team === 'home' ? goals.away.centre : goals.home.centre) });
+    });
+  }
+  const cam = at(0, -(width / 2 + 12));
+  return {
+    centre: c, heading, length, width, along, side, centreSpot: at(0, 0), goals,
+    penaltySpots: { home: at(-half + spot, 0), away: at(half - spot, 0) },
+    corners: [at(-half, -width / 2), at(-half, width / 2), at(half, -width / 2), at(half, width / 2)],
+    players,
+    camera: { position: { x: cam.x, y: Math.max(12, width * 0.35), z: cam.z }, lookAt: at(0, 0) },
+  };
+}
+
+/** Where a world point is on the pitch: a = along the home attack (−half … +half), s = to the right. */
+export function pitchCoords(p: Pitch, q: Spot): { a: number; s: number } {
+  const dx = q.x - p.centre.x, dz = q.z - p.centre.z;
+  return { a: dx * p.along.x + dz * p.along.z, s: dx * p.side.x + dz * p.side.z };
+}
+
+/**
+ * The checks a fan makes at a glance on the game's own kick-off positions. Returns the problems in plain words; [] = right.
+ * Each team in its own half, its keeper in its own penalty area, every player facing the goal it attacks (within 100°).
+ */
+export function checkFootballLayout(p: Pitch, players: Array<Spot & { team: Team; role?: Role; yaw?: number }>): string[] {
+  const out: string[] = [];
+  const half = p.length / 2, depth = Math.min(PENALTY_AREA_DEPTH, p.length * 0.2), areaHalf = Math.min(PENALTY_AREA_WIDTH, p.width * 0.7) / 2;
+  players.forEach((pl, i) => {
+    const { a, s } = pitchCoords(p, pl);
+    const own = pl.team === 'home' ? -1 : 1;
+    const who = pl.team + ' player ' + (i + 1);
+    if (Math.abs(a) > half + 0.5 || Math.abs(s) > p.width / 2 + 0.5) out.push(who + ' is off the pitch');
+    if (a * own < -0.5) out.push(who + ' starts in the other team\'s half');
+    if (pl.role === 'GK' && (a * own < half - depth || Math.abs(s) > areaHalf)) out.push(who + ' (keeper) is not in his own penalty area');
+    if (pl.yaw !== undefined) {
+      const target = pl.team === 'home' ? p.goals.away.centre : p.goals.home.centre;
+      let d = Math.abs(pl.yaw - yawTo(pl, target)) % (2 * Math.PI);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d > (100 * Math.PI) / 180) out.push(who + ' does not face the goal he attacks');
+    }
+  });
+  return out;
+}
+
+// ── THE BALL ───────────────────────────────────────────────────────────────────────────────────────────────────
+export interface Ball { x: number; y: number; z: number; vx: number; vy: number; vz: number }
+export type Restart = { kind: 'throw-in' | 'corner' | 'goal-kick'; team: Team; at: Spot };
+export const BALL_PHYSICS = { gravity: 9.81, rollFriction: 0.55, airDrag: 0.05, bounce: 0.55, maxKick: 30 };
+
+/** Kick toward a target: power 0–1 of maxKick, loft 0 (along the ground) … 1 (a high ball). */
+export function kickBall(ball: Ball, target: Spot, o: { power?: number; loft?: number } = {}): Ball {
+  const d = Math.hypot(target.x - ball.x, target.z - ball.z) || 1;
+  const speed = BALL_PHYSICS.maxKick * Math.max(0.05, Math.min(1, o.power ?? 0.6));
+  const loft = Math.max(0, Math.min(1, o.loft ?? 0)) * 0.9;     // up to ~50°
+  const flat = speed * Math.cos(loft);
+  return { ...ball, vx: ((target.x - ball.x) / d) * flat, vz: ((target.z - ball.z) / d) * flat, vy: speed * Math.sin(loft) };
+}
+
+/** The pass a player would choose: the most open team-mate ahead of him, or null when nobody is better placed. */
+export function passTarget(p: Pitch, from: PlayerSpot, team: Array<PlayerSpot>, opponents: Spot[]): PlayerSpot | null {
+  const attack = from.team === 'home' ? 1 : -1;
+  let best: PlayerSpot | null = null, bestScore = -Infinity;
+  for (const m of team) {
+    if (m === from || m.role === 'GK') continue;
+    const gain = (pitchCoords(p, m).a - pitchCoords(p, from).a) * attack;
+    const space = Math.min(15, ...opponents.map((o) => dist(o, m)));
+    const length = dist(from, m);
+    if (length < 4 || length > 40) continue;
+    const score = gain * 0.6 + space * 1.5 - length * 0.1;
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return bestScore > 2 ? best : null;
+}
+
+/**
+ * One physics step. Returns the new ball and what happened: a goal (between the posts, under the bar, the whole ball
+ * over the line — the team that SCORED), or the ball out of play with the restart a referee would give.
+ * lastTouch = the team that touched it last (for throw-ins, corners and goal kicks).
+ */
+export function stepBall(ball: Ball, dt: number, p: Pitch, lastTouch: Team = 'home'): { ball: Ball; goal: Team | null; out: Restart | null } {
+  dt = Math.max(0, Math.min(0.1, dt));
+  const g = BALL_PHYSICS;
+  let { x, y, z, vx, vy, vz } = ball;
+  const onGround = y <= BALL_RADIUS + 1e-3 && Math.abs(vy) < 0.5;
+  if (onGround) {
+    y = BALL_RADIUS; vy = 0;
+    const sp = Math.hypot(vx, vz), slow = Math.max(0, sp - g.rollFriction * g.gravity * dt);
+    const f = sp > 0 ? slow / sp : 0; vx *= f; vz *= f;
+  } else {
+    vy -= g.gravity * dt;
+    const f = Math.max(0, 1 - g.airDrag * dt); vx *= f; vz *= f; vy *= f;
+  }
+  const before = pitchCoords(p, ball);
+  x += vx * dt; y += vy * dt; z += vz * dt;
+  if (y < BALL_RADIUS) { y = BALL_RADIUS; vy = Math.abs(vy) > 1 ? -vy * g.bounce : 0; }
+  const next = { x, y, z, vx, vy, vz };
+  const now = pitchCoords(p, next);
+  const half = p.length / 2, edge = half + BALL_RADIUS;
+  for (const end of [1, -1] as const) {
+    if (before.a * end <= edge && now.a * end > edge) {
+      const t = (edge - before.a * end) / (now.a * end - before.a * end);
+      const s = before.s + (now.s - before.s) * t, h = ball.y + (y - ball.y) * t;
+      const defending: Team = end === 1 ? 'away' : 'home';
+      if (Math.abs(s) < GOAL_WIDTH / 2 - BALL_RADIUS && h < GOAL_HEIGHT - BALL_RADIUS) {
+        return { ball: { ...next, vx: 0, vy: 0, vz: 0 }, goal: defending === 'away' ? 'home' : 'away', out: null };
+      }
+      const attacking: Team = defending === 'away' ? 'home' : 'away';
+      const corner = p.corners[(end === 1 ? 2 : 0) + (s > 0 ? 1 : 0)];
+      const restart: Restart = lastTouch === defending
+        ? { kind: 'corner', team: attacking, at: corner }
+        : { kind: 'goal-kick', team: defending, at: p.goals[defending].centre };
+      return { ball: { ...next, vx: 0, vy: 0, vz: 0 }, goal: null, out: restart };
+    }
+  }
+  if (Math.abs(now.s) > p.width / 2 + BALL_RADIUS) {
+    const sideSign = now.s > 0 ? 1 : -1;
+    const at = { x: p.centre.x + p.along.x * now.a + p.side.x * sideSign * p.width / 2, z: p.centre.z + p.along.z * now.a + p.side.z * sideSign * p.width / 2 };
+    return { ball: { ...next, vx: 0, vy: 0, vz: 0 }, goal: null, out: { kind: 'throw-in', team: lastTouch === 'home' ? 'away' : 'home', at } };
+  }
+  return { ball: next, goal: null, out: null };
+}
+
+// ── PLAYERS THAT THINK ────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * Where a goalkeeper stands: on the line from the goal centre to the ball, a little off his line (narrowing the angle),
+ * never outside the goal area. dive: 'left' | 'right' (his own left/right as he faces the pitch) when a shot will cross
+ * the line within his reach in the next ~0.6 s, else null.
+ */
+export function keeperMove(p: Pitch, team: Team, ball: Ball, reach = 2.6): { to: Spot; dive: 'left' | 'right' | null } {
+  const sign = team === 'home' ? -1 : 1;           // + along = towards the away goal
+  const b = pitchCoords(p, ball), half = p.length / 2;
+  const off = Math.min(GOAL_AREA_DEPTH * 0.6, Math.max(0.5, (half - Math.abs(b.a)) * 0.08));
+  const lineA = sign * (half - off);
+  const fromGoalA = b.a - sign * half;
+  const tShare = fromGoalA === 0 ? 0 : (lineA - sign * half) / fromGoalA;
+  const s = Math.max(-GOAL_WIDTH / 2, Math.min(GOAL_WIDTH / 2, b.s * Math.max(0, Math.min(1, tShare))));
+  const to = { x: p.centre.x + p.along.x * lineA + p.side.x * s, z: p.centre.z + p.along.z * lineA + p.side.z * s };
+  // A shot: the ball moving toward this goal fast enough to arrive within 0.6 s.
+  const va = ball.vx * p.along.x + ball.vz * p.along.z, vs = ball.vx * p.side.x + ball.vz * p.side.z;
+  let dive: 'left' | 'right' | null = null;
+  if (va * sign > 3) {
+    const t = (sign * half - b.a) / va;
+    if (t > 0 && t < 0.6) {
+      const crossS = b.s + vs * t;
+      if (Math.abs(crossS) < GOAL_WIDTH / 2 + 0.5 && Math.abs(crossS - s) > 0.6 && Math.abs(crossS - s) < reach + 0.6) {
+        // Facing into the pitch (−sign along), his right is −sign × side.
+        const toRight = (crossS - s) * -sign > 0;
+        dive = toRight ? 'right' : 'left';
+      }
+    }
+  }
+  return { to, dive };
+}
+
+/** Where an outfield player should be now: his kick-off spot shifted with the ball, so the team keeps its shape. */
+export function shapeSpot(p: Pitch, home: PlayerSpot, ball: Spot): Spot {
+  if (home.role === 'GK') return home;
+  const b = pitchCoords(p, ball), h = pitchCoords(p, home);
+  const push = home.role === 'FW' ? 0.55 : home.role === 'MF' ? 0.45 : 0.35;
+  const a = Math.max(-p.length / 2 + 3, Math.min(p.length / 2 - 3, h.a + b.a * push));
+  const s = Math.max(-p.width / 2 + 2, Math.min(p.width / 2 - 2, h.s * 0.85 + b.s * 0.25));
+  return { x: p.centre.x + p.along.x * a + p.side.x * s, z: p.centre.z + p.along.z * a + p.side.z * s };
+}
+
+/** The one player of a team who goes for the ball: the nearest outfield player (the keeper only inside his area). */
+export function chaser(p: Pitch, players: PlayerSpot[], team: Team, ball: Spot): PlayerSpot | null {
+  let best: PlayerSpot | null = null, d = Infinity;
+  for (const pl of players) {
+    if (pl.team !== team) continue;
+    if (pl.role === 'GK') {
+      const { a, s } = pitchCoords(p, ball), sign = team === 'home' ? -1 : 1;
+      if (a * sign < p.length / 2 - GOAL_AREA_DEPTH || Math.abs(s) > GOAL_AREA_WIDTH / 2) continue;
+    }
+    const k = dist(pl, ball);
+    if (k < d) { d = k; best = pl; }
+  }
+  return best;
+}
+
+// ── THE MATCH ─────────────────────────────────────────────────────────────────────────────────────────────────
+export interface GoalEvent { team: Team; minute: number; scorer: string }
+export interface FootballMatch {
+  teams: Record<Team, string>;
+  score: Record<Team, number>;
+  minutesPerHalf: number;
+  /** Seconds of play in the current half. 1 real second = 1 match minute × minutesPerHalf / 45 … see tickMatch. */
+  clock: number; half: 1 | 2;
+  phase: 'first-half' | 'half-time' | 'second-half' | 'full-time';
+  goals: GoalEvent[];
+  /** Who kicks off next. */
+  kickOff: Team;
+  result: string | null;
+}
+
+export function createFootballMatch(o: { teams?: [string, string]; minutesPerHalf?: number } = {}): FootballMatch {
+  return {
+    teams: { home: o.teams?.[0] ?? 'Home', away: o.teams?.[1] ?? 'Away' }, score: { home: 0, away: 0 },
+    minutesPerHalf: Math.max(0.5, o.minutesPerHalf ?? 3), clock: 0, half: 1, phase: 'first-half', goals: [], kickOff: 'home', result: null,
+  };
+}
+
+/** The match minute a fan sees (a real-time half of minutesPerHalf is shown as 45 minutes). */
+export function matchMinute(m: FootballMatch): number {
+  const played = Math.min(1, m.clock / (m.minutesPerHalf * 60));
+  return Math.min(90, Math.floor((m.half - 1) * 45 + played * 45) + 1);
+}
+
+/** Advance the clock by real seconds. Half time and full time happen here; resume() starts the second half. */
+export function tickMatch(m: FootballMatch, dt: number): FootballMatch {
+  if (m.phase !== 'first-half' && m.phase !== 'second-half') return m;
+  const clock = m.clock + Math.max(0, dt);
+  if (clock < m.minutesPerHalf * 60) return { ...m, clock };
+  if (m.half === 1) return { ...m, clock: m.minutesPerHalf * 60, phase: 'half-time', kickOff: 'away' };
+  return finish({ ...m, clock: m.minutesPerHalf * 60, phase: 'full-time' });
+}
+
+export function resume(m: FootballMatch): FootballMatch {
+  return m.phase === 'half-time' ? { ...m, half: 2, clock: 0, phase: 'second-half' } : m;
+}
+
+/** A goal for 'team' (the team that scored). The other team kicks off. */
+export function scoreGoal(m: FootballMatch, team: Team, scorer = ''): FootballMatch {
+  if (m.phase !== 'first-half' && m.phase !== 'second-half') return m;
+  return {
+    ...m, score: { ...m.score, [team]: m.score[team] + 1 },
+    goals: [...m.goals, { team, minute: matchMinute(m), scorer }], kickOff: team === 'home' ? 'away' : 'home',
+  };
+}
+
+function finish(m: FootballMatch): FootballMatch {
+  const { home, away } = m.score;
+  const result = home === away ? 'Draw ' + home + '–' + away
+    : (home > away ? m.teams.home : m.teams.away) + ' won ' + Math.max(home, away) + '–' + Math.min(home, away);
+  return { ...m, result };
+}
+
+/** '2–1 · 67′' — what a scoreboard shows. */
+export function scoreline(m: FootballMatch): string {
+  const s = m.teams.home + ' ' + m.score.home + '–' + m.score.away + ' ' + m.teams.away;
+  if (m.phase === 'half-time') return s + ' · HT';
+  if (m.phase === 'full-time') return s + ' · FT';
+  return s + ' · ' + matchMinute(m) + '′';
+}
+
+// ── PENALTY SHOOT-OUT ─────────────────────────────────────────────────────────────────────────────────────────
+export interface Shootout { kicks: Record<Team, boolean[]>; next: Team; winner: Team | null; rounds: number }
+
+export function createShootout(first: Team = 'home', rounds = 5): Shootout {
+  return { kicks: { home: [], away: [] }, next: first, winner: null, rounds };
+}
+
+/** One penalty: scored or not. Ends as soon as one side cannot be caught; after the rounds, sudden death in pairs. */
+export function takePenalty(sh: Shootout, scored: boolean): Shootout {
+  if (sh.winner) return sh;
+  const kicks = { home: [...sh.kicks.home], away: [...sh.kicks.away] };
+  kicks[sh.next].push(scored);
+  const other: Team = sh.next === 'home' ? 'away' : 'home';
+  const goals = (t: Team) => kicks[t].filter(Boolean).length;
+  const left = (t: Team) => Math.max(0, sh.rounds - kicks[t].length);
+  let winner: Team | null = null;
+  if (kicks.home.length <= sh.rounds && kicks.away.length <= sh.rounds) {
+    if (goals('home') > goals('away') + left('away')) winner = 'home';
+    else if (goals('away') > goals('home') + left('home')) winner = 'away';
+  } else if (kicks.home.length === kicks.away.length && goals('home') !== goals('away')) {
+    winner = goals('home') > goals('away') ? 'home' : 'away';
+  }
+  return { kicks, next: other, winner, rounds: sh.rounds };
+}
+
+/** Where a penalty shot crosses the goal line from a 0–1 aim (the taker's left post → right post) and height 0–1. */
+export function penaltyShot(p: Pitch, defending: Team, aim: number, height: number, power = 0.8): { ball: Ball; target: Spot } {
+  const g = p.goals[defending];
+  const a = Math.max(0, Math.min(1, aim));
+  // left post → right post as the TAKER sees them (the taker faces the goal; his left is the keeper's right).
+  const from = defending === 'away' ? g.leftPost : g.rightPost, to = defending === 'away' ? g.rightPost : g.leftPost;
+  const target = { x: from.x + (to.x - from.x) * a, z: from.z + (to.z - from.z) * a };
+  const spot = defending === 'away' ? p.penaltySpots.away : p.penaltySpots.home;
+  const ball = kickBall({ ...spot, y: BALL_RADIUS, vx: 0, vy: 0, vz: 0 }, target, { power, loft: Math.max(0, Math.min(1, height)) * 0.12 });
+  return { ball, target };
+}
+`;
+
 const INDEX = String.raw`// The India games pack: tested rules engines (the board is drawn by the game).
 export { createRng, rollDie, shuffle } from './dice';
 export type { Rng } from './dice';
@@ -2083,6 +2455,8 @@ export { createBusiness, roll as rollBusiness, buy, decline, endTurn, payJailFin
 export type { BusinessState, BusinessPlayer, BusinessRules, BusinessPhase, BusinessEvent, BusinessResult, BoardSquare, SquareKind, ChanceCard } from './business';
 export { createMatch3, swapTiles, hint as match3Hint, findRuns } from './match3';
 export type { Match3State, Match3Status, Tile, Special, Cell as Match3Cell, CascadeStep, SwapResult } from './match3';
+export { footballLayout, checkFootballLayout, pitchCoords, kickBall, stepBall, passTarget, keeperMove, shapeSpot, chaser, createFootballMatch, tickMatch, resume as resumeMatch, scoreGoal, scoreline, matchMinute, createShootout, takePenalty, penaltyShot, FORMATIONS, BALL_PHYSICS, PITCH_LENGTH, PITCH_WIDTH, GOAL_WIDTH, GOAL_HEIGHT, PENALTY_AREA_DEPTH, PENALTY_AREA_WIDTH, GOAL_AREA_DEPTH, GOAL_AREA_WIDTH, PENALTY_SPOT, CENTRE_CIRCLE, BALL_RADIUS } from './football';
+export type { Pitch, PlayerSpot, Spot as PitchSpot, Goal as FootballGoal, Team as FootballTeam, Role as FootballRole, Ball as FootballBall, Restart, FootballMatch, GoalEvent, Shootout } from './football';
 `;
 
 const FILES: Record<string, string> = {
@@ -2095,10 +2469,11 @@ const FILES: Record<string, string> = {
   [`${BOARD_DIR}/cricket.ts`]: CRICKET,
   [`${BOARD_DIR}/business.ts`]: BUSINESS,
   [`${BOARD_DIR}/match3.ts`]: MATCH3,
+  [`${BOARD_DIR}/football.ts`]: FOOTBALL,
   [`${BOARD_DIR}/index.ts`]: INDEX,
 };
 
-export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket', 'business', 'match3'];
+export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket', 'business', 'match3', 'football'];
 
 const EXAMPLE = [
   "import { createLudo, legalMoves, move, pass, chooseMove, cellOf, createRng, rollDie, type LudoState } from './game/board';",
@@ -2140,10 +2515,10 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
     files,
     dependencies: [],
     instructions:
-      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom, cricket, Business (vyapaar) and card games (Teen Patti, rummy), `
+      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom, cricket, Business (vyapaar), football and card games (Teen Patti, rummy), `
       + 'a seeded die, and board geometry for drawing.\n'
       + '```ts\n' + EXAMPLE + '\n```\n'
-      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders, chess, Business or match-3 logic. For Business, every roll goes through rollBusiness(game, d1, d2), then follow game.phase: \'buy\' shows Buy / Skip (buy / decline), \'end\' shows End turn (endTurn), \'roll\' again means doubles; show each event in r.events (rent paid, chance card, jail, bankrupt), draw owners and houses from game.owner and game.houses, and let the player build (cannotBuild says why not) and mortgage; a computer player plays with computerTurn. Money in Business is pretend money. For match-3, every swap goes through swapTiles(game, a, b): ok false means swap the two back on screen; otherwise animate r.steps in order (cleared, then the fall, chain by chain) and show game.score, game.movesLeft and game.status; a Hint button uses match3Hint(game). For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
+      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders, chess, Business or match-3 logic. For Business, every roll goes through rollBusiness(game, d1, d2), then follow game.phase: \'buy\' shows Buy / Skip (buy / decline), \'end\' shows End turn (endTurn), \'roll\' again means doubles; show each event in r.events (rent paid, chance card, jail, bankrupt), draw owners and houses from game.owner and game.houses, and let the player build (cannotBuild says why not) and mortgage; a computer player plays with computerTurn. Money in Business is pretend money. For match-3, every swap goes through swapTiles(game, a, b): ok false means swap the two back on screen; otherwise animate r.steps in order (cleared, then the fall, chain by chain) and show game.score, game.movesLeft and game.status; a Hint button uses match3Hint(game). For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For football, place everyone from footballLayout() (checkFootballLayout must be []), move the ball only with kickBall/stepBall (a goal is r.goal, a restart r.out), let keeperMove place and dive the keeper (act(\'dive\') / act(\'dive-left\')), keep the rest in shape with shapeSpot and send chaser() to the ball, and run the clock with tickMatch/scoreGoal/scoreline. For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
       + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',

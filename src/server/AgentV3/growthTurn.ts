@@ -8,6 +8,7 @@ import { characterAsked, librarySubjectOf, libraryMovesOf, characterNotSwappable
 import { GAME_PLAYER_FILE } from '../lib/GamePlayerBodyGenerator';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
 import { setLibraryCarAtTurnStart } from './carSwap';
+import { mapGrowthNote } from './mapGrowthIntent';
 
 /** The game's own open-world bridge (GameOpenWorldGenerator OPEN_WORLD_BRIDGE_PATH — a test keeps the two equal). */
 export const OPEN_WORLD_FILE = 'src/game/play/openWorld.ts';
@@ -177,5 +178,28 @@ export async function setLibraryCharacterAtTurnStart(io: {
 export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibraryCharacterAtTurnStart>[0]): Promise<string> {
   // …and the car a racer drives (carSwap.ts, 2026-11-22).
   const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io), await setLibraryCarAtTurnStart(io)].filter(Boolean);
+  // 🧭 …and when the turn is not a library pick, what a MAP request means for THIS game (mapGrowthIntent.ts, item 10).
+  if (handoffs.length === 0) { const note = mapGrowthNoteAtTurnStart(io); if (note) handoffs.push(note); }
   return handoffs.join('\n\n---\n\n');
+}
+
+/** Kill switch: AGENTV3_MAP_GROWTH_NOTE=off says no map-request note (the world rule alone, exactly as before). */
+export function mapGrowthNoteEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !/^(?:0|off|false|no)$/i.test(String(env.AGENTV3_MAP_GROWTH_NOTE ?? '').trim());
+}
+
+/**
+ * 🧭 A MAP REQUEST, READ BY ITS MEANING (map expansion item 10): "ek aur map jodo" (one more, spread) vs "jod ke ek world"
+ * (joined), "bagal me" (joinTo), "cricket ground chahiye" (a venue) vs "cricket game banao" (the game itself), "roads se
+ * jodo" (the highways, nothing moves) — and the owner's rules for a sports game, a race and a battle royale. Only for a game
+ * that has a map or a race, only for a short request (a growth ask; a long specification is the builder's to read), and
+ * never a change by itself: a note the builder reads before the request. '' otherwise. Never throws.
+ */
+export function mapGrowthNoteAtTurnStart(io: { prompt: string; filesAtTurnStart: Readonly<Record<string, string>> | null; record: (issue: Issue) => void; env?: NodeJS.ProcessEnv }): string {
+  try {
+    if (!mapGrowthNoteEnabled(io.env ?? process.env) || !io.filesAtTurnStart || String(io.prompt ?? '').length > 600) return '';
+    const note = mapGrowthNote(io.prompt, io.filesAtTurnStart);
+    if (note) io.record({ phase: 'build', severity: 'info', code: 'MAP_GROWTH_ROUTED', autoResolved: true, message: note.slice(0, 400) });
+    return note;
+  } catch { return ''; }
 }

@@ -5308,3 +5308,7 @@ Seed preview (`src/server/AgentV3/seedPreview.ts`, failedbr #2485 Q-3233): when 
 ### AGENTV3_GROWTH_GUARD (code default: ON; not set in Cloud Run) — 2026-11-21
 
 The growth guard (`src/server/AgentV3/growthGuard.ts`): in a game that grows by lists (`src/game/features/index.ts`, `src/game/world.ts`), a turn may not rewrite or delete a feature, drop a feature or a place from its list, replace the mount, or edit a kit file unless the user's own words ask for it. Lock 1 refuses the builder's write; lock 2 puts back at the end of the turn whatever changed without being asked. `off` disables both locks (the prompt rules remain). Admin-mandated ("isko rocksolid karo"); do not turn it off without the admin.
+
+### AGENTV3_MAP_GROWTH_NOTE (code default: ON; not set in Cloud Run) — 2026-11-23
+
+Map-request routing (`src/server/AgentV3/mapGrowthIntent.ts`, map expansion item 10): in a game with a map or a race (`src/game/world.ts`, `<RacingRoadGame>`, a cricket or football app), a short request about the map is read by its meaning (one more place spread out, joined into one, beside a place, a venue, the game itself, roads between places, bigger, N×, universe, duplicate, a longer track, smaller) and the builder is told, before the request, the smallest change for that game type, with the owner's rules (sports: a world only on request; racing: cities only after asking once; battle royale: stays an 8 km island). Unsure → ask. It writes nothing. `off` removes the note (the world rule alone, as before). No cost: no model call.

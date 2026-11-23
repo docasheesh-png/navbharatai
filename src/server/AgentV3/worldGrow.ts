@@ -37,9 +37,25 @@ export type AppendResult =
 export function appendPlace(source: string, kind: PlaceKind, cap: number = MAX_PLACES): AppendResult {
   const text = String(source ?? '');
   const regions = parseRegions(text);
-  const open = /\bregions\s*:\s*\[/.exec(text);
-  if (!regions || !open) return { ok: false, reason: 'no-list' };
+  if (!regions) return { ok: false, reason: 'no-list' };
   if (regions.length >= Math.min(MAX_PLACES, cap)) return { ok: false, reason: 'full' };
+  const taken = new Set(regions.map((r) => r.id));
+  let n = regions.filter((r) => new RegExp(`\\bkind\\s*:\\s*['"]${kind}['"]`).test(r.text)).length + 1;
+  let id = `${kind}-${n}`;
+  while (taken.has(id)) id = `${kind}-${++n}`;
+  const out = appendRegionEntries(text, [`{ id: '${id}', kind: '${kind}' }`]);
+  return out === null ? { ok: false, reason: 'no-list' } : { ok: true, source: out, id, count: regions.length + 1 };
+}
+
+/**
+ * `source` with these entries (each the exact text of one `{ … }`) added at the end of WORLD.regions, one per line. Every
+ * existing entry is kept byte for byte. null when there is no regions list the platform can read. PURE.
+ */
+export function appendRegionEntries(source: string, entries: readonly string[]): string | null {
+  const text = String(source ?? '');
+  const regions = parseRegions(text);
+  const open = /\bregions\s*:\s*\[/.exec(text);
+  if (!regions || !open) return null;
   // The closing bracket of the regions list: the first `]` at depth 0 after it opens.
   let depth = 0, close = -1;
   for (let i = open.index + open[0].length; i < text.length; i++) {
@@ -48,16 +64,13 @@ export function appendPlace(source: string, kind: PlaceKind, cap: number = MAX_P
     else if (ch === '}') depth--;
     else if (ch === ']') { if (depth === 0) { close = i; break; } depth--; }
   }
-  if (close < 0) return { ok: false, reason: 'no-list' };
-  const taken = new Set(regions.map((r) => r.id));
-  let n = regions.filter((r) => new RegExp(`\\bkind\\s*:\\s*['"]${kind}['"]`).test(r.text)).length + 1;
-  let id = `${kind}-${n}`;
-  while (taken.has(id)) id = `${kind}-${++n}`;
+  if (close < 0) return null;
+  if (entries.length === 0) return text;
   const before = text.slice(0, close).replace(/[ \t]+$/, '');
   const needsComma = regions.length > 0 && !/,\s*$/.test(before);
   const lead = /\n\s*$/.test(before) ? '' : '\n';
-  const entry = `${needsComma ? ',' : ''}${lead}    { id: '${id}', kind: '${kind}' },\n  `;
-  return { ok: true, source: `${before}${entry}${text.slice(close)}`, id, count: regions.length + 1 };
+  const lines = entries.map((e) => `    ${e},\n`).join('');
+  return `${before}${needsComma ? ',' : ''}${lead}${lines}  ${text.slice(close)}`;
 }
 
 /** What the builder is told when the platform has already made the change. */

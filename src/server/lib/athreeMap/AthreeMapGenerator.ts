@@ -205,8 +205,8 @@ import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './r
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
 export interface GroundEdit { x0: number; z0: number; x1: number; z1: number }
-/** A land a game can lay on part of the map (setLand). */
-export type LandBiome = 'beach' | 'desert' | 'forest' | 'mountain' | 'snow';
+/** A land a game can lay on part of the map (setLand). 'grassland' is an open field: grass to the horizon, no trees. */
+export type LandBiome = 'beach' | 'desert' | 'forest' | 'grassland' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
 
 export interface AthreeWorldOptions {
@@ -299,6 +299,8 @@ export interface AthreeWorld {
    * for mountains, the height follow. Call it BEFORE the first map.update(), like levelGround. Water stays water.
    */
   setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void;
+  /** True inside an open field a game laid with setLand(..., 'grassland'): thick grass and no trees (a maidan, a meadow). */
+  openFieldAt(x: number, z: number): boolean;
   /**
    * Lay a ROAD the game asks for (a highway between two of its places), through these points. The ground is cut and filled
    * to it (a smooth grade, a shoulder) so it can be driven, roadAt answers it, and the returned centre line (with heights)
@@ -603,6 +605,11 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     noteEdit(x - r * 1.25, z - r * 1.25, x + r * 1.25, z + r * 1.25);
     indexPlace(landCells, landsEverywhere, lands.length - 1, x, z, r * 1.25 + 1, r * 1.25 + 1);
   }
+  function openFieldAt(x: number, z: number): boolean {
+    if (!lands.length) return false;
+    const l = landAt(x, z);
+    return !!l && l.land === 'grassland' && l.w > 0.15;
+  }
   // GAME ROADS (admin 2026-11-22: "abhi 30 sec me hi road khatam ho jati hai"). A highway the game lays between its own places:
   // resampled every 10 m, its height the ground averaged along it and limited to an 8 percent grade, and the land cut and filled
   // to it with a shoulder — the same heightAt feeds the drawn terrain, the collider and the road ribbon, so they always agree.
@@ -879,7 +886,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 

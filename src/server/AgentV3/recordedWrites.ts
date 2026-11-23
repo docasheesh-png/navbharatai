@@ -18,6 +18,7 @@
  */
 
 import { isSecretEnvPath, SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
+import { isPlatformScratchPath } from '../lib/generatedDirs';
 import { currentToolSignal, lapsedGuardEnabled, LAPSED_WRITE_MESSAGE } from './toolDeadline';
 
 export interface WritablePort {
@@ -43,7 +44,7 @@ export function recordingActuator<T extends WritablePort>(
     refuseIfLapsed();
     if (beforeWrite) beforeWrite(filePath);
     await inner.writeFile(ws, filePath, content);
-    if (ws === workspaceId && !isDurableSecretEnv(filePath)) {
+    if (ws === workspaceId && !isNotTheProject(filePath)) {
       try { onWritten(filePath, content); } catch { /* recording must never fail a write */ }
     }
   };
@@ -59,13 +60,13 @@ export function recordingActuator<T extends WritablePort>(
         refuseIfLapsed();
         beforeWrite?.(filePath);
         await (target as unknown as {createFileExclusive(ws:string,p:string,c:string):Promise<void>}).createFileExclusive(ws,filePath,content);
-        if(ws===workspaceId&&!isDurableSecretEnv(filePath)){try{onWritten(filePath,content);}catch{/* recording must never fail a completed write */}}
+        if(ws===workspaceId&&!isNotTheProject(filePath)){try{onWritten(filePath,content);}catch{/* recording must never fail a completed write */}}
       };
       if (prop === 'compareAndSwapFile' && typeof (target as {compareAndSwapFile?:unknown}).compareAndSwapFile === 'function') return async (ws:string,filePath:string,expected:string,content:string):Promise<void> => {
         refuseIfLapsed();
         beforeWrite?.(filePath);
         await (target as unknown as {compareAndSwapFile(ws:string,p:string,expected:string,c:string):Promise<void>}).compareAndSwapFile(ws,filePath,expected,content);
-        if(ws===workspaceId&&!isDurableSecretEnv(filePath)){try{onWritten(filePath,content);}catch{/* recording must never fail a completed write */}}
+        if(ws===workspaceId&&!isNotTheProject(filePath)){try{onWritten(filePath,content);}catch{/* recording must never fail a completed write */}}
       };
       if (prop === 'runCommand' && typeof (target as { runCommand?: unknown }).runCommand === 'function') return runCommand;
       const value = Reflect.get(target, prop, receiver);
@@ -74,11 +75,17 @@ export function recordingActuator<T extends WritablePort>(
   });
 }
 
-/** A vault env file stays in the sandbox. It must not be noted for the durable save. */
-function isDurableSecretEnv(filePath: string): boolean {
+/**
+ * A write that stays in the sandbox and must not be noted for the durable save: a vault env file, or one of
+ * NavBharatAI's own temporary files (failedbr #2496 — the asset proof's script was noted here, saved into the
+ * user's project, and graded as their code; see `isPlatformScratchPath`).
+ */
+function isNotTheProject(filePath: string): boolean {
+  let rel: string;
   try {
-    return isSecretEnvPath(toWorkspaceRelPath(filePath, SANDBOX_WORKSPACE_ROOT));
+    rel = toWorkspaceRelPath(filePath, SANDBOX_WORKSPACE_ROOT);
   } catch {
-    return isSecretEnvPath(String(filePath ?? ''));
+    rel = String(filePath ?? '');
   }
+  return isSecretEnvPath(rel) || isPlatformScratchPath(rel);
 }

@@ -37,6 +37,12 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /** Side of the walkable ground patch kept under the player, in metres. Default 96. */
   patchSize?: number;
   /**
+   * How many cities stand built at once (a grown city counts once; the first place, where the player starts, always stays).
+   * Left out: the device's share — LIVE_CITIES[quality, else deviceTier()], phone 2, mid 5, desktop 8. Walking on to a new place frees the
+   * farthest one standing; it is built again when the player comes back. false: every city reached stays built (the old way).
+   */
+  liveCities?: number | false;
+  /**
    * A city on the map, on ground levelled for it near the start: streets, crossings, pavements, shops, apartments, offices,
    * houses and parks, with traffic that obeys the lights and people who cross on the zebras. true for the default city;
    * false (default) for open country only. The player starts on one of its streets.
@@ -61,6 +67,24 @@ export function isLandKind(kind: unknown): kind is LandKind { return typeof kind
 export const MAX_REGIONS = 100;
 /** A planned place's city is built when the player comes this many metres from its edge. */
 export const BUILD_AHEAD = 1500;
+/** How many cities stand built at once, by the map's quality tier (owner decision 2026-11-23: phone 2, mid 5, desktop 8). */
+export const LIVE_CITIES = { phone: 2, mid: 5, desktop: 8 } as const;
+/** A standing city is freed for a nearer one only when it is this many metres farther from the player — never back and forth. */
+export const LIVE_MARGIN = 300;
+/**
+ * Which share of cities this device gets (the map's own drawing tier is left as it is): a browser with no GPU or a finger
+ * for a pointer is a phone; 8+ cores (and 8+ GB where the browser says) is a desktop; anything else, or anything unknown, mid.
+ */
+export function deviceTier(): keyof typeof LIVE_CITIES {
+  try {
+    if (softwareRenderer()) return 'phone';
+    if (typeof window === 'undefined') return 'mid';
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches) return 'phone';
+    const nav = (typeof navigator !== 'undefined' ? navigator : {}) as { hardwareConcurrency?: number; deviceMemory?: number };
+    if ((nav.hardwareConcurrency ?? 0) >= 8 && (nav.deviceMemory === undefined || nav.deviceMemory >= 8)) return 'desktop';
+  } catch { /* unknown: mid */ }
+  return 'mid';
+}
 export type Compass = 'north' | 'north-east' | 'east' | 'south-east' | 'south' | 'south-west' | 'west' | 'north-west';
 export interface WorldRegion {
   /** A short unique name: 'old-town', 'harbour', 'hill-village'. */
@@ -141,7 +165,10 @@ export interface OpenWorld {
   readonly map: AthreeMap;
   /** The first place (where the player starts), or null in open country. */
   readonly city: OpenWorldCity | null;
-  /** The places whose city is built so far (see places for all of them). */
+  /**
+   * The places whose city stands built now (see places for all of them). Only the nearest few stand at once (liveCities):
+   * a place the player left far behind is taken off this list and built again when they come back.
+   */
   readonly regions: OpenWorldCity[];
   /** Every land on the map (desert, jungle, mountain, snow, beach regions), in the order listed. */
   readonly lands: OpenWorldLand[];
@@ -212,11 +239,14 @@ export function spanningPairs(stops: ReadonlyArray<{ x: number; z: number }>): A
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, liveCities, ...mapOptions } = options;
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
   const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
+  const tier = (mapOptions as { quality?: string }).quality ?? deviceTier();
+  const liveBudget = liveCities === false ? Infinity
+    : Math.max(1, Math.min(64, Math.floor(Number(liveCities ?? LIVE_CITIES[tier as keyof typeof LIVE_CITIES] ?? LIVE_CITIES.mid) || LIVE_CITIES.mid)));
   (map as { sky?: { applyTo(scene: THREE.Scene): void } | null }).sky?.applyTo(ctx.scene);
   ctx.camera.near = 0.3; ctx.camera.far = 9000; ctx.camera.updateProjectionMatrix();
 
@@ -296,6 +326,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // The places spread out on a golden-angle spiral (the n-th one about √n spacings from the first), never stacked, always
   // reachable; a place asked to lie toward a direction keeps that direction.
   interface PlannedPlace { region: WorldRegion; preset: (typeof REGION_PRESETS)['city']; cityOptions: CityOptions; centre: { x: number; y: number; z: number }; reach: number; built: number;
+    /** Its parked cars, made the first time it is built and kept when it is freed (each stays where the player left it). */
+    parked?: THREE.Object3D[];
     /** A grown city: the first tile's id, and this tile's cell on the city's grid. */
     cluster?: { root: string; gx: number; gz: number; stepX: number; stepZ: number } }
   const planned: PlannedPlace[] = [];
@@ -478,8 +510,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, ...(peopleOption || {}) });
     if (people) root.add(people.root);
     const local = new THREE.Object3D(); root.add(local);
-    const parked: THREE.Object3D[] = [];
-    for (let i = 0; i < Math.max(0, Math.min(12, parkedCars)); i++) {
+    // Built again after it was freed: the same cars, where they were (never a second set handed to ctx.vehicles).
+    const parked: THREE.Object3D[] = p.parked ?? [];
+    if (p.parked) for (const car of parked) root.add(car);
+    else for (let i = 0; i < Math.max(0, Math.min(12, parkedCars)); i++) {
       // Beside the kerb of a north-south street, between two crossings, nose along the street.
       const sx = plan.streetsX[(i * 2 + 1) % plan.streetsX.length];
       const zi = i % Math.max(1, plan.streetsZ.length - 1);
@@ -489,6 +523,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       car.rotation.y = i % 2 ? Math.PI : 0;
       root.add(car); parked.push(car); ctx.vehicles.add(car);
     }
+    p.parked = parked;
     const centre = p.centre;
     const built: OpenWorldCity = { id: p.region.id, kind: p.region.kind, city, traffic, people, parked, centre, radius: p.reach, toWorld: (x, z) => ({ x: centre.x + x, z: centre.z + z }) };
     p.built = towns.length;
@@ -565,6 +600,48 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
   ctx.player.setWater(map.world.seaLevel);
 
+  // 🏙️ THE NEAREST CITIES LIVE (map expansion item 4; owner decision: phone 2, mid 5, desktop 8). A city — all the tiles of a
+  // grown city together — counts once. When the player nears a place and the budget is full, the standing city farthest from
+  // the player is freed (its buildings, traffic, people and parked cars), if it is LIVE_MARGIN metres farther than the new
+  // one — so walking between two places never builds and frees them back and forth. The first place (world.city, where the
+  // player starts) and a city whose car the player is driving are never freed. A freed place is built again on the way back.
+  const groupOf = (p: PlannedPlace): string => p.cluster?.root ?? p.region.id;
+  const homeGroup = planned[0] ? groupOf(planned[0]) : '';
+  const standing = (): Map<string, PlannedPlace[]> => {
+    const groups = new Map<string, PlannedPlace[]>();
+    for (const q of planned) if (q.built >= 0) (groups.get(groupOf(q)) || groups.set(groupOf(q), []).get(groupOf(q))!).push(q);
+    return groups;
+  };
+  const edgeDistance = (q: PlannedPlace, at: { x: number; z: number }): number => Math.hypot(at.x - q.centre.x, at.z - q.centre.z) - q.reach;
+  const holdsSeat = (group: PlannedPlace[]): boolean => {
+    const seat = ctx.vehicles.seated;
+    if (!seat) return false;
+    for (const q of group) for (let o: THREE.Object3D | null = seat; o; o = o.parent) if (o === roots[q.built]) return true;
+    return false;
+  };
+  const freePlace = (q: PlannedPlace): void => {
+    const i = q.built, t = towns[i];
+    t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]);
+    for (const car of q.parked ?? []) roots[i].remove(car);
+    towns.splice(i, 1); roots.splice(i, 1); locals.splice(i, 1);
+    q.built = -1;
+    for (const other of planned) if (other.built > i) other.built--;
+  };
+  const roomFor = (p: PlannedPlace, at: { x: number; z: number }): boolean => {
+    if (!Number.isFinite(liveBudget)) return true;
+    const groups = standing();
+    if (groups.has(groupOf(p)) || groups.size < liveBudget) return true;
+    const near = edgeDistance(p, at);
+    let farthest: { id: string; d: number } | null = null;
+    for (const [id, group] of groups) {
+      if (id === homeGroup || holdsSeat(group)) continue;
+      const d = Math.min(...group.map((q) => edgeDistance(q, at)));
+      if (!farthest || d > farthest.d) farthest = { id, d };
+    }
+    if (!farthest || farthest.d < near + LIVE_MARGIN) return false;
+    for (const q of [...groups.get(farthest.id)!].sort((a, b) => b.built - a.built)) freePlace(q);
+    return true;
+  };
   const anchored = new Map<THREE.Object3D, { x: number; z: number }>();
   let time = 0;
   // LATE GROUND EDITS (world: { lateEdits: true }, default off): a pad, land or road laid after this point redraws the map's
@@ -703,9 +780,20 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       layGround(at.x, at.z);
       // A place still only planned is built when the player comes near it — at most one per frame, so walking towards a
       // cluster of places never stalls a frame on several cities at once.
-      for (const p of planned) {
-        if (p.built >= 0) continue;
-        if (Math.hypot(at.x - p.centre.x, at.z - p.centre.z) < p.reach + BUILD_AHEAD) { buildPlace(p); break; }
+      if (!Number.isFinite(liveBudget)) {
+        for (const p of planned) {
+          if (p.built >= 0) continue;
+          if (Math.hypot(at.x - p.centre.x, at.z - p.centre.z) < p.reach + BUILD_AHEAD) { buildPlace(p); break; }
+        }
+      } else {
+        // With a budget, the NEAREST place waiting is the one built (never a farther one that would only be freed again).
+        let next: PlannedPlace | null = null, nextD = Infinity;
+        for (const p of planned) {
+          if (p.built >= 0) continue;
+          const d = Math.hypot(at.x - p.centre.x, at.z - p.centre.z);
+          if (d < p.reach + BUILD_AHEAD && d - p.reach < nextD) { next = p; nextD = d - p.reach; }
+        }
+        if (next && roomFor(next, at)) buildPlace(next);
       }
       // A user's map is loaded when the player comes near it (once; a failure is said, never retried in a loop).
       for (const m of userMaps) {

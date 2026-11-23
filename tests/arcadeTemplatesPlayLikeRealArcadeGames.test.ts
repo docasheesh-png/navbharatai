@@ -7,7 +7,7 @@ import { GAME_LIBRARY, materializeGame } from '../src/server/AgentV3/gameLibrary
 const DIR = join(__dirname, `.tmp-arcade-${process.pid}`);
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const M: Record<string, any> = {}; const SRC: Record<string, string> = {};
-const IDS = ['lane-dash'];
+const IDS = ['lane-dash', 'dodge-fall'];
 beforeAll(async () => {
   for (const id of IDS) {
     const dir = join(DIR, id); mkdirSync(dir, { recursive: true });
@@ -69,6 +69,43 @@ describe('🏃 Lane Dash', () => {
   it('missions check the run', () => {
     const done = L().MISSIONS.filter((m: any) => m.goal({ metres: 600, coins: 10, jumps: 12, slides: 0 })).map((m: any) => m.en);
     expect(done).toEqual(['Run 500 m', 'Jump 10 times']);
+  });
+});
+
+describe('☄️ Dodge Fall', () => {
+  const D = () => M['dodge-fall'];
+  it('every wave leaves a way through, for hundreds of waves', () => {
+    const r = rng(11);
+    for (let w = 1; w < 300; w++) {
+      const wave = D().makeWave(w, r);
+      expect(D().hasWayThrough(wave.map((f: any) => ({ ...f, y: 0 })))).toBe(true);
+      for (const f of wave) { expect(f.x).toBeGreaterThan(0); expect(f.x).toBeLessThan(D().OPTIONS.width); }
+    }
+  });
+  it('a hit box is round and a little forgiving; a long log hits along its length', () => {
+    const rock = { kind: 'rock', x: 100, y: 100 };
+    const pr = D().OPTIONS.playerRadius, rr = D().FALLERS.rock.r;
+    expect(D().hits(rock, 100, 100)).toBe(true);
+    expect(D().hits(rock, 100 + rr + pr * 0.9, 100)).toBe(false);          // drawn shapes touch, the hit box does not yet
+    expect(D().hits(rock, 100 + rr + pr * 0.5, 100)).toBe(true);
+    const log = { kind: 'log', x: 100, y: 100 };
+    expect(D().hits(log, 130, 100)).toBe(true);
+    expect(D().hits(log, 100, 140)).toBe(false);
+  });
+  it('a near miss counts only when it really is near and not a hit', () => {
+    const rock = { kind: 'rock', x: 100, y: 100 };
+    const pr = D().OPTIONS.playerRadius, rr = D().FALLERS.rock.r;
+    expect(D().grazes(rock, 100 + rr + pr + 5, 100)).toBe(true);
+    expect(D().grazes(rock, 100 + rr + pr + 40, 100)).toBe(false);
+    expect(D().grazes(rock, 100, 100)).toBe(false);
+  });
+  it('the move eases toward the target without overshooting; falls speed up and waves come faster to a floor', () => {
+    expect(D().moveToward(0, 100, 400, 0.1)).toBe(40);
+    expect(D().moveToward(95, 100, 400, 0.1)).toBe(100);
+    expect(D().moveToward(100, 0, 400, 0.1)).toBe(60);
+    expect(D().fallSpeed(60)).toBeGreaterThan(D().fallSpeed(0));
+    expect(D().waveGap(10)).toBeLessThan(D().waveGap(1));
+    expect(D().waveGap(1000)).toBe(D().OPTIONS.fastestWave);
   });
 });
 

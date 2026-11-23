@@ -117,11 +117,35 @@ export function gameRepairRecord(o: GameRepairOutcome): { code: 'GAME_REPAIR_SKI
   return { code: 'GAME_REPAIR_UNREPAIRED', severity: 'warning', autoResolved: false, message: `Game repair attempted and undone: ${o.reason} — ${ba}. Repair cost absorbed by the platform.` };
 }
 
-/** The incomplete-delivery gate: the reason the game is not shippable, or null. PURE. */
-export function gameIncompleteReason(defects: readonly GameDefect[], scopeMissing: readonly string[]): string | null {
-  const hard = defects.filter((d) => HARD_DEFECTS.has(d.code)).map((d) => d.code.replace('GAME_DEFECT_', '').toLowerCase().replace(/_/g, ' '));
+/**
+ * Defects read from the game's CODE, not from playing it. They hold whether or not the playtest ran, so the
+ * gate states them as code facts — never as "the game was played" (failedbr #2494, 2026-11-22).
+ */
+export const CODE_READ_DEFECTS: ReadonlySet<GameDefectCode> = new Set(['GAME_DEFECT_MISSING_LAYER']);
+
+const defectLabel = (code: GameDefectCode): string => code.replace('GAME_DEFECT_', '').toLowerCase().replace(/_/g, ' ');
+
+/**
+ * The incomplete-delivery gate: the reason the game is not shippable, or null. PURE.
+ *
+ * 🔴 `played` IS REQUIRED, AND IT IS THE PLAYTEST'S OWN ANSWER (`playtestOutcome(...) !== 'not-run'`).
+ * failedbr #2494 (2026-11-22): the playtest recorded "The game was never played — … the page drew 1 frames per
+ * second", and 0.3 s later this gate said "the game was played and is not playable (missing layer)" — a
+ * sentence it built from a CODE-read defect, with no knowledge of whether anything was played. The release
+ * gate then went RED "Not shippable" on a claim that was false twice over. A defect is now phrased by where
+ * it came from: a code fact as a code fact, a play measurement as "played" only when the game WAS played.
+ */
+export function gameIncompleteReason(defects: readonly GameDefect[], scopeMissing: readonly string[], opts: { played: boolean }): string | null {
+  const hardDefects = defects.filter((d) => HARD_DEFECTS.has(d.code));
+  const measured = hardDefects.filter((d) => !CODE_READ_DEFECTS.has(d.code)).map((d) => defectLabel(d.code));
+  const fromCode = hardDefects.filter((d) => CODE_READ_DEFECTS.has(d.code)).map((d) => defectLabel(d.code));
   const parts: string[] = [];
-  if (hard.length) parts.push(`the game was played and is not playable (${hard.join(', ')})`);
+  if (measured.length) {
+    parts.push(opts.played
+      ? `the game was played and is not playable (${measured.join(', ')})`
+      : `the playtest could not finish playing the game, and what it did see is broken (${measured.join(', ')})`);
+  }
+  if (fromCode.length) parts.push(`its code imports game-kit files that are not in the project (${fromCode.join(', ')})`);
   if (scopeMissing.length) parts.push(`features you asked for are missing (${scopeMissing.join(', ')})`);
   return parts.length ? parts.join('; ') : null;
 }

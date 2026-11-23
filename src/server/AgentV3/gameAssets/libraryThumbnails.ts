@@ -27,7 +27,7 @@ export interface LibraryBrowseResult { rows: LibraryBrowseRow[]; total: number; 
 
 const titleCase = (s: string) => s.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase());
 /** Catalogue ids carry internal batch/pack prefixes ("lib4-cow", "city-car_taxi"); a user sees only the object. */
-const ID_PREFIX = /^(?:lib\d+|library|city|medieval|prototype|adventurers)-(?=.)/i;
+const ID_PREFIX = /^(?:lib\d+|library|city|medieval|prototype|adventurers|vuena|market|k13|psx|ggbot|n1)-(?=.)/i;
 export const libraryDisplayName = (id: string) => titleCase(id.replace(ID_PREFIX, '')) || titleCase(id);
 const normalize = (s: string) => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
 const HASH = /^[a-f0-9]{64}$/;

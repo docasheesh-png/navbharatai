@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe,it,expect } from 'vitest';
 import { REVIEWED_LIBRARY_EXPANSION } from '../src/server/AgentV3/gameAssets/reviewedExpansion';
 import { REVIEWED_LIBRARY_BATCH_2 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch2';
@@ -11,12 +12,18 @@ import { REVIEWED_LIBRARY_BATCH_9 } from '../src/server/AgentV3/gameAssets/revie
 import { REVIEWED_LIBRARY_BATCH_10 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch10';
 import { REVIEWED_LIBRARY_BATCH_11 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch11';
 import { REVIEWED_LIBRARY_BATCH_12 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch12';
+import { REVIEWED_LIBRARY_BATCH_13 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch13';
 import { REVIEWED_GAME_ASSETS,validateCatalogue } from '../src/server/AgentV3/gameAssets/providers';
 import { gameAssetRequirements,externalGameAssetsEnabled } from '../src/server/AgentV3/gameAssets/assetPlan';
 import { searchGameLibrary } from '../src/server/AgentV3/gameAssets/gameLibrary';
 describe('licensed library expansion admission',()=>{
  it('adds eleven pinned models; the library is on by default (admin 2026-11-20)',()=>{
-  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length + REVIEWED_LIBRARY_BATCH_9.length + REVIEWED_LIBRARY_BATCH_10.length + REVIEWED_LIBRARY_BATCH_11.length + REVIEWED_LIBRARY_BATCH_12.length);
+  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length + REVIEWED_LIBRARY_BATCH_9.length + REVIEWED_LIBRARY_BATCH_10.length + REVIEWED_LIBRARY_BATCH_11.length + REVIEWED_LIBRARY_BATCH_12.length + REVIEWED_LIBRARY_BATCH_13.length);
+  // A batch spread into the catalogue and left out of the sum above is how 101 admitted models were reported as a short library.
+  const joined = readFileSync(new URL('../src/server/AgentV3/gameAssets/providers.ts', import.meta.url), 'utf8');
+  const catalogue = joined.slice(joined.indexOf('export const REVIEWED_GAME_ASSETS'), joined.indexOf('];', joined.indexOf('export const REVIEWED_GAME_ASSETS')));
+  const here = readFileSync(new URL(import.meta.url), 'utf8');
+  for (const name of catalogue.match(/REVIEWED_LIBRARY_BATCH_\d+/g) ?? []) expect(here, name).toContain(`${name}.length`);
   expect(()=>validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();expect(externalGameAssetsEnabled({})).toBe(true);expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:'off'})).toBe(false);
  });
  it('selects exact characters and locomotion, not a neighbouring substitute',()=>{

@@ -497,6 +497,17 @@ export function gameWorldRule(openWorldSource?: string | null): string {
     + ' only gets the world that is already there. Never write a feature that claims to add regions, expand, stream or enlarge the map —'
     + ' the change goes in src/game/world.ts or it is not made. Never build a place by hand beside the list, and never replace the'
     + ' map to make it bigger.');
+  // Map expansion item 6: a sports ground or venue is a place ON the map, at its real size, on its own level ground.
+  if (typeof openWorldSource !== 'string' || /'venue'/.test(openWorldSource)) {
+    parts.push('A SPORTS GROUND / VENUE on the map ("cricket ground jodo", "football ka maidan banao", "शहर में स्टेडियम बनाओ", "stadium next'
+      + ' to the city", "race track / circuit add karo", "ek arena banao") → ONE region { id, kind: \'venue\', venue: \'cricket-ground\' |'
+      + ' \'football-field\' | \'stadium\' | \'race-circuit\' | \'arena\', joinTo?: \'<region id>\' (beside that place, when they say'
+      + ' next to / in / near it), toward?, size? } — standard size (size = metres along its longer side), marked out, on level dry'
+      + ` ground, joined by road. It counts toward the ${cap.maxRegions}. Not a venue: "cricket game banao", "football khelna hai", "racing game`
+      + ' banao" ask for the GAME itself, not a ground added to the map.');
+  } else {
+    missing.push('add a sports ground or venue (kind \'venue\')');
+  }
   if (missing.length) {
     parts.push(`⚠️ THIS GAME'S MAP FILE (src/game/play/openWorld.ts) is an older or edited copy and CANNOT: ${missing.join('; ')}. Do not write`
       + ' those into src/game/world.ts (the game will not compile) and do not fake them with a feature or a hand-made shape: do what it CAN'
@@ -835,23 +846,39 @@ export function gameTurnHandoff(
   if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped) return { contract: null, block: '' };
   // A game that grows by features is one on EVERY turn, whatever the turn's words are ("add coins", "police bhi daalo"
   // name no game): the project's own list says so, and the rule that protects the other features is said regardless.
-  if (!turnIsGame(prompt)) return { contract: null, block: projectGrowthRules(files) };
-  const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
   // 12_500 since 2026-11-22: the touch-layout options (joystick, buttonPositions) joined the contract, and at 12_000 a
   // whole section (objects.ts) would have been dropped from every game turn rather than one field trimmed.
-  const api = kitTypeContract(producers, 12_500);
+  const kitApi = () => kitTypeContract(producers, 12_500);
+  if (!turnIsGame(prompt)) {
+    // 🔴 failedbr #2498: a turn on a game whose words name no game ("add a pause button", "fix the error") got no kit
+    // API, so the builder spent five minutes reading audio.ts, synth.ts, meta.ts and input.ts with sed before writing a
+    // line. The project's own kit files say it is a game; only a request for a DIFFERENT kind of app goes without.
+    const api = Object.keys(producers).length > 0 && turnNamesNoOtherApp(prompt) ? kitApi() : '';
+    return { contract: null, block: [projectGrowthRules(files), api ? kitApiBlock(api) : ''].filter(Boolean).join('\n\n') };
+  }
+  const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
+  const api = kitApi();
   // Read from the project itself, so it holds on the 30th turn exactly as on the first — whoever built the game.
   const grows = projectGrowthRules(files);
   return { contract, block: [
     grows,
     driveControlsLine(prompt),
     contract ? gameContractBlock(contract) : '',
-    api ? '[GAME KIT API SNAPSHOT — saved start-of-turn source plus acknowledged seed/refresh writes; '
-      + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '
-      + 'Match the consumer to the library; never add a guessed API to make it fit.]\n' + api : '',
+    api ? kitApiBlock(api) : '',
   ].filter(Boolean).join('\n\n') };
+}
+
+function kitApiBlock(api: string): string {
+  return '[GAME KIT API SNAPSHOT — saved start-of-turn source plus acknowledged seed/refresh writes; '
+    + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '
+    + 'Match the consumer to the library; never add a guessed API to make it fit.]\n' + api;
+}
+
+/** A turn whose words read as no particular kind of app (an edit, a fix) — not a request for a different app. */
+function turnNamesNoOtherApp(text: string): boolean {
+  return requestDomain(text) === 'general';
 }
 
 /** A milestone owns game preparation too. GTA in the later/full goal must not force a 3D shell
@@ -921,7 +948,11 @@ export function gameTurnRequest(original: string, milestone?: string | null): st
 
 /** The original request is a game by the one domain reading the kit uses. Never throws. */
 function requestIsGame(text: string): boolean {
-  try { return analyzeRequirementGaps(String(text ?? '')).domain === 'game'; } catch { return false; }
+  return requestDomain(text) === 'game';
+}
+// The module's one domain reading (census).
+function requestDomain(text: string): string | null {
+  try { return analyzeRequirementGaps(String(text ?? '')).domain; } catch { return null; }
 }
 
 /** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */

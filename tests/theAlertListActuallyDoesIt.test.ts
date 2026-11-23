@@ -96,13 +96,13 @@ describe('❗️ "Find and fix bugs" really runs the bug hunt', () => {
 
   it('pre-approved: the hunt runs without asking again; on an app that did not finish, it says why and does not run', async () => {
     const asked: unknown[] = []; const said: string[] = [];
-    const base = { hasUser: true, newCallId: () => 'x', ask: (g: unknown) => { asked.push(g); }, wait: async () => 'approved' as const, say: (t: string) => { said.push(t); }, record: () => undefined, env: {} as NodeJS.ProcessEnv };
+    const base = { hasUser: true, newCallId: () => 'x', offer: (g: unknown) => { asked.push(g); }, say: (t: string) => { said.push(t); }, record: () => undefined, env: {} as NodeJS.ProcessEnv };
     expect(await offerBugHunt({ ...base, eligible: true, preApproved: true })).toEqual({ runReview: true, answer: 'approved' });
     expect(asked).toEqual([]);
     expect(await offerBugHunt({ ...base, eligible: false, preApproved: true })).toEqual({ runReview: false, answer: 'approved' });
     expect(said).toEqual([bugHuntCouldNotRunLine()]);
     expect(asked).toEqual([]);
-    // Not pre-approved: unchanged — it asks.
+    // Not pre-approved: it offers (a standing row, nothing waits).
     await offerBugHunt({ ...base, eligible: true });
     expect(asked).toHaveLength(1);
   });

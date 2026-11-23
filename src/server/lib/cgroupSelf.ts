@@ -103,17 +103,21 @@ export function effectiveMemoryLimitBytes(read: (p: string) => string): number |
  * `/user` cgroup envd starts every build command in. Read-only, and with NO redirection at all: every read is
  * guarded by `[ -r … ]`, so the write-ban test stays as strict as it was (adversarial review of 303e8a6f).
  *
- *   v2 <peak> max=<own memory.max> high=<reclaim-throttle events> oom_kill=<n> cgroup=<path>
+ *   v2 <peak> max=<own memory.max> high=<reclaim-throttle events> oom_kill=<n> current=<now> anon=<now> file=<now> cgroup=<path>
  *   v1 <max_usage_in_bytes> cgroup=<path>          (the probe's OWN v1 memory cgroup — never the host's root)
  *   unavailable cgroup=<path>
  */
 export function ownCgroupMemoryProbe(root: string = CGROUP_V2_ROOT, selfFile: string = SELF_CGROUP_FILE): string {
   const r = root.replace(/\/+$/, '');
   const ev = (key: string) => `$(if [ -r "$d/memory.events" ]; then sed -n 's/^${key} //p' "$d/memory.events"; fi)`;
+  // What is in use NOW, split into the programs' own memory (anon) and reclaimable file cache (failedbr #2495/#2496:
+  // a cache-inflated 99% high-water mark with zero pressure read as a near-crash).
+  const st = (key: string) => `$(if [ -r "$d/memory.stat" ]; then sed -n 's/^${key} //p' "$d/memory.stat"; fi)`;
   return `if [ -r ${selfFile} ]; then cg=$(sed -n 's/^0:://p' ${selfFile} | head -n1); m1=$(sed -n 's/^[0-9]*:\\(.*,\\)\\{0,1\\}memory\\(,[^:]*\\)\\{0,1\\}://p' ${selfFile} | head -n1); fi; `
     + `d="${r}\${cg%/}"; v="${r}/memory\${m1%/}"; `
     + `if [ -n "$cg" ] && [ -r "$d/memory.peak" ]; then `
-    + `echo "v2 $(cat "$d/memory.peak") max=$(if [ -r "$d/memory.max" ]; then cat "$d/memory.max"; fi) high=${ev('high')} oom_kill=${ev('oom_kill')} cgroup=\${cg:-/}"; `
+    + `echo "v2 $(cat "$d/memory.peak") max=$(if [ -r "$d/memory.max" ]; then cat "$d/memory.max"; fi) high=${ev('high')} oom_kill=${ev('oom_kill')} `
+    + `current=$(if [ -r "$d/memory.current" ]; then cat "$d/memory.current"; fi) anon=${st('anon')} file=${st('file')} cgroup=\${cg:-/}"; `
     + `elif [ -n "$m1" ] && [ -r "$v/memory.max_usage_in_bytes" ]; then echo "v1 $(cat "$v/memory.max_usage_in_bytes") cgroup=\${m1:-/}"; `
     + `else echo "unavailable cgroup=\${cg:-\${m1:-unknown}}"; fi`;
 }

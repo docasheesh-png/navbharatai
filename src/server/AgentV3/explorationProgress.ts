@@ -8,7 +8,9 @@ import { isReadOnlyInspection } from './shellInspection';
 
 export const EXPLORATION_TURNS = 8;
 export const EXPLORATION_PROBES = 16;
-export const MAX_EXPLORATION_STEERS = 2;
+// Three since failedbr #2498: after the second hand-back (227 s) the builder read for another 195 s before its first
+// write. The third says plainly that the next reply must write — reads stay available, but they come with the write.
+export const MAX_EXPLORATION_STEERS = 3;
 
 const PROBES: ReadonlySet<string> = new Set(['read_file', 'grep', 'glob']);
 
@@ -68,7 +70,7 @@ export function advanceExplorationProgress(
   if (probes === 0 || !names.every((name) => PROBES.has(name) || name === 'update_todo')) return none;
   const next = { ...state, turns: state.turns + 1, probes: state.probes + probes };
   const stage = next.stage + 1;
-  if (next.steers >= MAX_EXPLORATION_STEERS || stage > 2
+  if (next.steers >= MAX_EXPLORATION_STEERS || stage > MAX_EXPLORATION_STEERS
     || (next.turns < EXPLORATION_TURNS * stage && next.probes < EXPLORATION_PROBES * stage)) {
     return { state: next, steer: null };
   }
@@ -83,8 +85,9 @@ export function advanceExplorationProgress(
     steer: {
       stage,
       observation,
-      message: `[BUILD PROGRESS${stage === 2 ? ' — STILL EXPLORING' : ''}] ${observation} `
+      message: `[BUILD PROGRESS${stage === 2 ? ' — STILL EXPLORING' : stage >= 3 ? ' — WRITE NOW' : ''}] ${observation} `
         + (stage === 2 ? 'Exploration continued after the earlier hand-back. ' : '')
+        + (stage >= 3 ? 'Two earlier hand-backs did not lead to a change. Your next reply must call write_file or edit_file with the first concrete piece of the work, or state in plain words the one input that is missing. ' : '')
         + action + ' Read any still-needed signature alongside that concrete change; a complete map of every helper is not needed first. '
         + 'If you cannot safely make a change, state the exact missing input or blocker instead of continuing to map the project. '
         + 'File reads remain available in full.',

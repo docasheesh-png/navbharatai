@@ -94,8 +94,9 @@ describe('🔒 the route runs it at the start of an edit turn, re-reads the sand
   it('wired', () => {
     expect(route).toContain("if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart");
     expect(route).toContain("String(process.env.AGENTV3_KIT_REFRESH ?? '').trim().toLowerCase() !== 'off'");
-    expect(route).toContain('const refresh = planKitRefresh(projectFilesAtTurnStart);');
-    expect(route).toMatch(/changed in the sandbox since it was saved/);
+    // Q-3300: planned against the sandbox itself (planKitRefreshAgainstSandbox), never the saved copy alone.
+    expect(route).toContain("const refresh = await finalSteps.step('kit refresh read', () => planKitRefreshAgainstSandbox(projectFilesAtTurnStart!");
+    expect(route).not.toMatch(/planKitRefresh\(projectFilesAtTurnStart\)/);
     expect(route).toContain("code: 'KIT_REFRESHED'");
   });
   it('the hashes above are what the manifest said (a sanity check on the transcription)', () => {

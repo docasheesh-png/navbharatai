@@ -180,3 +180,88 @@ export function createWorldCourse(options: WorldCourseOptions): WorldCourse {
   };
 }
 `;
+
+// 🏁 THE WORLD RACE (item 8, part 2 of 3): the race on that course, under the open world. <RacingRoadGame> loads this file
+// only when the game's src/game/track.ts says TRACK.world = true AND the file is in the project (play/raceCustom.ts
+// loadWorldRace, through import.meta.glob: a project without it compiles and races on the road library, as before). It is
+// written into a project only after the user says yes once (part 3). Not shipped by any recipe.
+export const WORLD_RACE_PATH = 'src/game/play/worldRace.ts';
+
+export const WORLD_RACE = String.raw`// THE WORLD RACE: the race runs on the open world's highways, from the first place through the others, with the kit's
+// rivals, countdown, position and finish. <RacingRoadGame> uses it by itself when src/game/track.ts sets TRACK.world = true.
+// The places are the game's own src/game/world.ts (WORLD.regions) when it has one, else four towns joined by highways.
+import * as THREE from 'three';
+import type { GameContext } from '../Game';
+import { createWorldLayer, type WorldLayer } from './worldLayer';
+import { createWorldCourse, type CoursePose, type WorldCourse } from './worldCourse';
+import { createRace, type Race, type RaceStatus } from '../three/race';
+import type { WorldRegion } from './openWorld';
+
+export interface WorldRaceOptions {
+  /** The player's car (the kit car): it is followed by the world and put on the start line. */
+  car: THREE.Object3D;
+  opponents?: number;
+  /** A finish this many km along the route; null or more than the route: the end of the route. */
+  finishKm?: number | null;
+  /** The places to race through. Default: src/game/world.ts WORLD.regions, else four towns. */
+  regions?: ReadonlyArray<WorldRegion>;
+  seed?: number;
+}
+
+export interface WorldRace {
+  readonly world: WorldLayer;
+  readonly course: WorldCourse;
+  readonly race: Race;
+  /** The start line, in render coordinates. */
+  readonly startPose: CoursePose;
+  /** The ground the car drives on, at a RENDER (x, z). */
+  groundAt(x: number, z: number): number;
+  /** Every frame: the world streams round the car, the car's distance is read, the race moves on. */
+  update(ctx: GameContext, dt: number): { distance: number; standing: RaceStatus; km: number; totalKm: number };
+  /** Back to the start line (Play again). */
+  reset(): void;
+  dispose(): void;
+}
+
+const TOWNS: WorldRegion[] = [
+  { id: 'start-town', kind: 'town' }, { id: 'east-town', kind: 'town', toward: 'east' },
+  { id: 'north-town', kind: 'town', toward: 'north' }, { id: 'far-town', kind: 'town', toward: 'north-east' },
+] as WorldRegion[];
+
+function ownRegions(): ReadonlyArray<WorldRegion> | null {
+  try {
+    const found = import.meta.glob('../world.ts', { eager: true, import: 'WORLD' }) as Record<string, { regions?: ReadonlyArray<WorldRegion> } | undefined>;
+    const regions = Object.values(found)[0]?.regions;
+    return Array.isArray(regions) && regions.length >= 2 ? regions : null;
+  } catch { return null; }
+}
+
+/** Throws (with a reason a person can read) when the world has no road to race on. */
+export function startWorldRace(ctx: GameContext, options: WorldRaceOptions): WorldRace {
+  const regions = options.regions ?? ownRegions() ?? TOWNS;
+  const world = createWorldLayer(ctx, { regions: regions as WorldRegion[], follow: options.car, placeAtSpawn: false, ...(options.seed !== undefined ? { seed: options.seed } : {}) });
+  const origin = world.map.chunks!.origin;
+  const legs = world.highways.map((h) => h.map((p) => ({ x: p.x, z: p.z })));
+  const home = world.places[0]?.centre;
+  const course = createWorldCourse({ legs, start: home ? { x: home.x, z: home.z } : undefined, heightAt: (x, z) => world.heightAt(x, z), origin: () => ({ x: origin.x, z: origin.z }), finishKm: options.finishKm ?? null });
+  if (legs.length === 0 || course.length < 500) { world.dispose(); throw new Error('this world has no highway between its places to race on (it needs at least two places)'); }
+  const start = course.startPose;
+  const putOnStart = (): void => { options.car.position.set(start.x, start.y, start.z); options.car.rotation.y = start.heading; };
+  putOnStart();
+  const finish = course.finish ?? course.length;                         // the world's route ends: so does an "endless" race, for now
+  const race = createRace(ctx.scene, { stream: course, opponents: options.opponents ?? 3, finishDistance: finish });
+  return {
+    world, course, race,
+    get startPose() { return course.startPose; },
+    groundAt: (x, z) => world.heightAt(x + origin.x, z + origin.z),
+    update(c, dt) {
+      world.frame(c, dt);
+      const s = course.update(options.car);
+      const standing = race.update(dt, s.distance);
+      return { distance: s.distance, standing, km: s.distance / 1000, totalKm: finish / 1000 };
+    },
+    reset() { course.reset(); const p = course.startPose; options.car.position.set(p.x, p.y, p.z); options.car.rotation.y = p.heading; },
+    dispose() { race.dispose(); course.dispose(); world.dispose(); },
+  };
+}
+`;

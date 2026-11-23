@@ -995,6 +995,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // chunks and plants it touches, and the walkable ground under the player is sampled again at once.
   const lateEdits = options.lateEdits === true;
   let groundEditsSeen = map.world.editCount ? map.world.editCount() : 0;
+  /** The edit count at the first frame (-1 before it): edits after it, without lateEdits, are never redrawn (the playtest says so). */
+  let editsAtFirstFrame = -1;
   const playerWorld = () => {
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
@@ -1177,7 +1179,52 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     // 4. The player on foot, on dry land: how far its feet are from the ground (null while driving or swimming).
     const at = playerWorld(), land = h(at.x, at.z);
     const player = ctx.vehicles.seated || land < map.world.seaLevel ? null : r1(at.y - land);
-    return { terrain: { samples, off, worst: r1(worst) }, slabs, roads, player, ms: Math.round(performance.now() - t0) };
+    // 5. Seams: where two joined tiles of one grown city meet, the ground 3 m into each side (they share one level by design).
+    let seamSamples = 0, seamWorst = 0;
+    const tiles = planned.filter((q) => q.cluster);
+    for (let i = 0, pairs = 0; i < planned.length && pairs < 24 && !late(); i++) {
+      const p = planned[i], pc = p.cluster ? [p.cluster.gx, p.cluster.gz] : [0, 0], pr = p.cluster?.root ?? p.region.id;
+      for (const q of tiles) {
+        if (q === p || q.cluster!.root !== pr || pairs >= 24) continue;
+        const dx = q.cluster!.gx - pc[0], dz = q.cluster!.gz - pc[1];
+        if (Math.abs(dx) + Math.abs(dz) !== 1 || dx < 0 || dz < 0) continue;             // each neighbouring pair once
+        pairs++;
+        const mx = (p.centre.x + q.centre.x) / 2, mz = (p.centre.z + q.centre.z) / 2;
+        for (const t of [-0.3, 0, 0.3]) {
+          const w = Math.hypot(q.centre.x - p.centre.x, q.centre.z - p.centre.z) || 1, ux = (q.centre.x - p.centre.x) / w, uz = (q.centre.z - p.centre.z) / w;
+          const ex = mx - uz * t * w, ez = mz + ux * t * w;
+          seamSamples++; seamWorst = Math.max(seamWorst, Math.abs(h(ex - ux * 3, ez - uz * 3) - h(ex + ux * 3, ez + uz * 3)));
+        }
+      }
+    }
+    // 6. Venues: each pad's corners (1 m in) and centre against the level it was laid at.
+    const venuesOff = venueList.slice(0, 8).map((v) => {
+      let offBy = 0;
+      for (const [fx, fz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]]) offBy = Math.max(offBy, Math.abs(h(v.centre.x + fx * (v.width / 2 - 1), v.centre.z + fz * (v.depth / 2 - 1)) - v.centre.y));
+      return { name: v.id.replace(/[^\p{L}\p{N} _.-]/gu, '').slice(0, 40), off: r1(offBy) };
+    });
+    // 7. Pending: without lateEdits, an edit after the first frame is never redrawn — the drawn chunks it overlaps whose grid
+    // there is still the old ground. (With lateEdits they are being redrawn, a few per frame; nothing is said.)
+    let dirty = 0;
+    if (!lateEdits && editsAtFirstFrame >= 0 && map.world.editsSince && map.world.editCount && map.world.editCount() > editsAtFirstFrame) {
+      const edits = map.world.editsSince(editsAtFirstFrame).slice(0, 64);
+      for (const chunk of chunks.group.children.slice(0, 200)) {
+        if (late()) break;
+        const pos = ((chunk as THREE.Mesh).geometry as THREE.BufferGeometry | undefined)?.getAttribute?.('position') as THREE.BufferAttribute | undefined;
+        const n = pos ? Math.round(Math.sqrt(pos.count + 4) - 2) : 0;
+        if (!pos || n < 2 || n * n + 4 * n !== pos.count) continue;
+        chunk.updateWorldMatrix(true, false);
+        let stale = false;
+        for (let k = 0; k < n * n && !stale; k += Math.max(1, Math.floor((n * n) / 64))) {
+          a.fromBufferAttribute(pos, k).applyMatrix4(chunk.matrixWorld);
+          const wx = a.x + o.x, wz = a.z + o.z;
+          if (!edits.some((e) => wx >= e.x0 && wx <= e.x1 && wz >= e.z0 && wz <= e.z1)) continue;
+          if (Math.abs(a.y - h(wx, wz)) > 0.5) stale = true;
+        }
+        if (stale) dirty++;
+      }
+    }
+    return { terrain: { samples, off, worst: r1(worst) }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
   };
   const probeHook = { geometry: geometryReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
@@ -1209,6 +1256,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     release(object) { anchored.delete(object); },
     frame(_ctx, delta) {
       time += delta;
+      if (editsAtFirstFrame < 0) editsAtFirstFrame = map.world.editCount ? map.world.editCount() : 0;
       const at = playerWorld();
       const shift = map.update(at.x, at.z, time, at.y);
       if (shift) {

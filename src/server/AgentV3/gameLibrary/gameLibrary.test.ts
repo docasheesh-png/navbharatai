@@ -74,6 +74,7 @@ describe('the first six games compile', () => {
       expect(source).toContain('localStorage');
       expect(source).toContain('AudioContext');
       expect(source.toLowerCase()).not.toMatch(/subway surfers|ludo king|candy crush|temple run/);
+      if (game.id === 'coin-wheel') expect(source).toContain('Play coins only');
       const files = goldenScaffoldFiles(gameScaffold(game));
       expect(await findSyntaxErrors(files)).toEqual([]);
       const preview = checkPreviewCompiles(files);

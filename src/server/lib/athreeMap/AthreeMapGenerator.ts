@@ -203,6 +203,8 @@ import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './roads';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
+/** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
+export interface GroundEdit { x0: number; z0: number; x1: number; z1: number }
 /** A land a game can lay on part of the map (setLand). */
 export type LandBiome = 'beach' | 'desert' | 'forest' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
@@ -303,6 +305,12 @@ export interface AthreeWorld {
    * is what to draw. Call it BEFORE the first map.update(), like levelGround.
    */
   addRoad(points: ReadonlyArray<{ x: number; z: number }>, width?: number): Array<{ x: number; y: number; z: number }>;
+  /**
+   * How many ground edits (levelGround, setLand, addRoad) this world has had, and the area each one can change, from the n-th
+   * on. A map made with lateEdits: true reads them every update and redraws the chunks and plants they touch.
+   */
+  editCount?(): number;
+  editsSince?(n: number): ReadonlyArray<GroundEdit>;
   /** Every road, plaza, the race circuit and the runways (regions are built on demand). */
   roadNetwork(): RoadNetwork;
   /** The road under a place (on the paved width), or null. */
@@ -499,6 +507,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // first frame. Inside the pad the ground is one height; over the margin it eases back into the land, so there is no
   // cliff and no floating slab. Everything that reads heightAt (the drawn terrain, the colliders, plants, vehicles) agrees.
   const pads: Array<{ x: number; z: number; hx: number; hz: number; y: number; margin: number }> = [];
+  // ✏️ THE EDIT LOG (map expansion, item 2). Every ground edit notes the rectangle it can change, so a map that allows late
+  // edits redraws exactly those chunks and plants. 8 m more on every side: the drawn normals read the height 2 m around.
+  const groundEdits: GroundEdit[] = [];
+  function noteEdit(x0: number, z0: number, x1: number, z1: number): void {
+    groundEdits.push({ x0: x0 - 8, z0: z0 - 8, x1: x1 + 8, z1: z1 + 8 });
+  }
   // 🗂️ THE PLACE INDEX (map expansion, item 1). heightAt runs for every terrain vertex, collider sample and plant, and it used
   // to visit EVERY pad and land on the map — a map of hundreds of places paid for all of them at every point. Each pad and land
   // is now listed in the 256 m cells it can reach, and a point visits only its own cell's list, in the SAME order as before
@@ -556,6 +570,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
     const r = Math.min(4000, Math.max(60, radius));
     lands.push({ x, z, r, land });
+    noteEdit(x - r * 1.25, z - r * 1.25, x + r * 1.25, z + r * 1.25);
     indexPlace(landCells, landsEverywhere, lands.length - 1, x, z, r * 1.25 + 1, r * 1.25 + 1);
   }
   // GAME ROADS (admin 2026-11-22: "abhi 30 sec me hi road khatam ho jati hai"). A highway the game lays between its own places:
@@ -581,6 +596,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     for (let i = 1; i < y.length; i++) y[i] = Math.min(Math.max(y[i], y[i - 1] - 0.8), y[i - 1] + 0.8);
     for (let i = y.length - 2; i >= 0; i--) y[i] = Math.min(Math.max(y[i], y[i + 1] - 0.8), y[i + 1] + 0.8);
     const pts = line.map((p, i) => ({ x: p.x, y: y[i], z: p.z }));
+    const reachOut = Math.max(2, width / 2) + ROAD_SHOULDER;
+    let ex0 = Infinity, ez0 = Infinity, ex1 = -Infinity, ez1 = -Infinity;
+    for (const q of pts) { ex0 = Math.min(ex0, q.x); ez0 = Math.min(ez0, q.z); ex1 = Math.max(ex1, q.x); ez1 = Math.max(ez1, q.z); }
+    noteEdit(ex0 - reachOut, ez0 - reachOut, ex1 + reachOut, ez1 + reachOut);
     const id = gameRoads.length;
     gameRoads.push({ pts, half: Math.max(2, width / 2) });
     for (let i = 0; i < pts.length - 1; i++) {
@@ -635,6 +654,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const y = typeof height === 'number' && Number.isFinite(height) ? height : Math.max(1.5, sum / n);
     const pad = { x, z, hx: Math.max(1, halfX), hz: Math.max(1, halfZ), y, margin: Math.max(1, margin) };
     pads.push(pad);
+    noteEdit(x - pad.hx - Math.max(pad.margin, 2), z - pad.hz - Math.max(pad.margin, 2), x + pad.hx + Math.max(pad.margin, 2), z + pad.hz + Math.max(pad.margin, 2));
     // Reaches as far as its margin eases (heightAt) or clearAt's 2 m, whichever is wider, and a metre more.
     const reach = Math.max(pad.margin, 2) + 1;
     indexPlace(padCells, padsEverywhere, pads.length - 1, x, z, pad.hx + reach, pad.hz + reach);
@@ -808,7 +828,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -946,6 +966,12 @@ export interface ChunkManager {
   readonly origin: { x: number; z: number };
   /** Stream chunks around the camera (world metres). Returns the origin shift when it was re-based, else null. */
   update(cameraX: number, cameraZ: number): { dx: number; dz: number } | null;
+  /**
+   * The ground changed over this world rectangle (a late levelGround, setLand or addRoad): the loaded chunks it touches are
+   * drawn again on the next updates, nearest first, within the tier's builds per update. A rectangle that is not finite
+   * redraws every loaded chunk. Returns how many chunks were marked.
+   */
+  invalidate(x0: number, z0: number, x1: number, z1: number): number;
   loadedCount(): number;
   dispose(): void;
 }
@@ -1032,7 +1058,21 @@ export function createChunkManager(THREE: ThreeLike, world: AthreeWorld, quality
     sea.material.dispose();
   }
 
-  return { group, origin, update, loadedCount: () => loaded.size, dispose };
+  function invalidate(x0: number, z0: number, x1: number, z1: number): number {
+    const all = !(Number.isFinite(x0) && Number.isFinite(z0) && Number.isFinite(x1) && Number.isFinite(z1));
+    let marked = 0;
+    for (const [key, entry] of loaded) {
+      const [kx, kz] = key.split(',').map(Number);
+      // A chunk covers [k * size, (k + 1) * size] on each axis (its skirts hang under its own border).
+      if (!all && (kx * size > x1 || (kx + 1) * size < x0 || kz * size > z1 || (kz + 1) * size < z0)) continue;
+      entry.ring = -1;                                                     // no wanted ring is -1: built again
+      marked++;
+    }
+    if (marked > 0) lastCx = Infinity;                                     // the next update walks the list again
+    return marked;
+  }
+
+  return { group, origin, update, invalidate, loadedCount: () => loaded.size, dispose };
 }
 `;
 
@@ -1122,6 +1162,12 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '',
     'export interface AthreeMapOptions extends AthreeWorldOptions {',
     '  quality?: AthreeQuality;',
+    '  /**',
+    '   * LATE GROUND EDITS (default false: off). true: a levelGround, setLand or addRoad made AFTER the first update() redraws the',
+    '   * terrain chunks and plants it touches on the next updates (a few per update, nearest first). false keeps the old contract:',
+    '   * ground edits belong before the first update(), and what is drawn is never redrawn.',
+    '   */',
+    '  lateEdits?: boolean;',
   );
   if (has('plants')) add('  /** Set false to leave grass and trees out (a flat racing circuit that wants every triangle for the road). Default true. */', '  vegetation?: boolean;');
   if (has('sky')) add('  /** Set false to leave the sky out (you bring your own sky and lights). Default true. */', '  sky?: boolean;', '  /** Time of day, weather, day length and lights for the sky. */', '  skyOptions?: SkyOptions;');
@@ -1146,13 +1192,30 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('roads')) add('  const roadMesh = options.three && options.roads !== false ? createRoadMesh(options.three, world, quality) : null;', '  if (chunks && roadMesh) chunks.group.add(roadMesh.group);');
   const lit = ['sea', 'plants', 'rivers', 'roads'].some(has); // modules that take their light from the sky
   if (has('sky') && lit) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
+  add('  const lateEdits = options.lateEdits === true;', '  let editsSeen = 0;');
   add('  return {', '    world,', '    chunks,');
   if (has('sea')) add('    ocean,');
   if (has('plants')) add('    vegetation,');
   if (has('rivers')) add('    riverWater,');
   if (has('sky')) add('    sky,');
   if (has('roads')) add('    roadMesh,');
-  add('    update: (cameraX, cameraZ, time, cameraY = 0) => {', '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;');
+  add(
+    '    update: (cameraX, cameraZ, time, cameraY = 0) => {',
+    '      // A late ground edit redraws what it touched (only when the game asked for lateEdits).',
+    '      if (lateEdits && world.editCount && world.editsSince) {',
+    '        const n = world.editCount();',
+    '        if (n > editsSeen) {',
+    '          for (const e of world.editsSince(editsSeen)) {',
+    '            chunks?.invalidate(e.x0, e.z0, e.x1, e.z1);',
+  );
+  if (has('plants')) add('            vegetation?.invalidate(e.x0, e.z0, e.x1, e.z1);');
+  add(
+    '          }',
+    '          editsSeen = n;',
+    '        }',
+    '      }',
+    '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;',
+  );
   if (has('sky')) {
     add('      if (sky && chunks) {', '        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);');
     if (lit) add('        // One sun for everything the game chose: they take their light from the sky.', '        const r = sky.reading();');

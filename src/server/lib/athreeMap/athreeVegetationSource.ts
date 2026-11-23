@@ -569,6 +569,12 @@ export interface Vegetation {
   stats(): VegetationStats;
   /** Match the scene's light: sun direction (towards the sun), sun colour, ambient colour. */
   setLight(sun: { x: number; y: number; z: number }, sunColor?: number, ambientColor?: number): void;
+  /**
+   * The ground changed over this world rectangle (a late levelGround, setLand or addRoad): the plant tiles it touches are
+   * scattered again on the next updates (a few per update), so no tree floats over a new pad or stands on a new road. Plants
+   * already drawn stay until their tiles are ready. A rectangle that is not finite drops every tile. Returns tiles dropped.
+   */
+  invalidate(x0: number, z0: number, x1: number, z1: number): number;
   dispose(): void;
 }
 
@@ -882,7 +888,23 @@ export function createVegetation(THREE: ThreeLike, world: AthreeWorld, quality: 
     grassTiles.clear();
   }
 
-  return { group, update, stats, setLight, dispose };
+  function invalidate(x0: number, z0: number, x1: number, z1: number): number {
+    const all = !(Number.isFinite(x0) && Number.isFinite(z0) && Number.isFinite(x1) && Number.isFinite(z1));
+    let dropped = 0;
+    const drop = (tiles: Map<string, unknown>, size: number): void => {
+      for (const key of Array.from(tiles.keys())) {
+        const [i, j] = key.split(',').map(Number);
+        if (!all && (i * size > x1 || (i + 1) * size < x0 || j * size > z1 || (j + 1) * size < z0)) continue;
+        tiles.delete(key); dropped++;
+      }
+    };
+    drop(treeTiles, TREE_TILE);
+    drop(grassTiles, GRASS_TILE);
+    if (dropped > 0) { scanTile = { x: Infinity, z: Infinity }; dirty = true; }
+    return dropped;
+  }
+
+  return { group, update, stats, setLight, invalidate, dispose };
 }
 
 `;

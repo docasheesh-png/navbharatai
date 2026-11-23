@@ -39,7 +39,8 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /**
    * How many cities stand built at once (a grown city counts once; the first place, where the player starts, always stays).
    * Left out: the device's share — LIVE_CITIES[quality, else deviceTier()], phone 2, mid 5, desktop 8. Walking on to a new place frees the
-   * farthest one standing; it is built again when the player comes back. false: every city reached stays built (the old way).
+   * farthest city already out of view (CITY_HIDE metres past its edge, the same distance at which it is no longer drawn); a city still
+   * in view is never taken down, and the new place still appears. It is built again when the player comes back. false: every city reached stays built (the old way).
    */
   liveCities?: number | false;
   /**
@@ -71,6 +72,8 @@ export const BUILD_AHEAD = 1500;
 export const LIVE_CITIES = { phone: 2, mid: 5, desktop: 8 } as const;
 /** A standing city is freed for a nearer one only when it is this many metres farther from the player — never back and forth. */
 export const LIVE_MARGIN = 300;
+/** Metres past a city's edge at which it is no longer drawn. A city closer than this is still in view and is never taken down. */
+export const CITY_HIDE = 2600;
 /**
  * Which share of cities this device gets (the map's own drawing tier is left as it is): a browser with no GPU or a finger
  * for a pointer is a phone; 8+ cores (and 8+ GB where the browser says) is a desktop; anything else, or anything unknown, mid.
@@ -167,7 +170,7 @@ export interface OpenWorld {
   readonly city: OpenWorldCity | null;
   /**
    * The places whose city stands built now (see places for all of them). Only the nearest few stand at once (liveCities):
-   * a place the player left far behind is taken off this list and built again when they come back.
+   * a place the player left out of view is taken off this list and built again when they come back. A city still in view is never taken down.
    */
   readonly regions: OpenWorldCity[];
   /** Every land on the map (desert, jungle, mountain, snow, beach regions), in the order listed. */
@@ -619,9 +622,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
 
   // 🏙️ THE NEAREST CITIES LIVE (map expansion item 4; owner decision: phone 2, mid 5, desktop 8). A city — all the tiles of a
   // grown city together — counts once. When the player nears a place and the budget is full, the standing city farthest from
-  // the player is freed (its buildings, traffic, people and parked cars), if it is LIVE_MARGIN metres farther than the new
-  // one — so walking between two places never builds and frees them back and forth. The first place (world.city, where the
-  // player starts) and a city whose car the player is driving are never freed. A freed place is built again on the way back.
+  // the player is freed (its buildings, traffic, people and parked cars) only if it is already out of view (CITY_HIDE metres
+  // past its edge, the same distance at which it is no longer drawn) and LIVE_MARGIN metres farther than the new one — so a
+  // city never vanishes while the player can still see it, and walking between two places never builds and frees them back
+  // and forth. If every standing city is still in view, the new place is still built (briefly one more than the budget) and
+  // the extras are freed once they go out of view. The first place (world.city, where the player starts) and a city whose
+  // car the player is driving are never freed. A freed place is built again on the way back.
   const groupOf = (p: PlannedPlace): string => p.cluster?.root ?? p.region.id;
   const homeGroup = planned[0] ? groupOf(planned[0]) : '';
   const standing = (): Map<string, PlannedPlace[]> => {
@@ -644,20 +650,38 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     q.built = -1;
     for (const other of planned) if (other.built > i) other.built--;
   };
+  const farthestOutOfView = (groups: Map<string, PlannedPlace[]>, at: { x: number; z: number }): { id: string; d: number } | null => {
+    let farthest: { id: string; d: number } | null = null;
+    for (const [id, group] of groups) {
+      if (id === homeGroup || holdsSeat(group)) continue;
+      const d = Math.min(...group.map((q) => edgeDistance(q, at)));
+      if (d < CITY_HIDE) continue;                                          // still in view — never pop it out
+      if (!farthest || d > farthest.d) farthest = { id, d };
+    }
+    return farthest;
+  };
+  const freeGroup = (groups: Map<string, PlannedPlace[]>, id: string): void => {
+    for (const q of [...groups.get(id)!].sort((a, b) => b.built - a.built)) freePlace(q);
+  };
   const roomFor = (p: PlannedPlace, at: { x: number; z: number }): boolean => {
     if (!Number.isFinite(liveBudget)) return true;
     const groups = standing();
     if (groups.has(groupOf(p)) || groups.size < liveBudget) return true;
     const near = edgeDistance(p, at);
-    let farthest: { id: string; d: number } | null = null;
-    for (const [id, group] of groups) {
-      if (id === homeGroup || holdsSeat(group)) continue;
-      const d = Math.min(...group.map((q) => edgeDistance(q, at)));
-      if (!farthest || d > farthest.d) farthest = { id, d };
+    const farthest = farthestOutOfView(groups, at);
+    if (farthest && farthest.d >= near + LIVE_MARGIN) freeGroup(groups, farthest.id);
+    return true;                                                            // the place ahead still appears, even if nothing could be freed yet
+  };
+  /** When more cities stand than the budget, free the farthest that are already out of view. */
+  const reapHidden = (at: { x: number; z: number }): void => {
+    if (!Number.isFinite(liveBudget)) return;
+    while (true) {
+      const groups = standing();
+      if (groups.size <= liveBudget) return;
+      const farthest = farthestOutOfView(groups, at);
+      if (!farthest) return;
+      freeGroup(groups, farthest.id);
     }
-    if (!farthest || farthest.d < near + LIVE_MARGIN) return false;
-    for (const q of [...groups.get(farthest.id)!].sort((a, b) => b.built - a.built)) freePlace(q);
-    return true;
   };
   const anchored = new Map<THREE.Object3D, { x: number; z: number }>();
   let time = 0;
@@ -832,7 +856,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const seated = ctx.vehicles.seated;
       towns.forEach((t, i) => {
         const d = Math.hypot(at.x - t.centre.x, at.z - t.centre.z);
-        roots[i].visible = d < t.radius + 2600;
+        roots[i].visible = d < t.radius + CITY_HIDE;
         if (d > t.radius + 500) return;
         locals[i].position.set(at.x - t.centre.x, at.y - t.centre.y, at.z - t.centre.z);
         t.traffic?.update(delta, seated ? [locals[i], seated] : [locals[i]]);
@@ -841,6 +865,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         // the player on foot — or the car they drive — is pushed out of any traffic car it ran into, every frame.
         if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
       });
+      reapHidden(at);
     },
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();

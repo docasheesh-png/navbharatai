@@ -97,23 +97,62 @@ describe('🏙️ only the nearest cities stand (phone 2, mid 5, desktop 8)', ()
     expect(as(false, 4, 8)).toBe('mid');
     expect(as(false, undefined, undefined)).toBe('mid');
   });
+  const edgeOf = (q: any, at: { x: number; z: number }) => Math.hypot(at.x - q.centre.x, at.z - q.centre.z) - q.radius;
   for (const [quality, budget] of [['phone', 2], ['mid', 5], ['desktop', 8]] as const) {
-    it(quality + ': visiting twelve places, never more than ' + budget + ' stand; home always stands', () => {
+    it(quality + ': visiting twelve places, a city in view is never taken down; home and the place the player is in always stand', () => {
       const c = context();
       const world = OW.createOpenWorld(c, { seed: 7, quality, regions: villages(12) });
-      let most = 0;
+      const hide = OW.CITY_HIDE;
+      let wasBuilt = new Set(world.places.filter((q: any) => q.built).map((q: any) => q.id));
       for (const p of world.places.slice(1)) {
-        standAt(world, c, p.centre.x, p.centre.z);
-        most = Math.max(most, standing(world));
+        const at = p.centre;
+        standAt(world, c, at.x, at.z);
         expect(world.places.find((q: any) => q.id === p.id).built).toBe(true);   // the place the player is in stands
+        expect(world.places[0].built).toBe(true);
         expect(world.regions[0].id).toBe('home');
         expect(world.city.id).toBe('home');
+        const now = new Set(world.places.filter((q: any) => q.built).map((q: any) => q.id));
+        for (const id of wasBuilt) {
+          if (now.has(id)) continue;
+          const q = world.places.find((r: any) => r.id === id);
+          expect(edgeOf(q, at)).toBeGreaterThanOrEqual(hide);                  // never vanishes while still in view
+        }
+        const hiddenExtras = world.places.filter((q: any) => q.built && q.id !== 'home' && edgeOf(q, at) >= hide).length;
+        if (standing(world) > budget) expect(hiddenExtras).toBe(0);            // over the budget only while extras are still in view
+        wasBuilt = now;
       }
-      expect(most).toBe(budget);
-      expect(world.places.filter((q: any) => q.built).length).toBe(budget);
       world.dispose();
     }, 180_000);
   }
+  it('a city still in view is never taken down; once out of view and the budget is full, it is freed', () => {
+    const c = context();
+    const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions: [
+      { id: 'home', kind: 'city', city: tiny },
+      { id: 'near', kind: 'village', city: tiny, toward: 'east', distance: 1200 },
+      { id: 'mid', kind: 'village', city: tiny, toward: 'east', distance: 2400 },
+      { id: 'far', kind: 'village', city: tiny, toward: 'east', distance: 9000 },
+    ] });
+    expect(world.places.map((p: any) => p.id)).toEqual(['home', 'near', 'mid', 'far']);
+    const hide = OW.CITY_HIDE;
+    const byId = (id: string) => world.places.find((p: any) => p.id === id);
+    const home = byId('home'), near = byId('near'), mid = byId('mid'), far = byId('far');
+    expect(Math.hypot(far.centre.x - home.centre.x, far.centre.z - home.centre.z)).toBeGreaterThan(hide + far.radius + home.radius);
+    standAt(world, c, near.centre.x, near.centre.z);
+    standAt(world, c, mid.centre.x, mid.centre.z);
+    // From mid, home and near are still in view on this layout — building mid must not take them down.
+    if (edgeOf(home, mid.centre) < hide) expect(home.built).toBe(true);
+    if (edgeOf(near, mid.centre) < hide) expect(near.built).toBe(true);
+    expect(mid.built).toBe(true);
+    standAt(world, c, far.centre.x, far.centre.z);
+    expect(far.built).toBe(true);
+    expect(home.built).toBe(true);                                             // home is never freed
+    expect(edgeOf(near, far.centre)).toBeGreaterThanOrEqual(hide);
+    expect(edgeOf(mid, far.centre)).toBeGreaterThanOrEqual(hide);
+    expect(near.built).toBe(false);
+    expect(mid.built).toBe(false);
+    expect(standing(world)).toBe(2);
+    world.dispose();
+  }, 180_000);
   it('liveCities: false keeps the old way — every city reached stays built', () => {
     const c = context();
     const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', liveCities: false, regions: villages(6) });
@@ -124,8 +163,15 @@ describe('🏙️ only the nearest cities stand (phone 2, mid 5, desktop 8)', ()
   }, 180_000);
   it('a freed place is built again on the way back, with the SAME parked cars (handed to ctx.vehicles once)', () => {
     const c = context();
-    const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions: villages(4) });
+    const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions: [
+      { id: 'home', kind: 'city', city: tiny },
+      { id: 'a', kind: 'village', city: tiny, toward: 'east', distance: 5000 },
+      { id: 'b', kind: 'village', city: tiny, toward: 'west', distance: 5000 },
+      { id: 'd', kind: 'village', city: tiny, toward: 'north', distance: 8000 },
+    ] });
+    expect(world.places.map((p: any) => p.id)).toEqual(['home', 'a', 'b', 'd']);
     const [, a, b, d] = world.places;
+    expect(edgeOf(a, d.centre)).toBeGreaterThanOrEqual(OW.CITY_HIDE);
     standAt(world, c, a.centre.x, a.centre.z);
     const carsOfA = [...world.regions.find((r: any) => r.id === a.id).parked];
     standAt(world, c, b.centre.x, b.centre.z); standAt(world, c, d.centre.x, d.centre.z);
@@ -139,19 +185,26 @@ describe('🏙️ only the nearest cities stand (phone 2, mid 5, desktop 8)', ()
     expect(new Set(handed).size).toBe(handed.length);
     world.dispose();
   }, 180_000);
-  it('a city whose car the player is driving is never freed', () => {
+  it('a city whose car the player is driving is never freed, and the place ahead still appears', () => {
     const c = context();
-    const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions: villages(4) });
+    const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions: [
+      { id: 'home', kind: 'city', city: tiny },
+      { id: 'a', kind: 'village', city: tiny, toward: 'east', distance: 5000 },
+      { id: 'b', kind: 'village', city: tiny, toward: 'west', distance: 5000 },
+      { id: 'd', kind: 'village', city: tiny, toward: 'north', distance: 8000 },
+    ] });
+    expect(world.places.map((p: any) => p.id)).toEqual(['home', 'a', 'b', 'd']);
     const [, a, b, d] = world.places;
+    expect(edgeOf(a, d.centre)).toBeGreaterThanOrEqual(OW.CITY_HIDE);
     standAt(world, c, a.centre.x, a.centre.z);
     c.vehicles.seated = world.regions.find((r: any) => r.id === a.id).parked[0];
     standAt(world, c, b.centre.x, b.centre.z); standAt(world, c, d.centre.x, d.centre.z);
-    expect(world.places[1].built).toBe(true);
-    expect(world.places[2].built || world.places[3].built).toBe(false);   // nothing could be freed for them
+    expect(world.places[1].built).toBe(true);                                  // seated — never freed, even out of view
+    expect(world.places[3].built).toBe(true);                                  // the place ahead still appears
     c.vehicles.seated = null;
     standAt(world, c, d.centre.x, d.centre.z);
     expect(world.places[3].built).toBe(true);
-    expect(world.places[1].built).toBe(false);
+    expect(world.places[1].built).toBe(false);                                 // now out of view and the budget is full
     world.dispose();
   }, 180_000);
   it('standing between two places never builds and frees them back and forth', () => {
@@ -159,14 +212,13 @@ describe('🏙️ only the nearest cities stand (phone 2, mid 5, desktop 8)', ()
     const world = OW.createOpenWorld(c, { seed: 7, quality: 'phone', regions: villages(2) });
     const [, a, b] = world.places;
     const mid = { x: (a.centre.x + b.centre.x) / 2, z: (a.centre.z + b.centre.z) / 2 };
-    let changes = 0, last = world.regions.map((r: any) => r.id).join();
+    const ever = new Set<string>();
     for (let f = 0; f < 60; f++) {
       const t = f % 2 ? 0.02 : -0.02;   // a tiny sway across the middle
       standAt(world, c, mid.x + (b.centre.x - a.centre.x) * t, mid.z + (b.centre.z - a.centre.z) * t, 1);
-      const now = world.regions.map((r: any) => r.id).join();
-      if (now !== last) { changes++; last = now; }
+      for (const p of world.places) if (p.built) ever.add(p.id);
+      for (const id of ever) expect(world.places.find((p: any) => p.id === id).built).toBe(true);  // once built, never taken down again
     }
-    expect(changes).toBeLessThanOrEqual(1);
     world.dispose();
   }, 180_000);
   it('a grown city counts once: all its tiles stand together within a phone\'s two', () => {

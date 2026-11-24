@@ -2172,6 +2172,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
 
   // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
   {
+    id: 'game_rules_followed',
+    name: 'Games that follow your rules (kill an enemy, the score goes up)',
+    path: 'NavBharatAI Pro → describe the game with its rules (for example "enemy add karo, jisko kill karne se score bade") → after the build the chat says which rules were checked while playing; if one did not work, the suggestions show "Make the game follow your rules"',
+    description: 'NavBharatAI reads the rules you state in your request — killing an enemy raises the score, an enemy that touches you takes a life, running out of health ends the game, collecting coins adds points, reaching a score moves to the next level (2026-11-24). A game with a fight in it gets NavBharatAI\'s combat kit (health with invulnerable frames, enemies, weapons, projectiles) laid down before building starts, and each rule is handed to the builder with the kit\'s own way to build it. While NavBharatAI plays the finished game it checks the rules it can check (an enemy dying raises the score; the player dying ends the round) and says which worked, which did not, and which could not be checked. A rule that did not work gets a one-tap fix.',
+    howToUse: 'Say the rule in the same sentence as what causes it: "jab enemy mare to score badhe", "zombie chhu le to ek jaan kam ho", "health khatam to game over". After the build, read the line that starts "Rules checked while playing". If a rule does not work, tap "Make the game follow your rules".',
+    relatedFeatures: ['game_fix_and_undo'],
+    keywords: ['game rules', 'enemy kill score', 'enemy maaro score badhe', 'kill karne se score', 'dushman', 'score badhe', 'game over', 'jaan kam', 'lives', 'health', 'combat', 'enemy add karo', 'shooting game', 'rules follow'],
+  },
+  {
     id: 'game_fix_and_undo',
     name: 'Fix my game safely, and go back if a change made it worse',
     path: 'NavBharatAI Pro → after a game is built, the suggestions show "Make the game playable" when NavBharatAI found problems while playing it; after any change that made the game worse, the ❗️ button in the Pro header (What you need to do) lights up with a "Go back" row',

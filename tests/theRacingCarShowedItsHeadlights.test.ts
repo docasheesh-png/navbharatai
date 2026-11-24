@@ -89,7 +89,8 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
       // Never the 3D layer; a 2D game that moves a body (flappy, pong, space invaders) also gets the 2D kit (2026-11-20).
       const plan = gameKitPlan(p, 'vite-react');
       expect(plan.slice(0, 3), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
-      expect(plan.filter((r) => r !== 'generate_game_2d'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      // A shooter (space invaders) also gets the combat layer (admin 2026-11-24, gameRules.ts) — never a 3D one.
+      expect(plan.filter((r) => r !== 'generate_game_2d' && r !== 'generate_game_systems'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
     }
   });
 
@@ -651,7 +652,8 @@ describe('5 · L-18: press-run → playtest → the explorer\'s repair', () => {
   });
 
   it('the explorer\'s working start label is HANDED to the playtest, and a crashed playtest is an open warning', () => {
-    expect(ROUTE).toContain('gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })');
+    // The rules the user named ride the same call since 2026-11-24 (gameRules.ts); the start labels are still handed over.
+    expect(ROUTE).toContain('gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels, rules: ');
     expect(ROUTE).toContain('const notRun = playtestNotRunVerdict(');
     expect(ROUTE).not.toMatch(/severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true/);
     // The real 46e2d74b presses: "Start Race" worked; "Settings" and "Back" must never be vouched into a start.

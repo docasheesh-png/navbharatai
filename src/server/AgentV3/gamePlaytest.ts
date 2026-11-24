@@ -256,12 +256,35 @@ export interface GameCodeFacts {
 }
 
 /** The in-sandbox shell command. PURE. */
-export function gamePlaytestScript(previewUrl: string, opts: { storageState?: string | null; startLabels?: readonly string[] } = {}): string {
-  const cfg = gamePlaytestConfig(previewUrl, opts.storageState ?? null, opts.startLabels ?? []);
+export function gamePlaytestScript(previewUrl: string, opts: { storageState?: string | null; startLabels?: readonly string[]; rules?: readonly string[] } = {}): string {
+  const cfg = { ...gamePlaytestConfig(previewUrl, opts.storageState ?? null, opts.startLabels ?? []), rules: probedRules(opts.rules), ruleEvents: RULE_EVENTS };
   return `cat > /tmp/nbai-playtest.mjs <<'NBAI_EOF'
 ${gamePlaytestModule(cfg)}
 NBAI_EOF
 ${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-playtest.mjs', marker: PLAYTEST_RESULT_MARKER })}`;
+}
+
+/**
+ * 🎮 THE RULES A PLAYTEST CAN PROVE BY PLAYING (admin 2026-11-24: "enemy add karo, jisko kill karne se score bade").
+ * A rule the user named is sent as the kit's own event once the round is in play, and the kit state is read back:
+ *   enemy-dies-score-up → ENEMY_DIED, then the score must rise;   no-health-game-over → PLAYER_DIED, then the round must end.
+ * Run at the very end, after the Play again check, so nothing it changes touches the other measures. A game that does not
+ * use the kit's state cannot be judged this way and is said to be not checkable, never "broken". PURE.
+ */
+export const PROBED_RULES = ['enemy-dies-score-up', 'no-health-game-over'] as const;
+/** The kit's own event names (combat.ts, Health), handed to the browser script as data. */
+export const RULE_EVENTS = { enemyDied: 'ENEMY_DIED', playerDied: 'PLAYER_DIED' } as const;
+export function probedRules(ids: readonly string[] | null | undefined): string[] {
+  const asked = new Set((ids ?? []).map(String));
+  return PROBED_RULES.filter((id) => asked.has(id));          // fixed order: the round-ending probe always last
+}
+export interface RuleProbe { id: string; verdict: 'held' | 'not-held' | 'not-checkable'; why: string }
+/** The admin/user line for the probes, or '' when none ran. PURE. */
+export function ruleProbeMessage(probes: readonly RuleProbe[] | null | undefined): string {
+  const list = Array.isArray(probes) ? probes : [];
+  if (!list.length) return '';
+  const words: Record<string, string> = { 'enemy-dies-score-up': 'killing an enemy raises the score', 'no-health-game-over': 'running out of health ends the game' };
+  return 'Rules checked while playing: ' + list.map((p) => `${words[p.id] ?? p.id} — ${p.verdict === 'held' ? 'works' : p.verdict === 'not-held' ? 'does NOT work' : 'could not be checked'} (${p.why})`).join('; ') + '.';
 }
 
 export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null, startLabels: readonly string[] = [], env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
@@ -1036,6 +1059,33 @@ try {
       const after = await page.evaluate(() => window.__nbKit.status());
       out.restartCheck = { ended, pressed, after };
     }
+    // The rules the user named, proved by playing (see PROBED_RULES): last, so no other measure sees what they change.
+    if (Array.isArray(cfg.rules) && cfg.rules.length) {
+      out.rules = [];
+      for (const id of cfg.rules) {
+        const r = await page.evaluate(async ([id, ev]) => {
+          const h = window.__nbRules;
+          if (!h) return { id, verdict: 'not-checkable', why: 'the game does not use the kit state' };
+          if (h.status() !== 'playing') return { id, verdict: 'not-checkable', why: 'the round was not in play (status ' + h.status() + ')' };
+          const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+          if (id === 'enemy-dies-score-up') {
+            const s0 = h.score();
+            h.emit(ev.enemyDied, { position: { x: 0, y: 0, z: 0 }, overkill: 0 });
+            await wait(300);
+            const s1 = h.score();
+            return { id, verdict: s1 > s0 ? 'held' : 'not-held', why: 'score ' + s0 + ' to ' + s1 + ' after an enemy died' };
+          }
+          if (id === 'no-health-game-over') {
+            h.emit(ev.playerDied, {});
+            await wait(300);
+            const st = h.status();
+            return { id, verdict: st === 'gameover' ? 'held' : 'not-held', why: 'status ' + st + ' after the player died' };
+          }
+          return { id, verdict: 'not-checkable', why: 'no probe for this rule' };
+        }, [id, cfg.ruleEvents]).catch((e) => ({ id, verdict: 'not-checkable', why: String(e && e.message || e).slice(0, 80) }));
+        out.rules.push(r);
+      }
+    }
   } catch (e) { out.restartCheck = { error: String(e && e.message || e).slice(0, 120) }; }
   await ctx.close();
 
@@ -1275,6 +1325,8 @@ export interface PlaytestRun {
   sounds?: number | null;
   /** The kit game's own score before the controls were touched and at the end (window.__nbKit). */
   kitScoreStart?: number | null;
+  /** The rules the user named, proved by playing (PROBED_RULES). */
+  rules?: RuleProbe[];
   kitScoreEnd?: number | null;
   /** What the kit game's last frame asked of the GPU (window.__nbKit.load) — null for a game that does not report it. */
   load?: { calls: number; triangles: number; geometries: number; textures: number } | null;

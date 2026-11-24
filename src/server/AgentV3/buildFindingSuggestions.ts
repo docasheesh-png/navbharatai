@@ -407,6 +407,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     withEvidence: true,
   },
   {
+    // A rule the user named was sent as the kit's own event while the game was played, and nothing happened
+    // (gamePlaytest.ts rule probes, admin 2026-11-24). The measured line travels with the fix.
+    code: 'GAME_RULE_BROKEN',
+    title: 'Make the game follow your rules',
+    detail: 'NavBharatAI played your game and a rule you asked for (for example, killing an enemy raises the score) did not happen.',
+    prompt: 'NavBharatAI played this game and checked the rules the user asked for, and at least one did not happen (named below). Wire each one to the game kit\'s own events so it really happens in play: give every enemy the kit\'s Health (it announces ENEMY_DIED once) and listen for ENEMY_DIED to raise the score there with the kit\'s addScore; give the player a Health whose death event is PLAYER_DIED, and end the round on it. Keep the score, the round status and the health in the kit\'s game state so the rules can be checked again. Change nothing else.',
+    withEvidence: true,
+  },
+  {
     // The playtest read the game's own renderer (2026-11-21): a frame asks more than a budget phone draws smoothly.
     code: 'GAME_TOO_HEAVY',
     title: 'Make it smooth on budget phones',

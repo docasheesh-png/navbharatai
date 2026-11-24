@@ -550,6 +550,16 @@ export function initialState(): GameState {
 
 export const state: GameState = initialState();
 
+// 🔎 NavBharatAI's playtest proves the rules the user named by sending the kit's own events and reading what changed
+// (gamePlaytest.ts, the rule probes; admin 2026-11-24 "enemy kill karne se score bade"). Read-only except emit, which sends
+// one event the game itself listens to. A game that never reads this is not affected.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __nbRules?: unknown }).__nbRules = {
+    status: () => state.status, score: () => state.score, health: () => state.health, lives: () => state.lives,
+    emit: (name: string, payload?: unknown) => (events as unknown as { emit(n: string, p?: unknown): void }).emit(name, payload),
+  };
+}
+
 /** Change state through here so UI and audio can react without polling every frame. */
 export function setStatus(status: GameState['status']): void {
   if (state.status === status) return;

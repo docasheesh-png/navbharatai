@@ -103954,3 +103954,7 @@ Weakness audit P0-1, safe form (automatic game repair stays OFF). Before: only a
 - An edit of an existing canvas game now holds the playtest's reserved time too (item 2's hold), so the fix turn is played.
 - Findings classified: GAME_FIX_NO_CHANGE → offered through GAME_PLAYTEST_ISSUES; GAME_FIX_UNVERIFIED → no button (reason recorded). AppKnowledgeBase `game_fix_and_undo` updated.
 - Test: `tests/aGameFixIsMeasuredAfterTheUserTaps.test.ts`.
+
+## 2026-11-24 — Locked plan item 4: the free repair allowance is said to the user
+
+Weakness audit P1-5. The Weak tier's platform-wide daily allowance for automatic button fixes (`explorerRepairBudget.ts`, default 100) stopped repairs with only an admin line and a server `console.warn`. Now `explorerRepairTierGate` carries a `userNote` ("Today's free automatic button fixes are used up … Tap "Fix the button that breaks your app" … comes back tomorrow"), said through `sayRepairGateNote` beside the admin line. The cap (a money rule) is unchanged. Test: `tests/theFreeRepairAllowanceIsSaid.test.ts`.

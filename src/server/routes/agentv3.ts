@@ -263,7 +263,7 @@ import {
   mergeUserProofs, EXPLORE_BUDGET_MS, type UserProof,
 } from '../AgentV3/clickExplorer';
 import {
-  explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, runExplorerRepair,
+  explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, sayRepairGateNote, runExplorerRepair,
   explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS, explorerRepairPrompt,
 } from '../AgentV3/explorerRepair';
 import { withoutPlatformCheckTools, REPAIR_WITHHELD_TOOLS } from '../AgentV3/repairScope';
@@ -25023,7 +25023,7 @@ async function noteBuildOutcome(
                 // The allowance is read only when it can matter: a Weak build by a non-free-listed user.
                 const weakAllowed = weakTier && !freeListed ? await explorerRepairBudget.allowed().catch(() => null) : true;
                 const gate = explorerRepairTierGate({ tier: String(powerLevelReqEffective), freeListed, weakAllowed });
-                if (!gate.attempt) skip(gate.reason);
+                if (!gate.attempt) { skip(gate.reason); sayRepairGateNote(gate, (text) => events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text })); } // the user is told why (locked plan item 4)
                 else {
                   // The snapshot is taken HERE and never inside the net — a repair to a working app with
                   // no way back is not attempted (the green repair's own rule).

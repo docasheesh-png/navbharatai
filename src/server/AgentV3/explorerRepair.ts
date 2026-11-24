@@ -182,7 +182,14 @@ export function explorerRepairPlan(headroomMs: number): { repairMs: number } {
 
 export type ExplorerRepairTierGate =
   | { attempt: true; countAgainstWeakBudget: boolean }
-  | { attempt: false; reason: string };
+  | { attempt: false; reason: string; userNote?: string };
+
+/**
+ * What the USER is told when the free tier's daily allowance stops an automatic button fix (locked plan item 4, 2026-11-24;
+ * weakness audit P1-5). Before, the stop was an admin-only line and a server log, so the free tier's quality dropped off a
+ * cliff at an arbitrary point in the day with nothing on screen to say why. The cap itself is a money rule and unchanged.
+ */
+export const FREE_REPAIR_ALLOWANCE_USED_NOTE = 'Today\'s free automatic button fixes are used up, so the broken button found in your app was not fixed automatically. Tap "Fix the button that breaks your app" to fix it now; automatic fixing on the free plan comes back tomorrow.';
 
 /**
  * Normal and Strong: always — the user is paying for a working app and this is how they get one.
@@ -191,13 +198,19 @@ export type ExplorerRepairTierGate =
  * how the repair gets verified at all. `weakAllowed` is the budget's answer; unreadable ⇒ refused
  * (the budget fails closed). PURE.
  */
+/** Tell the user the gate's note, when it has one. Never throws. */
+export function sayRepairGateNote(gate: ExplorerRepairTierGate, say: (text: string) => void): boolean {
+  if (gate.attempt || !gate.userNote) return false;
+  try { say(gate.userNote); return true; } catch { return false; }
+}
+
 export function explorerRepairTierGate(input: { tier: string; freeListed: boolean; weakAllowed: boolean | null }): ExplorerRepairTierGate {
   const weak = String(input.tier ?? '').trim().toLowerCase() === 'weak';
   if (!weak || input.freeListed) return { attempt: true, countAgainstWeakBudget: false };
   if (input.weakAllowed === true) return { attempt: true, countAgainstWeakBudget: true };
-  return { attempt: false, reason: input.weakAllowed === null
-    ? 'the free tier\'s daily repair allowance could not be read'
-    : 'the free tier\'s daily repair allowance is used up' };
+  return input.weakAllowed === null
+    ? { attempt: false, reason: 'the free tier\'s daily repair allowance could not be read', userNote: FREE_REPAIR_ALLOWANCE_USED_NOTE.replace('Today\'s free automatic button fixes are used up', 'Today\'s free automatic button fixes could not be checked') }
+    : { attempt: false, reason: 'the free tier\'s daily repair allowance is used up', userNote: FREE_REPAIR_ALLOWANCE_USED_NOTE };
 }
 
 // ── The judgement ───────────────────────────────────────────────────────────────────────────────────

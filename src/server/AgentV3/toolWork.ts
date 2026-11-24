@@ -54,6 +54,8 @@ export const PRODUCES_WORK_TOOLS: ReadonlySet<string> = new Set([
   'author_object',
   // writes library models (public/game-assets/*.glb) and their loader into an existing game
   'add_library_models',
+  // writes src/game/actions/<name>.ts — an action for the player's character (gameAssets/composeAction.ts)
+  'compose_action',
 ]);
 
 /** Families whose every member writes code into the app (`generate_auth`, `codemod_rename`, …). */

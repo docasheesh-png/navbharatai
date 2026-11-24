@@ -55,6 +55,7 @@ function shellHarness(fail:'renderer'|'setup'|null) {
     three:THREE,'./core/loop':{GameLoop:class {stop(){}start(){}setPaused(){}}},'./core/input':{Input},'./core/keybinds':{loadKeyBindings:()=>({})},'./core/feel':{GameFeel:class {}},'./core/events':{events},
     './core/state':{state,setStatus(status:string){state.status=status;},resetRun(){}},'./core/meta':{startMeta(){},mountMetaToasts(){return ()=>{};},combo:{break(){}}},
     './play/playerBody':{applyPlayerChoice:()=>({showing:'person',update(){},dispose(){}}),resolvePlayerChoice:()=>undefined},
+    './play/actions':{updateActions(){}},
     './three/renderer':{createRenderer(){if(fail==='renderer')throw Error('renderer fail');return {dispose(){renderDisposals++;},getPixelRatio(){return 1;},setPixelRatio(){}};},handleResize(){return ()=>{observerOff++;};}},
     './three/lighting':{applyLighting:()=>({}),followShadow(){}},'./three/materials':{disposeMaterials(){}},'./three/surfaces':{groundScene(){}},
     './three/buildings':{interactHouseDoor(){},updateHouseDoors(){}},'./three/collision':{setSceneColliders(){}},

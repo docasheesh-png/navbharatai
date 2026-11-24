@@ -43,7 +43,7 @@ describe('Indian Modern House H01 — owner-authorized Game Library model', () =
 
   it('is searchable for every user under Building and carries the approved CC BY 4.0 terms', () => {
     expect(() => validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();
-    expect(gameAssetRequirements('modern house', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'house' }]);
+    expect(gameAssetRequirements('modern house', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'modern house' }]);
     const result = searchGameLibrary({ query: 'modern house', category: 'building' });
     expect(result.entries.some(e => e.id === `model:github:${entry.id}:${entry.revision}`)).toBe(true);
     expect(entry.license.spdx).toBe('CC-BY-4.0');

@@ -103924,3 +103924,13 @@ Ledger (problem → root cause → class → siblings → lock):
 - Sibling: an FPS title (Valorant, CoD) is now 3D in the kit as well as in the contract. Runner titles are blocked on an admin decision (Q-3314).
 - Test: `tests/aMisspelledGameTitleIsStillTheGame.test.ts` (98). It uses the real prompt as a fixture, a negative corpus (every non-game prompt in tests/fixtures), and a census that fails when a private title regex appears. Proven by reversion: PUBG reduced to its exact spelling (11 failed), the big-world rule removed (4 failed), unrecognisedReference removed (1 failed), PUBG made fuzzy at 3 letters (3 negatives failed), the ordinary-word list emptied (2 failed). Existing tests changed: freeFireShorthandIsARoyale now uses `mentionsBattleRoyale` (BATTLE_ROYALE_REFERENCE is gone); GTA 6 is deliberately left out of the catalogue to keep the BR1966 boundary test.
 - Open: Q-3314 (runner titles, admin decision), Q-3315 (clarity judge timed out), Q-3316 (provider 404).
+
+## 2026-11-24 — Locked plan item 1: a comment is not a game feature; a real feature named the way code is written counts
+
+Admin locked the weakness-audit plan (adapted under the external-suggestion rule) and asked to start with item 1. Weakness audit P0-4, verified against the code at `d7763ac`.
+
+- New `src/server/lib/codeOnly.ts` (`withoutComments`): one pass, blanks comments, keeps strings and templates (UI text such as "Play again" proves a feature), keeps length and lines.
+- Applied to every reader that decides a game fact from source: `gameIntent.scopeMatch`, and in `gamePlaytest.ts` `isCanvasGameProject`, `replayFromCode` (progress, restart, sound), `isDrivingGame`, `domGameKind`; and `touchPlayableGame.isKeyboardOnlyGame`.
+- Found while testing, same function: `PRESENT` missed plurals and camelCase (`levels`, `currentLevel`, `spawnEnemy`, `addScore` were "missing"). Plurals are now accepted, and the code is also read with camelCase split.
+- Test: `tests/aCommentIsNotAGameFeature.test.ts`.
+- Still open by design (locked plan item 3): presence is still proven by source, not by playing; runtime rule assertions replace it.

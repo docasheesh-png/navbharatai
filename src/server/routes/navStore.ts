@@ -463,8 +463,10 @@ export function registerNavStoreRoutes(app: Express): void {
       res.setHeader('Cache-Control', 'public, max-age=60');
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
       const pins = await getAppMartPins().catch(() => []);
-      const rank = new Map<string, number>(pins.filter((p) => p.kind === 'apk').map((p, index) => [p.id, index] as const));
-      const publicApps = filtered.map(toPublic).map((a) => ({ ...a, pinned: rank.has(a.id), pinOrder: rank.get(a.id) ?? null }));
+      const rank = new Map<string, number>(pins.map((p, index) => [`${p.kind}:${p.id}`, index] as const));
+      const publicApps = filtered.map(toPublic).map((a) => ({
+        ...a, pinned: rank.has(`apk:${a.id}`), pinOrder: rank.get(`apk:${a.id}`) ?? null,
+      }));
       publicApps.sort((a, b) => {
         const ar = rank.get(a.id), br = rank.get(b.id);
         return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
@@ -1115,13 +1117,13 @@ export function registerNavStoreRoutes(app: Express): void {
         isNative: isNativeRequest(req),
       }));
       const appMartPins = await getAppMartPins().catch(() => []);
-      const webPinRank = new Map<string, number>(appMartPins.filter((p) => p.kind === 'web').map((p, index) => [p.id, index] as const));
+      const webPinRank = new Map<string, number>(appMartPins.map((p, index) => [`${p.kind}:${p.id}`, index] as const));
       const pinnedFirst = <T extends { id: string }>(rows: T[]): T[] => rows.map((row, index) => ({ row, index }))
         .sort((a, b) => {
-          const ar = webPinRank.get(a.row.id), br = webPinRank.get(b.row.id);
+          const ar = webPinRank.get(`web:${a.row.id}`), br = webPinRank.get(`web:${b.row.id}`);
           return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
             || (ar === undefined ? a.index - b.index : (ar - (br ?? 0)));
-        }).map(({ row }) => ({ ...row, pinned: webPinRank.has(row.id), pinOrder: webPinRank.get(row.id) ?? null }));
+        }).map(({ row }) => ({ ...row, pinned: webPinRank.has(`web:${row.id}`), pinOrder: webPinRank.get(`web:${row.id}`) ?? null }));
       visible = pinnedFirst(visible);
       // FOR YOU (admin 2026-10-14). `?sort=newest` or no `sort` = the list exactly as before (newest
       // first). `?sort=foryou&seed=…` = personalised + trending, seed-stable so paging never reshuffles.

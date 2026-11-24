@@ -54,6 +54,7 @@ import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { gameRuleData, gameRulesFrom, wantsCombatKit } from './gameRules';
 import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
+import { analyzeGameRequirements, gameDesignBlock } from './gameDesignDocument';
 import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
@@ -889,10 +890,12 @@ export function gameTurnHandoff(
   const api = kitApi();
   // Read from the project itself, so it holds on the 30th turn exactly as on the first — whoever built the game.
   const grows = projectGrowthRules(files);
+  const design = contract ? gameDesignBlock(analyzeGameRequirements(prompt, { drawnIn3D: gameKitWants3D(prompt) })) : '';
   return { contract, block: [
     grows,
     driveControlsLine(prompt),
     contract ? gameContractBlock(contract) : '',
+    design,
     api ? kitApiBlock(api) : '',
   ].filter(Boolean).join('\n\n') };
 }

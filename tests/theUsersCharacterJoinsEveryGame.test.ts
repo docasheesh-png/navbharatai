@@ -338,7 +338,9 @@ describe('🗣️ the builder is told how, in every game that has the file', () 
     const note = userModelNote([{ from: 'Boxer.glb', subject: 'boxer', path: 'public/models/boxer.glb', bytes: new Uint8Array(), sha256: 'a'.repeat(64), triangles: 10, animations: ['Idle', 'Punch_Right'], materials: [], parts: [], warnings: [] }], []);
     expect(note).toMatch(/AS THE PLAYER[\s\S]*PLAYER\.file = '\/models\/boxer\.glb'/);
     expect(note).toMatch(/punch \("Punch_Right"\)/);
-    expect(note).toMatch(/it has NO walk, run, jump, kick/);
+    // Admin 2026-11-24: a missing punch/kick/swing/throw/fire/use is MADE from the skeleton; the rest stays unanimated (playerMoves.lackedMovesClause).
+    expect(note).toMatch(/kick, fire, swing, throw, use are not in its own clips, so NavBharatAI makes them from its skeleton/);
+    expect(note).toMatch(/walk, run, jump, block, hit, die, slide are not animated/);
     expect(playerMovesOf([]).has).toEqual([]);
   });
   it('the shell recipe creates the file once (never replaces it), and says so', () => {

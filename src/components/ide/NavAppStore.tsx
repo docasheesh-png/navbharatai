@@ -5,7 +5,7 @@ import PullToRefresh from '../PullToRefresh';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
-  Rocket, ImagePlus, Clipboard, Copy, User, ChevronLeft, ChevronRight,
+  Rocket, ImagePlus, Clipboard, Copy, User, ChevronLeft, ChevronRight, Pin,
 } from 'lucide-react';
 import { StoreReviewAccess } from './StoreReviewAccess';
 import { WebAppPlayer } from './WebAppPlayer';
@@ -70,6 +70,8 @@ interface PublicApp {
   developerName: string; publishedAt: number; sha256: string;
   /** The uploader's public creator code — opens their profile. Never the account id. */
   creatorId?: string;
+  pinned?: boolean;
+  pinOrder?: number | null;
 }
 
 interface MineApp {
@@ -153,6 +155,8 @@ interface WebApp {
   /** Who made it — a display name and a public creator code (never the account uid). */
   creatorName?: string;
   creatorId?: string;
+  pinned?: boolean;
+  pinOrder?: number | null;
 }
 
 export interface NavAppStoreProps {
@@ -236,10 +240,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [apps, setApps] = useState<PublicApp[]>([]);
   // The Android shelf of whichever Browse view is open. Feed apps pass the same Apple filter as the store's.
   const viewApk = browseView === 'general' ? apps : (feed.view === browseView ? visibleAndroidApps(feed.apps, STORE_PLATFORM) : []);
-  const pagedApps = usePagedList(viewApk, { resetKey: `${browseView}|${kindFilter}` });
   const [mine, setMine] = useState<MineApp[]>([]);
   const pagedMine = usePagedList(mine);
   const [queue, setQueue] = useState<QueueApp[]>([]);
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(() => new Set());
+  const [pinBusyKey, setPinBusyKey] = useState('');
   // THE REVIEW HUB (admin 2026-10-05: "pahle 2 button banao, 'manage app, manage apk' aur uske andar apps
   // dikhe"). The tab opens on its buttons; one button opens one list, filtered to Waiting or On the store.
   const [reviewSection, setReviewSection] = useState<ReviewSection | null>(null);
@@ -311,15 +316,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
   const [webApps, setWebApps] = useState<WebApp[]>([]);
   const viewWeb = browseView === 'general' ? webApps : (feed.view === browseView ? feed.webApps : []);
-  const pagedWebApps = usePagedList(viewWeb, { resetKey: `${browseView}|${kindFilter}` });
   const viewLoading = browseView === 'general' ? loading : feed.loading || feed.view !== browseView;
   const shelves = shelvesFor(kindFilter, HIDE_ANDROID_INSTALLS);
+  // One mixed pinned shelf preserves the admin's exact order across APKs and Web Apps.
+  const pinnedItems = useMemo(() => [
+    ...(shelves.web ? viewWeb.filter((a) => a.pinned).map((app) => ({ kind: 'web' as const, app, pinOrder: app.pinOrder ?? Number.MAX_SAFE_INTEGER })) : []),
+    ...(shelves.apk ? viewApk.filter((a) => a.pinned).map((app) => ({ kind: 'apk' as const, app, pinOrder: app.pinOrder ?? Number.MAX_SAFE_INTEGER })) : []),
+  ].sort((a, b) => a.pinOrder - b.pinOrder), [viewWeb, viewApk, shelves.web, shelves.apk]);
+  const regularViewWeb = useMemo(() => viewWeb.filter((a) => !a.pinned), [viewWeb]);
+  const regularViewApk = useMemo(() => viewApk.filter((a) => !a.pinned), [viewApk]);
+  const pagedWebApps = usePagedList(regularViewWeb, { resetKey: `${browseView}|${kindFilter}` });
+  const pagedApps = usePagedList(regularViewApk, { resetKey: `${browseView}|${kindFilter}` });
   const anyInView = (shelves.web && viewWeb.length > 0) || (shelves.apk && viewApk.length > 0);
 
   // ── APP MART SOCIAL (admin 2026-09-30: "app mart me ek social media banana hai!") ──────────────
   // 👍 · 👎 · 💬 under every app on the page, fetched for the visible tiles in ONE request. Counts are
   // public; pressing asks for a sign-in. See appMart/AppMartSocial.tsx and routes/appMartSocial.ts.
   const socialKeys = [
+    ...pinnedItems.map((item) => item.kind === 'web' ? webKey(item.app.id) : apkKey(item.app.id)),
     ...pagedWebApps.visible.map((a) => webKey(a.id)),
     ...pagedApps.visible.map((a) => apkKey(a.id)),
   ];
@@ -665,6 +679,43 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     } catch { if (current()) setReviewError('Some moderation lists could not be loaded. Retry the access check to reload them.'); }
   }, []);
 
+  const loadAdminPins = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/admin/pins', { headers: await storeHeaders() });
+      const data = await res.json().catch(() => null);
+      if (res.ok && Array.isArray(data?.pins) && liveRef.current) {
+        setPinnedKeys(new Set(data.pins.map((p: { kind: string; id: string }) => `${p.kind}:${p.id}`)));
+      }
+    } catch { /* pin controls remain available after a later retry */ }
+  }, []);
+
+  const toggleAdminPin = useCallback(async (kind: 'apk' | 'web', id: string, pinned: boolean) => {
+    const key = `${kind}:${id}`;
+    setPinBusyKey(key);
+    setReviewError('');
+    try {
+      const res = await fetch('/api/nav-store/admin/pin', {
+        method: 'POST',
+        headers: await storeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ kind, id, pinned }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setReviewError(typeof data?.error === 'string' ? data.error : 'Pin status could not be updated.');
+        return;
+      }
+      if (liveRef.current && Array.isArray(data?.pins)) {
+        setPinnedKeys(new Set(data.pins.map((p: { kind: string; id: string }) => `${p.kind}:${p.id}`)));
+      }
+      void loadApps();
+      void loadWebApps();
+    } catch {
+      if (liveRef.current) setReviewError('Pin status could not be updated. Check your connection and try again.');
+    } finally {
+      if (liveRef.current) setPinBusyKey('');
+    }
+  }, [loadApps, loadWebApps]);
+
   const loadReports = useCallback(async () => {
     const generation = statusRequestRef.current;
     const request = ++reviewReadRef.current.reports;
@@ -725,8 +776,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       void loadWebQueue();
       void loadReports();
       void loadWebApps();
+      void loadAdminPins();
     }
-  }, [loadWebQueue, loadReports, loadWebApps]);
+  }, [loadWebQueue, loadReports, loadWebApps, loadAdminPins]);
 
   useEffect(() => { void loadStatus(); void loadApps(); void loadWebApps(); }, [loadStatus, loadApps, loadWebApps]);
   // Loaded when the Publish tab is actually opened, not on mount: most people arriving at App Mart
@@ -738,8 +790,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
   }, [tab, loadMine, loadWebMine, loadOwned]);
   useEffect(() => {
-    if (tab === 'review' && !statusLoading && status?.isAdmin) { void loadQueue(); void loadWebQueue(); void loadReports(); }
-  }, [tab, statusLoading, status?.isAdmin, loadQueue, loadWebQueue, loadReports]);
+    if (tab === 'review' && !statusLoading && status?.isAdmin) { void loadQueue(); void loadWebQueue(); void loadReports(); void loadAdminPins(); }
+  }, [tab, statusLoading, status?.isAdmin, loadQueue, loadWebQueue, loadReports, loadAdminPins]);
 
   /** Returns whether the server SAVED the decision — a refused or failed one is said, never silent. */
   const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed', note?: string): Promise<boolean> => {
@@ -765,8 +817,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       if (liveRef.current) setReviewing('');
       void loadQueue();
       void loadApps();
+      void loadAdminPins();
     }
-  }, [loadQueue, loadApps]);
+  }, [loadQueue, loadApps, loadAdminPins]);
 
   /**
    * ADMIN: take ANY app off App Mart, from its own page (admin 2026-10-04: "admin kabhi bhi kisi bhi app
@@ -1038,8 +1091,27 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           })()
         )}
 
+        {tab === 'browse' && browseView === 'general' && !viewLoading && pinnedItems.length > 0 && (
+          <section className="mb-6">
+            <p className="text-sm font-bold text-body mb-2 flex items-center gap-1.5"><Pin size={13} className="text-warn" /> Pinned by NavBharatAI</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {pinnedItems.map((item) => (
+                <button
+                  key={`${item.kind}:${item.app.id}`}
+                  onClick={() => item.kind === 'web' ? void openWebDetail(item.app) : setOpenApp(item.app)}
+                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-card border border-amber-500/30 hover:border-amber-500/60 text-left min-w-0"
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-warn">{item.kind === 'web' ? 'Instant app' : 'Android app'}</span>
+                  <span className="text-sm font-semibold leading-snug line-clamp-2 w-full">{item.kind === 'web' ? item.app.name : item.app.appName}</span>
+                  <span className="text-[11px] text-accent-text">Open app →</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ── Half 1: PLAY INSTANTLY (web apps) — tap and it runs ── */}
-        {tab === 'browse' && !viewLoading && shelves.web && anyInView && (
+        {tab === 'browse' && !viewLoading && shelves.web && (regularViewWeb.length > 0 || (viewWeb.length === 0 && anyInView)) && (
           <div className="mb-7">
             {/* 🔴 A FIRST-TIME VISITOR HAS TO BE ABLE TO READ THIS (admin 2026-09-17). It was
                 `text-faint` uppercase at 12px — the lowest-contrast text on the screen, carrying
@@ -1151,7 +1223,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             iPhone that line is not information, it is an apology for a section that could never have
             worked. The two gates are not redundant: the list makes the tiles impossible, this makes
             the section invisible. */}
-        {tab === 'browse' && !viewLoading && !HIDE_ANDROID_INSTALLS && shelves.apk && anyInView && (
+        {tab === 'browse' && !viewLoading && !HIDE_ANDROID_INSTALLS && shelves.apk && (regularViewApk.length > 0 || (viewApk.length === 0 && anyInView)) && (
           <div className="mb-6">
             <p className="text-sm font-bold text-body mb-0.5 flex items-center gap-1.5">
               <Package size={13} className="text-info" /> Install on Android
@@ -1746,6 +1818,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
                       >List on the store</button>
                     )}
+                    {isLiveOnStore(a.status) && (
+                      <button
+                        onClick={() => void toggleAdminPin('web', a.id, !pinnedKeys.has(`web:${a.id}`))}
+                        disabled={pinBusyKey === `web:${a.id}`}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40 ${pinnedKeys.has(`web:${a.id}`) ? 'bg-amber-500/20 text-warn' : 'bg-raised hover:bg-raised-hover text-body'}`}
+                      ><Pin size={11} className="inline mr-1" />{pinnedKeys.has(`web:${a.id}`) ? 'Unpin' : 'Pin to top'}</button>
+                    )}
                     <button
                       onClick={() => void adminRemoveFromStore('web', a.id, a.name)}
                       disabled={webBusy === a.id}
@@ -1809,6 +1888,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                   {/* An APPROVED app is live in the store, so "Publish" and "Reject" would be wrong
                       buttons for it — the only thing left to decide is whether to take it down. */}
                   <div className="flex gap-2 mt-3">
+                    {a.status === 'approved' && (
+                      <button
+                        onClick={() => void toggleAdminPin('apk', a.id, !pinnedKeys.has(`apk:${a.id}`))}
+                        disabled={pinBusyKey === `apk:${a.id}`}
+                        className={`px-3 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${pinnedKeys.has(`apk:${a.id}`) ? 'bg-amber-500/20 text-warn' : 'bg-raised hover:bg-raised-hover text-body'}`}
+                      ><Pin size={12} className="inline mr-1" />{pinnedKeys.has(`apk:${a.id}`) ? 'Unpin' : 'Pin to top'}</button>
+                    )}
                     {reviewActionsFor(a.status) === 'remove' ? (
                       <button
                         onClick={() => void adminRemoveFromStore('apk', a.id, a.appName)}

@@ -46,6 +46,8 @@ export interface PlayerChoice {
   turn?: number;
   /** The model's own clip for a move, when its name is not one the kit recognises: { punch: 'Jab_R', block: 'Guard' }. */
   moves?: Partial<Record<PlayerMove, string>>;
+  /** What the character holds: library subjects, for example { right: 'pistol' } or { right: 'sword', left: 'shield' }. */
+  holds?: { right?: string | null; left?: string | null };
 }
 
 export interface PlayerModelHandle { root: THREE.Object3D; source?: string; update(dt: number): void; dispose?(): void; play?(role: string, fade?: number): boolean }
@@ -188,6 +190,76 @@ function fromHandle(handle: PlayerModelHandle): PlayerModel {
   };
 }
 
+// ── THE SKELETON: an item in the hand, and a made move for one the model lacks (admin 2026-11-24) ─────────────────────
+// "character ke hath me gun do" used to be impossible: a library model is a baked file, and the kit could only play its
+// own clips. Two things are built from the model's SKELETON instead, the same way for every rig:
+//   • holdItem — an item is parented to the hand bone (found by name: RightHand, Hand_R, mixamorig:RightHand, Hand.R…),
+//     sized to the character, so it moves with every clip the model plays. No hand bone: it is held at the side, and said.
+//   • a made move — when the model has no clip for punch, kick, swing, throw, fire or use, the arm or leg bones are turned
+//     toward the target direction in WORLD space for the length of the move, then let go. World space is what makes it work
+//     on any rig: the bones' local axes differ between rigs, a direction in the world does not. It is said once on screen
+//     that the move is made by NavBharatAI from the skeleton. A model with no such bones keeps the old honest line.
+export type BoneRole = 'rightHand' | 'leftHand' | 'rightUpperArm' | 'rightForeArm' | 'rightUpLeg' | 'rightLeg';
+const BONE_NAMES: Record<BoneRole, readonly string[]> = {
+  rightHand: ['righthand', 'handr', 'rhand', 'handright', 'wristr', 'rightwrist'],
+  leftHand: ['lefthand', 'handl', 'lhand', 'handleft', 'wristl', 'leftwrist'],
+  rightUpperArm: ['rightarm', 'upperarmr', 'rightupperarm', 'armr', 'rupperarm', 'uparmr'],
+  rightForeArm: ['rightforearm', 'forearmr', 'lowerarmr', 'rightlowerarm', 'rforearm', 'elbowr'],
+  rightUpLeg: ['rightupleg', 'thighr', 'upperlegr', 'rightupperleg', 'rightthigh', 'uplegr'],
+  rightLeg: ['rightleg', 'calfr', 'shinr', 'lowerlegr', 'rightlowerleg', 'rightshin', 'legr'],
+};
+/** 'mixamorig:RightForeArm' → 'rightforearm'; 'Hand.R' → 'handr'. */
+export function boneKey(name: string): string {
+  return String(name || '').toLowerCase().replace(/^mixamorig\d*[:_]?/, '').replace(/[^a-z]/g, '');
+}
+/** The bones of a model's skeleton that the kit knows by role. Exact names only, never a guess. */
+export function findBones(root: THREE.Object3D): Partial<Record<BoneRole, THREE.Object3D>> {
+  const out: Partial<Record<BoneRole, THREE.Object3D>> = {};
+  root.traverse((o) => {
+    const key = boneKey(o.name);
+    if (!key) return;
+    for (const role of Object.keys(BONE_NAMES) as BoneRole[]) if (!out[role] && BONE_NAMES[role].includes(key)) out[role] = o;
+  });
+  return out;
+}
+
+type Aim = { role: BoneRole; dir: (t: number) => THREE.Vector3 };
+const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).normalize();
+const lerpDir = (a: THREE.Vector3, b: THREE.Vector3, t: number) => a.clone().lerp(b, Math.min(1, Math.max(0, t))).normalize();
+/** Directions in the character's own frame (+Z forward, +Y up, -X its right), as a function of the move's progress 0..1. */
+export const MADE_MOVES: Partial<Record<PlayerMove, { seconds: number; aims: Aim[] }>> = {
+  punch: { seconds: 0.35, aims: [{ role: 'rightUpperArm', dir: () => v(-0.15, 0.05, 1) }, { role: 'rightForeArm', dir: () => v(-0.1, 0.05, 1) }] },
+  fire: { seconds: 0.3, aims: [{ role: 'rightUpperArm', dir: () => v(-0.1, 0.1, 1) }, { role: 'rightForeArm', dir: (t) => v(-0.05, 0.1 + 0.25 * Math.sin(Math.PI * t), 1) }] },
+  swing: { seconds: 0.45, aims: [{ role: 'rightUpperArm', dir: (t) => lerpDir(v(-0.3, 1, 0.2), v(0.2, -0.4, 1), t) }, { role: 'rightForeArm', dir: (t) => lerpDir(v(-0.2, 1, 0.3), v(0.3, -0.5, 1), t) }] },
+  throw: { seconds: 0.5, aims: [{ role: 'rightUpperArm', dir: (t) => lerpDir(v(-0.3, 0.8, -0.6), v(-0.1, 0.3, 1), t) }, { role: 'rightForeArm', dir: (t) => lerpDir(v(-0.2, 1, -0.4), v(-0.1, 0.2, 1), t) }] },
+  kick: { seconds: 0.45, aims: [{ role: 'rightUpLeg', dir: () => v(-0.05, -0.2, 1) }, { role: 'rightLeg', dir: () => v(-0.05, -0.1, 1) }] },
+  use: { seconds: 0.4, aims: [{ role: 'rightUpperArm', dir: () => v(-0.1, -0.4, 1) }, { role: 'rightForeArm', dir: () => v(-0.1, -0.6, 1) }] },
+};
+
+/** The first child of a bone that the bone points at (its direction is bone → child). */
+function childOf(bone: THREE.Object3D): THREE.Object3D | null {
+  return bone.children.find((c) => (c as THREE.Bone).isBone || c.type === 'Bone' || c.children.length > 0) ?? bone.children[0] ?? null;
+}
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _q = new THREE.Quaternion(), _p = new THREE.Quaternion(), _w = new THREE.Quaternion();
+/** Turn bone so it points along worldDir by weight (0..1). Rig-agnostic: computed in world space. */
+export function aimBone(bone: THREE.Object3D, worldDir: THREE.Vector3, weight: number): boolean {
+  const child = childOf(bone);
+  if (!child || weight <= 0) return false;
+  bone.updateWorldMatrix(true, true);
+  bone.getWorldPosition(_a);
+  child.getWorldPosition(_b);
+  const now = _b.sub(_a);
+  if (now.lengthSq() < 1e-10) return false;
+  now.normalize();
+  const want = now.clone().lerp(worldDir.clone().normalize(), Math.min(1, weight)).normalize();
+  _q.setFromUnitVectors(now, want);                         // the world turn
+  bone.getWorldQuaternion(_w);
+  const parentQ = bone.parent ? bone.parent.getWorldQuaternion(_p) : _p.identity();
+  bone.quaternion.copy(parentQ.clone().invert().multiply(_q.multiply(_w)));
+  bone.updateWorldMatrix(false, true);
+  return true;
+}
+
 /** Said to the player on screen (the kit's Hud shows HINT) and in the console — once per message per game. */
 function say(id: string, text: string): void {
   console.warn('[player] ' + text);
@@ -205,6 +277,8 @@ export interface PlayerCharacter {
   act(move: PlayerMove): boolean;
   /** Back on its feet after die (a respawn, Play again). */
   revive(): void;
+  /** Put an item in a hand (it follows the hand bone). False while the kit body is shown. */
+  hold(item: THREE.Object3D, side?: 'right' | 'left'): boolean;
   update(dt: number): void;
   dispose(): void;
 }
@@ -233,6 +307,10 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
   let exact = false;
   let busy = 0;
   let down = false;
+  let bones: Partial<Record<BoneRole, THREE.Object3D>> = {};
+  let made: { move: PlayerMove; t: number; seconds: number } | null = null;
+  const rests = new Map<THREE.Object3D, THREE.Quaternion>();
+  const tallness = Number.isFinite(choice?.modelHeight) && Number(choice?.modelHeight) > 0 ? Number(choice?.modelHeight) : 1.75;
   const told = new Set<string>();
   const tell = (move: PlayerMove, rest: string) => {
     if (told.has(move) || told.has('*')) return;
@@ -263,6 +341,18 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     }
     holder.add(outer);
     model = m; wrapper = outer;
+    bones = findBones(m.root);
+    // What the character holds (PLAYER.holds): library subjects, each put in its hand once it has loaded.
+    for (const side of ['right', 'left'] as const) {
+      const wanted = typeof choice?.holds?.[side] === 'string' ? String(choice?.holds?.[side]).trim() : '';
+      if (!wanted) continue;
+      const none = (): PlayerModelHandle => ({ root: new THREE.Group(), source: 'procedural', update() { /* nothing to move */ } });
+      void (loaders.library ?? assetModule)().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(wanted, none) : null)).then((item) => {
+        if (gone) { item?.dispose?.(); return; }
+        if (!item || item.source !== 'model') { item?.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' to hold is not one of this game\'s saved models, so nothing is in the hand.'); return; }
+        api.hold(item.root, side);
+      }).catch(() => say('player-hold-missing-' + side, 'The ' + wanted + ' to hold could not be loaded, so nothing is in the hand.'));
+    }
     if (m.clips && m.clips.length === 0) { told.add('*'); say('player-moves-none', 'Your character has no animations of its own, so it moves without walking or posing.'); }
     shown();
   };
@@ -277,7 +367,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       mount(fromHandle(handle));
     }).catch((error) => failed(String(error)));
   }
-  return {
+  const api: PlayerCharacter = {
     get showing() { return model ? 'model' as const : 'person' as const; },
     get root() { return wrapper; },
     move(role) {
@@ -294,6 +384,15 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     act(move) {
       if (!model || (down && move !== 'die')) return false;
       if (!model.play(move, true)) {
+        // No clip of its own: make the move from the skeleton when the model has the bones for it (see MADE_MOVES).
+        const recipe = MADE_MOVES[move];
+        if (recipe && recipe.aims.every((a) => bones[a.role])) {
+          made = { move, t: 0, seconds: recipe.seconds };
+          looping = '';
+          busy = recipe.seconds;
+          if (!told.has('made-' + move)) { told.add('made-' + move); say('player-move-made-' + move, 'Your character has no ' + move + ' move of its own, so NavBharatAI animates one from its skeleton.'); }
+          return true;
+        }
         // Landing is the kit person's small settle pose, not a move anyone asked for: a model without one simply lands.
         if (move !== 'land') tell(move, 'It is not animated when the game asks for it.');
         return false;
@@ -303,11 +402,49 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       busy = model.seconds(move) || 0.6;
       return true;
     },
-    revive() { down = false; busy = 0; looping = ''; },
+    revive() { down = false; busy = 0; looping = ''; made = null; },
+    hold(item, side = 'right') {
+      if (!model || !wrapper) return false;
+      const box = new THREE.Box3().setFromObject(item);
+      const size = box.getSize(new THREE.Vector3());
+      const longest = Math.max(size.x, size.y, size.z) || 1;
+      const want = 0.3 * tallness;                          // a hand-held item is about a third of the character's height
+      const bone = bones[side === 'left' ? 'leftHand' : 'rightHand'];
+      if (bone) {
+        bone.updateWorldMatrix(true, false);
+        const scale = new THREE.Vector3();
+        bone.getWorldScale(scale);
+        item.scale.multiplyScalar(want / longest / (Math.abs(scale.x) || 1));
+        bone.add(item);
+        return true;
+      }
+      item.scale.multiplyScalar(want / longest);
+      item.position.set((side === 'left' ? 1 : -1) * 0.22 * tallness, 0.5 * tallness, 0.2 * tallness);
+      wrapper.add(item);
+      if (!told.has('hold-' + side)) { told.add('hold-' + side); say('player-hold-' + side, 'Your character has no ' + side + ' hand bone, so the item is held at its side.'); }
+      return true;
+    },
     update(dt) {
       if (!model) return;
+      for (const [bone, rest] of rests) bone.quaternion.copy(rest);   // undo last frame's made pose before the clips run
+      rests.clear();
       if (busy > 0) { busy -= dt; if (busy <= 0) { busy = 0; looping = ''; } }
       model.update(dt);
+      if (made && wrapper) {
+        made.t += Number.isFinite(dt) && dt > 0 ? dt : 0;
+        const k = made.t / made.seconds;
+        const recipe = MADE_MOVES[made.move];
+        if (k >= 1 || !recipe) { made = null; return; }
+        const weight = Math.sin(Math.PI * k);                 // in, hold, out
+        wrapper.updateMatrixWorld(true);
+        const frame = wrapper.getWorldQuaternion(new THREE.Quaternion());
+        for (const aim of recipe.aims) {
+          const bone = bones[aim.role];
+          if (!bone) continue;
+          rests.set(bone, bone.quaternion.clone());
+          aimBone(bone, aim.dir(k).clone().applyQuaternion(frame), weight);
+        }
+      }
     },
     dispose() {
       gone = true;
@@ -315,6 +452,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       if (wrapper) { wrapper.removeFromParent(); wrapper = null; }
     },
   };
+  return api;
 }
 
 export interface PlayerBody {
@@ -377,6 +515,14 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
 export function playMove(ctx: GameContext, move: PlayerMove): boolean {
   return applied.get(ctx)?.character.act(move) ?? false;
 }
+
+/**
+ * Put an item (a gun, a sword, a torch…) in the player's hand: holdItem(ctx, gunMesh). It follows the hand bone through
+ * every clip. False when the game shows the kit person (it has its own grips: ctx.hero.rightHand).
+ */
+export function holdItem(ctx: GameContext, item: THREE.Object3D, side: 'right' | 'left' = 'right'): boolean {
+  return applied.get(ctx)?.character.hold(item, side) ?? false;
+}
 `;
 
 export const GAME_PLAYER_FILE_PATH = 'src/game/player.ts';
@@ -390,6 +536,7 @@ export const GAME_PLAYER_FILE = [
   "// model: a character from the game library — add it to the game first, then set its subject (for example 'knight').",
   "// file: your OWN model, attached in the chat and saved at public/models/<name>.glb (for example '/models/my-hero.glb').",
   "// modelHeight: its height in metres. turn: 180 if it faces backwards. moves: { punch: 'Jab_R' } for clips with unusual names.",
+  "// holds: what it holds, from the game library, for example holds: { right: 'pistol' } or { right: 'sword', left: 'shield' }.",
   '// Set model and file back to null for the default person.',
   "import type { PlayerChoice } from './play/playerBody';",
   '',

@@ -63,9 +63,27 @@ export function playerMovesOf(names: readonly string[]): { has: Array<{ move: Pl
   return { has, lacks };
 }
 
+/**
+ * The moves the kit MAKES from a model's skeleton when the model has no clip for them (playerBody.ts, MADE_MOVES; admin
+ * 2026-11-24: "character ke pas punch move nahi hai" must not be the end of it). Kept equal to the kit's table by
+ * tests/aLibraryCharacterCanHoldAndPunch.test.ts.
+ */
+export const MADE_FROM_SKELETON: readonly PlayerMoveName[] = ['punch', 'kick', 'swing', 'throw', 'fire', 'use'];
+
+/** The honest clause for moves a model has no clip for: which the kit makes from the skeleton, and which stay unanimated. PURE. */
+export function lackedMovesClause(lacks: readonly string[]): string {
+  if (!lacks.length) return '';
+  const made = lacks.filter((m) => (MADE_FROM_SKELETON as readonly string[]).includes(m));
+  const not = lacks.filter((m) => !(MADE_FROM_SKELETON as readonly string[]).includes(m));
+  return [
+    made.length ? `${made.join(', ')} ${made.length === 1 ? 'is' : 'are'} not in its own clips, so NavBharatAI makes ${made.length === 1 ? 'it' : 'them'} from its skeleton when it has arm and leg bones (the game says so on screen)` : '',
+    not.length ? `${not.join(', ')} ${not.length === 1 ? 'is' : 'are'} not animated` : '',
+  ].filter(Boolean).join('; ');
+}
+
 /** One plain line for the builder: what the character can do, and what it cannot (so the user is told). PURE. */
 export function playerMovesLine(has: readonly string[], lacks: readonly string[]): string {
   if (!has.length) return 'it has NO animations of its own, so it moves without walking or posing — tell the user that plainly';
   return `its own moves: ${has.join(', ')}`
-    + (lacks.length ? `; it has NO ${lacks.join(', ')} — those moves are not animated (the game says so on screen), so tell the user which moves their character lacks` : '');
+    + (lacks.length ? `; ${lackedMovesClause(lacks)} — tell the user plainly` : '');
 }

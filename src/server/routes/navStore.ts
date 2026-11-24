@@ -468,7 +468,7 @@ export function registerNavStoreRoutes(app: Express): void {
         ...a, pinned: rank.has(`apk:${a.id}`), pinOrder: rank.get(`apk:${a.id}`) ?? null,
       }));
       publicApps.sort((a, b) => {
-        const ar = rank.get(a.id), br = rank.get(b.id);
+        const ar = rank.get(`apk:${a.id}`), br = rank.get(`apk:${b.id}`);
         return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
           || (ar === undefined ? 0 : ar) - (br === undefined ? 0 : br);
       });

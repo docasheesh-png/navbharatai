@@ -26,6 +26,7 @@ describe('Indian Modern House H01 — owner-authorized Game Library model', () =
     expect(gltf.buffers).toHaveLength(1);
     expect(JSON.stringify(gltf)).not.toContain('"uri"');
     expect(gltf.extras.units).toBe('metres');
+    expect(gltf.nodes.every((node: { rotation?: number[] }) => node.rotation?.[0] === -0.7071067811865475 && node.rotation?.[3] === 0.7071067811865476)).toBe(true);
   });
 
   it('keeps an open entrance and internal room passages in the geometry', () => {

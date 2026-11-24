@@ -395,6 +395,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/core/quests.ts": [
     "23688f9c511f110c2e0aab1a704abd655b54a2822d5143b09f816313d43dc06c"
   ],
+  "src/game/core/rules.ts": [
+    "11640104ffee4d3b79e4cdcf92eb6053e270c29dd2f4e66fa903ad4a93260665"
+  ],
   "src/game/core/runner.ts": [
     "97bdd55536727c171dcd0045864eda6f8ecc1406539771fb8ba32e92cdeb2312",
     "a06767604361385befb2be4ce618bebf6aad192239e911ea354849ad14958d6c"
@@ -411,7 +414,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b",
     "78e6d51764f0df4b2557f81776522d67de87755acaf3b8d1944f8c332f70adc2",
     "8d8609eb00710ba637432167f1f95dd55828a7fc3568877b0c10e2913bcf2ad3",
-    "d51eb9f4b9ff7d3b77aa0741207da8cd4afb5e215b0b27741fce2266af0be5af"
+    "d51eb9f4b9ff7d3b77aa0741207da8cd4afb5e215b0b27741fce2266af0be5af",
+    "894b26ee828d1ac074d86ac3999423a0419163c21db3a5f008bff3b706689dc0"
   ],
   "src/game/core/strings.ts": [
     "614045d3d4eaf7f63fd8e969d4c06d411e302554adfff1df00ce7acb2d30a006",

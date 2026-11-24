@@ -242,7 +242,7 @@ describe('the builder can really call this', () => {
 
   it('the dispatcher handles it and writes the files', () => {
     expect(dispatcher).toContain("case 'generate_game_runtime': {");
-    expect(dispatcher).toContain('generateGameRuntime(grInclude)');
+    expect(dispatcher).toContain('generateGameRuntime(grInclude, { rules: grRec.rules })');
     expect(dispatcher).toContain('await this.writeRecipeFiles(gr.files, agent)');
   });
 

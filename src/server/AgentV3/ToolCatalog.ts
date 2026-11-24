@@ -2685,7 +2685,12 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting, swipe, runner, keybinds, tuning. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting, swipe, runner, keybinds, tuning, rules. Default = all; imports are pulled in automatically.',
+          },
+          rules: {
+            type: 'array',
+            items: { type: 'object' },
+            description: 'Optional game rules as data, e.g. [{"when":"ENEMY_DIED","then":{"addScore":10}}]. when: ENEMY_DIED, ITEM_COLLECTED, PLAYER_DIED, PLAYER_DAMAGED or SCORE_CHANGED; then: addScore, gameOver or nextLevelEvery. Written to src/game/gameRules.ts and applied by core/rules.ts from the first round.',
           },
         },
       },

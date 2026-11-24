@@ -1,4 +1,5 @@
 import { open } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { isDiscoverySubject } from './discoveryPolicy';
 import { assetProviderPermit, recordAssetProviderResponse } from './assetProviderBudget';
@@ -24,17 +25,19 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
     const reviewed = REVIEWED_GAME_ASSETS.find(c => c.packaged && c.id === candidate.id);
     if (!reviewed || reviewed.provider !== candidate.provider || reviewed.sha256 !== candidate.sha256 || reviewed.bytes !== candidate.bytes
       || reviewed.bytes === undefined || !/^[a-f0-9]{64}$/.test(reviewed.sha256)) throw Error('Unreviewed packaged model');
-    const file = await open(join(process.cwd(), 'assets/game-models', reviewed.sha256 + '.glb'), 'r');
+    const compressed = reviewed.packagedCompression === 'gzip';
+    const file = await open(join(process.cwd(), 'assets/game-models', reviewed.sha256 + (compressed ? '.glb.gz' : '.glb')), 'r');
     try {
       const size = (await file.stat()).size;
-      if (size !== reviewed.bytes || size > ASSET_LIMITS.bytes) throw Error('Packaged model size mismatch');
+      if (size > ASSET_LIMITS.bytes || (!compressed && size !== reviewed.bytes) || (compressed && size > reviewed.bytes)) throw Error('Packaged model size mismatch');
       const buffer = Buffer.alloc(size + 1); let total = 0;
       while (total < buffer.length) {
         const { bytesRead } = await file.read(buffer, total, buffer.length - total, total);
         if (!bytesRead) break; total += bytesRead;
       }
       if (total !== size) throw Error('Packaged model size changed');
-      const bytes = buffer.subarray(0, total);
+      const stored = buffer.subarray(0, total);
+      const bytes = compressed ? new Uint8Array(gunzipSync(stored, { maxOutputLength: ASSET_LIMITS.bytes })) : stored;
       signal.throwIfAborted();
       if (createHash('sha256').update(bytes).digest('hex') !== candidate.sha256) throw Error('Packaged model hash mismatch');
       return bytes;

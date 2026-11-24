@@ -21,3 +21,11 @@ The original public FBX URL remains provenance only. No user prompt can select a
 adding a library batch (it renders only the missing ones). Pictures exist only for CC0 and MIT models: a CC BY
 picture would need an on-screen credit, and users never see a source name. `tests/theGameLibraryIsOnScreen.test.ts`
 fails when a picture is missing or orphaned.
+
+
+## Indian Modern House (NavBharatAI community contribution)
+
+- Packaged GLB SHA-256: `6ecefba90f495971fe9e6111f8e3698d0a9b129ba74f37d693c44a96968c662b`
+- Uncompressed size: 40,172 bytes; stored as gzip-compressed `.glb.gz`.
+- License and required attribution: `indian-modern-house-LICENSE.txt` (CC BY 4.0).
+- Scope: self-contained architectural blockout; no textures, animations, furnished interior, collision mesh, loot configuration, or LOD variants.

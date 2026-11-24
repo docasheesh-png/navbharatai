@@ -1,0 +1,19 @@
+INDIAN MODERN HOUSE — ASSET LICENSE AND ATTRIBUTION
+
+Copyright and permission
+The original reference photograph was supplied by its owner, who confirmed ownership and expressly authorized public, free in-game use of the resulting 3D asset in NavBharatAI Game Maker.
+
+The owner grants the 3D asset and the owner-contributed reference material, to the extent they are included in this contribution, under the Creative Commons Attribution 4.0 International license (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+You may copy, redistribute, adapt, and use the asset commercially, including in games, provided that you give appropriate credit, provide a link to the license, and indicate if changes were made. Do not imply endorsement by the contributor or NavBharatAI.
+
+Required attribution:
+"Original reference photo: NavBharatAI community contributor (owner-confirmed); 3D conversion: NavBharatAI. Licensed CC BY 4.0."
+
+Asset scope and accuracy
+The packaged GLB is a lightweight, self-contained architectural blockout. It has 59 scene nodes and 70 meshes, with no embedded textures or animation. It is NOT the full showcase specification: PBR texture sets, detailed furnished interior, collision mesh, loot/spawn configuration, and LOD variants are not included in this GLB.
+
+The NavBharatAI asset catalogue validates the exact GLB bytes by SHA-256 before serving them. Game developers remain responsible for checking suitability and adding gameplay-specific collision, navigation, lighting, and performance settings.
+
+This notice records the contributor's permission for public distribution. The contributor's personal identity is not published; the attribution label above is used instead.

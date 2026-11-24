@@ -590,6 +590,7 @@ import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhases/buildHeadroom';
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
+import { reportRuleProbes } from '../AgentV3/buildPhases/gameRuleProbes';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -24854,8 +24855,9 @@ async function noteBuildOutcome(
           && roomFor(90_000)
         ) {
           try {
-            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
+            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
             const playRun = parsePlaytest(out.stdout);
+            reportRuleProbes(playRun.rules, gameFixPorts); // the user's named rules, proved by playing (gameRuleProbes.ts)
             const playedFiles = await withKitLayersFromDisk(playtestFiles, (p) => actuator.readFile(workspaceId, p));
             const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });

@@ -18,6 +18,7 @@ import { withoutNonObjectSenses } from '../lib/heroObjectSpec';
 import { largeWorldIntent } from './largeWorldIntent';
 import { findGameTitles, mentionsBattleRoyale, ROYALE_GENRE_PHRASE, unrecognisedGameReference, type GameTitleKind } from '../lib/wellKnownGameTitles';
 import { withoutComments } from '../lib/codeOnly';
+import { gameRulesFrom, gameRulesBlock, type GameRule } from './gameRules';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
   | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'simulator' | 'unknown';
@@ -58,6 +59,8 @@ export interface GameScopeContract {
   subjects?: string[];
   /** Did the request ask for real 3D models/assets rather than primitive placeholders? */
   externalAssets?: boolean;
+  /** The cause → effect rules the user stated (gameRules.ts): "killing an enemy raises the score". Absent when none. */
+  rules?: GameRule[];
   /** The well-known game the user named as the reference ("PUBG", "BGMI", "GTA 5"); absent when none. */
   reference?: string;
   /**
@@ -326,7 +329,9 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d'
     : reference?.dimension ?? (bigWorldWantsThreeD(text, genre, camera) ? '3d' : 'unspecified');
   const unrecognisedReference = !reference && genre === 'unknown' && !vehicle ? unrecognisedGameReference(text) : null;
+  const rules = gameRulesFrom(text);
   return {
+    ...(rules.length ? { rules } : {}),
     ...(reference ? { reference: reference.name } : {}),
     ...(unrecognisedReference ? { unrecognisedReference } : {}),
     genre,
@@ -344,7 +349,7 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
 
 /** The block the builder reads in the kit handoff. '' when the contract adds nothing. PURE. */
 export function gameContractBlock(c: GameScopeContract): string {
-  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference && !c.unrecognisedReference) return '';
+  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference && !c.unrecognisedReference && !(c.rules ?? []).length) return '';
   const lines = [
     '[GAME SCOPE CONTRACT — read from the request, checked after the build]',
     `Genre: ${c.genre}. View: ${c.dimension}.`,
@@ -361,6 +366,7 @@ export function gameContractBlock(c: GameScopeContract): string {
     c.collectibles?.length ? `Named collectibles: ${c.collectibles.join(', ')}. They are distinct currencies/collectibles, not permission to invent power-ups or real-money purchases.` : '',
     c.minimumUnlockableCharacters ? `At least ${c.minimumUnlockableCharacters} distinct unlockable characters, with actual unlock conditions and selection behavior; never just a labelled roster.` : '',
     c.runnerMechanics?.includes('currency-unlocks') ? 'Currency unlocks must really spend the named in-game balance, reject unaffordable purchases and allow selecting an unlocked character; not a shop mockup.' : '',
+    gameRulesBlock(c.rules ?? []),
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
   ];
   return lines.filter(Boolean).join('\n');
@@ -409,6 +415,8 @@ export function scopeMatch(c: GameScopeContract, files: Record<string, string>):
     ...(c.runnerMechanics ?? []),
     ...(c.collectibles ?? []),
     ...(c.minimumUnlockableCharacters ? [`${c.minimumUnlockableCharacters} unlockable characters`] : []),
+    // A rule is a fact about PLAY, which no code scan can prove (plan item: runtime rule assertions).
+    ...(c.rules ?? []).map((r) => `rule: ${r.said}`),
   ];
   return { present, missing, ...(unverified.length ? { unverified } : {}) };
 }

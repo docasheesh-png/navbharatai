@@ -103962,3 +103962,10 @@ Weakness audit P1-5. The Weak tier's platform-wide daily allowance for automatic
 ## 2026-11-24 — Locked plan item 5: one redactor union (Pro Chain V2's private copy)
 
 Weakness audit P1-6, adapted: `SourceSecretRedactor` already wraps the shared `SecretRedactor` by design and is unchanged. The real duplicate was `proChainV2/redact.ts`, a private short pattern list: a JWT, an AWS/GitHub/Google key or a password inside a URL was masked by the shared redactor and NOT there, while our gateway keys (`mtf_live_`, `qbx_`, `qubax_`) were masked ONLY there. Now Pro Chain V2 runs the shared redactor first and keeps only its stricter admin-line shapes on top; the gateway keys (20+ chars) are in the shared list; the error line keeps 1200 chars (was 600), marked with "…" when cut. Test: `tests/oneRedactorUnionHolds.test.ts` (one row per shape, both redactors). The plain-redactor caller census lists `proChainV2/redact.ts` with its reason.
+
+## 2026-11-24 — G1+G2: the rules the user names are kept, built with the combat kit, and proved by playing (game factory, admin question 2)
+
+Admin: *"user kahta hai enemy add karo, jisko kill karne se score bade, par navbharatai yeh nahi kar pata hai … hame game factory banna hai"*.
+- **Root cause:** the scope contract (`gameIntent.ts`) read a request as features (`enemies`, `score`) and dropped the RELATION between them, so nothing told the builder to wire one to the other and nothing checked it. The combat layer (Health emits ENEMY_DIED) was not seeded for 2D games at all.
+- **Fix:** `gameRules.ts` reads cause → effect rules (EN/Hinglish/Hindi, one sentence per rule, precision first) into the contract; `gameKitSeed` seeds `generate_game_systems` when the game needs combat; the runtime exposes `window.__nbRules`; the playtest emits each rule's event in the real browser and checks the effect (`GAME_RULE_BROKEN` warning / `GAME_RULES_CHECKED` info via `buildPhases/gameRuleProbes.ts`, one call from the route).
+- **Locks:** `aGameKeepsTheRulesTheUserNamed`, `aRuleIsProvenByPlaying`, `theUsersRulesAreReportedFromPlay`. Kit history regenerated.

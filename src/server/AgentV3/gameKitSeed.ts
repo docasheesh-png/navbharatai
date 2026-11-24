@@ -52,6 +52,7 @@
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
+import { wantsCombatKit } from './gameRules';
 import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
@@ -69,7 +70,7 @@ import { world2dIntent } from './world2dIntent';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
-export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d'
+export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d' | 'generate_game_systems'
   | 'generate_game_2d' | 'generate_board_games' | 'generate_athree_map' | 'generate_open_world';
 
 // 2D games that MOVE a body on screen get the 2D kit (sprites, platformer physics, camera, tilemap, particles): MOVING_2D_GENRES,
@@ -103,6 +104,19 @@ export function gameKitFrameworkSupported(framework: string | null | undefined):
  * The domain is read here as well as at the route's gate, from the same classifier, so the plan can never
  * seed a to-do app even if a caller forgets the gate.
  */
+/**
+ * 🎮 THE COMBAT LAYER IS LAID DOWN WHEN THE GAME HAS A FIGHT IN IT (admin 2026-11-24: "enemy add karo, jisko kill karne se
+ * score bade, par navbharatai yeh nahi kar pata"). `generate_game_systems` (health with invulnerable frames, death that fires
+ * once, enemy AI, projectiles, weapons) existed and was only a line in the system prompt, so a weak builder hand-wrote a
+ * fragile fight or none. A shooter, a fighting game, or a request that names enemies, health or a kill rule gets it. PURE.
+ */
+function combatKit(text: string): GameKitRecipe[] {
+  try {
+    const c = buildGameContract(text);
+    return wantsCombatKit(text, c.genre, c.requiredFeatures) ? ['generate_game_systems'] : [];
+  } catch { return []; }
+}
+
 export function gameKitPlan(prompt: string | null | undefined, framework?: string | null): GameKitRecipe[] {
   const text = String(prompt ?? '');
   if (!text.trim() || !gameKitFrameworkSupported(framework)) return [];
@@ -119,12 +133,12 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
     // A game played on foot on the big map gets the open-world starter after the shell: a player standing on the map,
     // mounted in src/App.tsx, playable before the first model call. A race or a flight has its own vehicle to stand on.
     const onFoot: GameKitRecipe[] = map.length && openWorldOnFoot(text) ? ['generate_open_world'] : [];
-    return ['generate_game_runtime', 'generate_game_3d', ...map, 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
+    return ['generate_game_runtime', 'generate_game_3d', ...map, ...combatKit(text), 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
   }
   // 🗺️ A 2D game whose user wants a big world (the wish, not one word: world2dIntent → largeWorldIntent, admin 2026-11-19)
   // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
   // platform KNOWS a build needs is not left to the model's optional tool call.
-  const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
+  const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody', ...combatKit(text)];
   if (world2dIntent({ prompt: text, drawnIn3D: false }).use) flat.push('generate_world_2d');
   // 🎮 THE GENRE'S OWN KIT (game audit 2, 2026-11-20): failedbr #2435 ("super Mario Bros game banao") got only the loop,
   // sound and music and hand-wrote its platformer physics, renderer and touch buttons; #2470 (a Monopoly-style "business
@@ -276,6 +290,8 @@ export function wantsSceneDetail(prompt: string | null | undefined): boolean {
  */
 export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKitRecipe[], request?: string | null): Record<string, unknown> | undefined {
   if (recipe === 'generate_game_vfx' && !plan.includes('generate_game_3d')) return { include: ['audio'] };
+  // The spawner imports the 3D world (gameRecipeLayers.ts); a 2D game takes every other system.
+  if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
   // city when the game's world has one.
   if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request) };
@@ -704,6 +720,11 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       ? '🎲 THE INDIA GAMES PACK IS ALREADY IN src/game/board/: the rules come from it — Ludo, Snakes & Ladders, chess,'
         + ' carrom, cricket, match-3 and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
         + ' move, and announce what happened. Card games are points or pretend chips only, never real money.'
+      : '',
+    has('generate_game_systems')
+      ? '⚔️ THE COMBAT LAYER IS ALREADY IN src/game/systems/: Health (invulnerable frames, death fires once), enemy AI,'
+        + ' projectiles and weapons — NEVER write your own health, damage or bullet code. Give every enemy a Health (it emits'
+        + " ENEMY_DIED), the player a Health with diedEvent \"PLAYER_DIED\", and wire each rule the user named to these events."
       : '',
     has('generate_world_2d')
       ? '🗺️ THE BIG 2D WORLD IS ALREADY IN src/game/world2d/: the user asked for a big map, so build the game ON it —'

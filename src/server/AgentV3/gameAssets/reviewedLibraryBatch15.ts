@@ -10,7 +10,7 @@ export const REVIEWED_LIBRARY_BATCH_15: readonly ReviewedAsset[] = [
   {
     provider: 'github',
     id: 'navbharatai-indian-modern-house',
-    revision: '6ecefba90f495971fe9e6111f8e3698d0a9b129ba74f37d693c44a96968c662b',
+    revision: '4fe9aced7253205cce5e7b2a4aaa79f4c715d48f',
     sourceUrl: 'https://github.com/docasheesh-png/navbharatai/blob/main/assets/game-models/6ecefba90f495971fe9e6111f8e3698d0a9b129ba74f37d693c44a96968c662b.glb.gz',
     downloadUrl: 'https://github.com/docasheesh-png/navbharatai/blob/main/assets/game-models/6ecefba90f495971fe9e6111f8e3698d0a9b129ba74f37d693c44a96968c662b.glb.gz',
     packaged: true,

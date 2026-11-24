@@ -23,7 +23,7 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
     // Only a catalogue entry may be read from the image: same provider, id, hash and declared size as the reviewed record,
     // so a forged or altered candidate object can never name a file. The file is found by hash alone.
     const reviewed = REVIEWED_GAME_ASSETS.find(c => c.packaged && c.id === candidate.id);
-    if (!reviewed || reviewed.provider !== candidate.provider || reviewed.sha256 !== candidate.sha256 || reviewed.bytes !== candidate.bytes
+    if (!reviewed || reviewed.provider !== candidate.provider || reviewed.sha256 !== candidate.sha256 || reviewed.bytes !== candidate.bytes || reviewed.packagedCompression !== candidate.packagedCompression
       || reviewed.bytes === undefined || !/^[a-f0-9]{64}$/.test(reviewed.sha256)) throw Error('Unreviewed packaged model');
     const compressed = reviewed.packagedCompression === 'gzip';
     const file = await open(join(process.cwd(), 'assets/game-models', reviewed.sha256 + (compressed ? '.glb.gz' : '.glb')), 'r');

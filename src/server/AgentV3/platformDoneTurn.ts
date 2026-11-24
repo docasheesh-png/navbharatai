@@ -31,6 +31,7 @@ import { libraryActionsAtTurnStart } from './growthTurn';
 import { templateRunResult } from './templateVerify';
 import { formatEta, formatEtaRange } from '../lib/BuildTimeEstimator';
 import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
+import { lackedMovesClause } from '../lib/playerMoves';
 
 type Issue = { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string };
 
@@ -87,7 +88,7 @@ export function platformDoneMessage(req: PickerRequest): string {
     const moves = libraryMovesOf(req.id);
     const movesLine = !moves ? ''
       : moves.has.length === 0 ? ' It has no animations of its own, so it moves without walking or posing.'
-        : ` It has its own animations for: ${moves.has.join(', ')}.${moves.lacks.length ? ` It has none for: ${moves.lacks.join(', ')} — those moves are not animated.` : ''}`;
+        : ` It has its own animations for: ${moves.has.join(', ')}.${moves.lacks.length ? ` For the rest: ${lackedMovesClause(moves.lacks)}.` : ''}`;
     return `Done — your player character is now ${name}.${movesLine} The map, the controls and everything else are as they were. `
       + 'To bring the default person back, say "wapas purana character".';
   }

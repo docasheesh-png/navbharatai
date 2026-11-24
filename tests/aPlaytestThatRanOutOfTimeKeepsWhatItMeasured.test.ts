@@ -22,7 +22,8 @@ describe('⏱️ the script keeps its evidence', () => {
   it('after the keyboard stage, a timeout sends everything measured and names what did not finish', () => {
     expect(src).toMatch(/if \(out\.playedKeyboard\) \{\s*say\(\{ \.\.\.out, ok: true, partial: true, unfinished: out\.stage, phoneChecked: out\.phoneChecked === true \}\);/);
     // The flag is set exactly when the keyboard stage is over, and the phone flag when the phone stage is.
-    expect(src).toMatch(/out\.playedKeyboard = true;[^\n]*\n\s*out\.stage = 'checking the score, the sound and play again';/);
+    // S4: the progression round runs right after the keyboard stage, still inside what a timeout keeps.
+    expect(src).toMatch(/out\.playedKeyboard = true;[^\n]*\n[\s\S]{0,300}out\.stage = 'playing a round to see it progress';[\s\S]{0,200}out\.stage = 'checking the score, the sound and play again';/);
     expect(src).toMatch(/await m\.close\(\);\n\s*out\.phoneChecked = true;/);
     // A run that never got that far is still "not run".
     expect(src).toMatch(/say\(\{ ok: false, partial: true, webgl: out\.webgl, stage: out\.stage, fps,/);

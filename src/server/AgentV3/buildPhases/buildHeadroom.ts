@@ -17,7 +17,7 @@
  */
 
 /** The playtest's own budget (60 s) + page load (15 s) + the route's 20 s timeout margin. Kept equal to gamePlaytest.ts. */
-export const PLAYTEST_RESERVE_MS = 95_000;
+export const PLAYTEST_RESERVE_MS = 125_000; // S4 (admin 2026-11-24): the 90 s playtest + its 20 s outer margin + start-up
 
 /** How much is held back for the playtest right now: only on a game turn, only until the playtest has run. */
 export function playtestReserveMs(o: { gameTurn: boolean; playtestDone: boolean }, env: NodeJS.ProcessEnv = process.env): number {

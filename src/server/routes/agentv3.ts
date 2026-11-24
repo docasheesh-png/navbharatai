@@ -24860,7 +24860,7 @@ async function noteBuildOutcome(
             enabled: gamePlaytestEnabled(), buildOk: result?.ok === true,
             isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }), // Q-3224: an R3F game is played too
             isImportTurn, aborted: abort.signal.aborted, hasRunCommand: !!actuator.runCommand, hasPreviewUrl: !!lastPreviewUrl,
-            awaitsShell: !!awaitsShellNow(), platformDone: !!platformDoneRef.cur, timeLeft: roomFor(90_000),
+            awaitsShell: !!awaitsShellNow(), platformDone: !!platformDoneRef.cur, timeLeft: roomFor(PLAYTEST_BUDGET_MS + 30_000), // S4: the 90 s round + its margin
           },
           files: playtestFiles,
           contract: gameContract ?? null,

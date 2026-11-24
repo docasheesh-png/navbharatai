@@ -524,6 +524,45 @@ export function holdItem(ctx: GameContext, item: THREE.Object3D, side: 'right' |
   return applied.get(ctx)?.character.hold(item, side) ?? false;
 }
 
+/**
+ * Put an item in the hand of ANY character — an NPC, an enemy, a pet — not only the player (admin 2026-11-24: "sabhi
+ * character apne hath me object utha le"). Works on a library or uploaded model (its hand bone, found by name, the same
+ * way as the player's), and on a kit person (createHumanoid: its own right/left hand). The item is sized to about a third
+ * of the character's height. With no hand bone it is held at the character's side, and false says so.
+ */
+export function holdInHand(
+  character: THREE.Object3D | { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } },
+  item: THREE.Object3D,
+  side: 'right' | 'left' = 'right',
+): boolean {
+  // A kit person (createHumanoid): its own grip — the right hand through hold(), the left hand by its joint.
+  if (!(character instanceof THREE.Object3D)) {
+    if (side === 'left' && character.joints?.leftHand) { character.joints.leftHand.add(item); return true; }
+    character.hold(item);
+    return true;
+  }
+  const bone = findBones(character)[side === 'left' ? 'leftHand' : 'rightHand'];
+  const box = new THREE.Box3().setFromObject(character);
+  const tall = Math.max(0.2, box.max.y - box.min.y);
+  const size = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3());
+  const longest = Math.max(size.x, size.y, size.z) || 1;
+  const want = 0.3 * tall;
+  if (bone) {
+    bone.updateWorldMatrix(true, false);
+    const scale = new THREE.Vector3();
+    bone.getWorldScale(scale);
+    item.scale.multiplyScalar(want / longest / (Math.abs(scale.x) || 1));
+    item.position.set(0, 0, 0);
+    bone.add(item);
+    return true;
+  }
+  // No hand bone: at the character's side, in its own frame, and false says so.
+  item.scale.multiplyScalar(want / longest / (Math.abs(character.scale.x) || 1));
+  item.position.set((side === 'left' ? 1 : -1) * 0.22 * tall, 0.5 * tall, 0.2 * tall).divideScalar(Math.abs(character.scale.x) || 1);
+  character.add(item);
+  return false;
+}
+
 /** The chosen character's model root while it is shown, else null (the kit person is shown). play/actions.ts poses it. */
 export function playerModelRoot(ctx: GameContext): THREE.Object3D | null {
   const a = applied.get(ctx);

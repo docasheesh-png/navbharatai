@@ -34,7 +34,15 @@ export interface GameVfxAudioResult {
   instructions: string;
 }
 
+const EFFECT_FILES = `// The game's own effects, found by the bundler (Vite) — read by particles.ts. A file of its own so particles.ts has no
+// import.meta (it is also loaded in plain CommonJS, where import.meta does not exist). ?* matches any file name.
+export const EFFECT_FILES: Record<string, { EFFECT?: unknown }> = (() => {
+  try { return import.meta.glob('../effects/?*.ts', { eager: true }) as Record<string, { EFFECT?: unknown }>; } catch { return {}; }
+})();
+`;
+
 const PARTICLES = `import * as THREE from 'three';
+import { EFFECT_FILES } from './effectFiles';
 
 /**
  * A pooled GPU particle system — one THREE.Points, one draw call, zero allocation per burst.
@@ -74,6 +82,59 @@ export const PARTICLE_PRESETS: Record<ParticlePreset, ParticleSpec> = {
   pickup:      { count: 14, color: 0xffe97a, colorEnd: 0xffa300, size: 0.14, sizeEnd: 0.01, life: 0.50, speed: 3.2, spread: 1.2, gravity: 1.4,  additive: true,  drag: 1.4 },
   blood:       { count: 16, color: 0xa8161b, colorEnd: 0x4a0a0c, size: 0.12, sizeEnd: 0.03, life: 0.60, speed: 5,  spread: 1.5,  gravity: -14,  additive: false, drag: 1 },
 };
+
+/**
+ * ANY EFFECT THE USER IMAGINES (admin 2026-11-24: "user ki sabhi ulti sidhi imagination ko real banaye"). An effect is a
+ * ParticleSpec with a name: NavBharatAI designs one on request (compose_effect) and saves it as src/game/effects/<name>.ts
+ * (export const EFFECT = { name, ...spec }), which this file reads by itself — burst('fire-tornado', x, y, z) then plays
+ * it. registerEffect does the same from code. A name that is neither a preset nor an effect plays 'impact', said once.
+ */
+const custom: Record<string, ParticleSpec> = {};
+const n = (v: unknown, lo: number, hi: number, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+/** Only a well-formed effect counts: numbers are clamped to what a phone can draw, colours to 0..0xffffff. */
+export function cleanEffect(raw: unknown): ParticleSpec | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.color !== 'number' || !Number.isFinite(r.color)) return null;
+  return {
+    count: Math.round(n(r.count, 1, 200, 20)), color: Math.round(n(r.color, 0, 0xffffff, 0xffffff)),
+    colorEnd: typeof r.colorEnd === 'number' ? Math.round(n(r.colorEnd, 0, 0xffffff, 0xffffff)) : undefined,
+    size: n(r.size, 0.01, 3, 0.2), sizeEnd: typeof r.sizeEnd === 'number' ? n(r.sizeEnd, 0, 5, 0.02) : undefined,
+    life: n(r.life, 0.05, 5, 0.6), speed: n(r.speed, 0, 40, 4), spread: n(r.spread, 0, 3.2, 1.2),
+    gravity: n(r.gravity, -40, 40, 0), additive: r.additive === true, drag: typeof r.drag === 'number' ? n(r.drag, 0, 10, 1) : undefined,
+  };
+}
+export function registerEffect(name: string, spec: unknown): boolean {
+  const clean = cleanEffect(spec);
+  const key = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!clean || !key) return false;
+  custom[key] = clean;
+  return true;
+}
+let filesRead = false;
+function readEffectFiles(): void {
+  if (filesRead) return;
+  filesRead = true;
+  try {
+    for (const mod of Object.values(EFFECT_FILES || {})) {
+      const e = mod && (mod.EFFECT as { name?: unknown } | undefined);
+      if (e && typeof e.name === 'string') registerEffect(e.name, e);
+    }
+  } catch { /* no effect files */ }
+}
+/** Every effect this game can burst by name: the presets and its own. */
+export function effectNames(): string[] { readEffectFiles(); return [...Object.keys(PARTICLE_PRESETS), ...Object.keys(custom)]; }
+const toldMissing = new Set<string>();
+function specFor(name: string): ParticleSpec {
+  readEffectFiles();
+  const key = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const own = custom[key] || custom[name];
+  if (own) return own;
+  const preset = (PARTICLE_PRESETS as Record<string, ParticleSpec>)[name];
+  if (preset) return preset;
+  if (!toldMissing.has(name)) { toldMissing.add(name); console.warn('[particles] there is no effect "' + name + '" — playing impact. Ask NavBharatAI to make it.'); }
+  return PARTICLE_PRESETS.impact;
+}
 
 interface Slot { life: number; maxLife: number; vx: number; vy: number; vz: number; spec: ParticleSpec; }
 
@@ -201,8 +262,8 @@ export class ParticleSystem {
   }
 
   /** Fire a burst. Oldest slots are recycled when full — a burst is never dropped silently. */
-  burst(preset: ParticlePreset, x: number, y: number, z: number, scale = 1): void {
-    const spec = PARTICLE_PRESETS[preset] ?? PARTICLE_PRESETS.impact;
+  burst(preset: ParticlePreset | (string & {}), x: number, y: number, z: number, scale = 1): void {
+    const spec = specFor(preset);
     // The preset chooses its own blend mode. Smoke must never be routed through the additive layer.
     const layer = spec.additive ? this.additive : this.normal;
     layer.spawn(spec, x, y, z, scale, () => this.rand());
@@ -940,13 +1001,14 @@ export function startAmbience(_names: readonly string[] = []): () => void {
 const FILES: Record<string, string> = {
   'src/game/fx/soundLibrary.ts': SOUND_LIBRARY_STUB,
   'src/game/fx/particles.ts': PARTICLES,
+  'src/game/fx/effectFiles.ts': EFFECT_FILES,
   'src/game/fx/synth.ts': SYNTH,
   'src/game/fx/music.ts': MUSIC_FILE,
   'src/game/fx/audio.ts': AUDIO,
   'src/game/fx/feedback.ts': FEEDBACK,
 };
 
-export const GAME_FX_MODULES: readonly string[] = ['particles', 'synth', 'music', 'audio', 'feedback', 'soundLibrary'];
+export const GAME_FX_MODULES: readonly string[] = ['particles', 'synth', 'music', 'audio', 'feedback', 'soundLibrary', 'effectFiles'];
 
 /**
  * Generate the VFX/audio layer. `feedback` imports both siblings, so a subset that would not compile is
@@ -975,6 +1037,8 @@ export function generateGameVfxAudio(include?: string[]): GameVfxAudioResult {
     if (files['src/game/fx/audio.ts']) { files['src/game/fx/synth.ts'] = FILES['src/game/fx/synth.ts']; files['src/game/fx/music.ts'] = FILES['src/game/fx/music.ts']; }
     // The shell imports the sound library next to audio; its stand-in travels with audio.ts.
     if (files['src/game/fx/audio.ts']) files['src/game/fx/soundLibrary.ts'] = FILES['src/game/fx/soundLibrary.ts'];
+    // particles.ts reads the game's own effects through effectFiles.ts.
+    if (files['src/game/fx/particles.ts']) files['src/game/fx/effectFiles.ts'] = FILES['src/game/fx/effectFiles.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 

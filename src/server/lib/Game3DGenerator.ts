@@ -28,6 +28,7 @@
 //
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
+import { GAME_DENTS, GAME_DENTS_PATH } from './GameDentsGenerator';
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
 import { GAME_CITY } from './GameCityGenerator';
 import { GAME_CITY_TRAFFIC } from './GameCityTrafficGenerator';
@@ -7260,6 +7261,8 @@ export function clearBreakables(): void {
 `;
 
 const FILES: Record<string, string> = {
+  // Dents from crashes (admin 2026-11-24, question 9) — GameDentsGenerator.ts.
+  [GAME_DENTS_PATH]: GAME_DENTS,
   'src/game/three/buildings.ts': GAME_BUILDINGS,
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
@@ -7296,7 +7299,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics', 'dents',
 ];
 
 /**
@@ -7320,6 +7323,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     // race.ts drives rival cars on the streamed road (objects.ts) — first, so objects' own dependencies follow below.
     if (files['src/game/three/race.ts']) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
+    // dents.ts hears crashes through objects.ts.
+    if (files[GAME_DENTS_PATH]) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
     // City traffic drives the kit's vehicles (objects.ts) on the city's grid (city.ts).
     if (files['src/game/three/citypeople.ts']) files['src/game/three/city.ts'] = FILES['src/game/three/city.ts'];
     if (files['src/game/three/citytraffic.ts']) { files['src/game/three/city.ts'] = FILES['src/game/three/city.ts']; files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts']; }

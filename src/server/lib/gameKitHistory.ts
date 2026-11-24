@@ -470,6 +470,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c48b5ea716493cea8024e5192c841982a298308ee64c62d7378673b8f3f6f836",
     "925796528a8a6b00d74dc196c13df620144ef2bbb9f8b51b58250ca938ecaf6a"
   ],
+  "src/game/fx/effectFiles.ts": [
+    "071a1a411d511ff9dfb906ca6e1ad161975979bb702f9712cbd848e8f2639fce"
+  ],
   "src/game/fx/feedback.ts": [
     "3b1bdaba648b84956fdb7f87f9fe77190edd03343751df01871e513a109403d2",
     "b24bb48a0a85cff4c6b92a534c2ba4f8a5324fc793aeced49109d0bbb1edeb97",
@@ -481,7 +484,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "9236e81cb871e1e42f8d51efac8ee6b84a392e7ec5a0ba55c893af945f906dd1"
   ],
   "src/game/fx/particles.ts": [
-    "959d5a2a5c2de08c15db1b0c23e83da423ab4aa1672c1a8a01bff1b26883d436"
+    "959d5a2a5c2de08c15db1b0c23e83da423ab4aa1672c1a8a01bff1b26883d436",
+    "4358d7fc329c00b3e64da2944da3cf936a3f92263ff6ddc565b714d5dcbdaea7"
   ],
   "src/game/fx/soundLibrary.ts": [
     "fc0a6dedfcfce13aa3ef7f16edd54776290ad253c4237643400d5396d0c8e436"
@@ -548,7 +552,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
     "795e63a219ed1b40b80de950fb709153af4847941c15b40975a2b363751a9e07",
     "b11dbc6f0577383a719629d5fc46529b0c34111c0b2afd33cae0eff8f374bba1",
-    "c60fff089f93a0ceada4afb3f70cd1daeb7c60e6782de352ef01e74906a49026"
+    "c60fff089f93a0ceada4afb3f70cd1daeb7c60e6782de352ef01e74906a49026",
+    "6534e7fec5a7c5352589a3e14abca6fa96ecf5c2b5ad1458d64e01f39428e171"
   ],
   "src/game/play/raceCustom.ts": [
     "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0",
@@ -644,6 +649,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "9b1aad461db630b41e9e676fb5515f6626e9b10b282dc06e946eb46a735ee90a",
     "80c4524a9eb7e440b19ed589a51a5ee09a67cf37886638132cfb57a7241e5a84",
     "8bc76dbe488549a1c0eee47b70a606a60fc2e2ac153b849d58cdc99f68f8822f"
+  ],
+  "src/game/three/dents.ts": [
+    "d26d43ce3cb9bd85f982585a0b25bcc8e590bd18c782d5a907661de8c841425f"
   ],
   "src/game/three/environment.ts": [
     "76509d190eeabb44658f377c0487a8217103664d73ed5a3e1888d65e06c9020b"

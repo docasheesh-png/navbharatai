@@ -2,6 +2,7 @@ import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
 import { askStandIn, generateStandIn } from './gameAssets/standInObject';
 import { composeAction } from './gameAssets/composeAction';
 import { composeRule } from './gameAssets/composeRule';
+import { composeEffect } from './gameAssets/composeEffect';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
@@ -10413,6 +10414,20 @@ export class ToolDispatcher {
           ...(made.combat.bleed ? [`a hit enemy bleeds for ${made.combat.bleed.seconds} s`] : []),
         ];
         return `The rule is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}: ${parts.join('; ')}. The kit runs it by itself — src/game/core/rules.ts for the "when" rules, the Health in src/game/systems/combat.ts for combat. The game only has to emit the events and give every fighter a Health (and call its tick(delta) every step for bleeding). Do not also listen for it yourself — it would count twice.`;
+      }
+
+      case 'compose_effect': {
+        // Any visual effect the user imagines, as a particle spec the kit plays (admin 2026-11-24; gameAssets/composeEffect.ts).
+        const rec = (input as { name?: unknown; description?: unknown; effect_json?: unknown }) || {};
+        const name = String(rec.name ?? '').trim().slice(0, 40);
+        const description = String(rec.description ?? '').trim().slice(0, 200);
+        const supplied = typeof rec.effect_json === 'string' && rec.effect_json.trim() ? rec.effect_json : undefined;
+        const made = await composeEffect(name, description, askStandIn, supplied);
+        if (made.kind === 'refused') refuse(made.reason);
+        if (made.kind === 'library') return `The kit already has the "${made.name}" effect: ctx.particles.burst('${made.name}', x, y, z). Nothing was written.`;
+        const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
+        this.scheduleCheckpoint('game effect');
+        return `The "${made.spec.name}" effect is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Play it with ctx.particles.burst('${made.spec.name}', x, y, z) wherever it should appear (src/game/fx/particles.ts reads the file by itself); for a lasting effect, burst it again every few tenths of a second while it lasts.`;
       }
 
       case 'generate_stand_in': {

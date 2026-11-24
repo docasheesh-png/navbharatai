@@ -58,6 +58,8 @@ export const PRODUCES_WORK_TOOLS: ReadonlySet<string> = new Set([
   'compose_action',
   // writes src/game/rules/<name>.ts — a game rule as data (gameAssets/composeRule.ts)
   'compose_rule',
+  // writes src/game/effects/<name>.ts — a particle effect (gameAssets/composeEffect.ts)
+  'compose_effect',
 ]);
 
 /** Families whose every member writes code into the app (`generate_auth`, `codemod_rename`, …). */

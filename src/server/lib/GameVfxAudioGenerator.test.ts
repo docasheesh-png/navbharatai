@@ -78,7 +78,10 @@ describe('particles — the difference between an effect and a frame-rate bug', 
   });
 
   it('an unknown preset falls back instead of throwing mid-fight', () => {
-    expect(particles).toContain('PARTICLE_PRESETS[preset] ?? PARTICLE_PRESETS.impact');
+    // Since G10 (2026-11-24) an effect is looked up by name — the game's own first, then the presets — and anything else
+    // falls back to impact, said once (specFor).
+    expect(particles).toContain('const spec = specFor(preset);');
+    expect(particles).toMatch(/if \(preset\) return preset;[\s\S]{0,260}return PARTICLE_PRESETS\.impact;/);
   });
 
   it('every preset is complete — a missing field is a silently invisible effect', () => {

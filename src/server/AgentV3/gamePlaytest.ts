@@ -47,7 +47,11 @@ import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead, type Heap
 import { withoutComments } from '../lib/codeOnly';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
-export const PLAYTEST_BUDGET_MS = 60_000;
+// S4 (admin 2026-11-24, "aapke suggestion ke anusar"): 60 s → 90 s, so a round can be played for up to 45 s to see the game
+// progress. The route holds PLAYTEST_RESERVE_MS (buildHeadroom.ts, 95 → 125 s) for it.
+export const PLAYTEST_BUDGET_MS = 90_000;
+/** S4: the longest a round is played to see the score or the level move. */
+export const PROGRESS_PLAY_MS = 45_000;
 const LOAD_MS = 15_000;
 const TOOLS_DIR = '/home/user/.e-tools';
 
@@ -298,6 +302,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     // The script's OWN deadline (autopsy 61279465): it reports what it measured, and where it got to,
     // before the route's outer timeout (budget + 20 s) kills it with nothing to show.
     budgetMs: PLAYTEST_BUDGET_MS,
+    // S4: how long a round is played to see the score or the level move (stops early once it does).
+    progressMs: PROGRESS_PLAY_MS,
     // The read-only geometry look (gameGeometryProbe.ts) — false when AGENTV3_GAME_GEOMETRY_PROBE=off.
     geometry: gameGeometryProbeEnabled(env),
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
@@ -521,6 +527,82 @@ async function compare(page, a, b) {
     const mean = sum / n;
     return { change: (diff / (n * 3 * 255)) * 100, spread: Math.sqrt(Math.max(0, sum2 / n - mean * mean)), brightness: mean };
   }, [a, b]);
+}
+
+// S4 (admin 2026-11-24): HOW THE PICTURE LOOKS — decoded at 96x54: how many distinct colours (4 bits a channel) and how
+// much of it is an edge (neighbours whose brightness differs by more than 24). A flat or grey box has few of both.
+async function looks(page, b) {
+  return page.evaluate(async (b64) => {
+    const blob = await (await fetch('data:image/png;base64,' + b64)).blob();
+    const bmp = await createImageBitmap(blob);
+    const W = 96, H = 54;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.drawImage(bmp, 0, 0, W, H);
+    const d = g.getImageData(0, 0, W, H).data;
+    const seen = new Set(); let edges = 0, pairs = 0;
+    const lum = (i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      seen.add(((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4));
+      if (x + 1 < W) { pairs++; if (Math.abs(lum(i) - lum(i + 4)) > 24) edges++; }
+      if (y + 1 < H) { pairs++; if (Math.abs(lum(i) - lum(i + W * 4)) > 24) edges++; }
+    }
+    return { colors: seen.size, edges: Math.round((edges / Math.max(1, pairs)) * 1000) / 1000 };
+  }, b).catch(() => null);
+}
+
+// S4: HOW FAST THE CONTROLS FEEL — the milliseconds from pressing RIGHT to the first scene object that was still at idle
+// moving. Read from the kit's scene hook (three.js scenes only); null where there is no scene to read, -1 when nothing
+// that was still moved within 600 ms (the controls probe already judges a game that does not respond at all).
+async function feel(page) {
+  const a = await snapScene(page);
+  if (!a || !a.objs || !a.objs.length) return null;
+  await page.waitForTimeout(150);
+  const b = await snapScene(page);
+  const idleMoved = new Set();
+  const im = sceneMoves(a, b);
+  if (im) for (const [id, v] of im) if (Math.hypot(v.dx, v.dz) > 0.02) idleMoved.add(id);
+  const t0 = Date.now();
+  let ms = -1;
+  await page.keyboard.down('ArrowRight');
+  try {
+    while (Date.now() - t0 < 600) {
+      const m = sceneMoves(b, await snapScene(page));
+      if (m && [...m].some(([id, v]) => !idleMoved.has(id) && Math.hypot(v.dx, v.dz) > 0.02)) { ms = Date.now() - t0; break; }
+      await page.waitForTimeout(16);
+    }
+  } finally { await page.keyboard.up('ArrowRight').catch(() => {}); }
+  await page.waitForTimeout(300);
+  return ms;
+}
+
+// S4: DOES THE GAME PROGRESS? A round is played for up to cfg.progressMs (the keys a player uses most, a tap on the game),
+// reading the kit's own state (window.__nbKit score, window.__nbRules score and level) every 1.5 s; it stops as soon as
+// the score or the level has moved. null when the game reports no state to read.
+async function progress(page, box, ms) {
+  const read = () => page.evaluate(() => {
+    const k = window.__nbKit, r = window.__nbRules;
+    const score = k && k.score ? Number(k.score()) : r ? Number(r.score) : NaN;
+    const level = r && typeof r.level === 'number' ? r.level : NaN;
+    return { score: Number.isFinite(score) ? score : null, level: Number.isFinite(level) ? level : null };
+  }).catch(() => null);
+  const start = await read();
+  if (!start || (start.score === null && start.level === null)) return null;
+  const t0 = Date.now();
+  let end = start, k = 0;
+  const moved = (x) => x && ((x.score !== null && start.score !== null && x.score > start.score) || (x.level !== null && start.level !== null && x.level > start.level));
+  while (Date.now() - t0 < ms) {
+    const key = ['ArrowRight', 'ArrowUp', 'Space', 'ArrowLeft', 'KeyD', 'KeyW'][k++ % 6];
+    await page.keyboard.down(key);
+    if (box) await page.mouse.click(box.x + box.w / 2, box.y + box.h / 2).catch(() => {});
+    await page.waitForTimeout(700);
+    await page.keyboard.up(key);
+    await page.keyboard.press('Space').catch(() => {});
+    await page.waitForTimeout(800);
+    end = (await read()) || end;
+    if (moved(end)) break;
+  }
+  return { start, end, ms: Date.now() - t0, advanced: !!moved(end) };
 }
 
 // WHICH WAY THE WORLD MOVES (Q-861) — read from CONSECUTIVE frames, inside the page, right after the game drew.
@@ -850,6 +932,7 @@ try {
   out.idle = Math.round(idle.change * 100) / 100;
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
+  out.looks = await looks(page, b); // S4: colours and edges of the idle picture
   // DOES WHAT IS DRAWN AGREE WITH THE LAND? (2026-11-23, the maps-do-not-join autopsy.) The kit's open world answers once,
   // read-only (window.__nbWorld.geometry, openWorld.ts): drawn terrain against its height, big flat meshes the game added
   // off the ground, road faces pointing down, the player off the ground. Its own 3 s limit; a game without it answers null.
@@ -864,6 +947,8 @@ try {
     if (typeof heap0 === 'number') out.heap = { start: heap0 };
   }
 
+  out.stage = 'timing the controls';
+  out.feelMs = await feel(page).catch(() => null); // S4
   out.stage = 'driving it with the keyboard';
   const moves = [];
   let prev = b;
@@ -1028,6 +1113,9 @@ try {
   // MEASURED only; the verdict decides. The round is ended through the kit's own hook — never by guessing a losing
   // move — and the play-again control is found by its words and PRESSED, as a player would.
   out.playedKeyboard = true;   // from here on a timeout keeps what the keyboard stage measured (the watchdog above)
+  // S4: play a round long enough to see the score or the level move (a timeout keeps what was measured before it).
+  out.stage = 'playing a round to see it progress';
+  out.progression = await progress(page, box, Number(cfg.progressMs) || 0).catch(() => null);
   out.stage = 'checking the score, the sound and play again';
   try {
     out.sounds = await page.evaluate(() => (typeof window.__nbSounds === 'number' ? window.__nbSounds : null));
@@ -1281,6 +1369,12 @@ export function probeStarvedNote(r: SceneRead | null | undefined, min = PROBE_MI
 }
 
 export interface PlaytestRun {
+  /** S4: the idle picture at 96×54 — distinct colours (4 bits a channel) and the fraction of it that is an edge. */
+  looks?: { colors: number; edges: number } | null;
+  /** S4: ms from pressing RIGHT to the first still scene object moving; -1 none within 600 ms; null no scene to read. */
+  feelMs?: number | null;
+  /** S4: a round played to see the score or the level move. null when the game reports no state. */
+  progression?: { start: { score: number | null; level: number | null }; end: { score: number | null; level: number | null }; ms: number; advanced: boolean } | null;
   ok: boolean;
   error?: string;
   /** The size (m) of the vehicle mesh the chase camera sat INSIDE while driving (autopsy 61279465), when it did. */
@@ -1381,11 +1475,17 @@ export function parsePlaytest(stdout: string | null | undefined): PlaytestRun {
  */
 export const BROWSER_INTERVENTION = /\[Intervention\]|unable to preventdefault inside passive event listener/i;
 
-export type Dimension = 'runs' | 'responds' | 'mobile' | 'stable' | 'smooth' | 'alive' | 'replay';
+export type Dimension = 'runs' | 'responds' | 'mobile' | 'stable' | 'smooth' | 'alive' | 'replay' | 'feel' | 'progression' | 'visual';
+/** S4: the dimensions a run measures only when it can (a three.js scene, a game that reports its state, a picture). */
+export const NEW_DIMENSIONS: readonly Dimension[] = ['feel', 'progression', 'visual'];
 
 /** How much each dimension weighs in the overall score. A game nobody can control is not a game. */
+//
+// S4 (admin 2026-11-24): the seven old weights are kept in proportion (× 0.8, 80 points) and the three new ones take 20
+// (feel 8, progression 6, visual 6). A dimension a run did not measure costs nothing and the rest are re-weighted, so a
+// game measured only on the old seven scores EXACTLY what it scored before.
 export const DIMENSION_WEIGHTS: Readonly<Record<Dimension, number>> = {
-  runs: 20, responds: 25, mobile: 15, stable: 15, replay: 10, smooth: 10, alive: 5,
+  runs: 16, responds: 20, mobile: 12, stable: 12, replay: 8, smooth: 8, alive: 4, feel: 8, progression: 6, visual: 6,
 };
 
 /** Below this mean change (0–100 at 48×27) two frames are "the same picture". */
@@ -1407,6 +1507,9 @@ export const DIMENSION_FIX: Readonly<Record<Dimension, string>> = {
   smooth: 'The game crawls even before any action — reduce draw calls (merge, instance, lite detail) and allocations per frame.',
   alive: 'Nothing moves until a key is pressed — add idle motion (the world, an enemy, a hint) so it reads as a game.',
   replay: 'Nothing brings the player back — keep a best score and progress (startMeta) and a one-tap Play again.',
+  feel: 'The controls are slow to answer — move the player in the same step the key is read (input in update, never a timer or an await).',
+  progression: 'Nothing moves forward while it is played — make the score, the level or the round advance as the player plays.',
+  visual: 'The picture is flat — give the world colour, light and detail (a lit scene, textures, a sky), not one plain colour.',
 };
 
 export interface PlaytestScore {
@@ -1416,6 +1519,8 @@ export interface PlaytestScore {
   respondedTo: string[];
   /** Dimensions our check never reached (it ran out of time first): not scored, never a defect (Q-3230). */
   unmeasured?: Dimension[];
+  /** S4: the new dimensions (feel, progression, visual) this run could not measure — not scored, never a defect. */
+  notMeasured?: Dimension[];
   /** A driving game whose picture stayed still at idle AND while the accelerator was held — see below. */
   stalledVehicle?: boolean;
   /** A driving game whose road moved UP the screen as it drove — the camera faces the vehicle (Q-861). */
@@ -1616,16 +1721,28 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   const smooth = fps >= 45 ? 100 : fps >= 25 ? 85 : fps >= 12 ? 60 : fps >= 5 ? 35 : 10;
   const alive = idle >= STILL_BELOW ? 100 : 60;
   const rep = (replay.progress ? 60 : 0) + (replay.restart ? 40 : 0);
-  const dimensions: Record<Dimension, number> = { runs, responds, mobile, stable, smooth, alive, replay: rep };
+  // S4: feel (≤100 ms = 100, ≥400 ms = 0), progression (the score or level moved in a round), visual (colours and edges).
+  const feelMs = typeof run.feelMs === 'number' && run.feelMs >= 0 ? run.feelMs : null;
+  const feel = feelMs === null ? 0 : Math.round(Math.max(0, Math.min(100, ((400 - feelMs) / 300) * 100)));
+  const progression = run.progression ? (run.progression.advanced ? 100 : 0) : 0;
+  const lk = run.looks && typeof run.looks.colors === 'number' && typeof run.looks.edges === 'number' ? run.looks : null;
+  const visual = lk ? Math.round(50 * Math.min(1, lk.colors / 24) + 50 * Math.min(1, lk.edges / 0.04)) : 0;
+  const dimensions: Record<Dimension, number> = { runs, responds, mobile, stable, smooth, alive, replay: rep, feel, progression, visual };
   // A dimension our own check never reached is NOT a zero (Q-3230): it costs no points and names no defect.
   const unmeasured: Dimension[] = phoneUnmeasured(run) ? ['mobile'] : [];
+  // S4's three are kept apart (notMeasured): an old run then reports exactly what it reported before.
+  const notMeasured: Dimension[] = [];
+  if (feelMs === null) notMeasured.push('feel');
+  if (!run.progression) notMeasured.push('progression');
+  if (!lk) notMeasured.push('visual');
+  const skip = [...unmeasured, ...notMeasured];
   let total = 0, weight = 0;
-  for (const d of Object.keys(DIMENSION_WEIGHTS) as Dimension[]) { if (unmeasured.includes(d)) continue; total += dimensions[d] * DIMENSION_WEIGHTS[d]; weight += DIMENSION_WEIGHTS[d]; }
+  for (const d of Object.keys(DIMENSION_WEIGHTS) as Dimension[]) { if (skip.includes(d)) continue; total += dimensions[d] * DIMENSION_WEIGHTS[d]; weight += DIMENSION_WEIGHTS[d]; }
   // The weakest dimension is the one costing the most points, so a tie goes to what matters more.
   let weakest: Dimension = 'responds';
   let worst = -1;
   for (const d of Object.keys(DIMENSION_WEIGHTS) as Dimension[]) {
-    if (unmeasured.includes(d)) continue;
+    if (skip.includes(d)) continue;
     const lost = (100 - dimensions[d]) * DIMENSION_WEIGHTS[d];
     if (lost > worst) { worst = lost; weakest = d; }
   }
@@ -1634,6 +1751,7 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   return {
     overall: Math.round(total / weight), dimensions, weakest, respondedTo,
     ...(unmeasured.length ? { unmeasured } : {}),
+    ...(notMeasured.length ? { notMeasured } : {}),
     ...(stalledVehicle ? { stalledVehicle: true } : {}),
     ...(cameraFacesVehicle ? { cameraFacesVehicle: true } : {}),
     ...(steeringMirrored ? { steeringMirrored: true } : {}),
@@ -1649,6 +1767,19 @@ export function phoneUnmeasured(run: PlaytestRun): boolean {
 /** At or above this, with nothing at zero, a game is reported as playable. */
 export const PLAYABLE_SCORE = 75;
 
+/**
+ * 🌟 A GOOD GAME, NOT ONLY A PLAYABLE ONE (S4, admin 2026-11-24: "aapke suggestion ke anusar"). "Good" is said ONLY when it
+ * is measured: an overall of GOOD_SCORE or more, no measured dimension at zero, the progression actually measured, and
+ * every rule the user named that could be checked working. Anything less is "playable", never "good".
+ */
+export const GOOD_SCORE = 88;
+export function isGoodGame(score: PlaytestScore, rules?: ReadonlyArray<{ verdict: string }> | null): boolean {
+  const un = [...(score.unmeasured ?? []), ...(score.notMeasured ?? [])];
+  if (score.overall < GOOD_SCORE || un.includes('progression')) return false;
+  if ((Object.keys(score.dimensions) as Dimension[]).some((d) => !un.includes(d) && score.dimensions[d] === 0)) return false;
+  return !(rules ?? []).some((r) => r.verdict === 'not-held');
+}
+
 export interface PlaytestVerdict {
   code: 'GAME_PLAYTEST_OK' | 'GAME_PLAYTEST_ISSUES' | 'GAME_PLAYTEST_NOT_RUN';
   severity: 'info' | 'warning';
@@ -1659,6 +1790,7 @@ export interface PlaytestVerdict {
 
 const LABEL: Readonly<Record<Dimension, string>> = {
   runs: 'Runs', responds: 'Controls', mobile: 'Phone', stable: 'Stable', smooth: 'Smooth', alive: 'Alive', replay: 'Replay',
+  feel: 'Feel', progression: 'Progress', visual: 'Looks',
 };
 
 /**
@@ -1733,14 +1865,15 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   if (checkerLacksWebGL(run)) return playtestNotRunVerdict('the checking browser could not create a WebGL context, so this 3D game could not be drawn or played here — that is NavBharatAI\'s checker, not the game');
   if (!run.ok) return playtestNotRunVerdict(run.error || run.diagnostic || '');
   const score = scorePlaytest(run, replay);
-  const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).map((d) => `${LABEL[d]} ${(score.unmeasured ?? []).includes(d) ? 'not checked' : score.dimensions[d]}`).join(' · ');
+  // A new dimension (S4) the run could not measure is left off the card, so an old run reads exactly as before.
+  const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).filter((d) => !(score.notMeasured ?? []).includes(d)).map((d) => `${LABEL[d]} ${(score.unmeasured ?? []).includes(d) ? 'not checked' : score.dimensions[d]}`).join(' · ');
   // Said in the head, never as a defect of the game: our check ran out of time, and this is the part it did not reach.
   const unfinishedNote = run.partial && run.unfinished ? ` The check ran out of time while ${run.unfinished}, so ${phoneUnmeasured(run) ? 'play on a phone (touch) was not checked' : 'that part was not checked'} — that is NavBharatAI's check, not the game.` : '';
   const played = score.respondedTo.length ? `it responded to ${score.respondedTo.join(', ')}` : 'it did not respond to the arrows/WASD, Space or a drag';
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
   const pictureNote = typeof run.brightness === 'number' ? `; picture brightness ${run.brightness}/255, contrast ${run.spread ?? 0}` : '';
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${firstPlayError(run)}` : '';
-  const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay' && !(score.unmeasured ?? []).includes(d));
+  const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay' && !NEW_DIMENSIONS.includes(d) && !(score.unmeasured ?? []).includes(d)); // S4: the new three decide "good", never "playable"
   const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored && !score.cameraInsideVehicle;
   /**
    * 🔴 A PROBE THAT COULD NOT LOOK DOES NOT READ AS A PASS (Q-1038) — `playtestNotRunVerdict`'s own
@@ -1809,7 +1942,8 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
     rc?.ended === 'gameover' ? (rc.pressed && rc.after === 'playing' ? ` Play again works ("${rc.pressed}").` : ' Play again did NOT start a new round.') : '',
   ].join('');
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}${probeNote}${unfinishedNote}`;
-  if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
+  // "Good" only when measured (S4): said in the head of a passing run, and only then.
+  if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: isGoodGame(score, run.rules) ? `A good game — ${head}` : head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
     : score.cameraInsideVehicle ? `${CAMERA_INSIDE_VEHICLE_FIX} (measured: inside a ${(run.cameraInside ?? []).join(' × ')} m part of it)`
     : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX

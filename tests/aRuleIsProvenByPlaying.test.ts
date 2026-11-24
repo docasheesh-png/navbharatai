@@ -62,7 +62,8 @@ describe('the probe list and its message', () => {
 describe('🔒 the script', () => {
   const src = gamePlaytestModule({ ...gamePlaytestConfig('http://x'), rules: [...PROBED_RULES], ruleEvents: RULE_EVENTS }, '');
   it('runs the probes after the Play again check, from window.__nbRules, with event names as data', () => {
-    expect(src.indexOf('window.__nbRules')).toBeGreaterThan(src.indexOf('out.restartCheck = { ended, pressed, after }'));
+    // The rule probe's own read (const h = …); S4's progression round reads the same state earlier, for the score only.
+    expect(src.indexOf('const h = window.__nbRules')).toBeGreaterThan(src.indexOf('out.restartCheck = { ended, pressed, after }'));
     expect(src).toMatch(/h\.emit\(ev\.enemyDied/);
     expect(src).not.toMatch(/'ENEMY_DIED'/);
   });

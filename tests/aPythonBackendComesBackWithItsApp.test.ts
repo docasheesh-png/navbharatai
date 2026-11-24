@@ -121,7 +121,11 @@ describe('Q-284 · the platform knows the Python backend and how to start it', (
   const venvWorks = spawnSync('python3', ['-c', 'import venv, ensurepip']).status === 0;
   (venvWorks ? it : it.skip)('the boot really creates the venv, starts the server, and is a no-op the second time', () => {
     const root = mkdtempSync(join(tmpdir(), 'nbai-pyboot-'));
-    const port = 20000 + Math.floor(Math.random() * 20000);
+    // Q-3329: a port the OS says is free right now, never a random guess another test (or process) may hold.
+    const port = Number(spawnSync('python3', ['-c', "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1]); s.close()"], { encoding: 'utf8' }).stdout.trim()) || 20000 + Math.floor(Math.random() * 20000);
+    // Is anything listening on the port, asked from outside the boot script?
+    const listening = () => spawnSync('python3', ['-c', `import socket; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', ${port})); s.close()`]).status === 0;
+    const logTail = () => { try { return readFileSync('/tmp/nbai-backend.log', 'utf8').split('\n').slice(-12).join('\n'); } catch { return '(no backend log)'; } };
     try {
       mkdirSync(join(root, 'api'));
       writeFileSync(join(root, 'api/requirements.txt'), '');
@@ -132,8 +136,15 @@ describe('Q-284 · the platform knows the Python backend and how to start it', (
         cwd: root, encoding: 'utf8', timeout: 120_000,
         env: { ...process.env, PIP_NO_INDEX: '1', PIP_DISABLE_PIP_VERSION_CHECK: '1' },
       });
-      expect(readBackendBoot(run()).state).toBe('up');
-      expect(readBackendBoot(run()).state).toBe('already');
+      // 🔎 Q-3329 (a CI-only "not-up" on the second boot): each step says what it saw, so the next occurrence names
+      // whether the first server died between the boots or the boot's own port probe missed a live server.
+      const first = run();
+      expect(readBackendBoot(first).state, `first boot:\n${first}\nlog:\n${logTail()}`).toBe('up');
+      const aliveBetween = listening();
+      expect(aliveBetween, `the server the first boot started is not listening on ${port} before the second boot\nfirst boot:\n${first}\nlog:\n${logTail()}`).toBe(true);
+      const second = run();
+      const verdict = readBackendBoot(second);
+      expect(verdict.state, `second boot (${verdict.reason}; listening now: ${listening()}):\n${second}\nlog:\n${logTail()}`).toBe('already');
     } finally {
       spawnSync('bash', ['-c', `pkill -f "http.server ${port}" || true`]);
       rmSync(root, { recursive: true, force: true });

@@ -103995,3 +103995,19 @@ Admin: *"user jo bole, woh agar kit me nahi hai, navbharatai ai ko api call kar 
 - `runGamePlaytest`'s ~140-line body (play, judge, defects, geometry, too-heavy, made-worse/undo, fix verdict, rule probes, scope, not-run and DOM-game lines) moved to `src/server/AgentV3/buildPhases/gamePlaytestPhase.ts`, unchanged in behaviour. The route builds ONE `facts` object; the phase plays only when every fact allows it and otherwise says why from the SAME facts, so the gate and the reason cannot disagree by construction. It returns the proof, the gate value and the measured defects; the route keeps them.
 - Eight route imports only the moved body used were removed. The phase census now accepts a phase imported by another phase the route imports (`gameRuleProbes`, via the playtest phase).
 - Locks: `theBuildRouteIsSplitByPhase` S7 block (four behaviour tests through the ports, plus a census that the body is not back inline); eleven route-pin tests re-pinned to the phase file. Full local suite: 57,697 passed; the two remaining local failures are this sandbox's symlinked node_modules (`nodeModulesIsNotAFile`, a ragdoll test's `cannon-es`).
+
+## 2026-11-24 — Q-2768: a file the saved work imports that nobody wrote is named in the hand-off
+
+- **Root cause:** the fast-lane salvage hand-off listed what exists (the saved files) and the missing entry, never what the saved files NEED that does not exist. BR2002's `ServicesSection.css` was planned, imported and never written; the hand-off typecheck cannot see a stylesheet, so the app stayed blank ~40 s.
+- **Fix (class + sibling):** `src/server/AgentV3/salvageMissingImports.ts` — `loadedRelativeSpecifiers` (named, re-export, bare side-effect, dynamic; comments ignored), `missingImportsOfSaved` (turn files, turn-start project, then bounded sandbox reads, so an existing starter file is never named), `savedWorkMissingLine` (one call, bounded at 10 s). Wired at both hand-off doors: the fast-lane salvage block and the one-shot's `steeringSalvage`.
+- **Lock:** `tests/aHandOffNamesWhatTheSavedWorkImports.test.ts` (reverted-and-failed). `initialLaneDeclineRoute` env given the new helper.
+
+## 2026-11-24 — Q-2765: one shared name has one owner, and the other planned files are told
+
+- **Root cause:** the fast lane's owner choice (`helperOwners`, `valueOwnerFor`) changed only the owner's purpose. A second planned file whose purpose also claimed the same shared name (BR2001: `src/utils/apps.tsx` and `src/utils/system.ts`, two app registries) kept claiming it, and each isolated per-file call reads its own purpose first.
+- **Fix:** `SimpleBuilder.disownSharedNames` runs after both owner choices: every other planned code file whose purpose names an owned symbol is told, in its own purpose, to import it from the owner and never define it. Whole names only, idempotent.
+- **Lock:** `tests/oneSharedNameHasOneOwner.test.ts` (reverted-and-failed). **Open:** whether BR2001's two registries used the same contract name was not re-read from the report (the build-report connector needs a fresh sign-in).
+
+## 2026-11-24 — Q-3329: the Python boot test now names its own failure (still OPEN)
+
+- The CI-only failure (`not-up` on the second boot) came after the boot's 30 s wait loop, so the first server was not answering at all for 30 s: it died, or never owned the port. The test now uses a port the OS reports free, checks from outside that the first server is listening before the second boot, and prints both outputs, the reason and the backend log on failure. Root cause not yet proven; the row stays OPEN until the next occurrence names it.

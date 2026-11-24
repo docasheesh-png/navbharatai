@@ -3,7 +3,7 @@
 - **Library ID:** `modern-house-h01`
 - **Category:** building
 - **Format:** self-contained glTF 2.0 binary (`.glb`)
-- **Scale:** metres; declared model height 5.12 m
+- **Scale:** metres; Y-up glTF coordinates; declared model height 5.12 m
 - **Geometry:** 86 authored box components grouped into 12 material meshes; 1,032 triangles
 - **Reference:** owner-provided exterior elevation and floor-plan image
 - **License:** CC BY 4.0; commercial use and redistribution in games and source exports are permitted with the supplied attribution

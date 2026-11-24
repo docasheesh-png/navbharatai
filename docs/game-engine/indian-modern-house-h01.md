@@ -7,7 +7,12 @@
 - **Geometry:** 86 authored box components grouped into 12 material meshes; 1,032 triangles
 - **Reference:** owner-provided exterior elevation and floor-plan image
 - **License:** CC BY 4.0; commercial use and redistribution in games and source exports are permitted with the supplied attribution
-- **Build:** `node scripts/library/buildIndianModernHouse.mjs` deterministically writes the pinned file under `assets/game-models/`
+- **File:** the `.glb` is COMMITTED under `assets/game-models/`, like every other library model. The registry is a list of
+  files that exist in a checkout, so a model generated at build time would be absent from every reader that runs before a
+  build — the test step among them, which is how this entry first went red.
+- **Regenerate:** `node scripts/library/buildIndianModernHouse.mjs` deterministically rewrites that exact file (same bytes,
+  same sha256). `tests/indianModernHouseAsset.test.ts` re-runs it and compares against the pinned digest, so the script and
+  the committed binary can never drift.
 
 The model follows the reference's pale plaster, mauve feature wall, flat parapet, horizontal upper louvers, porch canopy, stone column accents and entry steps. The interior includes a living area, two bedrooms, kitchen/dining fixtures and partition walls. The front entrance is an open 1.5 m passage; internal room passages are also left open.
 

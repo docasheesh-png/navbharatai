@@ -9,7 +9,10 @@ export const REVIEWED_LIBRARY_BATCH_15: readonly ReviewedAsset[] = [
   {
     provider: 'github',
     id: 'modern-house-h01',
-    revision: '67502c880f8889f6e8237d45205bf9d996e79f8b2284eaf60573c8868b775f85',
+    // A PACKAGED asset's revision is the first 40 hex of its sha256, exactly as every entry in
+    // batch 14 carries it — `assetIntegration.test.ts` requires 40, and the full digest stays below
+    // as `evidenceRevision`. This read the whole 64-char digest, which is what turned that test red.
+    revision: '67502c880f8889f6e8237d45205bf9d996e79f8b',
     sourceUrl: 'https://github.com/docasheesh-png/navbharatai',
     downloadUrl: 'https://github.com/docasheesh-png/navbharatai',
     packaged: true,

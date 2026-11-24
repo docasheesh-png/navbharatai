@@ -9,12 +9,12 @@ export const REVIEWED_LIBRARY_BATCH_15: readonly ReviewedAsset[] = [
   {
     provider: 'github',
     id: 'modern-house-h01',
-    revision: 'c74250694078d5cf8b1615acfd04c3c6945d79adb2a46c0cb040637d51cf34dd',
+    revision: '67502c880f8889f6e8237d45205bf9d996e79f8b2284eaf60573c8868b775f85',
     sourceUrl: 'https://github.com/docasheesh-png/navbharatai',
     downloadUrl: 'https://github.com/docasheesh-png/navbharatai',
     packaged: true,
-    sha256: 'c74250694078d5cf8b1615acfd04c3c6945d79adb2a46c0cb040637d51cf34dd',
-    bytes: 67900,
+    sha256: '67502c880f8889f6e8237d45205bf9d996e79f8b2284eaf60573c8868b775f85',
+    bytes: 68572,
     libraryCategory: 'building',
     subjects: ['house', 'modern house'],
     animations: [],
@@ -23,7 +23,7 @@ export const REVIEWED_LIBRARY_BATCH_15: readonly ReviewedAsset[] = [
     downloadOrigins: ['https://github.com'],
     review: {
       reviewer: 'NavBharatAI asset admission',
-      evidenceRevision: 'c74250694078d5cf8b1615acfd04c3c6945d79adb2a46c0cb040637d51cf34dd',
+      evidenceRevision: '67502c880f8889f6e8237d45205bf9d996e79f8b2284eaf60573c8868b775f85',
       freeDownload: true
     },
     license: {

@@ -2269,7 +2269,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director, nav, grenade, aimassist. Default = all.',
+            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director, nav, grenade, aimassist, combatrules. Default = all.',
           },
         },
       },
@@ -2289,6 +2289,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         name: { type: 'string', description: 'The action in a few English words, such as "climb ladder" or "pick up gun".' },
         description: { type: 'string', description: 'What it should look like, in a sentence.' },
         action_json: { type: 'string', description: 'Leave empty. The tool asks the model. A caller that already holds a checked plan may pass it.' },
+      } },
+    },
+    {
+      name: 'compose_rule',
+      description: 'Make ANY game rule the user names real, as data the kit runs by itself: scoring ("3 points per zombie"), levels ("next level every 50 points"), game over, how many hits kill an enemy or the player ("the boss dies after 20 shots"), and bleeding. One model call turns the sentence into checked data at src/game/rules/<name>.ts. A rule outside that vocabulary is refused with what it can hold — then write it as code. Call through run_recipe.',
+      input_schema: { type: 'object', required: ['rule'], properties: {
+        rule: { type: 'string', description: 'The rule in the user\'s words, one sentence.' },
+        name: { type: 'string', description: 'A short name for the file, such as "boss-health".' },
+        rule_json: { type: 'string', description: 'Leave empty. The tool asks the model. A caller that already holds a checked plan may pass it.' },
       } },
     },
     {
@@ -3808,6 +3817,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_systems',
   'generate_stand_in',
   'compose_action',
+  'compose_rule',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',
@@ -4045,6 +4055,7 @@ export const RECIPE_TOOLS = [
   'generate_game_runtime',
   'generate_stand_in',
   'compose_action',
+  'compose_rule',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',

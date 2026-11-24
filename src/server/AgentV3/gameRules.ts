@@ -83,10 +83,52 @@ export function gameRulesFrom(text: string | null | undefined): GameRule[] {
   return [...found.values()];
 }
 
+/** Combat rules as data, read by the kit's Health (src/game/systems/combat.ts). */
+export interface GameCombatData { enemyHitsToKill?: number; playerHitsToKill?: number; bleed?: { seconds: number; perSecond: number } }
+
+const NUM_WORDS: Readonly<Record<string, number>> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, saat: 7, aath: 8, nau: 9, das: 10 };
+const HITS = /\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|chaa?r|paa?nch|chhe|saat|aath|nau|das)\s*(?:shots?|hits?|bullets?|goli(?:yon|yo)?|vaar|baar|punch(?:es)?|maar)\b/i;
+const DIES = /\b(kill\w*|die\w*|dead|mar(?:e|na|ega|ta|ne|o)?|maro|khatam)\b|मर|ख़त्म|खत्म/i;
+const PLAYER = /\b(player|me|mujhe|main|mera|hero|i\b)\b/i;
+const BLEED = /\b(bleed\w*|blood\w*|khoon|khun)\b|खून|ख़ून/i;
+
+/**
+ * The combat rules a request states: "enemy 5 goli me mare" → enemyHitsToKill 5; "player 3 hit me mare" → playerHitsToKill
+ * 3; "enemy ko bleeding karwao" → a 3 s bleed. Precision first: a number counts only next to a hit word in a sentence that
+ * also names dying. PURE.
+ */
+export function gameCombatFrom(text: string | null | undefined): GameCombatData {
+  const out: GameCombatData = {};
+  for (const s of sentences(String(text ?? ''))) {
+    const m = s.match(HITS);
+    if (m && DIES.test(s)) {
+      const raw = m[1].toLowerCase();
+      const n = /^\d+$/.test(raw) ? Number(raw) : NUM_WORDS[raw.replace('chaar', 'char').replace('paanch', 'panch')] ?? NUM_WORDS[raw];
+      if (n && n >= 1 && n <= 1000) {
+        if (PLAYER.test(s) && !ENEMY.test(s)) { if (!out.playerHitsToKill) out.playerHitsToKill = n; }
+        else if (!out.enemyHitsToKill) out.enemyHitsToKill = n;
+      }
+    }
+    if (BLEED.test(s) && !out.bleed) out.bleed = { seconds: 3, perSecond: 8 };
+  }
+  return out;
+}
+
+/** The contract lines for the combat rules, or [] — said to the builder so it uses Health and calls tick(). PURE. */
+export function gameCombatLines(c: GameCombatData): string[] {
+  const lines: string[] = [];
+  if (c.enemyHitsToKill) lines.push(`- an enemy dies on hit ${c.enemyHitsToKill}: give every enemy a Health from src/game/systems/combat.ts — the kit reads COMBAT in src/game/gameRules.ts and makes each hit 1/${c.enemyHitsToKill} of its health, whatever the weapon`);
+  if (c.playerHitsToKill) lines.push(`- the player dies on hit ${c.playerHitsToKill}: give the player a Health with diedEvent "PLAYER_DIED"; the kit applies COMBAT.playerHitsToKill`);
+  if (c.bleed) lines.push('- a hit enemy bleeds (blood, and health lost for a few seconds): the kit applies COMBAT.bleed — call each Health\'s tick(delta) every step, or the bleeding never runs');
+  return lines;
+}
+
 /** Does this request need the kit's combat layer (health, damage, enemies, weapons)? PURE. */
 export function wantsCombatKit(text: string | null | undefined, genre: string, features: readonly string[]): boolean {
   if (genre === 'shooter' || genre === 'fighting') return true;
   if (features.includes('enemies') || features.includes('health')) return true;
+  const c = gameCombatFrom(text);
+  if (c.enemyHitsToKill || c.playerHitsToKill || c.bleed) return true;
   return gameRulesFrom(text).some((r) => r.id === 'enemy-dies-score-up' || r.id === 'enemy-hit-health-down');
 }
 

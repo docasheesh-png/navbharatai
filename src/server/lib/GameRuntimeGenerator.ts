@@ -3089,12 +3089,13 @@ export function startRules(rules: readonly GameRule[]): () => void {
   return stop;
 }
 
-/** The game's own rules file (src/game/gameRules.ts), when it has one. A game without it simply has none. */
+/** The game's own rules: src/game/gameRules.ts and every file under src/game/rules/ (one NavBharatAI made on request). */
 export function gameRulesFromProject(): GameRule[] {
   try {
-    const found = import.meta.glob('../gameRules.ts', { eager: true }) as Record<string, { RULES?: unknown }>;
-    const mod = Object.values(found)[0];
-    return validRules(mod && mod.RULES);
+    const found = import.meta.glob(['../gameRules.ts', '../rules/?*.ts'], { eager: true }) as Record<string, { RULES?: unknown }>; // ?* = any name
+    const out: GameRule[] = [];
+    for (const key of Object.keys(found).sort()) out.push(...validRules(found[key] && found[key].RULES));
+    return out;
   } catch { return []; }
 }
 
@@ -3176,21 +3177,45 @@ export function cleanGameRules(raw: unknown): GameRuleData[] {
   return out;
 }
 
-/** The text of src/game/gameRules.ts for these rules. PURE. */
-export function gameRulesFileText(rules: readonly GameRuleData[]): string {
+/** Combat rules as data — the shape src/game/systems/combat.ts reads (cleanCombatRules there). */
+export interface CombatRuleData { enemyHitsToKill?: number; playerHitsToKill?: number; bleed?: { seconds: number; perSecond: number } }
+
+/** Keep only well-formed combat rules (model-supplied). The same limits the kit applies. PURE. */
+export function cleanCombatData(raw: unknown): CombatRuleData {
+  const out: CombatRuleData = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const r = raw as Record<string, unknown>;
+  const whole = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.min(1000, Math.round(v)) : undefined);
+  const e = whole(r.enemyHitsToKill); if (e) out.enemyHitsToKill = e;
+  const p = whole(r.playerHitsToKill); if (p) out.playerHitsToKill = p;
+  const b = r.bleed as Record<string, unknown> | undefined;
+  if (b && typeof b === 'object' && typeof b.seconds === 'number' && typeof b.perSecond === 'number' && Number.isFinite(b.seconds) && Number.isFinite(b.perSecond) && b.seconds > 0 && b.perSecond > 0) {
+    out.bleed = { seconds: Math.min(30, Math.max(0.5, b.seconds)), perSecond: Math.min(10000, Math.max(0.1, b.perSecond)) };
+  }
+  return out;
+}
+
+/** The text of src/game/gameRules.ts (or a src/game/rules/ file) for these rules. PURE. */
+export function gameRulesFileText(rules: readonly GameRuleData[], combat: CombatRuleData = {}, typeImport = './core/rules'): string {
+  const hasCombat = Object.keys(combat).length > 0;
   return [
     '// The rules this game keeps, written by NavBharatAI from your request. src/game/core/rules.ts runs them when',
     '// the first round starts. To change a rule, change a number here; to add one, add a line.',
-    "import type { GameRule } from './core/rules';",
+    `import type { GameRule } from '${typeImport}';`,
     '',
     'export const RULES: GameRule[] = [',
     ...rules.map((r) => `  ${JSON.stringify(r)},`),
     '];',
+    ...(hasCombat ? [
+      '',
+      '// Combat, read by src/game/systems/combat.ts: hits to kill an enemy or the player, and how a hit enemy bleeds.',
+      `export const COMBAT = ${JSON.stringify(combat)};`,
+    ] : []),
     '',
   ].join('\n');
 }
 
-export function generateGameRuntime(include?: string[], opts: { rules?: unknown } = {}): GameRuntimeResult {
+export function generateGameRuntime(include?: string[], opts: { rules?: unknown; combat?: unknown } = {}): GameRuntimeResult {
   const wanted = Array.isArray(include) && include.length
     ? new Set(include.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))
     : null;
@@ -3229,7 +3254,8 @@ export function generateGameRuntime(include?: string[], opts: { rules?: unknown 
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
   const rules = cleanGameRules(opts.rules);
-  if (rules.length && files['src/game/core/rules.ts']) files[GAME_RULES_FILE] = gameRulesFileText(rules);
+  const combat = cleanCombatData(opts.combat);
+  if ((rules.length || Object.keys(combat).length) && files['src/game/core/rules.ts']) files[GAME_RULES_FILE] = gameRulesFileText(rules, combat);
 
   return {
     files,

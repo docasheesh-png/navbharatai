@@ -104011,3 +104011,10 @@ Admin: *"user jo bole, woh agar kit me nahi hai, navbharatai ai ko api call kar 
 ## 2026-11-24 — Q-3329: the Python boot test now names its own failure (still OPEN)
 
 - The CI-only failure (`not-up` on the second boot) came after the boot's 30 s wait loop, so the first server was not answering at all for 30 s: it died, or never owned the port. The test now uses a port the OS reports free, checks from outside that the first server is listening before the second boot, and prints both outputs, the reason and the backend log on failure. Root cause not yet proven; the row stays OPEN until the next occurrence names it.
+
+## 2026-11-24 — G7: any rule the user imagines is run by the kit as data (compose_rule)
+
+Admin: *"navbharatai api call se user ki sabhi ulti sidhi imagination ko real banaye"* (and questions 7–8: bleeding, "5 shoot me marna chahiye").
+- **Root cause:** a combat rule ("5 shots kill", "enemies bleed") lived only as words the builder had to remember; the kit's Health had no notion of either.
+- **Fix:** the kit's `Health` (src/game/systems/combat.ts) reads COMBAT data by itself — `enemyHitsToKill`, `playerHitsToKill`, `bleed { seconds, perSecond }` (blood each half second, can bleed to death) — from src/game/gameRules.ts and every file under src/game/rules/; `core/rules.ts` reads rules/ too. The request's combat words become that data (`gameRules.gameCombatFrom`, EN/Hinglish/Hindi), seeded through `generate_game_runtime({ combat })` and said in the contract. Any other rule: the `compose_rule` recipe (`gameAssets/composeRule.ts`) — ONE model call turns the sentence into the checked vocabulary and writes src/game/rules/<name>.ts; outside the vocabulary it is refused honestly ("write it as code").
+- **Locks:** `anyRuleTheUserImaginesIsRun` (real kit files; reverted-and-failed). AppKnowledgeBase `game_any_rule`. Kit history regenerated.

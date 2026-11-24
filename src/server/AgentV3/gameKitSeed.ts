@@ -52,7 +52,7 @@
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
-import { gameRuleData, gameRulesFrom, wantsCombatKit } from './gameRules';
+import { gameCombatFrom, gameRuleData, gameRulesFrom, wantsCombatKit } from './gameRules';
 import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
 import { analyzeGameRequirements, gameDesignBlock } from './gameDesignDocument';
 import { largeWorldIntent } from './largeWorldIntent';
@@ -295,7 +295,9 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   // rules engine applies them, so "kill an enemy and the score goes up" is kept by the kit, not by the builder's memory.
   if (recipe === 'generate_game_runtime') {
     const rules = gameRuleData(gameRulesFrom(request));
-    return rules.length ? { rules } : undefined;
+    const combat = gameCombatFrom(request);
+    const hasCombat = Object.keys(combat).length > 0;
+    return rules.length || hasCombat ? { ...(rules.length ? { rules } : {}), ...(hasCombat ? { combat } : {}) } : undefined;
   }
   // The spawner imports the 3D world (gameRecipeLayers.ts); a 2D game takes every other system.
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };

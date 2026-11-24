@@ -61,6 +61,7 @@ const REQUIRED_INPUTS: Record<string, Record<string, unknown>> = {
   generate_env_validation: { keys: ['DATABASE_URL'] },
   generate_release_notes: { features: ['Browse items'] },
   compose_action: { name: 'wave' },
+  compose_rule: { rule: 'the boss dies after 20 shots', rule_json: JSON.stringify({ name: 'boss', combat: { enemyHitsToKill: 20 } }) },
   generate_stand_in: {
     subject: 'zzzz widget',
     plan_json: JSON.stringify({ version: 1, label: 'Census widget', parts: [

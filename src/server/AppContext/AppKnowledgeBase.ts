@@ -2181,6 +2181,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
     keywords: ['game rules', 'enemy kill score', 'enemy maaro score badhe', 'kill karne se score', 'dushman', 'score badhe', 'game over', 'jaan kam', 'lives', 'health', 'combat', 'enemy add karo', 'shooting game', 'rules follow'],
   },
   {
+    id: 'game_any_rule',
+    name: 'Any game rule you imagine (shots to kill, bleeding, scoring, levels)',
+    path: 'NavBharatAI Pro → describe the rule in your own words in the game request or a later message (for example "boss 20 goli me mare", "enemy ko bleeding karwao", "har 3 zombie par level badhe")',
+    description: 'NavBharatAI turns the rules you say into rules the game itself runs (2026-11-24): how many hits kill an enemy or the player, whatever the weapon; a hit enemy bleeds (blood, and health lost for a few seconds, and it can bleed to death); points for an enemy or a pickup; next level every so many points; game over when you die. A rule in any words that the game does not have yet is designed by NavBharatAI and added to your game. A rule that cannot be run this way (for example "gravity flips every 10 seconds") is built into the game\'s code instead, and NavBharatAI says so.',
+    howToUse: 'Say the rule plainly: "zombie 3 goli me mare aur khoon nikle", "player 5 hit me mar jaye", "har dushman par 10 point". After the build, play it: the rule is already on.',
+    relatedFeatures: ['game_rules_followed', 'game_character_any_action'],
+    keywords: ['5 goli me mare', 'shots to kill', 'hits to kill', 'bleeding', 'khoon', 'blood', 'enemy health', 'boss health', 'game rule', 'naya rule', 'score rule', 'level up rule', 'imagination', 'kuch bhi'],
+  },
+  {
     id: 'game_character_any_action',
     name: 'Your character does any action you ask for (pick up, open a gate, eat, and more)',
     path: 'NavBharatAI Pro → in a 3D game, ask for the action in your own words (for example "sadak par padi banduk uthao", "gate khol ke ghar me ghuso", "hero khana khaye") → NavBharatAI builds it into the game for the character you chose',

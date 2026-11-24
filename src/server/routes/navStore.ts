@@ -623,6 +623,9 @@ export function registerNavStoreRoutes(app: Express): void {
       const pins = await setAppMartPin(kind, id, pinned);
       publicApprovedApps.forget();
       publicListings.forget();
+      // A pin decides what every visitor to App Mart sees first, so it leaves the same record every
+      // other store-admin decision does (everyAdminDecisionIsAudited.test.ts).
+      audit('STORE_APP_MART_PIN', { reviewer: me?.email || '', kind, id, pinned, slots: pins.length, limit: APP_MART_PIN_LIMIT, result: 'ok' });
       return res.json({ ok: true, pins, limit: APP_MART_PIN_LIMIT });
     } catch (error) {
       if (error instanceof Error && error.message === 'APP_MART_PIN_LIMIT_REACHED') {

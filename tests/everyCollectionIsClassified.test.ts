@@ -322,6 +322,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
    * argument that made Q-766 a decision applies to the web store ALONE, which is why these two can be
    * deleted outright when they were never public.
    */
+  nav_store_admin: { kind: 'platform', why: "ONE admin-owned document (`app_mart_pins`) holding the six App Mart pin slots (appMartPins.ts): `{kind, id, pinnedAt}` per slot, replaced in place inside a transaction, capped at six. No uid, no contact detail, nothing a person owns — an editorial choice by the store admin, and deleting it would silently unpin the storefront" },
   nav_store_apps: { kind: 'de-identified', why: "an APK submission, carrying a whole `developer` block — name, EMAIL, phone, website. Not purchasable; only an `approved` one is served. Pending/rejected is deleted, published is de-identified and unlisted (Q-766)" },
   /**
    * ── The three stores form 4 found (Q-784, 2026-10-09) ──────────────────────────────────────────────

@@ -50,6 +50,9 @@ const PROVIDER_PATTERNS: Array<{ kind: string; re: RegExp }> = [
   { kind: 'google-oauth', re: /\bGOCSPX-[A-Za-z0-9_-]{20,}\b/g },
   // SendGrid
   { kind: 'sendgrid-key', re: /\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g },
+  // Our own gateway keys (locked plan item 5): they were masked only in Pro Chain V2's private copy, so a key printed
+  // anywhere else was left in the clear. Long enough (20+) that an identifier like `qbx_config` is never touched.
+  { kind: 'api-key', re: /\b(?:mtf_live|mtf_test|qubax|qbx)_[A-Za-z0-9._-]{20,}\b/g },
 ];
 
 /** Multi-line / structural secret blocks handled separately (need the `m`/`s` flags). */

@@ -61,6 +61,8 @@ describe('one server evidence policy, with a compiler-free client boundary', () 
       // gateway's import path, which must not load the TypeScript compiler.
       'src/server/AI/TrafficRegistry/controlStore.ts',
       'src/server/AgentV3/SourceSecretRedactor.ts',
+      // Pro Chain V2's admin error line (locked plan item 5): a supplier SDK's error text — plain text, never source evidence.
+      'src/server/AgentV3/proChainV2/redact.ts',
       // Vault/config views and uploaded-content safety are not source-evidence exemptions.
       'src/server/AgentV3/secretFileView.ts',
       'src/server/lib/promptSafety.ts',

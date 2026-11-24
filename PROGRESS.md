@@ -103958,3 +103958,7 @@ Weakness audit P0-1, safe form (automatic game repair stays OFF). Before: only a
 ## 2026-11-24 — Locked plan item 4: the free repair allowance is said to the user
 
 Weakness audit P1-5. The Weak tier's platform-wide daily allowance for automatic button fixes (`explorerRepairBudget.ts`, default 100) stopped repairs with only an admin line and a server `console.warn`. Now `explorerRepairTierGate` carries a `userNote` ("Today's free automatic button fixes are used up … Tap "Fix the button that breaks your app" … comes back tomorrow"), said through `sayRepairGateNote` beside the admin line. The cap (a money rule) is unchanged. Test: `tests/theFreeRepairAllowanceIsSaid.test.ts`.
+
+## 2026-11-24 — Locked plan item 5: one redactor union (Pro Chain V2's private copy)
+
+Weakness audit P1-6, adapted: `SourceSecretRedactor` already wraps the shared `SecretRedactor` by design and is unchanged. The real duplicate was `proChainV2/redact.ts`, a private short pattern list: a JWT, an AWS/GitHub/Google key or a password inside a URL was masked by the shared redactor and NOT there, while our gateway keys (`mtf_live_`, `qbx_`, `qubax_`) were masked ONLY there. Now Pro Chain V2 runs the shared redactor first and keeps only its stricter admin-line shapes on top; the gateway keys (20+ chars) are in the shared list; the error line keeps 1200 chars (was 600), marked with "…" when cut. Test: `tests/oneRedactorUnionHolds.test.ts` (one row per shape, both redactors). The plain-redactor caller census lists `proChainV2/redact.ts` with its reason.

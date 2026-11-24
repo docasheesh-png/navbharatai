@@ -169,7 +169,7 @@ describe('the route wiring — the CODE of each late flip, comments stripped', (
   it('the proof reads the LIVE gate evidence, so a runtime failure recorded after the render still vetoes', () => {
     const at = code.indexOf('const runProof = () => runProvenApp({');
     expect(at).toBeGreaterThan(-1);
-    const body = code.slice(at, at + 700);
+    const body = code.slice(at, at + 1400);
     for (const line of [
       'browserRendered: browserRenderProven',
       'prodBuild: prodBuildOutcome',
@@ -179,7 +179,21 @@ describe('the route wiring — the CODE of each late flip, comments stripped', (
       'runtimeCrashBlocker: buildDiag.hasRuntimeCrashBlocker()',
       // The model's own answer, captured before any platform rewrite (2026-09-26).
       'deliveryRefused: modelAnswer.declined',
-      'stopped: abort.signal.aborted',
+      // Q-2767: the change record's rule, not the raw signal.
+      'stopped: changeWasStopped({ aborted: abort.signal.aborted, cause: abortCauseOf(abort.signal), userStopRecorded: buildWasStopped(buildDiag.report().issues), resultOk: result?.ok === true })',
     ]) expect(body).toContain(line);
+    expect(body).not.toContain('stopped: abort.signal.aborted,');
+  });
+});
+
+describe('Q-2767 (BR2002 D2): an abort that only cut the settling of a successful run does not unprove it', () => {
+  it('🔴 an advisory cap / reaper after a successful result: proven; a user stop: never; an abort before success: never', async () => {
+    const { changeWasStopped } = await import('../src/server/AgentV3/buildAbortCause');
+    const ran = { browserRendered: true, prodBuild: 'ok' as const, deliveryRefused: false, previewFailed: false, pagesFailed: false, journeyFailed: false, runtimeCrashBlocker: false };
+    const proofFor = (i: Parameters<typeof changeWasStopped>[0]) => runProvenApp({ ...ran, stopped: changeWasStopped(i) });
+    expect(proofFor({ aborted: true, cause: 'advisory-cap', userStopRecorded: false, resultOk: true }).proven).toBe(true);
+    expect(proofFor({ aborted: true, cause: 'user-stop', userStopRecorded: false, resultOk: true }).proven).toBe(false);
+    expect(proofFor({ aborted: false, cause: 'unknown' as never, userStopRecorded: true, resultOk: true }).proven).toBe(false);
+    expect(proofFor({ aborted: true, cause: 'advisory-cap', userStopRecorded: false, resultOk: false }).proven).toBe(false);
   });
 });

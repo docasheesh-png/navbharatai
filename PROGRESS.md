@@ -104036,3 +104036,21 @@ Admin: *"navbharatai api call se user ki sabhi ulti sidhi imagination ko real ba
 - **Root cause:** the kit's particles played only nine fixed presets; an imagined effect ("aag ka bawandar") had no form.
 - **Fix:** an effect is a checked ParticleSpec with a name. `particles.ts` reads `src/game/effects/<name>.ts` by itself (through the new `fx/effectFiles.ts`, so particles.ts has no import.meta), `registerEffect` adds one from code, `burst(name, …)` plays it, an unknown name plays impact and says so. `compose_effect` (`gameAssets/composeEffect.ts`): a kit effect asks no model; otherwise ONE model call designs the spec, clamped to what a phone can draw, written to src/game/effects/<name>.ts.
 - **Lock:** `anyEffectTheUserImaginesIsDrawn` (real kit file; census of the kit's preset list; reverted-and-failed). AppKnowledgeBase `game_any_effect`.
+
+## 2026-11-24 — Q-2767: "the run is proven" follows the change record's stop rule (admin decision: yes)
+
+- **Root cause:** `runProof()` passed `stopped: abort.signal.aborted`, so an abort that only cut the settling AFTER a successful result (advisory cap, reaper, lock reclaim, deploy drain) made the run unproven — the same class BR2002 F1 fixed in the change record.
+- **Fix:** `stopped: changeWasStopped({ aborted, cause, userStopRecorded, resultOk })` — one rule for both readers. Billing reads the proof ("the markup needs a preview that ran"); the admin approved the change on 2026-11-24 ("aapke suggestion ke anusar").
+- **Lock:** `tests/runProvenApp.test.ts` Q-2767 block (reverted-and-failed) + the route pin.
+
+## 2026-11-24 — Q-2770: a sectioned spec with product parts is a project, whatever small word its name holds (admin decision: yes)
+
+- **Root cause (two, changed together):** `requestSubject` stopped at a `Project Name:` header's own colon (the app "was" "Project Name"); and the small word in the name ("Quiz") vetoed every mega signal, so BR2003's seven-section spec with 100,000 questions, an admin dashboard, login and a Node/PostgreSQL/Firebase backend was "kept as one build".
+- **Fix:** `requestSubject` reads a name header's value; `analyzeAppScope` adds `sectionedProduct` (≥6 numbered sections and ≥2 `PRODUCT_PARTS`) as a strong signal with its own reason line. A sectioned small app with none of those parts is unchanged.
+- **Lock:** `tests/br2003Autopsy.test.ts` Q-2770 block. Scope suite: 49 files / 764 tests green.
+
+## 2026-11-24 — The repository is proprietary: "All rights reserved", not MIT (admin decision)
+
+- The external fix plan proposed an MIT licence ("owner approved"). Under the external-suggestion rule that was not transcribed: MIT would let any competitor copy the whole engine (ladders, autopsy lessons, the India-first moat), which works against the AIM. Recommended instead: "All rights reserved". The admin approved the recommendation on 2026-11-24 ("aapke suggestion ke anusar banao").
+- Added `LICENSE` (proprietary, no licence granted; third-party components keep their own) and `"license": "UNLICENSED"` in package.json (npm's marker for proprietary code). `license:gate` scans dependencies only, so it is unaffected.
+- Not done here (only the admin can): making the GitHub repository private, if it is public.

@@ -1,0 +1,11 @@
+Copyright (c) 2026 NavBharatAI. All rights reserved.
+
+This repository and everything in it (source code, prompts, build-engine logic, tests,
+documentation, assets and data) is proprietary and confidential.
+
+No licence is granted. You may not copy, modify, merge, publish, distribute, sublicense,
+sell, host as a service, or otherwise use any part of it, in whole or in part, without the
+prior written permission of the copyright holder.
+
+Third-party components keep their own licences, which are listed in their own packages
+and files and are not changed by this notice.

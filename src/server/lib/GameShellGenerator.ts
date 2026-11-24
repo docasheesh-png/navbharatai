@@ -28,6 +28,7 @@
 
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerator';
+import { GAME_ACTIONS, GAME_ACTIONS_PATH } from './GameActionsGenerator';
 import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
@@ -62,6 +63,7 @@ import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
 import { applyPlayerChoice, resolvePlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
+import { updateActions } from './play/actions';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -767,6 +769,9 @@ export class Game {
         this.hero.root.visible = !this.chased;
       }
       this.playerModel?.update(delta);
+      // Any action the game plays on the player (performAction: pick-up, open-door, eat, or one NavBharatAI made), after the
+      // body has posed itself, so the action's pose is the one drawn.
+      updateActions(this.context, delta);
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
@@ -4804,9 +4809,10 @@ const FILES: Record<string, string> = {
   'src/game/play/features.ts': GAME_FEATURES,
   // Who the player is, for every game on the shell: src/game/player.ts swaps the character (2026-11-22).
   [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
+  [GAME_ACTIONS_PATH]: GAME_ACTIONS,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'racingroadgame', 'racecustom', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -4903,6 +4909,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/Game.ts']) files['src/game/play/features.ts'] = FILES['src/game/play/features.ts'];
     // Game reads who the player is (src/game/player.ts) through it, so the two always ship together.
     if (files['src/game/Game.ts']) files[GAME_PLAYER_BODY_PATH] = FILES[GAME_PLAYER_BODY_PATH];
+    if (files['src/game/Game.ts']) files[GAME_ACTIONS_PATH] = FILES[GAME_ACTIONS_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -4919,6 +4926,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
+      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true.\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +
       (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +

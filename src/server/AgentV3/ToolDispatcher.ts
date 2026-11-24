@@ -1,5 +1,6 @@
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
 import { askStandIn, generateStandIn } from './gameAssets/standInObject';
+import { composeAction } from './gameAssets/composeAction';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
@@ -10375,6 +10376,23 @@ export class ToolDispatcher {
         const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
         return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
+      }
+
+      case 'compose_action': {
+        // Any action the user names for their character, made when the kit does not have it (admin 2026-11-24):
+        // library first, else one model call designs it as validated DATA (gameAssets/composeAction.ts).
+        const rec = (input as { name?: unknown; description?: unknown; action_json?: unknown }) || {};
+        const name = String(rec.name ?? '').trim().slice(0, 40);
+        const description = String(rec.description ?? '').trim().slice(0, 200);
+        const supplied = typeof rec.action_json === 'string' && rec.action_json.trim() ? rec.action_json : undefined;
+        const made = await composeAction(name, description, askStandIn, supplied);
+        if (made.kind === 'refused') refuse(made.reason);
+        if (made.kind === 'library') {
+          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger). It plays on the character the user chose. Nothing was written.`;
+        }
+        const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
+        this.scheduleCheckpoint('character action');
+        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it; it plays on the character the user chose, whatever model it is. Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
       }
 
       case 'generate_stand_in': {

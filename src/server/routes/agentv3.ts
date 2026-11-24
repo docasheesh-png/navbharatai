@@ -23235,7 +23235,10 @@ async function noteBuildOutcome(
         runtimeCrashBlocker: buildDiag.hasRuntimeCrashBlocker(),
         // The model's OWN answer, captured before any platform rewrite — see `modelAnswer`.
         deliveryRefused: modelAnswer.declined,
-        stopped: abort.signal.aborted,
+        // Q-2767 (BR2002 D2): the SAME rule the change record uses (buildAbortCause.changeWasStopped) — a user stop always
+        // counts; any other abort only when it came before a successful result. An advisory cap or a reaper that only cut
+        // the settling of a run that already succeeded used to make "the run is proven" false.
+        stopped: changeWasStopped({ aborted: abort.signal.aborted, cause: abortCauseOf(abort.signal), userStopRecorded: buildWasStopped(buildDiag.report().issues), resultOk: result?.ok === true }),
       });
       /** Record that a flip was HELD — admin-only, process-only code, never counted against the app. */
       const recordVerdictHeld = (flip: LateFlip, count: number) => {

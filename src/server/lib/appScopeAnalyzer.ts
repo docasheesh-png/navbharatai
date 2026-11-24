@@ -254,6 +254,16 @@ const HEAVY_INFRA: Array<{ label: string; re: RegExp }> = [
   { label: 'a trained AI / ML model of our own', re: /\btrain (a|an|my|our)?\s?(ai|ml|model|llm|neural)\b|build (a|an|my|our)?\s?(llm|foundation model|language model)\b/i },
 ];
 
+/** The parts of a real product (Q-2770). Each is one signal; a sectioned spec needs two to be a project. */
+const PRODUCT_PARTS: readonly RegExp[] = [
+  /\b(admin (dashboard|panel)|admin\b[^.\n]{0,20}\b(add|edit|delete|manage))/i,
+  /\b(back-?end|node\.?js|express|django|flask|spring boot|server)\b/i,
+  /\b(postgre\w*|mysql|mongo\w*|firestore|firebase|supabase|database)\b/i,
+  /\b(log ?in|sign ?(in|up)|auth\w*|otp)\b/i,
+  /\b(rest )?api\b/i,
+  /\b\d{1,3}(,\d{3})+\+?|\b\d+\s?(k|lakh|thousand|million|crore)\b/i,
+];
+
 /** Single-purpose things that are almost always small, buildable one-shot — used only to KEEP the default. */
 //
 // 🔴 PLURALS (autopsy 2a7fa4b0, 2026-09-25): every word here matched only in the SINGULAR, so "app to
@@ -357,6 +367,14 @@ export function analyzeAppScope(prompt: string): AppScope {
   // them in one pass. A spec that long is a project unless the app ITSELF is the small thing (Q-398's
   // subject reading) — an 8-to-13-part list keeps today's any-word veto, so no new planner call starts.
   const longSpec = shape.features >= MEGA_BULLETS_ALONE && !smallSubject;
+  // 🧱 A SECTIONED SPEC WITH THE PARTS OF A PRODUCT IS A PROJECT, WHATEVER SMALL WORD ITS NAME HOLDS (Q-2770, BR2003; admin
+  // decision 2026-11-24: "yes, as recommended"). "Quiz Master – 1 Lakh Questions" with seven numbered sections, an admin
+  // dashboard, login and a Node/PostgreSQL/Firebase backend was "kept as one build" because "Quiz" vetoed every signal.
+  // Six or more numbered sections AND at least two product parts (a backend, a database, login, an admin panel, an API,
+  // or a stated scale in the thousands) make it a project; a sectioned spec for a small app (no such parts) is unchanged.
+  const sectionCount = sectionedSpecSize(text) ?? 0;
+  const productParts = sectionCount >= 6 ? PRODUCT_PARTS.filter((re) => re.test(text)).length : 0;
+  const sectionedProduct = sectionCount >= 6 && productParts >= 2;
 
   if (famous) signals.push(`asks to clone ${famous.name}`);
   for (const h of heavy) signals.push(`needs ${h.label}`);
@@ -364,10 +382,11 @@ export function analyzeAppScope(prompt: string): AppScope {
   if (statedScale) signals.push(`states a scale of ${shape.scale} pages/screens/files/modules`);
   if (namedSystem && feats < FEATURE_COUNT_MEGA) signals.push(`a big-software system with ${shape.features} named parts`);
   if (longSpec && smallHint) signals.push(`a ${shape.features}-part spec — a project, whatever small word it mentions`);
+  if (sectionedProduct && !longSpec) signals.push(`a ${sectionCount}-section spec with ${productParts} product parts (backend, database, login, admin…) — a project, whatever small word its name holds`);
 
   // ESCALATE only on a STRONG signal. A "clearly small" single-purpose app with NO heavy infra stays
   // direct even if it happens to mention many small features (a todo app with 8 tweaks is still a todo app).
-  const strongMega = !!famous || heavy.length > 0 || (feats >= FEATURE_COUNT_MEGA && !smallHint) || statedScale || namedSystem || longSpec;
+  const strongMega = !!famous || heavy.length > 0 || (feats >= FEATURE_COUNT_MEGA && !smallHint) || statedScale || namedSystem || longSpec || sectionedProduct;
 
   if (strongMega) {
     return { decision: 'analyze', size: 'large', famousApp: famous?.name ?? null, signals, smallHint, smallSubject };

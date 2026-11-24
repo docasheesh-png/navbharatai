@@ -23,7 +23,7 @@ describe('BR1986 closure: a one-second setup failure does not score the ETA', ()
   });
 });
 
-describe('Q-2770 pin: how today\'s sizer reads a "Project Name:" headed spec (no behaviour change here)', () => {
+describe('Q-2770 (BR2003 D6): a sectioned spec with product parts is a project, whatever small word its name holds', () => {
   const SPEC = [
     'Project Name: Quiz Master – 1 Lakh Questions',
     '',
@@ -37,14 +37,20 @@ describe('Q-2770 pin: how today\'s sizer reads a "Project Name:" headed spec (no
     '6. Admin Dashboard', '- add/edit/delete questions, bulk upload, analytics, duplicate detection',
     '7. Technology', '- Node.js backend, PostgreSQL, Firebase auth, cloud storage',
   ].join('\n');
-  it('pins today\'s facts, so a change to the sizer is deliberate', () => {
-    // The subject reader stops at the label's colon: the "app itself" is named "Project Name".
-    expect(requestSubject(SPEC)).toBe('Project Name');
-    // The report's own line, reproduced: a seven-section spec with an admin dashboard, auth, a backend and
-    // 100,000 questions is "kept as one build" because the word "Quiz" vetoes the mega signals. Q-2770 decides
-    // whether that is right; this pin makes any change to it deliberate.
+  it('🔴 the report: the header names the app, and the spec goes to the planner (admin decision 2026-11-24)', () => {
+    expect(requestSubject(SPEC)).toBe('Quiz Master');
     const r = analyzeAppScope(SPEC);
-    expect(r.decision).toBe('direct');
-    expect(r.signals).toEqual(['mentions a small feature ("Quiz") but the app itself is "Project Name" — kept as one build (today\'s behaviour)']);
+    expect(r.decision).toBe('analyze');
+    expect(r.signals.join(' | ')).toMatch(/a 7-section spec with \d product parts/);
+  });
+  it('a small app stays small: a quiz with sections but no product parts, and a one-liner', () => {
+    const small = ['A quiz app.', '1. Questions', '- ten questions', '2. Score', '- show the score', '3. Timer', '- 30 seconds', '4. Colours', '- dark mode', '5. Sound', '- a beep', '6. Restart', '- play again'].join('\n');
+    expect(analyzeAppScope(small).decision).toBe('direct');
+    expect(analyzeAppScope('make a quiz app with 10 questions').decision).toBe('direct');
+  });
+  it('a header without "name" or "title" is not a name header', () => {
+    expect(requestSubject('App: a calculator')).toBe('App');
+    expect(requestSubject('Game Title - Space Run')).toBe('Space Run');
+    expect(requestSubject('**Project Name:** Shop Pro, with cart')).toBe('Shop Pro');
   });
 });

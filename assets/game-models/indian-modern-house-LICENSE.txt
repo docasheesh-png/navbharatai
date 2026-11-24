@@ -1,19 +1,19 @@
-INDIAN MODERN HOUSE — ASSET LICENSE AND ATTRIBUTION
+INDIAN MODERN DUPLEX HOUSE — ASSET LICENSE AND ATTRIBUTION
 
 Copyright and permission
-The original reference photograph was supplied by its owner, who confirmed ownership and expressly authorized public, free in-game use of the resulting 3D asset in NavBharatAI Game Maker.
+The reference image was supplied by its owner, who confirmed ownership and expressly authorized free public in-game use of the resulting 3D asset in NavBharatAI Game Maker.
 
-The owner grants the 3D asset and the owner-contributed reference material, to the extent they are included in this contribution, under the Creative Commons Attribution 4.0 International license (CC BY 4.0):
+The 3D asset and the owner-contributed reference material, to the extent included in this contribution, are licensed under the Creative Commons Attribution 4.0 International license (CC BY 4.0):
 https://creativecommons.org/licenses/by/4.0/
 
 You may copy, redistribute, adapt, and use the asset commercially, including in games, provided that you give appropriate credit, provide a link to the license, and indicate if changes were made. Do not imply endorsement by the contributor or NavBharatAI.
 
 Required attribution:
-"Original reference photo: NavBharatAI community contributor (owner-confirmed); 3D conversion: NavBharatAI. Licensed CC BY 4.0."
+"Reference image: NavBharatAI community contributor (owner-confirmed); 3D conversion: NavBharatAI. Licensed CC BY 4.0."
 
 Asset scope and accuracy
-The packaged GLB is a lightweight, self-contained architectural blockout. It has 59 scene nodes and 70 meshes, with no embedded textures or animation. It is NOT the full showcase specification: PBR texture sets, detailed furnished interior, collision mesh, loot/spawn configuration, and LOD variants are not included in this GLB.
+This GLB contains a two-level architectural shell, interior room partitions, furnished room geometry, a front entrance opening, staircase geometry, upper-floor stairwell opening, balcony and roof terrace. It is a visual architectural asset, not a complete game-ready physics scene. It contains no engine-native collision proxies, baked NavMesh, interactive door animation, character controller, embedded texture images, or animation clips. The target Game Maker must supply and validate collision, navigation, door interaction, lighting, and runtime performance.
 
-The NavBharatAI asset catalogue validates the exact GLB bytes by SHA-256 before serving them. Game developers remain responsible for checking suitability and adding gameplay-specific collision, navigation, lighting, and performance settings.
+The packaged GLB is stored gzip-compressed in the repository. The catalogue pins the SHA-256 of the decoded GLB bytes; the server decompresses it under the asset-size cap and verifies the hash before serving it.
 
 This notice records the contributor's permission for public distribution. The contributor's personal identity is not published; the attribution label above is used instead.

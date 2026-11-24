@@ -22,10 +22,9 @@ adding a library batch (it renders only the missing ones). Pictures exist only f
 picture would need an on-screen credit, and users never see a source name. `tests/theGameLibraryIsOnScreen.test.ts`
 fails when a picture is missing or orphaned.
 
+## Indian Modern Duplex House — Walkthrough Edition
 
-## Indian Modern House (NavBharatAI community contribution)
-
-- Packaged GLB SHA-256: `6ecefba90f495971fe9e6111f8e3698d0a9b129ba74f37d693c44a96968c662b`
-- Uncompressed size: 40,172 bytes; stored as gzip-compressed `.glb.gz`.
+- Packaged GLB SHA-256: `da971c0cacfc1b068d73b19a0506b0789f7833a78fddc1d0b30f6783335fb049`
+- Uncompressed size: 90,072 bytes; stored as gzip-compressed `.glb.gz`.
 - License and required attribution: `indian-modern-house-LICENSE.txt` (CC BY 4.0).
-- Scope: self-contained architectural blockout; no textures, animations, furnished interior, collision mesh, loot configuration, or LOD variants.
+- Scope: two-level architectural shell with interior partitions, furnished rooms, front entry opening, stairway, upper-floor stairwell opening, balcony and roof terrace. It contains geometry only: no embedded textures, animations, engine-native collision proxies, baked NavMesh, or interactive door logic. Character traversal depends on the target Game Maker physics/controller and navigation setup.

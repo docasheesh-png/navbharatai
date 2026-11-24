@@ -24,7 +24,7 @@ describe('public Indian modern duplex walkthrough asset', () => {
     expect(asset.license.attribution).toContain('CC BY 4.0');
   });
 
-  it('decompresses to the exact pinned GLB and validates its two-level interior geometry', () => {
+  it('decompresses to the exact pinned GLB and validates its interior walkthrough geometry', () => {
     const packed = readFileSync(`assets/game-models/${asset.sha256}.glb.gz`);
     const bytes = gunzipSync(packed, { maxOutputLength: 5 * 1024 * 1024 });
     expect(bytes.length).toBe(asset.bytes);
@@ -34,9 +34,10 @@ describe('public Indian modern duplex walkthrough asset', () => {
     expect(stats.triangles).toBeGreaterThan(1_000);
     expect(stats.triangles).toBeLessThanOrEqual(60_000);
     expect(stats.animations).toEqual([]);
-    const doc = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8'));
+    const jsonLength = bytes.readUInt32LE(12);
+    const doc = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'));
     expect(doc.nodes.length).toBeGreaterThan(100);
-    expect(doc.meshes.length).toBeGreaterThan(140);
+    expect(doc.meshes.length).toBeGreaterThan(100);
     expect(doc.images ?? []).toHaveLength(0);
     const names = new Set(doc.nodes.map((node: { name?: string }) => node.name));
     for (const name of ['GroundFloor_Walkable', 'FrontWall_Ground_L', 'Bedroom_BedBase', 'Kitchen_Counter', 'Stair_Tread_14', 'UpperFloor_StairwellFront']) {

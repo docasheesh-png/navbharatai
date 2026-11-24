@@ -10826,7 +10826,8 @@ export class ToolDispatcher {
         const grInclude = Array.isArray(grRec.include)
           ? grRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
-        const gr = generateGameRuntime(grInclude);
+        // The rules the user named (gameRules.ts → gameKitRecipeInput) arrive as data and become src/game/gameRules.ts.
+        const gr = generateGameRuntime(grInclude, { rules: grRec.rules });
         const grWritten = await this.writeRecipeFiles(gr.files, agent);
         const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');

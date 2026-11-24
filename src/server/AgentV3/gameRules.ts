@@ -16,6 +16,29 @@ export type GameRuleId = 'enemy-dies-score-up' | 'pickup-score-up' | 'enemy-hit-
 
 export interface GameRule { id: GameRuleId; said: string; howToBuild: string }
 
+/** A rule as data for the kit's rules engine (src/game/core/rules.ts reads src/game/gameRules.ts). */
+export interface GameRuleData { when: 'ENEMY_DIED' | 'ITEM_COLLECTED' | 'PLAYER_DIED' | 'SCORE_CHANGED'; then: { addScore?: number; gameOver?: boolean; nextLevelEvery?: number } }
+
+/**
+ * The rules the kit runs by itself, as data. A rule here is applied by the engine, so the builder only has to make the
+ * game EMIT the event. enemy-hit-health-down has no data form: it is the wiring of a touch to damage(), which is the
+ * game's own code.
+ */
+export const RULE_DATA: Readonly<Partial<Record<GameRuleId, GameRuleData>>> = {
+  'enemy-dies-score-up': { when: 'ENEMY_DIED', then: { addScore: 10 } },
+  'pickup-score-up': { when: 'ITEM_COLLECTED', then: { addScore: 5 } },
+  'no-health-game-over': { when: 'PLAYER_DIED', then: { gameOver: true } },
+  'score-level-up': { when: 'SCORE_CHANGED', then: { nextLevelEvery: 100 } },
+};
+
+/** The data rules for these contract rules, in order. PURE. */
+export function gameRuleData(rules: readonly GameRule[]): GameRuleData[] {
+  return rules.map((r) => RULE_DATA[r.id]).filter((d): d is GameRuleData => !!d).map((d) => ({ when: d.when, then: { ...d.then } }));
+}
+
+/** Said in each data rule's build line: the engine applies it, the game only emits the event. */
+export const RULES_FILE_NOTE = 'src/game/gameRules.ts, when it exists, already applies this rule through src/game/core/rules.ts — the game only emits the event; never add a second listener for it (it would count twice), change the number in that file instead';
+
 const KILL = /\b(kill(?:s|ed|ing)?|destroy(?:s|ed|ing)?|defeat(?:s|ed|ing)?|shoot(?:s|ing)?|maar(?:o|na|ne|ke|a|e)?|mar(?:o|ne|ke)|khatam)\b|मार/i;
 const ENEMY = /\b(enem(?:y|ies)|zombies?|monsters?|aliens?|boss(?:es)?|dushman|villains?|robots?)\b|दुश्मन|ज़ॉम्बी/i;
 const SCORE = /\b(scores?|points?|ank)\b|स्कोर|अंक/i;
@@ -36,19 +59,19 @@ function sentences(text: string): string[] {
 const RULES: ReadonlyArray<{ id: GameRuleId; test: (s: string) => boolean; said: string; howToBuild: string }> = [
   { id: 'enemy-dies-score-up', test: (s) => KILL.test(s) && ENEMY.test(s) && SCORE.test(s) && RISE.test(s),
     said: 'when an enemy is killed, the score goes up',
-    howToBuild: "give each enemy a Health from src/game/systems/combat.ts (it emits ENEMY_DIED exactly once) and add events.on('ENEMY_DIED', () => addScore(10)) with addScore from src/game/core/state.ts" },
+    howToBuild: `give each enemy a Health from src/game/systems/combat.ts (it emits ENEMY_DIED exactly once); ${RULES_FILE_NOTE}. Without that file, add events.on('ENEMY_DIED', () => addScore(10)) with addScore from src/game/core/state.ts` },
   { id: 'pickup-score-up', test: (s) => PICKUP.test(s) && SCORE.test(s) && RISE.test(s) && !ENEMY.test(s),
     said: 'collecting a pickup raises the score',
-    howToBuild: 'on the overlap of the player and a pickup, remove the pickup and call addScore from src/game/core/state.ts' },
+    howToBuild: `on the overlap of the player and a pickup, remove the pickup and emit ITEM_COLLECTED on events from src/game/core/events.ts; ${RULES_FILE_NOTE}. Without that file, call addScore from src/game/core/state.ts there too` },
   { id: 'enemy-hit-health-down', test: (s) => ENEMY.test(s) && TOUCH.test(s) && HEALTH.test(s) && FALL.test(s),
     said: 'an enemy that reaches the player takes away health or a life',
     howToBuild: 'give the player a Health from src/game/systems/combat.ts with invulnerable frames and diedEvent "PLAYER_DIED", and call its damage() when an enemy touches the player' },
   { id: 'no-health-game-over', test: (s) => HEALTH.test(s) && ZERO.test(s) && GAME_OVER.test(s),
     said: 'when health or lives run out, the game is over',
-    howToBuild: "on PLAYER_DIED (or lives reaching 0) set the game status to 'gameover' through src/game/core/state.ts, and show a play-again screen" },
+    howToBuild: `damagePlayer from src/game/core/state.ts emits PLAYER_DIED when health runs out; ${RULES_FILE_NOTE}. Without that file, set the status to 'gameover' with setStatus on PLAYER_DIED. Either way, show a play-again screen` },
   { id: 'score-level-up', test: (s) => SCORE.test(s) && LEVEL.test(s) && RISE.test(s),
     said: 'reaching a score moves the player to the next level',
-    howToBuild: "on SCORE_CHANGED, advance the level when the score passes the level's target, and make the next level harder" },
+    howToBuild: `${RULES_FILE_NOTE}; it moves state.level up every 100 points and emits LEVEL_UP. Make the next level harder on LEVEL_UP. Without that file, advance the level on SCORE_CHANGED yourself` },
 ];
 
 /** The cause → effect rules the user stated, one per kind, in request order. PURE. */

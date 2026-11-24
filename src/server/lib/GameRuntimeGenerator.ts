@@ -561,10 +561,14 @@ if (typeof window !== 'undefined') {
 }
 
 /** Change state through here so UI and audio can react without polling every frame. */
+let rulesStarted = false;
 export function setStatus(status: GameState['status']): void {
   if (state.status === status) return;
   const previous = state.status;
   state.status = status;
+  // The game's own rules (src/game/gameRules.ts, rules.ts) start with the first round — a dynamic import, so rules.ts
+  // can read this state without an import cycle. A game without the file starts nothing.
+  if (status === 'playing' && !rulesStarted) { rulesStarted = true; void import('./rules').then((m) => m.autoStartRules()).catch(() => { /* no rules */ }); }
   // Leaving PAUSE is a resume, not a new game. It used to emit GAME_STARTED, so anything that starts a
   // round on that event (music, the meta layer's run timer) restarted on every unpause, and
   // GAME_RESUMED — declared, and listened to by the HUD — never fired at all.
@@ -3021,7 +3025,88 @@ export function captureKey(target: Window | HTMLElement, done: (code: string | n
 }
 `;
 
+const RULES = `/**
+ * THE GAME'S RULES, AS DATA (NavBharatAI game factory, admin 2026-11-24: "hame game factory banna hai").
+ *
+ * A rule the user named ("kill an enemy and the score goes up") is one line of DATA in src/game/gameRules.ts, written by
+ * NavBharatAI from the request — not code the builder has to remember to wire. This engine reads that file by itself and
+ * starts when the first round starts (state.ts), so every game on the kit follows its rules the same way:
+ *   { when: 'ENEMY_DIED', then: { addScore: 10 } }      an enemy's Health (systems/combat.ts) dying raises the score
+ *   { when: 'ITEM_COLLECTED', then: { addScore: 5 } }   picking something up raises the score
+ *   { when: 'PLAYER_DIED', then: { gameOver: true } }   the player's death ends the round
+ *   { when: 'SCORE_CHANGED', then: { nextLevelEvery: 100 } }  every 100 points moves to the next level
+ * The game only EMITS the events (the kit already does for Health and damagePlayer). Never add a second listener for a
+ * rule that is here — it would count twice.
+ */
+import { events } from './events';
+import { state, addScore, setStatus } from './state';
+
+export type RuleWhen = 'ENEMY_DIED' | 'ITEM_COLLECTED' | 'PLAYER_DIED' | 'PLAYER_DAMAGED' | 'SCORE_CHANGED';
+export interface RuleThen { addScore?: number; gameOver?: boolean; nextLevelEvery?: number }
+export interface GameRule { when: RuleWhen; then: RuleThen }
+
+const WHEN: ReadonlySet<string> = new Set(['ENEMY_DIED', 'ITEM_COLLECTED', 'PLAYER_DIED', 'PLAYER_DAMAGED', 'SCORE_CHANGED']);
+
+/** Only well-formed rules run: an unknown event or an action of the wrong type is dropped, never guessed. */
+export function validRules(rules: unknown): GameRule[] {
+  if (!Array.isArray(rules)) return [];
+  const out: GameRule[] = [];
+  for (const r of rules) {
+    const when = r && typeof r === 'object' ? (r as { when?: unknown }).when : undefined;
+    const then = r && typeof r === 'object' ? (r as { then?: unknown }).then : undefined;
+    if (typeof when !== 'string' || !WHEN.has(when) || !then || typeof then !== 'object') continue;
+    const t = then as Record<string, unknown>;
+    const clean: RuleThen = {};
+    if (typeof t.addScore === 'number' && Number.isFinite(t.addScore) && t.addScore > 0) clean.addScore = Math.round(t.addScore);
+    if (t.gameOver === true) clean.gameOver = true;
+    if (typeof t.nextLevelEvery === 'number' && Number.isFinite(t.nextLevelEvery) && t.nextLevelEvery > 0) clean.nextLevelEvery = Math.round(t.nextLevelEvery);
+    if (Object.keys(clean).length) out.push({ when: when as RuleWhen, then: clean });
+  }
+  return out;
+}
+
+/** Start the rules; returns a function that stops them. A second start replaces the first. */
+let stopCurrent: (() => void) | null = null;
+export function startRules(rules: readonly GameRule[]): () => void {
+  stopCurrent?.();
+  const offs: Array<() => void> = [];
+  for (const rule of validRules(rules)) {
+    offs.push(events.on(rule.when, (payload?: { livesLeft?: unknown }) => {
+      if (state.status !== 'playing') return;
+      const t = rule.then;
+      if (t.addScore) addScore(t.addScore);
+      if (t.nextLevelEvery) {
+        const target = Math.floor(state.score / t.nextLevelEvery) + 1;
+        if (target > state.level) { state.level = target; events.emit('LEVEL_UP', { level: state.level }); }
+      }
+      // A life lost with lives still left is not the end: damagePlayer says livesLeft, and ends the round itself at 0.
+      const livesLeft = payload && typeof payload.livesLeft === 'number' ? payload.livesLeft : 0;
+      if (t.gameOver && livesLeft <= 0) setStatus('gameover');
+    }));
+  }
+  const stop = () => { for (const off of offs) off(); if (stopCurrent === stop) stopCurrent = null; };
+  stopCurrent = stop;
+  return stop;
+}
+
+/** The game's own rules file (src/game/gameRules.ts), when it has one. A game without it simply has none. */
+export function gameRulesFromProject(): GameRule[] {
+  try {
+    const found = import.meta.glob('../gameRules.ts', { eager: true }) as Record<string, { RULES?: unknown }>;
+    const mod = Object.values(found)[0];
+    return validRules(mod && mod.RULES);
+  } catch { return []; }
+}
+
+/** Called once by state.ts when the first round starts. */
+export function autoStartRules(): void {
+  const rules = gameRulesFromProject();
+  if (rules.length) startRules(rules);
+}
+`;
+
 const FILES: Record<string, string> = {
+  'src/game/core/rules.ts': RULES,
   'src/game/core/loop.ts': LOOP,
   'src/game/core/input.ts': INPUT,
   'src/game/core/events.ts': EVENTS,
@@ -3055,7 +3140,7 @@ const FILES: Record<string, string> = {
 /** Files the runtime writes that are DATA, not a module: the Tune panel's saved values (rewritten by its Save, kept by the kit). */
 export const GAME_RUNTIME_DATA_FILES: readonly string[] = ['src/game/tuning.values.ts'];
 
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner', 'keybinds', 'tuning'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting', 'swipe', 'runner', 'keybinds', 'tuning', 'rules'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -3064,7 +3149,48 @@ export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events
  * dependencies are pulled in automatically, for the same reason the motion pack does it. Pure; never
  * throws.
  */
-export function generateGameRuntime(include?: string[]): GameRuntimeResult {
+/** The rules file NavBharatAI writes from the request (data, read by core/rules.ts). */
+export const GAME_RULES_FILE = 'src/game/gameRules.ts';
+
+/** One rule as data — the same shape core/rules.ts validates in the browser. */
+export interface GameRuleData { when: 'ENEMY_DIED' | 'ITEM_COLLECTED' | 'PLAYER_DIED' | 'PLAYER_DAMAGED' | 'SCORE_CHANGED'; then: { addScore?: number; gameOver?: boolean; nextLevelEvery?: number } }
+
+const RULE_WHEN: ReadonlySet<string> = new Set(['ENEMY_DIED', 'ITEM_COLLECTED', 'PLAYER_DIED', 'PLAYER_DAMAGED', 'SCORE_CHANGED']);
+
+/** Keep only well-formed rules (the tool input is model-supplied). PURE. */
+export function cleanGameRules(raw: unknown): GameRuleData[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GameRuleData[] = [];
+  for (const r of raw.slice(0, 20)) {
+    if (!r || typeof r !== 'object') continue;
+    const when = (r as { when?: unknown }).when;
+    const then = (r as { then?: unknown }).then;
+    if (typeof when !== 'string' || !RULE_WHEN.has(when) || !then || typeof then !== 'object') continue;
+    const t = then as Record<string, unknown>;
+    const clean: GameRuleData['then'] = {};
+    if (typeof t.addScore === 'number' && Number.isFinite(t.addScore) && t.addScore > 0) clean.addScore = Math.min(1_000_000, Math.round(t.addScore));
+    if (t.gameOver === true) clean.gameOver = true;
+    if (typeof t.nextLevelEvery === 'number' && Number.isFinite(t.nextLevelEvery) && t.nextLevelEvery > 0) clean.nextLevelEvery = Math.min(1_000_000, Math.round(t.nextLevelEvery));
+    if (Object.keys(clean).length) out.push({ when: when as GameRuleData['when'], then: clean });
+  }
+  return out;
+}
+
+/** The text of src/game/gameRules.ts for these rules. PURE. */
+export function gameRulesFileText(rules: readonly GameRuleData[]): string {
+  return [
+    '// The rules this game keeps, written by NavBharatAI from your request. src/game/core/rules.ts runs them when',
+    '// the first round starts. To change a rule, change a number here; to add one, add a line.',
+    "import type { GameRule } from './core/rules';",
+    '',
+    'export const RULES: GameRule[] = [',
+    ...rules.map((r) => `  ${JSON.stringify(r)},`),
+    '];',
+    '',
+  ].join('\n');
+}
+
+export function generateGameRuntime(include?: string[], opts: { rules?: unknown } = {}): GameRuntimeResult {
   const wanted = Array.isArray(include) && include.length
     ? new Set(include.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))
     : null;
@@ -3092,6 +3218,9 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts'] || files['src/game/core/leaderboard.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    if (files['src/game/core/rules.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    // state.ts starts the game's rules with a dynamic import of rules.ts, so the two always travel together.
+    if (files['src/game/core/state.ts']) files['src/game/core/rules.ts'] = FILES['src/game/core/rules.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     // swipe.ts presses actions on the Input class.
     if (files['src/game/core/swipe.ts']) files['src/game/core/input.ts'] = FILES['src/game/core/input.ts'];
@@ -3099,6 +3228,8 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/keybinds.ts']) files['src/game/core/input.ts'] = FILES['src/game/core/input.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
+  const rules = cleanGameRules(opts.rules);
+  if (rules.length && files['src/game/core/rules.ts']) files[GAME_RULES_FILE] = gameRulesFileText(rules);
 
   return {
     files,

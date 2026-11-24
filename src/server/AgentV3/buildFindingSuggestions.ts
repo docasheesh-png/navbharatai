@@ -59,6 +59,16 @@ export interface FindingLike {
 export const MAX_FINDING_SUGGESTIONS = 3;
 
 /**
+ * Is this turn the user's tap on "Make the game playable"? Its prompt starts with that offer's own text, so the fix
+ * turn can be told apart from any other edit and its result measured (gameRegression.gameFixOutcome). PURE.
+ */
+export function isGameFixTurn(prompt: string | null | undefined): boolean {
+  const offer = FINDING_SUGGESTIONS.find((s) => s.code === 'GAME_PLAYTEST_ISSUES')?.prompt ?? '';
+  const head = offer.slice(0, 80);
+  return head.length > 0 && String(prompt ?? '').includes(head);
+}
+
+/**
  * Code → what to offer the user. Ordered by how much the user would feel the difference.
  *
  * Every string here is user-facing: plain language, no tool names, no provider names, no file paths.
@@ -574,6 +584,9 @@ export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
   // "Go back" card (the ❗️ list row, gameUndo.ts) that restores the saved version from just before the turn — a new prompt would build
   // on top of the broken game.
   'GAME_GOT_WORSE',
+  // gameFixVerdict.ts (locked plan item 3, 2026-11-24): the user's tapped fix could not be played again, so whether it worked
+  // is not known. The playtest's own not-run line beside it names why; no prompt can make the sandbox play it now.
+  'GAME_FIX_UNVERIFIED',
   // userModels.ts: a model the user attached was not added. The message names each file and its exact fix (export as
   // .glb, remove compression, attach the missing file) — only the user can re-export or re-attach it; no button can.
   'USER_MODELS_NOT_ALL_ADDED',
@@ -627,6 +640,8 @@ export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
   // Both initial lanes use the same compiler/style verification boundary and focused repair action.
   // Sharing the offer also avoids two buttons if both lanes left unresolved checks in one report.
   ONESHOT_VERIFY_FAILED: 'SIMPLE_BUILD_VERIFY_ERROR',
+  // A tapped game fix that changed nothing measurable (gameFixVerdict.ts): the same "Make the game playable" offer, with the new evidence.
+  GAME_FIX_NO_CHANGE: 'GAME_PLAYTEST_ISSUES',
   OUTCOME_SYNTAX_ERROR: 'SYNTAX_ERROR_DETECTED',
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
   OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',

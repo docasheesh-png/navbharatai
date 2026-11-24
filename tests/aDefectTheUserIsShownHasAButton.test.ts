@@ -22,6 +22,8 @@ const ROLL_UPS: Record<string, string> = {
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
   OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',
   BOOT_KILLING_ENV_GUARD_UNRESOLVED: 'BOOT_KILLING_ENV_GUARD',
+  // locked plan item 3: a tapped fix that changed nothing restates the same playtest problems, so it is offered through their button.
+  GAME_FIX_NO_CHANGE: 'GAME_PLAYTEST_ISSUES',
   // batch four
   PLATFORM_PREVIEW_NOT_UP: 'PREVIEW_NEVER_CAME_UP',
   REVIEW_CRITICAL_UNVERIFIED: 'REVIEW_RECHECK_CRITICALS_REMAIN',

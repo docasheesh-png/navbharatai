@@ -103,3 +103,39 @@ export function versionBeforeTurn(versions: ReadonlyArray<VersionLike> | null | 
 export function gameUndoMessage(reason: string): string {
   return `This change made your game worse: ${reason}. You can go back to the version from just before it — nothing else is lost, and the current version is kept so you can come back to it.`;
 }
+
+/**
+ * 🎮 A FIX THE USER TAPPED IS MEASURED, NOT CLAIMED (locked plan item 3, 2026-11-24; weakness audit P0-1).
+ *
+ * The playtest's problems are offered as a one-tap "Make the game playable" turn. That turn ran like any other edit,
+ * and only a turn that made the game WORSE was compared and reported. A turn that made it better, or changed nothing,
+ * ended without a verdict, so the user could pay for a fix and never learn whether it worked. The game is now played
+ * again and the two measures are put side by side, in numbers the user reads. PURE.
+ */
+export type GameFixOutcome = { code: 'GAME_FIX_VERIFIED' | 'GAME_FIX_NO_CHANGE'; message: string };
+
+/** A change of at least this many points is a measurable change; less is the noise of one more play. */
+export const SCORE_MOVE = 5;
+
+export function gameFixOutcome(before: GameMeasure | null, after: GameMeasure | null): GameFixOutcome | null {
+  if (!before || !after) return null;
+  if (gameGotWorse(before, after)) return null; // GAME_GOT_WORSE already says so, with the way back
+  const blockedBefore = before.defects.filter((d) => UNPLAYABLE.has(d));
+  const blockedAfter = new Set(after.defects.filter((d) => UNPLAYABLE.has(d)));
+  const cleared = blockedBefore.filter((d) => !blockedAfter.has(d));
+  const scores = before.score !== null && after.score !== null;
+  const rose = scores && (after.score as number) - (before.score as number) >= SCORE_MOVE;
+  const playableNow = after.score !== null && after.score >= PLAYABLE && blockedAfter.size === 0;
+  const pair = scores ? `Played before: ${before.score}/100. Played after: ${after.score}/100` : 'Played again';
+  if (rose || cleared.length) {
+    const fixed = cleared.length ? ` Fixed: ${cleared.map((d) => IN_WORDS[d] ?? d).join('; ')}.` : '';
+    return {
+      code: 'GAME_FIX_VERIFIED',
+      message: `${pair} — ${playableNow ? 'playable now' : 'better, but not fully playable yet'}.${fixed}`,
+    };
+  }
+  return { code: 'GAME_FIX_NO_CHANGE', message: `${pair} — nothing measurable changed, so this is not reported as fixed.` };
+}
+
+/** The sentence for a tapped fix whose game could not be played again: the honest "not known". PURE. */
+export const GAME_FIX_UNVERIFIED_MESSAGE = 'The game could not be played again after this fix, so whether it is now playable is not known. Nothing is reported as fixed.';

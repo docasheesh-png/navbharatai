@@ -103975,3 +103975,10 @@ Admin: *"user kahta hai enemy add karo, jisko kill karne se score bade, par navb
 - **Root cause (50/50 second half of G1+G2):** a rule the user named still lived only as a sentence the builder had to remember to wire; a weak builder could skip it or wire it twice.
 - **Fix:** the request's rules become DATA in `src/game/gameRules.ts` (`gameKitRecipeInput('generate_game_runtime')` → `generateGameRuntime(include, { rules })`, cleaned by `cleanGameRules`). The new kit module `src/game/core/rules.ts` validates and applies them from the first round (`state.ts` imports it lazily on `playing`); a life lost with lives left does not end the round. The builder is told never to add a second listener. `generate_game_runtime` takes `rules` (`ToolCatalog`).
 - **Lock:** `theGameKeepsItsRulesByItself` (runs the real kit files; proven by reversion — disabling the auto-start fails it).
+
+## 2026-11-24 — G3+G4: a library character can hold an item and punch, with moves made from its skeleton (admin question 1)
+
+Admin: *"character ke hath me gun do, to navbharatai bolta hai, character ke pas yeh move nahi hai, character ke pas punch move nahi hai"*.
+- **Root cause:** a library or uploaded model was a baked file; the kit only played its own clips and put nothing in its hand, so a missing clip became "the character cannot".
+- **Fix:** `playerBody.ts` finds the rig's bones by name (mixamo, Blender, Unity styles; exact names, never a guess), parents a held item to the hand bone (`holdItem`, `PlayerChoice.holds`), and makes punch, fire, swing, throw, kick and use from the skeleton by aiming bones in WORLD space (rig-agnostic), said once on screen. `playerMoves.lackedMovesClause` tells the builder which moves are made and which stay unanimated.
+- **Locks:** `aLibraryCharacterCanHoldAndPunch` (real kit file, real three.js); `theUsersCharacterJoinsEveryGame` updated. Kit history regenerated.

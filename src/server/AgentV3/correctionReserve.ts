@@ -107,9 +107,12 @@ export function correctionReserveMs(totalMs: number): number {
  *
  * With no reserve (watchdog off, or the kill switch) this returns `totalMs` unchanged.
  */
-export function generationBudgetMs(totalMs: number, elapsedMs: number): number {
+export function generationBudgetMs(totalMs: number, elapsedMs: number, heldMs: number = 0): number {
   const reserve = correctionReserveMs(totalMs);
-  if (reserve <= 0) return totalMs;
+  // `heldMs` is time kept for a named later check on top of the correction reserve: the game playtest on a game
+  // turn (buildPhases/buildHeadroom.ts). 0 everywhere else, so every other build gets exactly what it got before.
+  const held = Number.isFinite(heldMs) && heldMs > 0 && Number.isFinite(totalMs) && totalMs > 0 ? heldMs : 0;
+  if (reserve <= 0 && held <= 0) return totalMs;
   const spent = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
-  return Math.max(MIN_GENERATION_MS, Math.round(totalMs - reserve - spent));
+  return Math.max(MIN_GENERATION_MS, Math.round(totalMs - reserve - held - spent));
 }

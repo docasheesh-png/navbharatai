@@ -14,12 +14,13 @@ import { REVIEWED_LIBRARY_BATCH_11 } from '../src/server/AgentV3/gameAssets/revi
 import { REVIEWED_LIBRARY_BATCH_12 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch12';
 import { REVIEWED_LIBRARY_BATCH_13 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch13';
 import { REVIEWED_LIBRARY_BATCH_14 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch14';
+import { REVIEWED_LIBRARY_BATCH_15 } from '../src/server/AgentV3/gameAssets/reviewedLibraryBatch15';
 import { REVIEWED_GAME_ASSETS,validateCatalogue } from '../src/server/AgentV3/gameAssets/providers';
 import { gameAssetRequirements,externalGameAssetsEnabled } from '../src/server/AgentV3/gameAssets/assetPlan';
 import { searchGameLibrary } from '../src/server/AgentV3/gameAssets/gameLibrary';
 describe('licensed library expansion admission',()=>{
  it('adds eleven pinned models; the library is on by default (admin 2026-11-20)',()=>{
-  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length + REVIEWED_LIBRARY_BATCH_9.length + REVIEWED_LIBRARY_BATCH_10.length + REVIEWED_LIBRARY_BATCH_11.length + REVIEWED_LIBRARY_BATCH_12.length + REVIEWED_LIBRARY_BATCH_13.length + REVIEWED_LIBRARY_BATCH_14.length);
+  expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length + REVIEWED_LIBRARY_BATCH_6.length + REVIEWED_LIBRARY_BATCH_7.length + REVIEWED_LIBRARY_BATCH_8.length + REVIEWED_LIBRARY_BATCH_9.length + REVIEWED_LIBRARY_BATCH_10.length + REVIEWED_LIBRARY_BATCH_11.length + REVIEWED_LIBRARY_BATCH_12.length + REVIEWED_LIBRARY_BATCH_13.length + REVIEWED_LIBRARY_BATCH_14.length + REVIEWED_LIBRARY_BATCH_15.length);
   // A batch spread into the catalogue and left out of the sum above is how 101 admitted models were reported as a short library.
   const joined = readFileSync(new URL('../src/server/AgentV3/gameAssets/providers.ts', import.meta.url), 'utf8');
   const catalogue = joined.slice(joined.indexOf('export const REVIEWED_GAME_ASSETS'), joined.indexOf('];', joined.indexOf('export const REVIEWED_GAME_ASSETS')));

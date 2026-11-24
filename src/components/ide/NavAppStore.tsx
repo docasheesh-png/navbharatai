@@ -70,6 +70,8 @@ interface PublicApp {
   developerName: string; publishedAt: number; sha256: string;
   /** The uploader's public creator code — opens their profile. Never the account id. */
   creatorId?: string;
+  pinned?: boolean;
+  pinOrder?: number | null;
 }
 
 interface MineApp {

@@ -821,6 +821,7 @@ import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/ki
 import { missingExportClaims, staleExportClaims } from '../AgentV3/staleModuleExport';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
+import { savedWorkMissingLine } from '../AgentV3/salvageMissingImports';
 import { failedAttemptCostVerdict } from '../AI/SurplusRegistry/failedAttemptCost';
 import { waitCreditMs, workElapsedMs, hardDeadlineRemainingMs } from '../AgentV3/workClock';
 import { historyEstimateInr } from '../AgentV3/PreflightEstimate';
@@ -20556,6 +20557,8 @@ async function noteBuildOutcome(
             salvageErrors +
             // Q-2924: the salvage door used to skip the write-time quality check every other write gets.
             salvageQualityNotes(Object.fromEntries(writtenFiles), sb.salvagedPaths) +
+            // 🧩 Q-2768: a file the saved work imports that nobody wrote (a stylesheet the typecheck cannot see) is named.
+            await savedWorkMissingLine(sb.salvagedPaths, writtenFiles, projectFilesAtTurnStart, (p) => actuator.readFile(workspaceId, p)) +
             `${salvageReadInstruction(sb.verifyErrors, Object.fromEntries(writtenFiles))} COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.` +
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
@@ -20635,7 +20638,8 @@ async function noteBuildOutcome(
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
           const os = await runOneShot({ prompt: fastLaneRequest + requestNotesSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog, originalRequest: originalPrompt, yieldRequested: () => steeringHandoff.pending() });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : os.initialDecline ? 'ONESHOT_DECLINED' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
-          buildPrompt = steeringSalvage(os, buildPrompt, (paths) => salvagedThisBuild.push(...paths));
+          // Q-2768 sibling: the one-shot's saved work is checked for files it imports that nobody wrote, too.
+          buildPrompt = steeringSalvage(os, buildPrompt, (paths) => salvagedThisBuild.push(...paths), os.ok ? '' : await savedWorkMissingLine(os.salvagedPaths, writtenFiles, projectFilesAtTurnStart, (p) => actuator.readFile(workspaceId, p)));
           if (settleInitialDecline(os.initialDecline)) {
             // The sibling declined too; no full-runner retry or preview/repair is appropriate.
           } else if (os.ok) {

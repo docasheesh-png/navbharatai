@@ -24,11 +24,11 @@ export function createSteeringHandoff<T>(queue: () => T[] | undefined, enabled: 
 }
 
 /** One-shot has no manifest salvage block: carry only acknowledged files on a scope-change handoff. */
-export function steeringSalvage(result: { ok: boolean; reason?: string; salvagedPaths?: string[] }, prompt: string, onSavedPaths: (paths: string[]) => void): string {
+export function steeringSalvage(result: { ok: boolean; reason?: string; salvagedPaths?: string[] }, prompt: string, onSavedPaths: (paths: string[]) => void, missingLine = ''): string {
   if (result.ok || result.reason !== STEERING_YIELD_REASON || !result.salvagedPaths?.length) return prompt;
   const paths = result.salvagedPaths;
   onSavedPaths(paths);
-  return `${SALVAGE_HANDOFF_MARKER} The files below are already saved work of THIS app. Read and continue them under the newly queued user instruction; do not rebuild a parallel module tree:\n${paths.map((path) => `- ${path}`).join('\n')}\n\n${prompt}`;
+  return `${SALVAGE_HANDOFF_MARKER} The files below are already saved work of THIS app. Read and continue them under the newly queued user instruction; do not rebuild a parallel module tree:\n${paths.map((path) => `- ${path}`).join('\n')}${missingLine ? `\n${missingLine.trim()}` : ''}\n\n${prompt}`;
 }
 
 export function plannedHandoffOutcome(reason?: string): string {

@@ -1326,6 +1326,29 @@ export function valueOwnerPurpose(names: readonly string[], existing?: string): 
   return existing ? `${existing} ${need}` : need;
 }
 
+/**
+ * 🧩 ONE OWNER MEANS THE OTHERS ARE TOLD (Q-2765, BR2001 D3). Choosing an owner only changed the OWNER's purpose: a second
+ * planned file whose purpose also says it exports the same shared name kept saying so, and each per-file call reads its
+ * own purpose first — so the lane wrote two registries for one concept (`src/utils/apps.tsx` and `src/utils/system.ts`)
+ * and the full builder spent ~5 min making them agree. Every OTHER planned file whose purpose names an owned symbol is
+ * now told, in its own purpose, to import it from the owner and never define it. Returns the paths it changed. Mutates
+ * the manifest's purposes only.
+ */
+export function disownSharedNames(manifest: SimpleFileSpec[], names: readonly string[], ownerPath: string): string[] {
+  const changed: string[] = [];
+  if (!names.length) return changed;
+  for (const f of manifest) {
+    if (f.path === ownerPath || !/\.[jt]sx?$/.test(f.path)) continue;
+    const claimed = names.filter((n) => new RegExp(`(^|[^A-Za-z0-9_$])${n.replace(/\$/g, '\\$')}([^A-Za-z0-9_$]|$)`).test(f.purpose || ''));
+    if (!claimed.length) continue;
+    const line = `Do NOT define or export ${claimed.join(', ')} here — ${ownerPath} owns ${claimed.length === 1 ? 'it' : 'them'}; import from it.`;
+    if ((f.purpose || '').includes(line)) continue;
+    f.purpose = f.purpose ? `${f.purpose} ${line}` : line;
+    changed.push(f.path);
+  }
+  return changed;
+}
+
 /** The note appended to the contract so every call knows where the constants live. PURE. */
 export function valueOwnerNote(names: readonly string[], ownerPath: string): string {
   return `\n// The constants above (${names.join(', ')}) are exported by ${ownerPath} under exactly these names — import them from that file, never from the types file.`;
@@ -2659,6 +2682,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const existing = manifest.find((f) => f.path === owner.path);
           if (existing) existing.purpose = utilOwnerPurpose(owner.names, existing.purpose);
           else manifest.push({ path: owner.path, purpose: utilOwnerPurpose(owner.names) });
+          disownSharedNames(manifest, owner.names, owner.path); // Q-2765: the other files are told it is not theirs
           contract = `${contract}${utilOwnerNote(owner.names, owner.path)}`;
           if (owner.added) deps.log?.(`🧰 ${owner.names.length} shared helper(s) had no file to live in — added ${owner.path} for them.`);
         }
@@ -2669,6 +2693,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const existing = manifest.find((f) => f.path === valueOwner.path);
           if (existing) existing.purpose = valueOwnerPurpose(values, existing.purpose);
           else manifest.push({ path: valueOwner.path, purpose: valueOwnerPurpose(values) });
+          const disowned = disownSharedNames(manifest, values, valueOwner.path); // Q-2765: one registry, never two
+          if (disowned.length) deps.log?.(`🧩 ${disowned.length} other planned file(s) also claimed ${values.length === 1 ? values[0] : 'the shared constants'} — told to import from ${valueOwner.path}.`);
           contract = `${contract}${valueOwnerNote(values, valueOwner.path)}`;
           if (valueOwner.added) deps.log?.(`🧰 ${values.length} shared constant(s) had no file to live in — added ${valueOwner.path} for them.`);
         }

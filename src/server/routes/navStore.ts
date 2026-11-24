@@ -462,7 +462,7 @@ export function registerNavStoreRoutes(app: Express): void {
       const apps = await publicApprovedApps.get('approved', () => listApps('approved', 100));
       res.setHeader('Cache-Control', 'public, max-age=60');
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
-      const pins = await getAppMartPins();
+      const pins = await getAppMartPins().catch(() => []);
       const rank = new Map<string, number>(pins.filter((p) => p.kind === 'apk').map((p, index) => [p.id, index] as const));
       const publicApps = filtered.map(toPublic).map((a) => ({ ...a, pinned: rank.has(a.id), pinOrder: rank.get(a.id) ?? null }));
       publicApps.sort((a, b) => {
@@ -1114,7 +1114,7 @@ export function registerNavStoreRoutes(app: Express): void {
         // Play-policy decision rather than a preference.
         isNative: isNativeRequest(req),
       }));
-      const appMartPins = await getAppMartPins();
+      const appMartPins = await getAppMartPins().catch(() => []);
       const webPinRank = new Map<string, number>(appMartPins.filter((p) => p.kind === 'web').map((p, index) => [p.id, index] as const));
       const pinnedFirst = <T extends { id: string }>(rows: T[]): T[] => rows.map((row, index) => ({ row, index }))
         .sort((a, b) => {

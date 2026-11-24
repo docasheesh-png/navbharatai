@@ -80,7 +80,8 @@ describe('5 / 6 — bounded, and it cannot loop', () => {
 
 describe('7 — insufficient budget does not start it', () => {
   it('requires room for the whole attempt before starting', () => {
-    expect(block).toContain('effectiveBuildSeconds * 1000 - LAST_CHANCE_PROOF_MS');
+    // Same headroom, through the one helper (locked plan item 2, buildHeadroom.ts).
+    expect(block).toContain('roomFor(LAST_CHANCE_PROOF_MS)');
   });
   it('the floor is smaller than the main loop’s, because this one cannot heal', () => {
     const decl = route.match(/const LAST_CHANCE_PROOF_MS = ([\d_]+);/);

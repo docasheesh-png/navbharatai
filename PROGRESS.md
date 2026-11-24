@@ -103934,3 +103934,13 @@ Admin locked the weakness-audit plan (adapted under the external-suggestion rule
 - Found while testing, same function: `PRESENT` missed plurals and camelCase (`levels`, `currentLevel`, `spawnEnemy`, `addScore` were "missing"). Plurals are now accepted, and the code is also read with camelCase split.
 - Test: `tests/aCommentIsNotAGameFeature.test.ts`.
 - Still open by design (locked plan item 3): presence is still proven by source, not by playing; runtime rule assertions replace it.
+
+## 2026-11-24 — Locked plan item 2: the game playtest's time is reserved, not left over
+
+Weakness audit P0-2, verified at `ba2e646` (#4512 merged). The playtest needed 90 s of headroom and every pass before it could spend that time first, so late builds — the ones with problems — were the ones never played. About 30 sites in the route each computed headroom in their own words.
+
+- New `src/server/AgentV3/buildPhases/buildHeadroom.ts`: `hasHeadroom`, `headroomMs`, `playtestReserveMs` (`PLAYTEST_RESERVE_MS` 95 s = playtest 60 s + load 15 s + timeout margin 20 s). Kill switch `AGENTV3_GAME_PLAYTEST_RESERVE=off`.
+- The route asks one question everywhere (`roomFor(ms)`, `roomLeftMs()`); on a game turn whose build is OK, the playtest's 95 s are held until `runGamePlaytest` starts, and the three generation runners get `generationBudgetMs(…, heldMs)` that much less. A failed build or a non-game turn holds nothing (byte-identical arithmetic).
+- Test: `tests/aGameIsPlayedEvenWhenTheBuildRunsLate.test.ts` (report shape, neighbours, census of hand-written headroom).
+- Queue: Q-3329 opened for the CI flake seen on #4512 (Python backend boot test).
+- Live effect to watch: GAME_PLAYTEST_NOT_RUN "the build had no time left to play it in" should become rare on game builds.

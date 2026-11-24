@@ -44,6 +44,7 @@ import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
 import { locatedErrorText } from './runtimeErrorSite';
 import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead, type HeapRead } from './gameGeometryProbe';
+import { withoutComments } from '../lib/codeOnly';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
 export const PLAYTEST_BUDGET_MS = 60_000;
@@ -82,8 +83,8 @@ const R3F_LOOP = /\buseFrame\s*\(/;
 export function isCanvasGameProject(files: Record<string, string>, opts: { gameRequested?: boolean } = {}): boolean {
   let surface = false;
   let loop = false;
-  for (const [path, content] of Object.entries(files || {})) {
-    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
+  for (const [path, rawContent] of Object.entries(files || {})) {
+    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof rawContent !== 'string') continue;
     // 🔴 THE KIT'S OWN ENGINE FILES ARE NOT A SURFACE (build 46e2d74b's fixes, 2026-10-11). Since the platform
     // lays the game kit down for every new game (gameKitSeed.ts), `src/game/` is on disk for a sudoku drawn
     // in the DOM too — and this used to answer "canvas game" for any file under it, so a DOM game was sent
@@ -92,6 +93,7 @@ export function isCanvasGameProject(files: Record<string, string>, opts: { gameR
     // surface has to come from the game's own code or from the kit's 3D layer / shell, which do.
     // The kit's 3D layer and shell DO draw (a WebGL canvas), so a project carrying them is a canvas game.
     if (/(^|\/)src\/game\/(?:three\/|ui\/|Game\.ts$|GameCanvas\.tsx$)/.test(path)) return true;
+    const content = withoutComments(rawContent); // a comment is not code (codeOnly.ts)
     const kitEngineOnly = /(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path);
     if (!surface && !kitEngineOnly && (GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, '')) || (opts.gameRequested === true && R3F_SURFACE.test(content)))) surface = true;
     if (!loop && (/requestAnimationFrame|GameLoop|setAnimationLoop/.test(content) || (opts.gameRequested === true && R3F_LOOP.test(content)))) loop = true;
@@ -108,15 +110,16 @@ export function isCanvasGameProject(files: Record<string, string>, opts: { gameR
 export function replayFromCode(files: Record<string, string>): GameCodeFacts {
   let progress = false;
   let restart = false;
-  for (const [path, content] of Object.entries(files || {})) {
-    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
+  for (const [path, rawContent] of Object.entries(files || {})) {
+    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof rawContent !== 'string') continue;
     // The meta layer's own file only DEFINES these; using them is what counts.
     if (/(^|\/)src\/game\/core\/meta\.ts$/.test(path)) continue;
+    const content = withoutComments(rawContent); // a comment is not code (codeOnly.ts)
     if (/\bstartMeta\s*\(/.test(content) || /localStorage\.setItem\([^)]*(best|high|score|level|progress)/i.test(content)) progress = true;
     if (/\b(play again|restart|try again|retry|replay)\b/i.test(content) || /\.restart\s*\(/.test(content)) restart = true;
   }
   const sound = Object.entries(files || {}).some(([p, c]) => typeof c === 'string' && CODE_FILE.test(p) && !/(^|\/)node_modules\//.test(p)
-    && !/(^|\/)src\/game\/(?:fx|core)\//.test(p) && GAME_SOUND_USE.test(c));
+    && !/(^|\/)src\/game\/(?:fx|core)\//.test(p) && GAME_SOUND_USE.test(withoutComments(c)));
   const base = sound ? { progress, restart, sound: true } : { progress, restart };
   if (!isDrivingGame(files)) return base;
   const cockpit = Object.entries(files || {}).some(([p, c]) => typeof c === 'string' && CODE_FILE.test(p) && !/(^|\/)node_modules\//.test(p)
@@ -231,8 +234,9 @@ const VEHICLE_WORD = /\b(?:car|cars|kart|go-?kart|vehicle|truck|bike|motorcycle|
 const SPEED_STATE = /\b(?:speed|velocity)\b/;
 const ACCELERATOR = /['"](?:ArrowUp|KeyW|w)['"]|\baccelerat\w*|\bthrottle\b|\bgas\b/i;
 export function isDrivingGame(files: Record<string, string>): boolean {
-  for (const [path, content] of Object.entries(files || {})) {
-    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
+  for (const [path, rawContent] of Object.entries(files || {})) {
+    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof rawContent !== 'string') continue;
+    const content = withoutComments(rawContent); // a comment is not code (codeOnly.ts)
     if (/\bdriveVehicle\s*\(|\bcreateVehicleState\s*\(/.test(content)) return true;
     if (VEHICLE_WORD.test(content) && SPEED_STATE.test(content) && ACCELERATOR.test(content)) return true;
   }
@@ -1818,7 +1822,7 @@ export function domGameKind(files: Record<string, string>, contract?: GameScopeC
   for (const [path, content] of Object.entries(files || {})) {
     if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
     if (/(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path)) continue;
-    for (const [kind, re] of DOM_GAME_CODE) if (re.test(content)) return kind;
+    for (const [kind, re] of DOM_GAME_CODE) if (re.test(withoutComments(content))) return kind;
   }
   return null;
 }

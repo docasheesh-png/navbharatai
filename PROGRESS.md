@@ -103944,3 +103944,13 @@ Weakness audit P0-2, verified at `ba2e646` (#4512 merged). The playtest needed 9
 - Test: `tests/aGameIsPlayedEvenWhenTheBuildRunsLate.test.ts` (report shape, neighbours, census of hand-written headroom).
 - Queue: Q-3329 opened for the CI flake seen on #4512 (Python backend boot test).
 - Live effect to watch: GAME_PLAYTEST_NOT_RUN "the build had no time left to play it in" should become rare on game builds.
+
+## 2026-11-24 — Locked plan item 3: a tapped game fix is measured, not claimed
+
+Weakness audit P0-1, safe form (automatic game repair stays OFF). Before: only a turn that made the game WORSE was compared and said (`GAME_GOT_WORSE`); a better or unchanged game ended with no verdict.
+
+- `gameRegression.gameFixOutcome` (pure): `GAME_FIX_VERIFIED` (score +5 or an unplayable defect cleared — "Played before: 41/100. Played after: 78/100 — playable now") or `GAME_FIX_NO_CHANGE`; worse stays with GAME_GOT_WORSE.
+- `buildPhases/gameFixVerdict.ts`: says a better game on any turn; an unchanged one, or one that could not be played again (`GAME_FIX_UNVERIFIED`), only on the user's own "Make the game playable" turn (`isGameFixTurn`). The route makes two one-line calls.
+- An edit of an existing canvas game now holds the playtest's reserved time too (item 2's hold), so the fix turn is played.
+- Findings classified: GAME_FIX_NO_CHANGE → offered through GAME_PLAYTEST_ISSUES; GAME_FIX_UNVERIFIED → no button (reason recorded). AppKnowledgeBase `game_fix_and_undo` updated.
+- Test: `tests/aGameFixIsMeasuredAfterTheUserTaps.test.ts`.

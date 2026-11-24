@@ -70,7 +70,7 @@ import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirement
 import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowledge';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
-import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
+import { buildFindingSuggestions, isGameFixTurn } from '../AgentV3/buildFindingSuggestions';
 import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
@@ -589,6 +589,7 @@ import { freeBuildWindow, freeWindowLine, noteFreeBuildStartDurable, decideFreeP
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhases/buildHeadroom';
+import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -15747,7 +15748,13 @@ async function noteBuildOutcome(
       const workElapsed = (): number => workElapsedMs(Date.now(), buildStartedAt, creditedWaitMs());
       // Locked plan item 2: ONE headroom question for every post-build pass, with the game playtest's time held back
       // on a game turn until it has run (buildPhases/buildHeadroom.ts).
-      const playtestHold = { playtestDone: false, buildOk: true, get gameTurn(): boolean { return this.buildOk && turnIsGame(gameTurnRequest(prompt, milestoneRequest)); } };
+      // An edit of an existing game (a tapped "Make the game playable" fix) is a game turn too, whatever its words.
+      let wasGameAtStart: boolean | undefined;
+      const playtestHold = { playtestDone: false, buildOk: true, get gameTurn(): boolean {
+        if (!this.buildOk) return false;
+        wasGameAtStart ??= projectFilesAtTurnStart ? isCanvasGameProject(projectFilesAtTurnStart) : undefined;
+        return wasGameAtStart === true || turnIsGame(gameTurnRequest(prompt, milestoneRequest));
+      } };
       const roomFor = (needMs: number): boolean => hasHeadroom({ capMs: effectiveBuildSeconds * 1000, elapsedMs: workElapsed(), needMs, heldMs: playtestReserveMs(playtestHold) });
       const roomLeftMs = (): number => headroomMs({ capMs: effectiveBuildSeconds * 1000, elapsedMs: workElapsed(), heldMs: playtestReserveMs(playtestHold) });
       billingCtx.buildStartedAt = buildStartedAt; // Fix 67 — the finalizer debits with this exact ref
@@ -24831,6 +24838,7 @@ async function noteBuildOutcome(
       // (`startLabelsFromExplore`) reach the playtest's own browser as known starts, so the control that
       // started the game for the explorer is the one the playtest presses first.
       let gamePlaytestDone = false;
+      const gameFixPorts: GameFixPorts = { fixTurn: isGameFixTurn(prompt), record: (i) => buildDiag.record(i), say: (text) => events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }) };
       // Game Engine Ultra Phase 3 inputs (gameRepair.ts): the last measured defects and still-missing named features.
       type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[]; played: boolean };
       const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
@@ -24881,6 +24889,7 @@ async function noteBuildOutcome(
                   const versionId = versionBeforeTurn(versions, buildStartedAt);
                   if (versionId) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_GOT_WORSE', message: gameUndoMessage(worse), detail: versionId, autoResolved: false });
                 }
+                reportGameFixOutcome(before, { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) }, gameFixPorts); // better / unchanged, said with both scores
               } catch { /* observation only — never in the way of the build */ }
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
@@ -24925,6 +24934,7 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
               gameProof = { outcome: playtestOutcome(notRun.code), score: null, unplayed: true };
               gateEvidence.game = 'not-run'; // a canvas game we could not play is not verified (playtestSkipReason is silent otherwise)
+              reportGameFixUnverified(gameFixPorts); // a tapped fix whose game could not be played again is said as not known
             }
           } catch { /* an honest line is best-effort and must never touch a build */ }
           // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.

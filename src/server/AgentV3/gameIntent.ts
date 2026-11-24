@@ -222,6 +222,17 @@ const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['braking', /\bbrak(e|es|ing)\b/i],
 ];
 
+/**
+ * A feature the raw request names only inside a refusal ("no multiplayer", "no braking").
+ * The contract already drops those words before it decides what is required; this lists them
+ * so a later reader can refuse to build them. PURE.
+ */
+export function declinedGameFeatures(prompt: string | null | undefined): GameFeature[] {
+  const raw = String(prompt ?? '');
+  const kept = withoutDeclinedSentences(raw);
+  return FEATURES.filter(([, re]) => re.test(raw) && !re.test(kept)).map(([f]) => f);
+}
+
 const VEHICLES: ReadonlyArray<[GameVehicle, RegExp]> = [
   ['train', /\b(locomotives?|railway engine|metro|rail ?car)\b|\btrains?\s+(simulator|simulation|game|driv\w*|ride|station|tracks?|journey|coach(es)?)\b|\b(a|the|3d|3-d|realistic|passenger|express|goods|freight|bullet|steam|electric|diesel|toy|indian)\s+trains?\b(?!\s+(your|my|his|her|their|to)\b)/i],
   ['aircraft', /\b(aircraft|aeroplanes?|airplanes?|planes?|jet|helicopter|flight)\b/i],
@@ -382,6 +393,14 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   throttle: /\b(throttle|accelerat\w*|setSpeed|driveVehicle)\b|\bspeed\s*[+-]?=/i,
   braking: /\b(brak\w*|decelerat\w*|driveVehicle)\b/i,
 };
+
+/** The same code signal `scopeMatch` uses, for one feature. Kit engine files are not the game. PURE. */
+export function codeMentionsFeature(feature: GameFeature, files: Record<string, string>): boolean {
+  const code = Object.entries(files || {})
+    .filter(([p, v]) => typeof v === 'string' && /\.(t|j)sx?$/.test(p) && !/(^|\/)node_modules\//.test(p) && !/(^|\/)src\/(game\/(core|fx|three)|audio)\//.test(p))
+    .map(([, v]) => v).join('\n');
+  return PRESENT[feature].test(code);
+}
 
 export interface ScopeMatch {
   present: GameFeature[];

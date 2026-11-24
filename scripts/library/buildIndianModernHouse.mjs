@@ -93,5 +93,5 @@ export async function buildIndianModernHouse(root=process.cwd()) {
   return {path,sha256:sha,bytes:bytes.length,parts:boxes.length,materials: new Set(boxes.map(b=>b.material)).size};
 }
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  const result=await buildIndianModernHouse(); process.stdout.write(JSON.stringify(result)+'\\n');
+  const result=await buildIndianModernHouse(); process.stdout.write(JSON.stringify(result)+'\n');
 }

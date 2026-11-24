@@ -49,3 +49,7 @@ that cannot load (outside the project, another site, missing, hash changed, not 
 Unedited loaders from before this change are upgraded by the existing kit refresh; edited ones are left alone. The builder
 is told where changes go in the seed handoff and in every later `object_spec` lead (`localModelLead`). Locked by
 `tests/everyLibraryModelIsChangeable.test.ts` (real runtime + real GLB), proven by reversion.
+
+
+## 2026-11-24: Indian Modern House H01 (owner-authorized, CC BY 4.0)
+The library now includes a deterministic, packaged GLB modeled from the owner's modern Indian house exterior and floor-plan reference. It is searchable as `house` / `modern house` in `building`. The model has an open front entrance and internal room passages, but it is static: interactive doors, loot, navmesh and completed-game traversal/performance remain gameplay acceptance work. See `game-engine/indian-modern-house-h01.md`.

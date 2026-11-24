@@ -52,7 +52,7 @@
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
-import { wantsCombatKit } from './gameRules';
+import { gameRuleData, gameRulesFrom, wantsCombatKit } from './gameRules';
 import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
 import { analyzeGameRequirements, gameDesignBlock } from './gameDesignDocument';
 import { largeWorldIntent } from './largeWorldIntent';
@@ -291,6 +291,12 @@ export function wantsSceneDetail(prompt: string | null | undefined): boolean {
  */
 export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKitRecipe[], request?: string | null): Record<string, unknown> | undefined {
   if (recipe === 'generate_game_vfx' && !plan.includes('generate_game_3d')) return { include: ['audio'] };
+  // 🎮 THE USER'S RULES, AS DATA (game factory, admin 2026-11-24): the runtime writes them to src/game/gameRules.ts and its
+  // rules engine applies them, so "kill an enemy and the score goes up" is kept by the kit, not by the builder's memory.
+  if (recipe === 'generate_game_runtime') {
+    const rules = gameRuleData(gameRulesFrom(request));
+    return rules.length ? { rules } : undefined;
+  }
   // The spawner imports the 3D world (gameRecipeLayers.ts); a 2D game takes every other system.
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a

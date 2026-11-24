@@ -672,7 +672,7 @@ export function registerNavStoreRoutes(app: Express): void {
       if (!found) return res.status(404).json({ error: 'No such app.' });
 
       const status = String(decision) as SubmissionStatus;
-      if (status === 'removed') await setAppMartPin('apk', appId, false);
+      if (status === 'removed') await setAppMartPin('apk', appId, false).catch(() => undefined);
       // Fires only on the TRANSITION into 'approved' — re-clicking an already-approved app (or a
       // decision that was not 'approved' at all) must never re-congratulate the creator.
       const enteringApproved = status === 'approved' && found.status !== 'approved';
@@ -1563,7 +1563,7 @@ export function registerNavStoreRoutes(app: Express): void {
       // listed (see navStoreWeb.ts's saveWebApp) must never re-congratulate the creator.
       const enteringListed = decision === 'listed' && found.status !== 'listed';
       if (decision === 'removed') {
-        await setAppMartPin('web', id, false);
+        await setAppMartPin('web', id, false).catch(() => undefined);
         // Before the snapshot is deleted, while the files can still be hashed.
         await recordTakedown({
           surface: 'app_mart_web',

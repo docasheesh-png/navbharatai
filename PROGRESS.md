@@ -103969,3 +103969,9 @@ Admin: *"user kahta hai enemy add karo, jisko kill karne se score bade, par navb
 - **Root cause:** the scope contract (`gameIntent.ts`) read a request as features (`enemies`, `score`) and dropped the RELATION between them, so nothing told the builder to wire one to the other and nothing checked it. The combat layer (Health emits ENEMY_DIED) was not seeded for 2D games at all.
 - **Fix:** `gameRules.ts` reads cause → effect rules (EN/Hinglish/Hindi, one sentence per rule, precision first) into the contract; `gameKitSeed` seeds `generate_game_systems` when the game needs combat; the runtime exposes `window.__nbRules`; the playtest emits each rule's event in the real browser and checks the effect (`GAME_RULE_BROKEN` warning / `GAME_RULES_CHECKED` info via `buildPhases/gameRuleProbes.ts`, one call from the route).
 - **Locks:** `aGameKeepsTheRulesTheUserNamed`, `aRuleIsProvenByPlaying`, `theUsersRulesAreReportedFromPlay`. Kit history regenerated.
+
+## 2026-11-24 — G5: the kit keeps the user's rules by itself, as data (game factory)
+
+- **Root cause (50/50 second half of G1+G2):** a rule the user named still lived only as a sentence the builder had to remember to wire; a weak builder could skip it or wire it twice.
+- **Fix:** the request's rules become DATA in `src/game/gameRules.ts` (`gameKitRecipeInput('generate_game_runtime')` → `generateGameRuntime(include, { rules })`, cleaned by `cleanGameRules`). The new kit module `src/game/core/rules.ts` validates and applies them from the first round (`state.ts` imports it lazily on `playing`); a life lost with lives left does not end the round. The builder is told never to add a second listener. `generate_game_runtime` takes `rules` (`ToolCatalog`).
+- **Lock:** `theGameKeepsItsRulesByItself` (runs the real kit files; proven by reversion — disabling the auto-start fails it).

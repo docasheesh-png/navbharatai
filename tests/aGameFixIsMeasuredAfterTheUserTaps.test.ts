@@ -76,8 +76,12 @@ describe('the fix turn is recognised from the offer\'s own prompt', () => {
 
 describe('🔒 wiring', () => {
   it('the route says the outcome after the playtest and the not-known case when it could not play', () => {
-    expect(ROUTE).toMatch(/reportGameFixOutcome\(before, \{ score: verdict\.score\?\.overall \?\? null, defects: measured\.map\(\(d\) => d\.code\) \}, gameFixPorts\)/);
-    expect(ROUTE).toMatch(/gateEvidence\.game = 'not-run';[^\n]*\n\s+reportGameFixUnverified\(gameFixPorts\);/);
+    // In the playtest phase since S7; the route hands it gameFixPorts.
+    const phase = readFileSync(join(__dirname, '..', 'src/server/AgentV3/buildPhases/gamePlaytestPhase.ts'), 'utf8');
+    expect(phase).toContain('const after = { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) };');
+    expect(phase).toContain('reportGameFixOutcome(before, after, p.fix);');
+    expect(phase).toMatch(/gate: 'not-run' \};\n\s+reportGameFixUnverified\(p\.fix\);/);
+    expect(ROUTE).toContain('fix: gameFixPorts,');
     expect(ROUTE).toMatch(/fixTurn: isGameFixTurn\(prompt\)/);
   });
   it('an edit of an existing canvas game holds the playtest\'s time too', () => {

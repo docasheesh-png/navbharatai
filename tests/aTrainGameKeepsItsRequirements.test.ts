@@ -114,9 +114,13 @@ describe('the user is told the truth too: an unplayed game is "not verified yet"
 describe('🔒 the route feeds the playtest into the gate on EVERY way the playtest ends', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   it('played, timed out / crashed, could not be reached, DOM-only, and re-played after a repair', () => {
-    expect(route).toMatch(/gameProof = \{ outcome: playtestOutcome\(verdict\.code\)[^\n]*\n[^\n]*unplayed = true[^\n]*\n[\s\S]{0,200}gateEvidence\.game = gameProof\.outcome;/);
-    expect(route.match(/gateEvidence\.game = 'not-run';/g)?.length).toBe(3);
-    expect(route).toMatch(/if \(domKind\) \{[\s\S]{0,500}gateEvidence\.game = 'not-run';/);
+    // The first four ways live in the playtest phase since S7 (buildPhases/gamePlaytestPhase.ts); the route copies its
+    // answer into the gate in ONE place.
+    const phase = readFileSync('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts', 'utf8');
+    expect(phase).toMatch(/const proof: GamePlaytestResult\['proof'\] = \{ outcome: playtestOutcome\(verdict\.code\)[^\n]*\n[^\n]*unplayed = true[^\n]*\n[\s\S]{0,200}out = \{ proof, gate: proof\.outcome \};/);
+    expect(phase.match(/gate: 'not-run' \}/g)?.length).toBe(3);
+    expect(phase).toMatch(/if \(domKind\) \{[\s\S]{0,500}gate: 'not-run' \}/);
+    expect(route).toContain('gateEvidence.game = played.gate;');
     const repairedStart = route.indexOf('if (outcome.kept && outcome.after) {');
     expect(repairedStart).toBeGreaterThan(0);
     const repaired = route.slice(repairedStart, route.indexOf('if (gameCompleteGateEnabled())', repairedStart));

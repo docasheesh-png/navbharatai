@@ -79,15 +79,20 @@ describe('source guard: every reader states the evidence it was given', () => {
     const calls = route.match(/gameIncompleteReason\([^;]*\)/g) ?? [];
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) expect(c).toMatch(/played:/);
-    expect(route).toContain("played: gameProof.outcome !== 'not-run'");
+    // Since S7 the played answer is made in the playtest phase (buildPhases/gamePlaytestPhase.ts).
+    const phase = readFileSync('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts', 'utf8');
+    expect(phase).toContain("played: proof.outcome !== 'not-run'");
   });
   it('the playtest\'s defect and scope readers use the map completed from the sandbox', () => {
-    expect(route).toContain('const playedFiles = await withKitLayersFromDisk(playtestFiles,');
-    const at = route.indexOf('const playedFiles = await withKitLayersFromDisk(');
-    const known = route.lastIndexOf('const playtestFiles =', at);
+    // Since S7 the readers live in the playtest phase; the route hands it the known map as `files`.
+    const phase = readFileSync('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts', 'utf8');
+    expect(phase).toContain('const playedFiles = await withKitLayersFromDisk(p.files, p.readFile);');
+    expect(route).toContain('files: playtestFiles,');
+    const at = phase.indexOf('const playedFiles = await withKitLayersFromDisk(');
+    const known = phase.indexOf('async function playIt(');
     expect(known).toBeGreaterThan(0);
     // No reader between the known map and the completed one judges kit layers or scope from the partial map.
-    expect(route.slice(known, at)).not.toMatch(/missingKitLayerPaths\(|scopeMatch\(|replayFromCode\(/);
+    expect(phase.slice(known, at)).not.toMatch(/missingKitLayerPaths\(|scopeMatch\(|replayFromCode\(/);
   });
   it('census: "the game was played" appears in server code only where a play is known to have happened', () => {
     const hits: string[] = [];

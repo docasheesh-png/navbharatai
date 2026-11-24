@@ -240,7 +240,6 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [apps, setApps] = useState<PublicApp[]>([]);
   // The Android shelf of whichever Browse view is open. Feed apps pass the same Apple filter as the store's.
   const viewApk = browseView === 'general' ? apps : (feed.view === browseView ? visibleAndroidApps(feed.apps, STORE_PLATFORM) : []);
-  const pagedApps = usePagedList(viewApk, { resetKey: `${browseView}|${kindFilter}` });
   const [mine, setMine] = useState<MineApp[]>([]);
   const pagedMine = usePagedList(mine);
   const [queue, setQueue] = useState<QueueApp[]>([]);
@@ -317,15 +316,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
   const [webApps, setWebApps] = useState<WebApp[]>([]);
   const viewWeb = browseView === 'general' ? webApps : (feed.view === browseView ? feed.webApps : []);
-  const pagedWebApps = usePagedList(viewWeb, { resetKey: `${browseView}|${kindFilter}` });
   const viewLoading = browseView === 'general' ? loading : feed.loading || feed.view !== browseView;
   const shelves = shelvesFor(kindFilter, HIDE_ANDROID_INSTALLS);
+  // One mixed pinned shelf preserves the admin's exact order across APKs and Web Apps.
+  const pinnedItems = useMemo(() => [
+    ...(shelves.web ? viewWeb.filter((a) => a.pinned).map((app) => ({ kind: 'web' as const, app, pinOrder: app.pinOrder ?? Number.MAX_SAFE_INTEGER })) : []),
+    ...(shelves.apk ? viewApk.filter((a) => a.pinned).map((app) => ({ kind: 'apk' as const, app, pinOrder: app.pinOrder ?? Number.MAX_SAFE_INTEGER })) : []),
+  ].sort((a, b) => a.pinOrder - b.pinOrder), [viewWeb, viewApk, shelves.web, shelves.apk]);
+  const regularViewWeb = useMemo(() => viewWeb.filter((a) => !a.pinned), [viewWeb]);
+  const regularViewApk = useMemo(() => viewApk.filter((a) => !a.pinned), [viewApk]);
+  const pagedWebApps = usePagedList(regularViewWeb, { resetKey: `${browseView}|${kindFilter}` });
+  const pagedApps = usePagedList(regularViewApk, { resetKey: `${browseView}|${kindFilter}` });
   const anyInView = (shelves.web && viewWeb.length > 0) || (shelves.apk && viewApk.length > 0);
 
   // ── APP MART SOCIAL (admin 2026-09-30: "app mart me ek social media banana hai!") ──────────────
   // 👍 · 👎 · 💬 under every app on the page, fetched for the visible tiles in ONE request. Counts are
   // public; pressing asks for a sign-in. See appMart/AppMartSocial.tsx and routes/appMartSocial.ts.
   const socialKeys = [
+    ...pinnedItems.map((item) => item.kind === 'web' ? webKey(item.app.id) : apkKey(item.app.id)),
     ...pagedWebApps.visible.map((a) => webKey(a.id)),
     ...pagedApps.visible.map((a) => apkKey(a.id)),
   ];
@@ -1083,8 +1091,27 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           })()
         )}
 
+        {tab === 'browse' && browseView === 'general' && !viewLoading && pinnedItems.length > 0 && (
+          <section className="mb-6">
+            <p className="text-sm font-bold text-body mb-2 flex items-center gap-1.5"><Pin size={13} className="text-amber-500" /> Pinned by NavBharatAI</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {pinnedItems.map((item) => (
+                <button
+                  key={`${item.kind}:${item.app.id}`}
+                  onClick={() => item.kind === 'web' ? void openWebDetail(item.app) : setOpenApp(item.app)}
+                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-card border border-amber-500/30 hover:border-amber-500/60 text-left min-w-0"
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-500">{item.kind === 'web' ? 'Instant app' : 'Android app'}</span>
+                  <span className="text-sm font-semibold leading-snug line-clamp-2 w-full">{item.kind === 'web' ? item.app.name : item.app.appName}</span>
+                  <span className="text-[11px] text-accent-text">Open app →</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ── Half 1: PLAY INSTANTLY (web apps) — tap and it runs ── */}
-        {tab === 'browse' && !viewLoading && shelves.web && anyInView && (
+        {tab === 'browse' && !viewLoading && shelves.web && (regularViewWeb.length > 0 || (viewWeb.length === 0 && anyInView)) && (
           <div className="mb-7">
             {/* 🔴 A FIRST-TIME VISITOR HAS TO BE ABLE TO READ THIS (admin 2026-09-17). It was
                 `text-faint` uppercase at 12px — the lowest-contrast text on the screen, carrying
@@ -1196,7 +1223,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             iPhone that line is not information, it is an apology for a section that could never have
             worked. The two gates are not redundant: the list makes the tiles impossible, this makes
             the section invisible. */}
-        {tab === 'browse' && !viewLoading && !HIDE_ANDROID_INSTALLS && shelves.apk && anyInView && (
+        {tab === 'browse' && !viewLoading && !HIDE_ANDROID_INSTALLS && shelves.apk && (regularViewApk.length > 0 || (viewApk.length === 0 && anyInView)) && (
           <div className="mb-6">
             <p className="text-sm font-bold text-body mb-0.5 flex items-center gap-1.5">
               <Package size={13} className="text-info" /> Install on Android

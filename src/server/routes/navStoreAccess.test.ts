@@ -20,12 +20,24 @@ import { join } from 'path';
 
 const src = readFileSync(join(__dirname, 'navStore.ts'), 'utf8');
 
-function handler(startsWith: string, endsBefore: string): string {
+/**
+ * One route's own body, and NOTHING that follows it.
+ *
+ * 🔴 ROOT CAUSE, 2026-11-24 (#4519's red CI). This used to slice from the route being read to the
+ * NEXT ROUTE THAT HAPPENED TO FOLLOW IT, named by hand as `endsBefore`. That anchor is not a
+ * property of the route under test, so inserting an unrelated route between the two silently grew
+ * every slice: #4519 added `/api/nav-store/admin/pins` + `/admin/pin` between the download route
+ * and `/admin/queue`, and the download route's "a refusal is a PAGE, not JSON" assertion then read
+ * the PIN routes' perfectly correct `res.status(403).json` and failed. The test was wrong, not the
+ * code. The boundary is now derived — the next registration at the file's own indentation — which
+ * is exactly how `everyAdminDecisionIsAudited.test.ts` has always sliced route bodies.
+ */
+function handler(startsWith: string): string {
   const start = src.indexOf(startsWith);
   expect(start, `route not found: ${startsWith}`).toBeGreaterThan(-1);
-  const end = src.indexOf(endsBefore, start + startsWith.length);
-  expect(end, `end anchor not found after ${startsWith}`).toBeGreaterThan(start);
-  return src.slice(start, end);
+  const rest = src.slice(start + startsWith.length);
+  const next = rest.search(/\n  app\.(get|post|put|patch|delete|use)\(/);
+  return src.slice(start, next >= 0 ? start + startsWith.length + next : src.length);
 }
 
 function code(text: string): string {
@@ -38,10 +50,10 @@ function code(text: string): string {
     .join('\n');
 }
 
-const remixHandler = () => handler("app.post('/api/nav-store/web/app/:id/remix'", "app.get('/api/nav-store/web/purchases'");
-const openHandler = () => handler("app.post('/api/nav-store/web/app/:id/open'", "app.get('/api/nav-store/web/apps'");
-const downloadHandler = () => handler("app.get('/api/nav-store/download/:id'", "app.get('/api/nav-store/admin/queue'");
-const ticketHandler = () => handler("app.post('/api/nav-store/download-ticket/:id'", "app.get('/api/nav-store/download/:id'");
+const remixHandler = () => handler("app.post('/api/nav-store/web/app/:id/remix'");
+const openHandler = () => handler("app.post('/api/nav-store/web/app/:id/open'");
+const downloadHandler = () => handler("app.get('/api/nav-store/download/:id'");
+const ticketHandler = () => handler("app.post('/api/nav-store/download-ticket/:id'");
 
 describe('REMIX — only a plan holder may take someone else’s app', () => {
   it('runs the shared gate, not a second copy of the check', () => {

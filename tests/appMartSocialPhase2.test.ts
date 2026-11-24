@@ -251,7 +251,11 @@ describe('4 · the Browse views and the kind filter', () => {
   it('the screen draws the views and the filter, and an Android shelf never appears on an iPhone', () => {
     expect(mart).toContain('BROWSE_VIEWS.map((v)');
     expect(mart).toContain('kindFilterOptions(HIDE_ANDROID_INSTALLS)');
-    expect(mart).toContain('!HIDE_ANDROID_INSTALLS && shelves.apk && anyInView');
+    // The invariant is the APPLE GATE and the shelf switch, in that order — not the arithmetic that
+    // follows it. Asserting the whole conjunction made this guard fail the moment #4519 drew pinned
+    // apps in their own section and the shelf started counting `regularViewApk`, which took nothing
+    // away from the iPhone rule. Guard what the rule is, not how the list beside it is computed.
+    expect(mart).toContain('!HIDE_ANDROID_INSTALLS && shelves.apk &&');
     expect(mart).toContain('visibleAndroidApps(feed.apps, STORE_PLATFORM)');
     expect(mart).toContain('fetchFeed<WebApp, PublicApp>(view)');
   });

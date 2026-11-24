@@ -768,8 +768,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       void loadWebQueue();
       void loadReports();
       void loadWebApps();
+      void loadAdminPins();
     }
-  }, [loadWebQueue, loadReports, loadWebApps]);
+  }, [loadWebQueue, loadReports, loadWebApps, loadAdminPins]);
 
   useEffect(() => { void loadStatus(); void loadApps(); void loadWebApps(); }, [loadStatus, loadApps, loadWebApps]);
   // Loaded when the Publish tab is actually opened, not on mount: most people arriving at App Mart
@@ -808,8 +809,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       if (liveRef.current) setReviewing('');
       void loadQueue();
       void loadApps();
+      void loadAdminPins();
     }
-  }, [loadQueue, loadApps]);
+  }, [loadQueue, loadApps, loadAdminPins]);
 
   /**
    * ADMIN: take ANY app off App Mart, from its own page (admin 2026-10-04: "admin kabhi bhi kisi bhi app

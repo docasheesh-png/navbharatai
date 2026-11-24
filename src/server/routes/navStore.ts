@@ -1,4 +1,5 @@
 import { explicitStoreAdmin, storeAdminRequest } from '../lib/storeAdminPermission';
+import { getAppMartPins, setAppMartPin, APP_MART_PIN_LIMIT, type AppMartPinKind } from '../lib/appMartPins';
 // Nav App Store — a place where a NavBharatAI user can publish their Android app, and anyone can
 // install it.
 //
@@ -461,7 +462,15 @@ export function registerNavStoreRoutes(app: Express): void {
       const apps = await publicApprovedApps.get('approved', () => listApps('approved', 100));
       res.setHeader('Cache-Control', 'public, max-age=60');
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
-      res.json({ apps: filtered.map(toPublic) });
+      const pins = await getAppMartPins();
+      const rank = new Map(pins.filter((p) => p.kind === 'apk').map((p, index) => [p.id, index]));
+      const publicApps = filtered.map(toPublic).map((a) => ({ ...a, pinned: rank.has(a.id), pinOrder: rank.get(a.id) ?? null }));
+      publicApps.sort((a, b) => {
+        const ar = rank.get(a.id), br = rank.get(b.id);
+        return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
+          || (ar === undefined ? 0 : ar) - (br === undefined ? 0 : br);
+      });
+      res.json({ apps: publicApps });
     } catch {
       res.status(502).json({ error: 'Could not load the store.' });
     }
@@ -582,6 +591,45 @@ export function registerNavStoreRoutes(app: Express): void {
     await updateApp(found.id, { downloads: (found.downloads || 0) + 1 }).catch(() => { /* a count is never worth failing a download */ });
   });
 
+  // ── Admin pin management (six shared slots across APK + Web Apps) ──────────
+  app.get('/api/nav-store/admin/pins', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    try { res.json({ pins: await getAppMartPins(), limit: APP_MART_PIN_LIMIT }); }
+    catch { res.status(502).json({ error: 'Could not load App Mart pins.' }); }
+  });
+
+  app.post('/api/nav-store/admin/pin', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    const kind = String(req.body?.kind || '') as AppMartPinKind;
+    const id = String(req.body?.id || '').trim();
+    const pinned = req.body?.pinned;
+    if (!id || !['apk', 'web'].includes(kind) || typeof pinned !== 'boolean') {
+      return res.status(400).json({ error: 'A valid app kind, id and pinned boolean are required.' });
+    }
+    try {
+      if (pinned) {
+        if (kind === 'apk') {
+          const app = await getApp(id);
+          if (!app || app.status !== 'approved') return res.status(409).json({ error: 'Only approved APKs can be pinned.' });
+        } else {
+          const app = await getWebApp(id);
+          if (!app || app.status !== 'listed') return res.status(409).json({ error: 'Only listed Web Apps can be pinned.' });
+        }
+      }
+      const pins = await setAppMartPin(kind, id, pinned);
+      publicApprovedApps.forget();
+      publicListings.forget();
+      return res.json({ ok: true, pins, limit: APP_MART_PIN_LIMIT });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'APP_MART_PIN_LIMIT_REACHED') {
+        return res.status(409).json({ error: 'All 6 App Mart pin slots are occupied. Unpin an app first.' });
+      }
+      return res.status(502).json({ error: 'Could not update App Mart pins.' });
+    }
+  });
+
   // ── Admin review ───────────────────────────────────────────────────────────
 
   /** The review queue, with everything a reviewer needs to decide. */
@@ -624,6 +672,7 @@ export function registerNavStoreRoutes(app: Express): void {
       if (!found) return res.status(404).json({ error: 'No such app.' });
 
       const status = String(decision) as SubmissionStatus;
+      if (status === 'removed') await setAppMartPin('apk', appId, false);
       // Fires only on the TRANSITION into 'approved' — re-clicking an already-approved app (or a
       // decision that was not 'approved' at all) must never re-congratulate the creator.
       const enteringApproved = status === 'approved' && found.status !== 'approved';
@@ -1059,12 +1108,21 @@ export function registerNavStoreRoutes(app: Express): void {
         const creators = await resolveCreators(rows.map((a) => a.uid), realCreatorLookupDeps).catch(() => new Map());
         return rows.map((a) => toPublicWebApp(a, creators.get(a.uid)));
       });
-      const visible = listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
+      let visible = listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
         optedIn: viewer.optedIn,
         // The native shell never shows 18+ content at all — see adultContent.ts for why that is a
         // Play-policy decision rather than a preference.
         isNative: isNativeRequest(req),
       }));
+      const appMartPins = await getAppMartPins();
+      const webPinRank = new Map(appMartPins.filter((p) => p.kind === 'web').map((p, index) => [p.id, index]));
+      const pinnedFirst = <T extends { id: string }>(rows: T[]): T[] => rows.map((row, index) => ({ row, index }))
+        .sort((a, b) => {
+          const ar = webPinRank.get(a.row.id), br = webPinRank.get(b.row.id);
+          return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
+            || (ar === undefined ? a.index - b.index : (ar - (br ?? 0)));
+        }).map(({ row }) => ({ ...row, pinned: webPinRank.has(row.id), pinOrder: webPinRank.get(row.id) ?? null }));
+      visible = pinnedFirst(visible);
       // FOR YOU (admin 2026-10-14). `?sort=newest` or no `sort` = the list exactly as before (newest
       // first). `?sort=foryou&seed=…` = personalised + trending, seed-stable so paging never reshuffles.
       // Any failure in the ranking falls back to the chronological list — the store never breaks for it.
@@ -1072,7 +1130,7 @@ export function registerNavStoreRoutes(app: Express): void {
         try {
           const uid = await verifyFirebaseToken(req).catch(() => null);
           const [signals, affinity] = await Promise.all([readSignals(), readAffinity(uid ?? null)]);
-          const ranked = rankForYou(visible, { signals, affinity, seed: cleanSeed(req.query.seed), now: Date.now() });
+          const ranked = pinnedFirst(rankForYou(visible, { signals, affinity, seed: cleanSeed(req.query.seed), now: Date.now() }));
           const page = pageOf(ranked, req.query.offset, req.query.limit);
           res.setHeader('Cache-Control', 'private, no-store');
           return res.json({ apps: page.items, nextOffset: page.nextOffset, sort: 'foryou', personalized: !!affinity });
@@ -1505,6 +1563,7 @@ export function registerNavStoreRoutes(app: Express): void {
       // listed (see navStoreWeb.ts's saveWebApp) must never re-congratulate the creator.
       const enteringListed = decision === 'listed' && found.status !== 'listed';
       if (decision === 'removed') {
+        await setAppMartPin('web', id, false);
         // Before the snapshot is deleted, while the files can still be hashed.
         await recordTakedown({
           surface: 'app_mart_web',

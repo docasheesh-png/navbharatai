@@ -5,7 +5,7 @@ import PullToRefresh from '../PullToRefresh';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
-  Rocket, ImagePlus, Clipboard, Copy, User, ChevronLeft, ChevronRight,
+  Rocket, ImagePlus, Clipboard, Copy, User, ChevronLeft, ChevronRight, Pin,
 } from 'lucide-react';
 import { StoreReviewAccess } from './StoreReviewAccess';
 import { WebAppPlayer } from './WebAppPlayer';
@@ -153,6 +153,8 @@ interface WebApp {
   /** Who made it — a display name and a public creator code (never the account uid). */
   creatorName?: string;
   creatorId?: string;
+  pinned?: boolean;
+  pinOrder?: number | null;
 }
 
 export interface NavAppStoreProps {
@@ -240,6 +242,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [mine, setMine] = useState<MineApp[]>([]);
   const pagedMine = usePagedList(mine);
   const [queue, setQueue] = useState<QueueApp[]>([]);
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(() => new Set());
+  const [pinBusyKey, setPinBusyKey] = useState('');
   // THE REVIEW HUB (admin 2026-10-05: "pahle 2 button banao, 'manage app, manage apk' aur uske andar apps
   // dikhe"). The tab opens on its buttons; one button opens one list, filtered to Waiting or On the store.
   const [reviewSection, setReviewSection] = useState<ReviewSection | null>(null);
@@ -665,6 +669,43 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     } catch { if (current()) setReviewError('Some moderation lists could not be loaded. Retry the access check to reload them.'); }
   }, []);
 
+  const loadAdminPins = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/admin/pins', { headers: await storeHeaders() });
+      const data = await res.json().catch(() => null);
+      if (res.ok && Array.isArray(data?.pins) && liveRef.current) {
+        setPinnedKeys(new Set(data.pins.map((p: { kind: string; id: string }) => `${p.kind}:${p.id}`)));
+      }
+    } catch { /* pin controls remain available after a later retry */ }
+  }, []);
+
+  const toggleAdminPin = useCallback(async (kind: 'apk' | 'web', id: string, pinned: boolean) => {
+    const key = `${kind}:${id}`;
+    setPinBusyKey(key);
+    setReviewError('');
+    try {
+      const res = await fetch('/api/nav-store/admin/pin', {
+        method: 'POST',
+        headers: await storeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ kind, id, pinned }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setReviewError(typeof data?.error === 'string' ? data.error : 'Pin status could not be updated.');
+        return;
+      }
+      if (liveRef.current && Array.isArray(data?.pins)) {
+        setPinnedKeys(new Set(data.pins.map((p: { kind: string; id: string }) => `${p.kind}:${p.id}`)));
+      }
+      void loadApps();
+      void loadWebApps();
+    } catch {
+      if (liveRef.current) setReviewError('Pin status could not be updated. Check your connection and try again.');
+    } finally {
+      if (liveRef.current) setPinBusyKey('');
+    }
+  }, [loadApps, loadWebApps]);
+
   const loadReports = useCallback(async () => {
     const generation = statusRequestRef.current;
     const request = ++reviewReadRef.current.reports;
@@ -738,8 +779,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
   }, [tab, loadMine, loadWebMine, loadOwned]);
   useEffect(() => {
-    if (tab === 'review' && !statusLoading && status?.isAdmin) { void loadQueue(); void loadWebQueue(); void loadReports(); }
-  }, [tab, statusLoading, status?.isAdmin, loadQueue, loadWebQueue, loadReports]);
+    if (tab === 'review' && !statusLoading && status?.isAdmin) { void loadQueue(); void loadWebQueue(); void loadReports(); void loadAdminPins(); }
+  }, [tab, statusLoading, status?.isAdmin, loadQueue, loadWebQueue, loadReports, loadAdminPins]);
 
   /** Returns whether the server SAVED the decision — a refused or failed one is said, never silent. */
   const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed', note?: string): Promise<boolean> => {
@@ -1746,6 +1787,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
                       >List on the store</button>
                     )}
+                    {isLiveOnStore(a.status) && (
+                      <button
+                        onClick={() => void toggleAdminPin('web', a.id, !pinnedKeys.has(`web:${a.id}`))}
+                        disabled={pinBusyKey === `web:${a.id}`}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40 ${pinnedKeys.has(`web:${a.id}`) ? 'bg-amber-500/20 text-amber-500' : 'bg-raised hover:bg-raised-hover text-body'}`}
+                      ><Pin size={11} className="inline mr-1" />{pinnedKeys.has(`web:${a.id}`) ? 'Unpin' : 'Pin to top'}</button>
+                    )}
                     <button
                       onClick={() => void adminRemoveFromStore('web', a.id, a.name)}
                       disabled={webBusy === a.id}
@@ -1809,6 +1857,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                   {/* An APPROVED app is live in the store, so "Publish" and "Reject" would be wrong
                       buttons for it — the only thing left to decide is whether to take it down. */}
                   <div className="flex gap-2 mt-3">
+                    {a.status === 'approved' && (
+                      <button
+                        onClick={() => void toggleAdminPin('apk', a.id, !pinnedKeys.has(`apk:${a.id}`))}
+                        disabled={pinBusyKey === `apk:${a.id}`}
+                        className={`px-3 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${pinnedKeys.has(`apk:${a.id}`) ? 'bg-amber-500/20 text-amber-500' : 'bg-raised hover:bg-raised-hover text-body'}`}
+                      ><Pin size={12} className="inline mr-1" />{pinnedKeys.has(`apk:${a.id}`) ? 'Unpin' : 'Pin to top'}</button>
+                    )}
                     {reviewActionsFor(a.status) === 'remove' ? (
                       <button
                         onClick={() => void adminRemoveFromStore('apk', a.id, a.appName)}

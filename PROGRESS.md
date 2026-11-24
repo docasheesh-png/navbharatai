@@ -104018,3 +104018,21 @@ Admin: *"navbharatai api call se user ki sabhi ulti sidhi imagination ko real ba
 - **Root cause:** a combat rule ("5 shots kill", "enemies bleed") lived only as words the builder had to remember; the kit's Health had no notion of either.
 - **Fix:** the kit's `Health` (src/game/systems/combat.ts) reads COMBAT data by itself — `enemyHitsToKill`, `playerHitsToKill`, `bleed { seconds, perSecond }` (blood each half second, can bleed to death) — from src/game/gameRules.ts and every file under src/game/rules/; `core/rules.ts` reads rules/ too. The request's combat words become that data (`gameRules.gameCombatFrom`, EN/Hinglish/Hindi), seeded through `generate_game_runtime({ combat })` and said in the contract. Any other rule: the `compose_rule` recipe (`gameAssets/composeRule.ts`) — ONE model call turns the sentence into the checked vocabulary and writes src/game/rules/<name>.ts; outside the vocabulary it is refused honestly ("write it as code").
 - **Locks:** `anyRuleTheUserImaginesIsRun` (real kit files; reverted-and-failed). AppKnowledgeBase `game_any_rule`. Kit history regenerated.
+
+## 2026-11-24 — G8: a crash dents the car (admin question 9)
+
+- **Root cause:** the kit heard every crash (`onVehicleCrash`: point, vehicle, speed lost) and only made it felt; nothing ever changed the car.
+- **Fix:** new kit file `src/game/three/dents.ts` (`GameDentsGenerator.ts`, Game3D module `dents`): `enableVehicleDents()` dents every crashing vehicle where it hit — vertices within a radius pushed toward the car's centre, deeper for a harder crash and capped, wheels untouched, paint scuffed, `userData.damage` 0..1 and `VEHICLE_DAMAGED`; a shared geometry is copied once so one car's dent never shows on another; `repairVehicle` restores it. The request's words ("dent", "realistic accident", Hinglish) make `crashDamage` a required feature with the call to make, checked from code by scopeMatch.
+- **Lock:** `aCrashDentsTheCar` (real three.js; reverted-and-failed). AppKnowledgeBase `game_crash_dents`.
+
+## 2026-11-24 — G9: every character can hold things, not only the player (admin question 1)
+
+- **Root cause:** `holdItem(ctx, …)` reached only the player's character; an NPC or enemy that was a library model had no way to hold anything.
+- **Fix:** `holdInHand(character, item, side)` in the kit's `playerBody.ts`: a library or uploaded model by its hand bone (same bone-name matching as the player), a kit person (`createHumanoid`) by its own grip (right through `hold`, left by its joint); sized to a third of the character's height; no hand bone → at its side, and false says so. The shell handoff tells the builder.
+- **Lock:** `everyCharacterCanHoldThings` (real kit files; reverted-and-failed). Kit history regenerated.
+
+## 2026-11-24 — G10: any visual effect the user imagines is drawn by the kit (compose_effect)
+
+- **Root cause:** the kit's particles played only nine fixed presets; an imagined effect ("aag ka bawandar") had no form.
+- **Fix:** an effect is a checked ParticleSpec with a name. `particles.ts` reads `src/game/effects/<name>.ts` by itself (through the new `fx/effectFiles.ts`, so particles.ts has no import.meta), `registerEffect` adds one from code, `burst(name, …)` plays it, an unknown name plays impact and says so. `compose_effect` (`gameAssets/composeEffect.ts`): a kit effect asks no model; otherwise ONE model call designs the spec, clamped to what a phone can draw, written to src/game/effects/<name>.ts.
+- **Lock:** `anyEffectTheUserImaginesIsDrawn` (real kit file; census of the kit's preset list; reverted-and-failed). AppKnowledgeBase `game_any_effect`.

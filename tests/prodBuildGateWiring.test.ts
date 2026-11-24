@@ -20,7 +20,8 @@ describe('the detector runs, and only where it is safe to', () => {
 
   it('respects the same wall-clock headroom the vaccine does', () => {
     const i = route.indexOf('prodBuildGateEnabled() && expectsArtifacts');
-    expect(route.slice(i, i + 260)).toContain('effectiveBuildSeconds * 1000 - 90_000');
+    // Same 90 s headroom, through the one helper (locked plan item 2, buildHeadroom.ts).
+    expect(route.slice(i, i + 260)).toContain('roomFor(90_000)');
   });
 
   it('is bounded — a hung bundler cannot eat the window', () => {

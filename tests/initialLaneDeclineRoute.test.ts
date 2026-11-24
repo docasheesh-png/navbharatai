@@ -256,6 +256,8 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     // The guard reads whether the platform completed the turn itself (platformDoneTurn.ts); these synthetic turns never are.
     platformDoneRef: { cur: null },
     effectiveBuildSeconds: 0, buildStartedAt: Date.now(), singleHtmlFileRule: false,
+    // The route's one headroom helper (buildHeadroom.ts); with no watchdog (0 s) every pass fits, as before.
+    roomFor: () => true, roomLeftMs: () => Number.POSITIVE_INFINITY, playtestHold: { playtestDone: false, buildOk: true, gameTurn: false },
     shouldAutoScaffoldE2e, renderRescueEligible, lastPreviewUrl: options.existingPreview ? 'https://synthetic.invalid/preview' : null,
     findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote, withE2eExcluded, e2eExcludeNote,
     noteFinishingWrite: (path: string) => finishingPaths.add(path), userId: null,

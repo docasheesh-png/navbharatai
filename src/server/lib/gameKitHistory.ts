@@ -397,7 +397,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "23688f9c511f110c2e0aab1a704abd655b54a2822d5143b09f816313d43dc06c"
   ],
   "src/game/core/rules.ts": [
-    "11640104ffee4d3b79e4cdcf92eb6053e270c29dd2f4e66fa903ad4a93260665"
+    "11640104ffee4d3b79e4cdcf92eb6053e270c29dd2f4e66fa903ad4a93260665",
+    "c045e18b106b18fda3877cc477ac669e294e407b80570e7170c6275ab06877cd"
   ],
   "src/game/core/runner.ts": [
     "97bdd55536727c171dcd0045864eda6f8ecc1406539771fb8ba32e92cdeb2312",
@@ -574,7 +575,11 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "ec3ca40df8e8a87f454cf4dd1e74698be5fbde06e5ac5aad32c6169b0588411b"
   ],
   "src/game/systems/combat.ts": [
-    "aa1173d83fb2800002182ffaa42f89cf76ceb7a8b6123bc709f679ac2284aaa3"
+    "aa1173d83fb2800002182ffaa42f89cf76ceb7a8b6123bc709f679ac2284aaa3",
+    "6d5071afa9bca3012e18bc6135469bbd7dad5d5d3998f06aaa3edc576b780f2f"
+  ],
+  "src/game/systems/combatRules.ts": [
+    "f12f4ec30a4aaef78e4c18bfbf4a0f607c01a0248caa483464afff70a0eedafe"
   ],
   "src/game/systems/director.ts": [
     "c92437c33c810b3a2064440eaa25a5feb8e4a0465b40e0fd475e94e1054ca31e"

@@ -32,7 +32,56 @@ export interface GameSystemsResult {
   instructions: string;
 }
 
+const COMBAT_RULES = `// The game's combat rules files, found by the bundler (Vite) — read by combat.ts. A file of its own so combat.ts has no
+// import.meta of its own (it is also loaded in plain CommonJS, where import.meta does not exist). ?* matches any name.
+export const COMBAT_FILES: Record<string, { COMBAT?: unknown }> = (() => {
+  try { return import.meta.glob(['../gameRules.ts', '../rules/?*.ts'], { eager: true }) as Record<string, { COMBAT?: unknown }>; } catch { return {}; }
+})();
+`;
+
 const COMBAT = `import { events } from '../core/events';
+import { COMBAT_FILES } from './combatRules';
+
+/**
+ * THE GAME'S COMBAT RULES, AS DATA (admin 2026-11-24: "user ki sabhi ulti sidhi imagination ko real banaye").
+ * "5 shots kill an enemy", "enemies bleed" are written by NavBharatAI as data — COMBAT in src/game/gameRules.ts, or in a
+ * file under src/game/rules/ — and every Health below reads them by itself:
+ *   enemyHitsToKill: 5          an enemy dies on its 5th hit, whatever the weapon's damage
+ *   playerHitsToKill: 3         the player dies on the 3rd hit
+ *   bleed: { seconds: 3, perSecond: 8 }   a hit enemy keeps losing health for 3 s (blood each half second), and can die of it
+ * Health.tick(delta) must be called every step for the bleeding to run (it also drives the i-frames).
+ */
+export interface CombatRules { enemyHitsToKill?: number; playerHitsToKill?: number; bleed?: { seconds: number; perSecond: number } }
+const whole = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= lo ? Math.min(hi, Math.round(v)) : undefined);
+/** Only well-formed combat rules count; anything else is dropped, never guessed. */
+export function cleanCombatRules(raw: unknown): CombatRules {
+  const out: CombatRules = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const r = raw as Record<string, unknown>;
+  const e = whole(r.enemyHitsToKill, 1, 1000); if (e) out.enemyHitsToKill = e;
+  const p = whole(r.playerHitsToKill, 1, 1000); if (p) out.playerHitsToKill = p;
+  const b = r.bleed as Record<string, unknown> | undefined;
+  if (b && typeof b === 'object') {
+    const seconds = typeof b.seconds === 'number' && Number.isFinite(b.seconds) ? Math.min(30, Math.max(0.5, b.seconds)) : 0;
+    const perSecond = typeof b.perSecond === 'number' && Number.isFinite(b.perSecond) ? Math.min(10000, Math.max(0.1, b.perSecond)) : 0;
+    if (seconds && perSecond) out.bleed = { seconds, perSecond };
+  }
+  return out;
+}
+let combatRules: CombatRules | null = null;
+/** The game's combat rules: src/game/gameRules.ts then every file in src/game/rules/ (a later file wins a key). */
+export function readCombatRules(): CombatRules {
+  if (combatRules) return combatRules;
+  const out: CombatRules = {};
+  try {
+    const found = COMBAT_FILES || {};
+    for (const key of Object.keys(found).sort()) Object.assign(out, cleanCombatRules(found[key] && found[key].COMBAT));
+  } catch { /* no rules files: no combat rules */ }
+  combatRules = out;
+  return out;
+}
+/** Set the combat rules in code (a game that decides them at run time, or a test). null reads the files again. */
+export function setCombatRules(rules: CombatRules | null): void { combatRules = rules ? cleanCombatRules(rules) : null; }
 
 /**
  * Health, damage and death — with the two rules that stop a fight being decided in half a second.
@@ -70,6 +119,9 @@ export class Health {
   private invulnerableUntil = 0;
   private dead = false;
   private clock = 0;
+  private bleedLeft = 0;
+  private bleedDrip = 0;
+  private lastPosition: { x: number; y: number; z: number } | undefined;
 
   constructor(options: HealthOptions) {
     this.max = Math.max(1, options.max);
@@ -79,8 +131,29 @@ export class Health {
     this.diedEvent = options.diedEvent ?? 'ENEMY_DIED';
   }
 
-  /** Drive from the FIXED update so the i-frame window is frame-rate independent. */
-  tick(delta: number): void { this.clock += delta; }
+  /** Drive from the FIXED update so the i-frame window is frame-rate independent. It also runs a bleed (COMBAT.bleed). */
+  tick(delta: number): void {
+    const dt = Number.isFinite(delta) && delta > 0 ? delta : 0;
+    this.clock += dt;
+    if (this.bleedLeft <= 0 || this.dead || dt === 0) return;
+    const bleed = readCombatRules().bleed;
+    if (!bleed) { this.bleedLeft = 0; return; }
+    const step = Math.min(dt, this.bleedLeft);
+    this.bleedLeft -= step;
+    this.current -= bleed.perSecond * step;
+    this.bleedDrip += step;
+    if (this.current <= 1e-6) {
+      this.current = 0;
+      this.dead = true;
+      this.bleedLeft = 0;
+      events.emit(this.diedEvent, { position: this.lastPosition, overkill: 0, bled: true });
+      return;
+    }
+    if (this.bleedDrip >= 0.5) { this.bleedDrip = 0; events.emit(this.damagedEvent, { amount: 0, position: this.lastPosition, remaining: this.current, bleeding: true }); }
+  }
+
+  /** Seconds of bleeding left (0 when not bleeding). */
+  get bleeding(): number { return this.bleedLeft; }
 
   get isDead(): boolean { return this.dead; }
   get isInvulnerable(): boolean { return this.clock < this.invulnerableUntil; }
@@ -91,14 +164,23 @@ export class Health {
     // The i-frame check. Removing this is what turns a fight into an instant death.
     if (this.isInvulnerable) return { applied: 0, blocked: true, died: false, remaining: this.current };
 
-    const applied = Math.min(this.current, amount);
+    // The game's combat rules (COMBAT): "5 shots kill" makes each hit a fifth of the health, whatever the weapon.
+    const rules = readCombatRules();
+    const isPlayer = this.diedEvent === 'PLAYER_DIED';
+    const hits = isPlayer ? rules.playerHitsToKill : rules.enemyHitsToKill;
+    const dealt = hits ? this.max / hits : amount;
+    const applied = Math.min(this.current, dealt);
     this.current -= applied;
+    if (this.current <= 1e-6) this.current = 0;
     this.invulnerableUntil = this.clock + this.invulnerable;
+    if (position) this.lastPosition = position;
+    if (!isPlayer && rules.bleed) { this.bleedLeft = rules.bleed.seconds; this.bleedDrip = 0; }
 
     if (this.current <= 0) {
       // Guarded, or two hits in one frame kill the same enemy twice.
       this.dead = true;
-      events.emit(this.diedEvent, { position, overkill: amount - applied });
+      this.bleedLeft = 0;
+      events.emit(this.diedEvent, { position, overkill: Math.max(0, dealt - applied) });
       return { applied, blocked: false, died: true, remaining: 0 };
     }
     events.emit(this.damagedEvent, { amount: applied, position, remaining: this.current });
@@ -117,6 +199,7 @@ export class Health {
     this.dead = false;
     this.current = this.max;
     this.invulnerableUntil = 0;
+    this.bleedLeft = 0;
   }
 }
 
@@ -1408,6 +1491,7 @@ export function aimAssist(aim: { origin: V3; dir: V3 }, targets: ReadonlyArray<{
 
 const FILES: Record<string, string> = {
   'src/game/systems/combat.ts': COMBAT,
+  'src/game/systems/combatRules.ts': COMBAT_RULES,
   'src/game/systems/ai.ts': AI,
   'src/game/systems/projectile.ts': PROJECTILE,
   'src/game/systems/spawner.ts': SPAWNER,
@@ -1419,7 +1503,7 @@ const FILES: Record<string, string> = {
   'src/game/systems/aimassist.ts': AIMASSIST,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -1436,6 +1520,8 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       const base = (path.split('/').pop() || '').replace(/\.ts$/i, '').toLowerCase();
       if (wanted.has(base)) files[path] = content;
     }
+    // combat.ts reads the game's combat rules through combatRules.ts.
+    if (files['src/game/systems/combat.ts']) files['src/game/systems/combatRules.ts'] = FILES['src/game/systems/combatRules.ts'];
     // weapon.ts fires through projectile.ts.
     if (files['src/game/systems/weapon.ts']) files['src/game/systems/projectile.ts'] = FILES['src/game/systems/projectile.ts'];
     // ai.ts follows paths around walls (nav.ts).

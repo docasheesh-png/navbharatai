@@ -1,6 +1,7 @@
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
 import { askStandIn, generateStandIn } from './gameAssets/standInObject';
 import { composeAction } from './gameAssets/composeAction';
+import { composeRule } from './gameAssets/composeRule';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
@@ -10395,6 +10396,25 @@ export class ToolDispatcher {
         return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it; it plays on the character the user chose, whatever model it is. Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
       }
 
+      case 'compose_rule': {
+        // Any rule the user imagines, as data the kit runs by itself (admin 2026-11-24): one model call, validated
+        // (gameAssets/composeRule.ts), written to src/game/rules/<name>.ts. Refused honestly when the vocabulary cannot hold it.
+        const rec = (input as { rule?: unknown; name?: unknown; rule_json?: unknown }) || {};
+        const rule = String(rec.rule ?? '').trim().slice(0, 240);
+        const supplied = typeof rec.rule_json === 'string' && rec.rule_json.trim() ? rec.rule_json : undefined;
+        const made = await composeRule(rule, askStandIn, supplied, typeof rec.name === 'string' ? rec.name : undefined);
+        if (made.kind === 'refused') refuse(made.reason);
+        const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
+        this.scheduleCheckpoint('game rule');
+        const parts = [
+          ...made.rules.map((r) => `when ${r.when}: ${Object.entries(r.then).map(([k, v]) => `${k} ${v}`).join(', ')}`),
+          ...(made.combat.enemyHitsToKill ? [`an enemy dies on hit ${made.combat.enemyHitsToKill}`] : []),
+          ...(made.combat.playerHitsToKill ? [`the player dies on hit ${made.combat.playerHitsToKill}`] : []),
+          ...(made.combat.bleed ? [`a hit enemy bleeds for ${made.combat.bleed.seconds} s`] : []),
+        ];
+        return `The rule is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}: ${parts.join('; ')}. The kit runs it by itself — src/game/core/rules.ts for the "when" rules, the Health in src/game/systems/combat.ts for combat. The game only has to emit the events and give every fighter a Health (and call its tick(delta) every step for bleeding). Do not also listen for it yourself — it would count twice.`;
+      }
+
       case 'generate_stand_in': {
         const rec = (input as { subject?: unknown; plan_json?: unknown }) || {};
         const subject = String(rec.subject ?? '').trim().slice(0, 80);
@@ -10845,7 +10865,7 @@ export class ToolDispatcher {
           ? grRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         // The rules the user named (gameRules.ts → gameKitRecipeInput) arrive as data and become src/game/gameRules.ts.
-        const gr = generateGameRuntime(grInclude, { rules: grRec.rules });
+        const gr = generateGameRuntime(grInclude, { rules: grRec.rules, combat: grRec.combat });
         const grWritten = await this.writeRecipeFiles(gr.files, agent);
         const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');

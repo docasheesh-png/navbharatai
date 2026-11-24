@@ -18,7 +18,7 @@ import { withoutNonObjectSenses } from '../lib/heroObjectSpec';
 import { largeWorldIntent } from './largeWorldIntent';
 import { findGameTitles, mentionsBattleRoyale, ROYALE_GENRE_PHRASE, unrecognisedGameReference, type GameTitleKind } from '../lib/wellKnownGameTitles';
 import { withoutComments } from '../lib/codeOnly';
-import { gameRulesFrom, gameRulesBlock, type GameRule } from './gameRules';
+import { gameCombatFrom, gameCombatLines, gameRulesFrom, gameRulesBlock, type GameCombatData, type GameRule } from './gameRules';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
   | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'simulator' | 'unknown';
@@ -61,6 +61,8 @@ export interface GameScopeContract {
   externalAssets?: boolean;
   /** The cause → effect rules the user stated (gameRules.ts): "killing an enemy raises the score". Absent when none. */
   rules?: GameRule[];
+  /** Combat rules the user stated ("5 goli me mare", "bleeding"), as data for the kit's Health. Absent when none. */
+  combat?: GameCombatData;
   /** The well-known game the user named as the reference ("PUBG", "BGMI", "GTA 5"); absent when none. */
   reference?: string;
   /**
@@ -341,8 +343,10 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
     : reference?.dimension ?? (bigWorldWantsThreeD(text, genre, camera) ? '3d' : 'unspecified');
   const unrecognisedReference = !reference && genre === 'unknown' && !vehicle ? unrecognisedGameReference(text) : null;
   const rules = gameRulesFrom(text);
+  const combat = gameCombatFrom(text);
   return {
     ...(rules.length ? { rules } : {}),
+    ...(Object.keys(combat).length ? { combat } : {}),
     ...(reference ? { reference: reference.name } : {}),
     ...(unrecognisedReference ? { unrecognisedReference } : {}),
     genre,
@@ -378,6 +382,8 @@ export function gameContractBlock(c: GameScopeContract): string {
     c.minimumUnlockableCharacters ? `At least ${c.minimumUnlockableCharacters} distinct unlockable characters, with actual unlock conditions and selection behavior; never just a labelled roster.` : '',
     c.runnerMechanics?.includes('currency-unlocks') ? 'Currency unlocks must really spend the named in-game balance, reject unaffordable purchases and allow selecting an unlocked character; not a shop mockup.' : '',
     gameRulesBlock(c.rules ?? []),
+    'Any OTHER rule the user states (scoring, levels, game over, hits to kill, bleeding) is made real with run_recipe({ name: "compose_rule", input: { rule } }) — the kit then runs it as data; a rule it refuses is written as code.',
+    c.combat && gameCombatLines(c.combat).length ? ['Combat rules the user named — the kit applies them as data, the game must use its Health:', ...gameCombatLines(c.combat)].join('\n') : '',
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
   ];
   return lines.filter(Boolean).join('\n');

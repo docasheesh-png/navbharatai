@@ -70,7 +70,7 @@ import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirement
 import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowledge';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
-import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
+import { buildFindingSuggestions, isGameFixTurn } from '../AgentV3/buildFindingSuggestions';
 import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
@@ -263,7 +263,7 @@ import {
   mergeUserProofs, EXPLORE_BUDGET_MS, type UserProof,
 } from '../AgentV3/clickExplorer';
 import {
-  explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, runExplorerRepair,
+  explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, sayRepairGateNote, runExplorerRepair,
   explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS, explorerRepairPrompt,
 } from '../AgentV3/explorerRepair';
 import { withoutPlatformCheckTools, REPAIR_WITHHELD_TOOLS } from '../AgentV3/repairScope';
@@ -588,6 +588,9 @@ import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceM
 import { freeBuildWindow, freeWindowLine, noteFreeBuildStartDurable, decideFreePauseDurable } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
+import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhases/buildHeadroom';
+import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
+import { reportRuleProbes } from '../AgentV3/buildPhases/gameRuleProbes';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -15744,6 +15747,17 @@ async function noteBuildOutcome(
       const buildStartedAt = Date.now();
       /** How long this build has WORKED — wall time minus the credited user wait (workClock.ts). Every budget check reads it. */
       const workElapsed = (): number => workElapsedMs(Date.now(), buildStartedAt, creditedWaitMs());
+      // Locked plan item 2: ONE headroom question for every post-build pass, with the game playtest's time held back
+      // on a game turn until it has run (buildPhases/buildHeadroom.ts).
+      // An edit of an existing game (a tapped "Make the game playable" fix) is a game turn too, whatever its words.
+      let wasGameAtStart: boolean | undefined;
+      const playtestHold = { playtestDone: false, buildOk: true, get gameTurn(): boolean {
+        if (!this.buildOk) return false;
+        wasGameAtStart ??= projectFilesAtTurnStart ? isCanvasGameProject(projectFilesAtTurnStart) : undefined;
+        return wasGameAtStart === true || turnIsGame(gameTurnRequest(prompt, milestoneRequest));
+      } };
+      const roomFor = (needMs: number): boolean => hasHeadroom({ capMs: effectiveBuildSeconds * 1000, elapsedMs: workElapsed(), needMs, heldMs: playtestReserveMs(playtestHold) });
+      const roomLeftMs = (): number => headroomMs({ capMs: effectiveBuildSeconds * 1000, elapsedMs: workElapsed(), heldMs: playtestReserveMs(playtestHold) });
       billingCtx.buildStartedAt = buildStartedAt; // Fix 67 — the finalizer debits with this exact ref
       etaStartMs = buildStartedAt; // anchor the live ETA heartbeat to the real build start
       // P-BRE.1 — open a distributed trace for this build (root span). Continues an inbound W3C
@@ -18378,7 +18392,7 @@ async function noteBuildOutcome(
         // `final` stage — advisory until now, and a build that ignored it reached every post-build
         // check with the headroom test already false. Nothing here extends the build's wall clock:
         // `deadlineMs` and `finalizeOnDeadline` are untouched.
-        maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed()),
+        maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed(), playtestReserveMs(playtestHold)),
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
         // a store failure never breaks the build (see AgentRunner). Reloadable via the
         // GET /api/agentv3/conversations endpoints below.
@@ -20726,7 +20740,7 @@ async function noteBuildOutcome(
               // Generation-shaped, so it respects the correction reserve too. Without this the
               // escalation would be handed a FRESH full-length clock (AgentRunner starts its own
               // stopwatch inside run()) and could spend the reserve the main runner just protected.
-              maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed()),
+              maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed(), playtestReserveMs(playtestHold)),
               persistence: {
                 store: getConversationStore(),
                 conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -20976,7 +20990,7 @@ async function noteBuildOutcome(
         result: () => result,
         aborted: () => abort.signal.aborted,
         signal: abort.signal,
-        remainingMs: () => effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (workElapsed()),
+        remainingMs: () => roomLeftMs(),
         record: (note) => buildDiag.record(note),
         platformDone: () => platformDoneRef.cur !== null,
       });
@@ -21107,7 +21121,7 @@ async function noteBuildOutcome(
           effort: powerSpecResolved.effort,
           // Generation-shaped (it re-runs the whole build), so it respects the correction reserve —
           // same reason as the escalation runner above.
-          maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed()),
+          maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed(), playtestReserveMs(playtestHold)),
           persistence: {
             store: getConversationStore(),
             conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -21288,6 +21302,8 @@ async function noteBuildOutcome(
       // already held back by the evidence rules rather than by a fabricated quality score.
       const gateQuality: QualitySignals = { a11yIssues: 0, slowRoutes: 0 };
 
+      // A failed build is never played, so its repairs keep the playtest's held time (buildHeadroom.ts).
+      playtestHold.buildOk = result?.ok === true;
       // G3 — POST-AGENTIC TSC GATE (default-on; disable with AGENTV3_AGENTIC_TSC_GATE=off). The fast
       // lane (SimpleBuilder) type-checks + repairs, but the agentic loop / escalation / empty-build
       // retry had NO deterministic compile gate — it relied on the agent choosing to run tsc, which is
@@ -21325,7 +21341,7 @@ async function noteBuildOutcome(
       if (
         typecheckGateShouldRun({ ...tscGateBase, wroteTypeScript })
         // Only with comfortable time left for install + tsc + one repair pass.
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
+        && roomFor(90_000)
       ) {
         // `verified` is separate from `ok` on purpose. Two of the paths below return ok=true meaning
         // "we could not check, so do not block" — which is right for the gate and would be a LIE as
@@ -21466,7 +21482,7 @@ async function noteBuildOutcome(
           // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
           isImportTurn, aborted: abort.signal.aborted,
         })
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
+        && roomFor(60_000)
       ) {
         try {
           const scaffoldPaths = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -21586,7 +21602,7 @@ async function noteBuildOutcome(
           // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
           isImportTurn, aborted: abort.signal.aborted,
         })
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
+        && roomFor(45_000)
       ) {
         try {
           let syntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
@@ -21648,7 +21664,7 @@ async function noteBuildOutcome(
           // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
           isImportTurn, aborted: abort.signal.aborted,
         })
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
+        && roomFor(45_000)
       ) {
         try {
           // 🔴 DETECTION SCOPE IS NOT REPAIR SCOPE (Q-1378, Q-1380, Q-1384, Q-1392, Q-1427, Q-1446 — six
@@ -22821,7 +22837,7 @@ async function noteBuildOutcome(
             // Bounded LLM self-heal — same gate/pattern as the runtime auto-fix loop and the integrity
             // heal. Only fires when a REAL divergence exists (the app already white-screens in-browser),
             // once, with time to spare. Never blocks or fails the build.
-            const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
+            const timeLeft = roomFor(90_000);
             if (autoFixEnabled() && !abort.signal.aborted && timeLeft) {
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a preview compile issue so the live preview renders…', ts: Date.now() });
               const compileHealRunner = new AgentRunner({
@@ -22875,7 +22891,7 @@ async function noteBuildOutcome(
         && result && !result.ok && expectsArtifacts && writtenFiles.size > 0 && autoFixEnabled() && !abort.signal.aborted) {
         try {
           const hooksReport = await analyzeHooksRules(Object.fromEntries(writtenFiles));
-          const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
+          const timeLeft = roomFor(90_000);
           if (!hooksReport.ok && hooksReport.violations.length > 0 && timeLeft) {
             events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a React hooks issue so the app runs without crashing…', ts: Date.now() });
             const hooksHealRunner = new AgentRunner({
@@ -22930,7 +22946,7 @@ async function noteBuildOutcome(
           // autopsy e706e068: 22 model calls completed a stray hook nothing imported). The readiness
           // gate that runs before this heal already judged which files the app loads; ask it.
           const stubs = loadedFindings(highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
-          const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
+          const timeLeft = roomFor(90_000);
           if (stubs.length > 0 && timeLeft) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Completing ${stubs.length} unfinished piece(s) of the code so the feature actually works…`, ts: Date.now() });
             const completeRunner = new AgentRunner({
@@ -23029,7 +23045,7 @@ async function noteBuildOutcome(
               phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
               message: bootKillingGuardSummary(killers).slice(0, 400),
             });
-            const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
+            const timeLeft = roomFor(90_000);
             if (autoFixEnabled() && timeLeft) {
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Making sure a missing key freezes just that one feature instead of stopping the whole app…', ts: Date.now() });
               const guardHealRunner = new AgentRunner({
@@ -24038,7 +24054,7 @@ async function noteBuildOutcome(
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: builderWroteCount() })
         && lastPreviewUrl && actuator.browseUrl && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 30_000)
+        && roomFor(30_000)
       ) {
         try {
           // This check's own window — see renderCheckConsole.ts (autopsy 7d79254b).
@@ -24112,7 +24128,7 @@ async function noteBuildOutcome(
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && !renderRescued && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
         // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
+        && roomFor(90_000)
       ) {
         /**
          * 🔒 AN IMPORT/SURVEY TURN IS LOOKED AT, NEVER REPAIRED (autopsy d0b2fcd6, Q-736). The user said "do not
@@ -24251,7 +24267,7 @@ async function noteBuildOutcome(
               const readOtherScreens = async (): Promise<ProbedScreen[]> => {
                 const out: ProbedScreen[] = [];
                 if (!featureProbeScreensEnabled() || !actuator.browseUrl || !lastPreviewUrl) return out;
-                if (effectiveBuildSeconds !== 0 && workElapsed() > effectiveBuildSeconds * 1000 - 90_000) return out;
+                if (!roomFor(90_000)) return out;
                 const routes = screensToProbe(extractPageRoutes({ ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }));
                 const started = Date.now();
                 for (const route of routes) {
@@ -24303,7 +24319,7 @@ async function noteBuildOutcome(
               // warning below still stands. Never blocks or fails a build.
               if (
                 (coverage.missing.length > 0 || regressedLabels.length > 0) && featureHealEnabled(workspaceId) && !abort.signal.aborted
-                && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
+                && roomFor(60_000)
               ) {
                 events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${[...coverage.missing, ...regressedLabels].join(', ')}. ${regressedLabels.length > 0 && coverage.missing.length === 0 ? 'It worked before this change — restoring it now…' : 'Adding it now…'}`, ts: Date.now() });
                 try {
@@ -24504,7 +24520,7 @@ async function noteBuildOutcome(
           }
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
-          if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && workElapsed() > effectiveBuildSeconds * 1000 - 60_000)) {
+          if (attempt >= healMax || abort.signal.aborted || !roomFor(60_000)) {
             previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = previewVerifiedFailed; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
             previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
@@ -24559,7 +24575,7 @@ async function noteBuildOutcome(
       if (
         process.env.AGENTV3_ROUTE_SMOKE !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
+        && roomFor(45_000)
       ) {
         await runRouteSmokeCheck({ plan: routeSmokePlan, previewUrl: lastPreviewUrl, run: (command) => actuator.runCommand!(workspaceId, command), aborted: () => abort.signal.aborted, record: (issue) => buildDiag.record(issue) });
       }
@@ -24584,7 +24600,7 @@ async function noteBuildOutcome(
       if (
         process.env.AGENTV3_PAGE_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
+        && roomFor(45_000)
       ) {
         try {
           // THE WHOLE PROJECT, overlaid with this turn's writes — the journey check's own rule (below). Read
@@ -24677,7 +24693,7 @@ async function noteBuildOutcome(
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
+        && roomFor(60_000)
       ) {
         try {
           // THE WHOLE PROJECT, overlaid with what this turn wrote — never `writtenFiles` alone.
@@ -24791,7 +24807,7 @@ async function noteBuildOutcome(
       if (
         mobileLayoutCheckEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
+        && roomFor(60_000)
       ) {
         try {
           const out = await withTimeout(actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl, { storageState: signedInState() })), MOBILE_CHECK_BUDGET_MS, 'mobile-layout');
@@ -24823,22 +24839,25 @@ async function noteBuildOutcome(
       // (`startLabelsFromExplore`) reach the playtest's own browser as known starts, so the control that
       // started the game for the explorer is the one the playtest presses first.
       let gamePlaytestDone = false;
+      const gameFixPorts: GameFixPorts = { fixTurn: isGameFixTurn(prompt), record: (i) => buildDiag.record(i), say: (text) => events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }) };
       // Game Engine Ultra Phase 3 inputs (gameRepair.ts): the last measured defects and still-missing named features.
       type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[]; played: boolean };
       const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
       const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
         gamePlaytestDone = true;
+        playtestHold.playtestDone = true; // the held time is the playtest's own from here (buildHeadroom.ts)
         const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
           && !isImportTurn && !abort.signal.aborted && !awaitsShellNow() && !platformDoneRef.cur
           && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
-          && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
+          && roomFor(90_000)
         ) {
           try {
-            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
+            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
             const playRun = parsePlaytest(out.stdout);
+            reportRuleProbes(playRun.rules, gameFixPorts); // the user's named rules, proved by playing (gameRuleProbes.ts)
             const playedFiles = await withKitLayersFromDisk(playtestFiles, (p) => actuator.readFile(workspaceId, p));
             const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
@@ -24872,6 +24891,7 @@ async function noteBuildOutcome(
                   const versionId = versionBeforeTurn(versions, buildStartedAt);
                   if (versionId) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_GOT_WORSE', message: gameUndoMessage(worse), detail: versionId, autoResolved: false });
                 }
+                reportGameFixOutcome(before, { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) }, gameFixPorts); // better / unchanged, said with both scores
               } catch { /* observation only — never in the way of the build */ }
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
@@ -24909,13 +24929,14 @@ async function noteBuildOutcome(
               hasPreviewUrl: !!lastPreviewUrl,
               awaitsShell: !!awaitsShellNow(),
               platformDone: !!platformDoneRef.cur,
-              timeLeft: effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000,
+              timeLeft: roomFor(90_000),
             });
             if (why) {
               const notRun = playtestNotRunVerdict(why);
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
               gameProof = { outcome: playtestOutcome(notRun.code), score: null, unplayed: true };
               gateEvidence.game = 'not-run'; // a canvas game we could not play is not verified (playtestSkipReason is silent otherwise)
+              reportGameFixUnverified(gameFixPorts); // a tapped fix whose game could not be played again is said as not known
             }
           } catch { /* an honest line is best-effort and must never touch a build */ }
           // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
@@ -24943,7 +24964,7 @@ async function noteBuildOutcome(
       if (
         clickExplorerEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted && !platformDoneRef.cur
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
+        && roomFor(90_000)
       ) {
         try {
           const exploreFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
@@ -24993,7 +25014,7 @@ async function noteBuildOutcome(
               } catch { /* best-effort */ }
             };
             try {
-              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (workElapsed());
+              const headroomMs = roomLeftMs();
               const plan = explorerRepairPlan(headroomMs);
               const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!actuator.browseUrl;
               const freeListed = isAgentV3FreeUser(userId, email);
@@ -25004,7 +25025,7 @@ async function noteBuildOutcome(
                 // The allowance is read only when it can matter: a Weak build by a non-free-listed user.
                 const weakAllowed = weakTier && !freeListed ? await explorerRepairBudget.allowed().catch(() => null) : true;
                 const gate = explorerRepairTierGate({ tier: String(powerLevelReqEffective), freeListed, weakAllowed });
-                if (!gate.attempt) skip(gate.reason);
+                if (!gate.attempt) { skip(gate.reason); sayRepairGateNote(gate, (text) => events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text })); } // the user is told why (locked plan item 4)
                 else {
                   // The snapshot is taken HERE and never inside the net — a repair to a working app with
                   // no way back is not attempted (the green repair's own rule).
@@ -25087,7 +25108,7 @@ async function noteBuildOutcome(
         if (gameAutoRepairEnabled() && lastPreviewUrl && actuator.runCommand) {
           try {
             const previewUrl = lastPreviewUrl;
-            const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (workElapsed());
+            const headroomMs = roomLeftMs();
             const snap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
             const outcome = await runGameRepair(gamePlayed.defects, gamePlayed.scopeMissing, prompt, {
               repairMs: explorerRepairPlan(headroomMs).repairMs, snapshot: snap, buildSignal: abort.signal,
@@ -25174,7 +25195,7 @@ async function noteBuildOutcome(
 
       if (
         prodBuildGateEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
+        && roomFor(90_000)
       ) {
         try {
           let pkgRaw: string | undefined;
@@ -25271,7 +25292,7 @@ async function noteBuildOutcome(
       // never blocks or hangs a build.
       if (
         vaccineEnabled(workspaceId) && expectsArtifacts && result.ok && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
+        && roomFor(90_000)
       ) {
         try {
           const vaxHealMax = featureHealEnabled(workspaceId) ? 1 : 0; // repair only when the heal budget is opted in
@@ -25341,7 +25362,7 @@ async function noteBuildOutcome(
               break;
             }
             // Out of repair budget OR near the wall-clock cap → record the honest failure and stop.
-            if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && workElapsed() > effectiveBuildSeconds * 1000 - 60_000)) {
+            if (attempt >= vaxHealMax || !roomFor(60_000)) {
               // The suite RAN and did not pass — that is real evidence, unlike the unverified case above.
               gateEvidence.tests = 'failed';
               buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
@@ -25563,7 +25584,7 @@ async function noteBuildOutcome(
           && !abort.signal.aborted
           // Only if ONE bounded open still fits inside the build's own budget — never an extension of
           // it, and never started when it would be cut off half-way.
-          && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - LAST_CHANCE_PROOF_MS)
+          && roomFor(LAST_CHANCE_PROOF_MS)
         ) {
           const proofStartedAt = Date.now();
           try {
@@ -25822,7 +25843,7 @@ async function noteBuildOutcome(
       if (
         redTeamEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
         && actuator.browserAction && actuator.getConsoleErrors && actuator.browseUrl && lastPreviewUrl
-        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 120_000)
+        && roomFor(120_000)
       ) {
         try {
           let fuzzHtml = '';
@@ -25857,7 +25878,7 @@ async function noteBuildOutcome(
           if (findings.length > 0) {
             buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'FUZZ_ROBUSTNESS', message: fuzzSummary(findings), autoResolved: false });
             // Opt-in bounded heal — harden the source, then trust the next build/preview to re-verify.
-            if (featureHealEnabled(workspaceId) && !abort.signal.aborted && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)) {
+            if (featureHealEnabled(workspaceId) && !abort.signal.aborted && roomFor(60_000)) {
               events.emit({ type: 'narration', agent: 'architect', text: `🛡️ Red-team crashed ${findings.length} input(s) on hostile input — hardening validation now…`, ts: Date.now() });
               try {
                 const rtRunner = new AgentRunner({
@@ -26474,7 +26495,7 @@ async function noteBuildOutcome(
       // the wall-clock deadline ("paused at time limit"). It is purely advisory, so (a) skip it when
       // little deadline headroom remains, and (b) cap it with a hard timeout so it can never be the
       // reason a built app times out.
-      const reviewHeadroomOk = effectiveBuildSeconds === 0 || (workElapsed()) < (effectiveBuildSeconds * 1000 - 120_000);
+      const reviewHeadroomOk = roomFor(120_000);
       // SPEED: skip the advisory reviewer (30-90s + 3-6 Claude calls) for FAST-LANE (simple) builds —
       // they already passed the fast lane's own `npx tsc --noEmit` type-check + CSS-consistency verify +
       // repair, so the extra multi-call review adds latency to the most common build with little value.
@@ -26566,7 +26587,7 @@ async function noteBuildOutcome(
           // SIZE-SCALED, HEADROOM-CLAMPED reviewer budget (2026-07-07): a fixed 90s cap killed the
           // reviewer mid-review on a 40-file app and silently lost its completeness verdict. Bigger apps
           // get more time, never past the wall-clock safety margin. Honest note on timeout, not silence.
-          const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (workElapsed()));
+          const reviewHeadroomMs = roomLeftMs();
           // 💸 A SUGGESTION COSTS A SUGGESTION'S PRICE (autopsy b6f88a72). On a proven-green app Green
           // Stop already makes this review suggest-only; it ran anyway at full budget and the full
           // 40-step cap — 523,374 input tokens, zero characters back. The plan is the SAME rule
@@ -26692,7 +26713,7 @@ async function noteBuildOutcome(
             // it, so a rejection can never surface as an unhandled rejection, and no second reviewer
             // is spawned — this waits on work that is already running and already paid for.
             const graceMs = timedOut
-              ? reviewGraceMs(reviewBudget, effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (workElapsed())))
+              ? reviewGraceMs(reviewBudget, roomLeftMs())
               : 0;
             if (graceMs > 0) {
               review = await raceTimeout(reviewPromise, graceMs, 'post-build-review-grace').catch(() => null);
@@ -26859,7 +26880,7 @@ async function noteBuildOutcome(
             // Findings the repair traced and reported NOT A BUG: never claimed as fixed, never offered.
             let greenRefuted: string[] = [];
             if (greenRepairable.length > 0) {
-              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (workElapsed());
+              const headroomMs = roomLeftMs();
               const plan = greenRepairPlan(headroomMs);
               const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!lastPreviewUrl && !!actuator.browseUrl;
               if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
@@ -27037,7 +27058,7 @@ async function noteBuildOutcome(
             //  - reviewerFixShouldRetry: ONE bounded retry after a COMPLETED-but-failed or non-timeout
             //    thrown pass, never after a timeout (the raced-out runner may still be editing — two
             //    concurrent runners on one workspace is a corruption risk), max 2 attempts total.
-            const fixHeadroomMs = () => effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (workElapsed()));
+            const fixHeadroomMs = () => roomLeftMs();
             for (let fixAttempt = 1; ; fixAttempt++) {
               // A FRESH runner per attempt — never re-run a runner whose previous run was abandoned.
               const critFixRunner = new AgentRunner({

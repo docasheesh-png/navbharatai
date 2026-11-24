@@ -2055,7 +2055,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
     } catch (err: any) {
-      console.error('[ADMIN] Internal error:', err?.message);
+      // Keep the browser response generic, but retain the Firestore error code and stack in
+      // Cloud Run logs. A Promise.all read failure otherwise collapses seven independent reads
+      // into one opaque "Internal server error", making missing-index/IAM failures hard to identify.
+      console.error('[ADMIN_ANALYTICS_READ_FAILED]', {
+        code: err?.code ?? null,
+        message: err?.message ?? String(err),
+        stack: err?.stack ?? null,
+      });
       return res.status(500).json({ error: 'Internal server error.' });
     }
   });

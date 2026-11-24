@@ -2172,13 +2172,22 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
 
   // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
   {
+    id: 'game_rules_followed',
+    name: 'Games that follow your rules (kill an enemy, the score goes up)',
+    path: 'NavBharatAI Pro → describe the game with its rules (for example "enemy add karo, jisko kill karne se score bade") → after the build the chat says which rules were checked while playing; if one did not work, the suggestions show "Make the game follow your rules"',
+    description: 'NavBharatAI reads the rules you state in your request — killing an enemy raises the score, an enemy that touches you takes a life, running out of health ends the game, collecting coins adds points, reaching a score moves to the next level (2026-11-24). A game with a fight in it gets NavBharatAI\'s combat kit (health with invulnerable frames, enemies, weapons, projectiles) laid down before building starts, and each rule is handed to the builder with the kit\'s own way to build it. While NavBharatAI plays the finished game it checks the rules it can check (an enemy dying raises the score; the player dying ends the round) and says which worked, which did not, and which could not be checked. A rule that did not work gets a one-tap fix.',
+    howToUse: 'Say the rule in the same sentence as what causes it: "jab enemy mare to score badhe", "zombie chhu le to ek jaan kam ho", "health khatam to game over". After the build, read the line that starts "Rules checked while playing". If a rule does not work, tap "Make the game follow your rules".',
+    relatedFeatures: ['game_fix_and_undo'],
+    keywords: ['game rules', 'enemy kill score', 'enemy maaro score badhe', 'kill karne se score', 'dushman', 'score badhe', 'game over', 'jaan kam', 'lives', 'health', 'combat', 'enemy add karo', 'shooting game', 'rules follow'],
+  },
+  {
     id: 'game_fix_and_undo',
     name: 'Fix my game safely, and go back if a change made it worse',
     path: 'NavBharatAI Pro → after a game is built, the suggestions show "Make the game playable" when NavBharatAI found problems while playing it; after any change that made the game worse, the ❗️ button in the Pro header (What you need to do) lights up with a "Go back" row',
     description: 'NavBharatAI plays every game it builds in a real browser (keys, a mouse drag and a thumb on a phone screen) and lists what it found (2026-11-21). Fixing is your choice: tap "Make the game playable" and it fixes exactly the problems it measured, as a normal change that is saved like every other. Nothing is changed in your game without you asking. After every change to a game, NavBharatAI plays it again and compares it with how it played before. If the change made it worse — the screen went blank, the controls stopped working, it no longer plays by touch, it hits an error, or its play score fell below playable — the ❗️ button in the Pro header shows a plain sentence saying what went wrong and a one-tap "Go back" that restores the saved version from just before that change. Going back keeps the newer version too, so you can return to it from Time Machine. You can also type "undo" or "pehle wala" at any time to pick a version. The optional deep bug hunt offered after a build also lives under the ❗️ button: if the build has already moved on, "Find and fix bugs" there starts a new run that does the bug hunt.',
-    howToUse: 'Tap "Make the game playable" in the suggestions when it appears. If a change makes the game worse, open the ❗️ button and tap "Go back", or "Keep this version" to stay. To run the deep bug hunt later, tap "Find and fix bugs" under the ❗️ button. Type "undo" to choose any earlier version.',
+    howToUse: 'Tap "Make the game playable" in the suggestions when it appears. After the fix the game is played again and you are shown both scores, for example "Played before: 41/100. Played after: 78/100 — playable now"; if nothing measurable changed, or the game could not be played again, it says so and never calls it fixed. If a change makes the game worse, open the ❗️ button and tap "Go back", or "Keep this version" to stay. To run the deep bug hunt later, tap "Find and fix bugs" under the ❗️ button. Type "undo" to choose any earlier version.',
     relatedFeatures: ['game_menus_settings', 'game_runner_starter'],
-    keywords: ['game fix', 'game theek karo', 'bugs dhundho', 'game me bug', 'game toot gaya', 'game kharab ho gaya', 'undo', 'pehle wala', 'go back', 'wapas lao', 'version wapas', 'game repair', 'fix my game', 'game broke', 'restore game'],
+    keywords: ['game fix', 'game score', 'before after score', 'kitna theek hua', 'game theek karo', 'bugs dhundho', 'game me bug', 'game toot gaya', 'game kharab ho gaya', 'undo', 'pehle wala', 'go back', 'wapas lao', 'version wapas', 'game repair', 'fix my game', 'game broke', 'restore game'],
   },
   {
     id: 'game_runner_starter',

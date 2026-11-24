@@ -17,6 +17,8 @@ import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
 import { withoutNonObjectSenses } from '../lib/heroObjectSpec';
 import { largeWorldIntent } from './largeWorldIntent';
 import { findGameTitles, mentionsBattleRoyale, ROYALE_GENRE_PHRASE, unrecognisedGameReference, type GameTitleKind } from '../lib/wellKnownGameTitles';
+import { withoutComments } from '../lib/codeOnly';
+import { gameRulesFrom, gameRulesBlock, type GameRule } from './gameRules';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
   | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'simulator' | 'unknown';
@@ -57,6 +59,8 @@ export interface GameScopeContract {
   subjects?: string[];
   /** Did the request ask for real 3D models/assets rather than primitive placeholders? */
   externalAssets?: boolean;
+  /** The cause → effect rules the user stated (gameRules.ts): "killing an enemy raises the score". Absent when none. */
+  rules?: GameRule[];
   /** The well-known game the user named as the reference ("PUBG", "BGMI", "GTA 5"); absent when none. */
   reference?: string;
   /**
@@ -336,7 +340,9 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d'
     : reference?.dimension ?? (bigWorldWantsThreeD(text, genre, camera) ? '3d' : 'unspecified');
   const unrecognisedReference = !reference && genre === 'unknown' && !vehicle ? unrecognisedGameReference(text) : null;
+  const rules = gameRulesFrom(text);
   return {
+    ...(rules.length ? { rules } : {}),
     ...(reference ? { reference: reference.name } : {}),
     ...(unrecognisedReference ? { unrecognisedReference } : {}),
     genre,
@@ -354,7 +360,7 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
 
 /** The block the builder reads in the kit handoff. '' when the contract adds nothing. PURE. */
 export function gameContractBlock(c: GameScopeContract): string {
-  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference && !c.unrecognisedReference) return '';
+  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference && !c.unrecognisedReference && !(c.rules ?? []).length) return '';
   const lines = [
     '[GAME SCOPE CONTRACT — read from the request, checked after the build]',
     `Genre: ${c.genre}. View: ${c.dimension}.`,
@@ -371,6 +377,7 @@ export function gameContractBlock(c: GameScopeContract): string {
     c.collectibles?.length ? `Named collectibles: ${c.collectibles.join(', ')}. They are distinct currencies/collectibles, not permission to invent power-ups or real-money purchases.` : '',
     c.minimumUnlockableCharacters ? `At least ${c.minimumUnlockableCharacters} distinct unlockable characters, with actual unlock conditions and selection behavior; never just a labelled roster.` : '',
     c.runnerMechanics?.includes('currency-unlocks') ? 'Currency unlocks must really spend the named in-game balance, reject unaffordable purchases and allow selecting an unlocked character; not a shop mockup.' : '',
+    gameRulesBlock(c.rules ?? []),
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
   ];
   return lines.filter(Boolean).join('\n');
@@ -378,13 +385,15 @@ export function gameContractBlock(c: GameScopeContract): string {
 
 /** What the built code shows for each feature. Conservative: a feature counts as present on a code signal. */
 const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
-  score: /\bscore\b/i,
-  levels: /\blevel\b/i,
+  // Plurals count: `levels`, `enemies`, `coins` are the same feature (the code is also read with camelCase split,
+  // so `currentLevel` and `nextLevel()` reach `level` — see scopeMatch).
+  score: /\bscores?\b/i,
+  levels: /\blevels?\b/i,
   lives: /\blives\b/i,
-  timer: /\b(timer|countdown|timeLeft|remaining)\b/i,
-  enemies: /\b(enem(y|ies)|monster|zombie|alien|boss)\b/i,
-  powerups: /\b(power-?up|boost|coin|collectible|pickup)\b/i,
-  leaderboard: /\b(leader-?board|ranking)\b/i,
+  timer: /\b(timers?|countdown|timeLeft|remaining)\b/i,
+  enemies: /\b(enem(y|ies)|monsters?|zombies?|aliens?|boss(es)?)\b/i,
+  powerups: /\b(power-?ups?|boosts?|coins?|collectibles?|pickups?)\b/i,
+  leaderboard: /\b(leader-?boards?|rankings?)\b/i,
   multiplayer: /\b(multiplayer|player2|playerTwo|socket|websocket|peer)\b/i,
   sound: /\b(audio|sound|playTone|synth|AudioContext)\b/i,
   restart: /\b(play again|restart|try again|retry|replay)\b/i,
@@ -411,9 +420,13 @@ export interface ScopeMatch {
 
 /** Compare the contract with the game's own files (kit engine files excluded — they are not the game). PURE. */
 export function scopeMatch(c: GameScopeContract, files: Record<string, string>): ScopeMatch {
-  const code = Object.entries(files || {})
+  const written = Object.entries(files || {})
     .filter(([p, v]) => typeof v === 'string' && /\.(t|j)sx?$/.test(p) && !/(^|\/)node_modules\//.test(p) && !/(^|\/)src\/(game\/(core|fx|three)|audio)\//.test(p))
-    .map(([, v]) => v).join('\n');
+    // A comment is not a feature (`// TODO: levels` used to satisfy "levels"); see codeOnly.ts.
+    .map(([, v]) => withoutComments(v)).join('\n');
+  // Read twice: as written (`playTone`, `driveVehicle`), and with camelCase split, so `currentLevel`, `spawnEnemy`
+  // and `addScore` reach their word. A real feature named the way code is written used to be reported missing.
+  const code = `${written}\n${written.replace(/([a-z0-9])([A-Z])/g, '$1 $2')}`;
   const present: GameFeature[] = [];
   const missing: GameFeature[] = [];
   for (const f of c.requiredFeatures) (PRESENT[f].test(code) ? present : missing).push(f);
@@ -421,6 +434,8 @@ export function scopeMatch(c: GameScopeContract, files: Record<string, string>):
     ...(c.runnerMechanics ?? []),
     ...(c.collectibles ?? []),
     ...(c.minimumUnlockableCharacters ? [`${c.minimumUnlockableCharacters} unlockable characters`] : []),
+    // A rule is a fact about PLAY, which no code scan can prove (plan item: runtime rule assertions).
+    ...(c.rules ?? []).map((r) => `rule: ${r.said}`),
   ];
   return { present, missing, ...(unverified.length ? { unverified } : {}) };
 }

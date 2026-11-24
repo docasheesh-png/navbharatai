@@ -103924,3 +103924,48 @@ Ledger (problem → root cause → class → siblings → lock):
 - Sibling: an FPS title (Valorant, CoD) is now 3D in the kit as well as in the contract. Runner titles are blocked on an admin decision (Q-3314).
 - Test: `tests/aMisspelledGameTitleIsStillTheGame.test.ts` (98). It uses the real prompt as a fixture, a negative corpus (every non-game prompt in tests/fixtures), and a census that fails when a private title regex appears. Proven by reversion: PUBG reduced to its exact spelling (11 failed), the big-world rule removed (4 failed), unrecognisedReference removed (1 failed), PUBG made fuzzy at 3 letters (3 negatives failed), the ordinary-word list emptied (2 failed). Existing tests changed: freeFireShorthandIsARoyale now uses `mentionsBattleRoyale` (BATTLE_ROYALE_REFERENCE is gone); GTA 6 is deliberately left out of the catalogue to keep the BR1966 boundary test.
 - Open: Q-3314 (runner titles, admin decision), Q-3315 (clarity judge timed out), Q-3316 (provider 404).
+
+## 2026-11-24 — Locked plan item 1: a comment is not a game feature; a real feature named the way code is written counts
+
+Admin locked the weakness-audit plan (adapted under the external-suggestion rule) and asked to start with item 1. Weakness audit P0-4, verified against the code at `d7763ac`.
+
+- New `src/server/lib/codeOnly.ts` (`withoutComments`): one pass, blanks comments, keeps strings and templates (UI text such as "Play again" proves a feature), keeps length and lines.
+- Applied to every reader that decides a game fact from source: `gameIntent.scopeMatch`, and in `gamePlaytest.ts` `isCanvasGameProject`, `replayFromCode` (progress, restart, sound), `isDrivingGame`, `domGameKind`; and `touchPlayableGame.isKeyboardOnlyGame`.
+- Found while testing, same function: `PRESENT` missed plurals and camelCase (`levels`, `currentLevel`, `spawnEnemy`, `addScore` were "missing"). Plurals are now accepted, and the code is also read with camelCase split.
+- Test: `tests/aCommentIsNotAGameFeature.test.ts`.
+- Still open by design (locked plan item 3): presence is still proven by source, not by playing; runtime rule assertions replace it.
+
+## 2026-11-24 — Locked plan item 2: the game playtest's time is reserved, not left over
+
+Weakness audit P0-2, verified at `ba2e646` (#4512 merged). The playtest needed 90 s of headroom and every pass before it could spend that time first, so late builds — the ones with problems — were the ones never played. About 30 sites in the route each computed headroom in their own words.
+
+- New `src/server/AgentV3/buildPhases/buildHeadroom.ts`: `hasHeadroom`, `headroomMs`, `playtestReserveMs` (`PLAYTEST_RESERVE_MS` 95 s = playtest 60 s + load 15 s + timeout margin 20 s). Kill switch `AGENTV3_GAME_PLAYTEST_RESERVE=off`.
+- The route asks one question everywhere (`roomFor(ms)`, `roomLeftMs()`); on a game turn whose build is OK, the playtest's 95 s are held until `runGamePlaytest` starts, and the three generation runners get `generationBudgetMs(…, heldMs)` that much less. A failed build or a non-game turn holds nothing (byte-identical arithmetic).
+- Test: `tests/aGameIsPlayedEvenWhenTheBuildRunsLate.test.ts` (report shape, neighbours, census of hand-written headroom).
+- Queue: Q-3329 opened for the CI flake seen on #4512 (Python backend boot test).
+- Live effect to watch: GAME_PLAYTEST_NOT_RUN "the build had no time left to play it in" should become rare on game builds.
+
+## 2026-11-24 — Locked plan item 3: a tapped game fix is measured, not claimed
+
+Weakness audit P0-1, safe form (automatic game repair stays OFF). Before: only a turn that made the game WORSE was compared and said (`GAME_GOT_WORSE`); a better or unchanged game ended with no verdict.
+
+- `gameRegression.gameFixOutcome` (pure): `GAME_FIX_VERIFIED` (score +5 or an unplayable defect cleared — "Played before: 41/100. Played after: 78/100 — playable now") or `GAME_FIX_NO_CHANGE`; worse stays with GAME_GOT_WORSE.
+- `buildPhases/gameFixVerdict.ts`: says a better game on any turn; an unchanged one, or one that could not be played again (`GAME_FIX_UNVERIFIED`), only on the user's own "Make the game playable" turn (`isGameFixTurn`). The route makes two one-line calls.
+- An edit of an existing canvas game now holds the playtest's reserved time too (item 2's hold), so the fix turn is played.
+- Findings classified: GAME_FIX_NO_CHANGE → offered through GAME_PLAYTEST_ISSUES; GAME_FIX_UNVERIFIED → no button (reason recorded). AppKnowledgeBase `game_fix_and_undo` updated.
+- Test: `tests/aGameFixIsMeasuredAfterTheUserTaps.test.ts`.
+
+## 2026-11-24 — Locked plan item 4: the free repair allowance is said to the user
+
+Weakness audit P1-5. The Weak tier's platform-wide daily allowance for automatic button fixes (`explorerRepairBudget.ts`, default 100) stopped repairs with only an admin line and a server `console.warn`. Now `explorerRepairTierGate` carries a `userNote` ("Today's free automatic button fixes are used up … Tap "Fix the button that breaks your app" … comes back tomorrow"), said through `sayRepairGateNote` beside the admin line. The cap (a money rule) is unchanged. Test: `tests/theFreeRepairAllowanceIsSaid.test.ts`.
+
+## 2026-11-24 — Locked plan item 5: one redactor union (Pro Chain V2's private copy)
+
+Weakness audit P1-6, adapted: `SourceSecretRedactor` already wraps the shared `SecretRedactor` by design and is unchanged. The real duplicate was `proChainV2/redact.ts`, a private short pattern list: a JWT, an AWS/GitHub/Google key or a password inside a URL was masked by the shared redactor and NOT there, while our gateway keys (`mtf_live_`, `qbx_`, `qubax_`) were masked ONLY there. Now Pro Chain V2 runs the shared redactor first and keeps only its stricter admin-line shapes on top; the gateway keys (20+ chars) are in the shared list; the error line keeps 1200 chars (was 600), marked with "…" when cut. Test: `tests/oneRedactorUnionHolds.test.ts` (one row per shape, both redactors). The plain-redactor caller census lists `proChainV2/redact.ts` with its reason.
+
+## 2026-11-24 — G1+G2: the rules the user names are kept, built with the combat kit, and proved by playing (game factory, admin question 2)
+
+Admin: *"user kahta hai enemy add karo, jisko kill karne se score bade, par navbharatai yeh nahi kar pata hai … hame game factory banna hai"*.
+- **Root cause:** the scope contract (`gameIntent.ts`) read a request as features (`enemies`, `score`) and dropped the RELATION between them, so nothing told the builder to wire one to the other and nothing checked it. The combat layer (Health emits ENEMY_DIED) was not seeded for 2D games at all.
+- **Fix:** `gameRules.ts` reads cause → effect rules (EN/Hinglish/Hindi, one sentence per rule, precision first) into the contract; `gameKitSeed` seeds `generate_game_systems` when the game needs combat; the runtime exposes `window.__nbRules`; the playtest emits each rule's event in the real browser and checks the effect (`GAME_RULE_BROKEN` warning / `GAME_RULES_CHECKED` info via `buildPhases/gameRuleProbes.ts`, one call from the route).
+- **Locks:** `aGameKeepsTheRulesTheUserNamed`, `aRuleIsProvenByPlaying`, `theUsersRulesAreReportedFromPlay`. Kit history regenerated.

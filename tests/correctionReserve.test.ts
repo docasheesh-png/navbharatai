@@ -52,7 +52,8 @@ describe('1 — the correction budget is reserved at build start', () => {
 
   it('the reserve is computed from the build-wide budget, at the generation runner itself', () => {
     // The working clock since failedbr #2431 (a key popup is not counted against the reserve either).
-    expect(route).toContain('maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed())');
+    // Locked plan item 2: the same call, now also holding the game playtest's time (buildHeadroom.ts).
+    expect(route).toContain('maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed(), playtestReserveMs(playtestHold))');
   });
 });
 
@@ -173,7 +174,8 @@ describe('10 — the repair loop stays bounded', () => {
   });
 
   it('the loop also stops on the wall clock and on abort, not only on the round count', () => {
-    expect(route).toContain('if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0');
+    // The wall-clock stop now asks the one headroom helper (locked plan item 2, buildHeadroom.ts).
+    expect(route).toContain('if (attempt >= healMax || abort.signal.aborted || !roomFor(60_000))');
   });
 });
 

@@ -81,9 +81,16 @@ export function lackedMovesClause(lacks: readonly string[]): string {
   ].filter(Boolean).join('; ');
 }
 
+/**
+ * Said with every character: an action beyond its clips is never refused (admin 2026-11-24: "jo user ne manga hai woh
+ * karne lage"). The kit plays its own actions on any body (play/actions.ts) and compose_action makes any other one.
+ */
+export const ANY_ACTION_NOTE = 'any OTHER action the user asks for (pick up, open a gate, eat, climb, anything) is never refused: performAction(ctx, name) from src/game/play/actions.ts plays it on this character, and run_recipe({ name: "compose_action" }) makes one the kit does not have';
+
 /** One plain line for the builder: what the character can do, and what it cannot (so the user is told). PURE. */
 export function playerMovesLine(has: readonly string[], lacks: readonly string[]): string {
-  if (!has.length) return 'it has NO animations of its own, so it moves without walking or posing — tell the user that plainly';
+  if (!has.length) return `it has NO animations of its own, so it moves without walking or posing — tell the user that plainly; ${ANY_ACTION_NOTE}`;
   return `its own moves: ${has.join(', ')}`
-    + (lacks.length ? `; ${lackedMovesClause(lacks)} — tell the user plainly` : '');
+    + (lacks.length ? `; ${lackedMovesClause(lacks)} — tell the user plainly` : '')
+    + `; ${ANY_ACTION_NOTE}`;
 }

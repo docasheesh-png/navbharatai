@@ -523,6 +523,12 @@ export function playMove(ctx: GameContext, move: PlayerMove): boolean {
 export function holdItem(ctx: GameContext, item: THREE.Object3D, side: 'right' | 'left' = 'right'): boolean {
   return applied.get(ctx)?.character.hold(item, side) ?? false;
 }
+
+/** The chosen character's model root while it is shown, else null (the kit person is shown). play/actions.ts poses it. */
+export function playerModelRoot(ctx: GameContext): THREE.Object3D | null {
+  const a = applied.get(ctx);
+  return a && a.character.showing === 'model' ? a.character.root : null;
+}
 `;
 
 export const GAME_PLAYER_FILE_PATH = 'src/game/player.ts';

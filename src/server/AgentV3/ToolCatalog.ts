@@ -2283,6 +2283,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       } },
     },
     {
+      name: 'compose_action',
+      description: 'Make the player character DO any action the user names that the game cannot do yet (pick up a gun from the road, open a gate and walk in, eat food, climb, dance, anything), on the character the user chose (the kit person, a library model or their own). Never answer that the character lacks the move. The kit already plays pick-up, drop, eat, drink, open-door, wave, point, raise-hands and bow: for those this returns the call to make. Otherwise one model call designs the action as data (key poses and steps) and writes src/game/actions/<name>.ts. Then call performAction(ctx, name) from src/game/play/actions.ts. Call through run_recipe.',
+      input_schema: { type: 'object', required: ['name'], properties: {
+        name: { type: 'string', description: 'The action in a few English words, such as "climb ladder" or "pick up gun".' },
+        description: { type: 'string', description: 'What it should look like, in a sentence.' },
+        action_json: { type: 'string', description: 'Leave empty. The tool asks the model. A caller that already holds a checked plan may pass it.' },
+      } },
+    },
+    {
       name: 'generate_procedural_object',
       description: 'Optional bounded procedural geometry recipe. The existing admitted architect API turn designs an original declarative JSON plan from the user request; object names are not a preset whitelist. Compose new shapes from semantic parts rather than substituting an unrelated catalog object. No additional provider call. If the bounded geometry vocabulary cannot express the request, disclose the unsupported capability instead of claiming a complete object. Writes trusted geometry runtime and an additive object factory, NOT an automatically mounted game. Requires reviewed Three.js 0.180.0 and AGENTV3_PROCEDURAL_OBJECTS on; otherwise unavailable. Call through run_recipe. Plan version1 fields: label and parts (phone max24/12000 triangles, desktop64/60000). Each part: id, geometry, position xyz, rotation radians xyz, color #RRGGBB, roughness0..1, metalness0..1. Geometry kinds box(size xyz), sphere(radius,segments,rings), cylinder(top,bottom,height,segments), lathe(points radius/y strictly increasing y,segments). No executable code, textures, URLs or hierarchy. No automatic collision, rigging or realism guarantee. Integrate returned factory using existing guarded edits and verify the preview.',
       input_schema: {type:'object',required:['id','quality','plan_json'],properties:{
@@ -2441,7 +2450,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, worldmap, features, playerbody, racingroadgame, racecustom, lanerunnergame. Default = all. worldmap is what the corner map and the full map draw (the places and roads of a world, the waypoint); features is the guarded feature list a game grows by (one file per thing); playerbody is who the player is (the game reads src/game/player.ts by itself, and it always ships with game); racingroadgame and lanerunnergame are the ready racing and endless-runner games; racecustom is the user\'s own car and track (src/game/car.ts, src/game/track.ts) and always ships with racingroadgame.',
+            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, worldmap, features, playerbody, actions, racingroadgame, racecustom, lanerunnergame. Default = all. worldmap is what the corner map and the full map draw (the places and roads of a world, the waypoint); features is the guarded feature list a game grows by (one file per thing); playerbody is who the player is (the game reads src/game/player.ts by itself, and it always ships with game); racingroadgame and lanerunnergame are the ready racing and endless-runner games; racecustom is the user\'s own car and track (src/game/car.ts, src/game/track.ts) and always ships with racingroadgame.',
           },
         },
       },
@@ -3798,6 +3807,7 @@ export const CATALOG_TOOL_NAMES = [
   'request_secrets',
   'generate_game_systems',
   'generate_stand_in',
+  'compose_action',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',
@@ -4034,6 +4044,7 @@ export const RECIPE_TOOLS = [
   'generate_game_controller',
   'generate_game_runtime',
   'generate_stand_in',
+  'compose_action',
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',

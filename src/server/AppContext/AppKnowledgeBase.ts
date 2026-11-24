@@ -2181,6 +2181,15 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
     keywords: ['game rules', 'enemy kill score', 'enemy maaro score badhe', 'kill karne se score', 'dushman', 'score badhe', 'game over', 'jaan kam', 'lives', 'health', 'combat', 'enemy add karo', 'shooting game', 'rules follow'],
   },
   {
+    id: 'game_character_any_action',
+    name: 'Your character does any action you ask for (pick up, open a gate, eat, and more)',
+    path: 'NavBharatAI Pro → in a 3D game, ask for the action in your own words (for example "sadak par padi banduk uthao", "gate khol ke ghar me ghuso", "hero khana khaye") → NavBharatAI builds it into the game for the character you chose',
+    description: 'Any action you name is played on the character you chose — the game\'s own person, a character from the game library, or your own uploaded model (2026-11-24). NavBharatAI already knows pick up, drop, eat, drink, open a door or gate, wave, point, raise hands and bow. For anything else (climb a ladder, dance, sit, salute…) NavBharatAI designs the action itself and adds it to your game. The character moves its own arms, legs, back and head for the action; what it picks up goes into its hand; food it eats is used up; a door or gate it reaches opens. NavBharatAI never answers that your character does not have the move. If your character\'s model has no bone for part of an action, the game says so once on screen and still does the rest.',
+    howToUse: 'Say what the character should do and when: "E dabane par hero zameen se banduk uthaye", "darwaze ke paas Use dabao to gate khule", "khana uthake khaye to health badhe". Walk next to the thing first in the game; the action uses the nearest one.',
+    relatedFeatures: ['game_rules_followed'],
+    keywords: ['character action', 'banduk uthao', 'pick up gun', 'gate kholo', 'open gate', 'darwaza kholo', 'ghar me ghuso', 'khana khaye', 'eat food', 'pick up', 'character move nahi hai', 'animation', 'new move', 'dance', 'climb', 'wave', 'library character'],
+  },
+  {
     id: 'game_fix_and_undo',
     name: 'Fix my game safely, and go back if a change made it worse',
     path: 'NavBharatAI Pro → after a game is built, the suggestions show "Make the game playable" when NavBharatAI found problems while playing it; after any change that made the game worse, the ❗️ button in the Pro header (What you need to do) lights up with a "Go back" row',

@@ -463,7 +463,7 @@ export function registerNavStoreRoutes(app: Express): void {
       res.setHeader('Cache-Control', 'public, max-age=60');
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
       const pins = await getAppMartPins();
-      const rank = new Map(pins.filter((p) => p.kind === 'apk').map((p, index) => [p.id, index]));
+      const rank = new Map<string, number>(pins.filter((p) => p.kind === 'apk').map((p, index) => [p.id, index] as const));
       const publicApps = filtered.map(toPublic).map((a) => ({ ...a, pinned: rank.has(a.id), pinOrder: rank.get(a.id) ?? null }));
       publicApps.sort((a, b) => {
         const ar = rank.get(a.id), br = rank.get(b.id);
@@ -1115,7 +1115,7 @@ export function registerNavStoreRoutes(app: Express): void {
         isNative: isNativeRequest(req),
       }));
       const appMartPins = await getAppMartPins();
-      const webPinRank = new Map(appMartPins.filter((p) => p.kind === 'web').map((p, index) => [p.id, index]));
+      const webPinRank = new Map<string, number>(appMartPins.filter((p) => p.kind === 'web').map((p, index) => [p.id, index] as const));
       const pinnedFirst = <T extends { id: string }>(rows: T[]): T[] => rows.map((row, index) => ({ row, index }))
         .sort((a, b) => {
           const ar = webPinRank.get(a.row.id), br = webPinRank.get(b.row.id);

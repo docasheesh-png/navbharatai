@@ -108,6 +108,18 @@ const KNOWN_UNREACHABLE = new Set([
   'src/server/providers/types.ts',
   'src/server/lib/provisioningJobs.ts',
   'src/server/lib/secretSink.ts',
+  // The two game-judgement engines of #4511, each merged one commit ahead of its caller and each with
+  // its own test. Named here rather than quietly deleted, and named honestly: NEITHER is on a build's
+  // path yet, so no game is judged by them today.
+  //   • gameQualityReport scores ten dimensions from evidence and refuses to call an unmeasured one a
+  //     pass. ⚠️ `gamePlaytest.ts` ALREADY owns a Game Quality Score measured from pixels, so the right
+  //     wiring is for this to become that score's judgement half — not a second, rival scorer. Until
+  //     that is decided, it stays unwired on purpose; a duplicate scorer is worse than none.
+  //   • representativeRules decides whether the ten representative games may be called certified. Its
+  //     caller is a QA pass that does not exist yet.
+  // Drop each entry in the change that wires it; the staleness check below fails if one is left behind.
+  'src/server/AgentV3/gameQualityReport.ts',
+  'src/server/AgentV3/representativeRules.ts',
   // Its only caller was the legacy Engineer AI actuator, removed 2026-09-25. Kept on purpose: it is an
   // npm-install safety scan the LIVE actuator does not run yet, so the right move is to wire it in, not
   // to delete a working check. Remove this entry in the change that wires it.

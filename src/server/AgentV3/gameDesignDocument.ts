@@ -12,6 +12,7 @@
 
 import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects } from '../lib/heroObjectSpec';
+import { physicsProfileSpec, physicsRuntimeFor } from './physicsProfiles';
 import {
   asksForBattleRoyale,
   asksForEnterableHouses,
@@ -162,8 +163,9 @@ function physicsFor(prompt: string, scope: GameScopeContract, engine: EngineKind
   else if (scope.genre === 'simulator') profile = 'simulation';
   else if (scope.genre === 'rpg' || asksForEnterableHouses(prompt)) profile = 'open-world';
   if (profile === 'none') return { profile, runtime: 'none' };
-  // A 2D game keeps the tested 2D movement. cannon-es is the 3D kit only.
-  return { profile, runtime: engine === 'three-3d' ? 'cannon-es' : '2d-kit' };
+  // A 2D game keeps the tested 2D movement. cannon-es is the 3D kit only — and that decision lives in
+  // ONE place (`physicsRuntimeFor`), beside the numbers, so the two can never drift apart.
+  return { profile, runtime: physicsRuntimeFor(profile, engine) };
 }
 
 function rulesModuleFor(prompt: string, genre: GameGenre): string | null {
@@ -307,6 +309,14 @@ export function analyzeGameRequirements(
 }
 
 /** Lines added after the scope contract. Empty when the request names no game. PURE. */
+/** The profile's measured numbers, for a game that actually gets a physics world. PURE. */
+function physicsNumbersLine(doc: GameDesignDocument): string {
+  if (doc.physicsRuntime !== '2d-kit' && doc.physicsRuntime !== 'cannon-es') return '';
+  const spec = physicsProfileSpec(doc.physicsProfile);
+  return `Physics numbers (use these, do not invent them): gravity ${spec.gravity} m/s², friction ${spec.friction}, `
+    + `restitution ${spec.restitution}, fixed step ${spec.fixedDt.toFixed(5)} s.`;
+}
+
 export function gameDesignBlock(doc: GameDesignDocument): string {
   const s = doc.scope;
   const named = s.genre !== 'unknown' || s.requiredFeatures.length > 0 || !!s.vehicle || !!s.reference || doc.genreSystems.length > 0 || doc.rulesModule;
@@ -319,6 +329,9 @@ export function gameDesignBlock(doc: GameDesignDocument): string {
     '[GAME DESIGN — genre recipe on top of the scope contract. A compile is not a pass.]',
     `Engine: ${doc.engine}. Physics profile: ${doc.physicsProfile} via ${doc.physicsRuntime}. `
       + (doc.physicsRuntime === '2d-kit' ? 'Do not put cannon-es on this 2D game.' : doc.physicsRuntime === 'cannon-es' ? 'Use the kit cannon-es world. Do not add a second physics engine.' : 'Do not invent a physics world for this rules game.'),
+    // A profile NAME leaves the builder to invent gravity, and an invented gravity is the moon-jump
+    // and the sliding car. The measured numbers go in the handoff so there is nothing left to guess.
+    physicsNumbersLine(doc),
     doc.rulesModule ? `Rules already exist in ${doc.rulesModule} — call that module. Do not reimplement them.` : '',
     requiredSystems.length ? `Genre systems that must really work: ${requiredSystems.join(', ')}.` : '',
     declinedSystems.length || declinedFeatures.length

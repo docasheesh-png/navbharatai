@@ -83,6 +83,8 @@ describe('🧪 the playtest script reads the memory, only when the look is on', 
   it('the route hands the memory read to the findings', async () => {
     const { readFileSync } = await import('node:fs');
     const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toContain('geometryFindings(playRun.geometry, playRun.models, playRun.heap)');
+    // In the playtest phase since S7.
+    expect(readFileSync(join(__dirname, '..', 'src/server/AgentV3/buildPhases/gamePlaytestPhase.ts'), 'utf8')).toContain('geometryFindings(playRun.geometry, playRun.models, playRun.heap)');
+    expect(route).toContain('runGamePlaytestPhase({');
   });
 });

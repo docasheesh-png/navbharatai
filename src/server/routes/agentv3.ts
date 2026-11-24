@@ -589,8 +589,8 @@ import { freeBuildWindow, freeWindowLine, noteFreeBuildStartDurable, decideFreeP
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhases/buildHeadroom';
-import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
-import { reportRuleProbes } from '../AgentV3/buildPhases/gameRuleProbes';
+import { type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
+import { runGamePlaytestPhase } from '../AgentV3/buildPhases/gamePlaytestPhase';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -745,8 +745,7 @@ import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey } from '../AgentV3/restorePoint';
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
-import { gameMeasureFromIssues, gameGotWorse, versionBeforeTurn, gameUndoMessage } from '../AgentV3/gameRegression';
-import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage, geometryRepairNote } from '../AgentV3/gameGeometryProbe';
+import { gameGeometryProbeEnabled, geometryRepairNote } from '../AgentV3/gameGeometryProbe';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -782,7 +781,7 @@ import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type 
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
 import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS, GAME_AUTO_REPAIR_SUSPENSION_REASON } from '../AgentV3/gameRepair';
 import { scopeMatch } from '../AgentV3/gameIntent';
-import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, withKitLayersFromDisk, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { playtestDefects, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -24848,107 +24847,28 @@ async function noteBuildOutcome(
         gamePlaytestDone = true;
         playtestHold.playtestDone = true; // the held time is the playtest's own from here (buildHeadroom.ts)
         const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
-        if (
-          gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
-          && !isImportTurn && !abort.signal.aborted && !awaitsShellNow() && !platformDoneRef.cur
-          && isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }) // Q-3224: an R3F game is played too
-          && roomFor(90_000)
-        ) {
-          try {
-            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
-            const playRun = parsePlaytest(out.stdout);
-            reportRuleProbes(playRun.rules, gameFixPorts); // the user's named rules, proved by playing (gameRuleProbes.ts)
-            const playedFiles = await withKitLayersFromDisk(playtestFiles, (p) => actuator.readFile(workspaceId, p));
-            const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
-            buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
-            gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
-            if (gameProof.outcome === 'not-run') gameProof.unplayed = true; // the runner's own "never played" answer
-            // 🎮 The release gate reads the SAME answer: a canvas game is GREEN only when it was played (autopsy 61279465).
-            gateEvidence.game = gameProof.outcome;
-            // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
-            try {
-              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playedFiles), replayFromCode(playedFiles));
-              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playedFiles).missing : [], played: gameProof.outcome !== 'not-run' };
-              const defectsMsg = gameDefectsMessage(measured);
-              if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
-              // 🔎 The read-only geometry look (gameGeometryProbe.ts): an info line for the admin report, handed to the builder
-              // as a builder-only note on the next turn. Never scored, never a gate, never shown to the user.
-              if (gameGeometryProbeEnabled()) {
-                const geometryMsg = geometryFindingsMessage(geometryFindings(playRun.geometry, playRun.models, playRun.heap));
-                if (geometryMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: GAME_GEOMETRY_CODE, message: geometryMsg, autoResolved: true });
-              }
-              // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
-              const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');
-              if (heavy) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: ${heavy.evidence}.`, autoResolved: false });
-              // 🎮 DID THIS TURN MAKE THE GAME WORSE? Compared with the measure from before the turn; if so, the user is told
-              // in plain words and offered a one-tap "Go back" to the saved version from just before it (the ❗️ list row (gameUndo.ts) reads
-              // the version id from this finding's detail). Nothing is changed automatically.
-              try {
-                const before = gameMeasureFromIssues((await previousReportAtStart)?.issues);
-                const worse = gameGotWorse(before, { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) });
-                if (worse) {
-                  const versions = await buildHistoryStore.list(restorePointKey(workspaceId, null)).catch(() => []);
-                  const versionId = versionBeforeTurn(versions, buildStartedAt);
-                  if (versionId) buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_GOT_WORSE', message: gameUndoMessage(worse), detail: versionId, autoResolved: false });
-                }
-                reportGameFixOutcome(before, { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) }, gameFixPorts); // better / unchanged, said with both scores
-              } catch { /* observation only — never in the way of the build */ }
-            } catch { /* observation only */ }
-            // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
-            try {
-              const scope = gameContract ? gameScopeVerdict(gameContract, playedFiles) : null;
-              if (scope) buildDiag.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
-            } catch { /* observation only */ }
-          } catch (err) {
-            // A playtest that timed out or crashed is a check that could not look — the same open warning
-            // the runner's own "never played" answer gives, never an info line that reads as a pass.
-            try {
-              const notRun = playtestNotRunVerdict(`the playtest browser stopped: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}`);
-              buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
-              // 🔴 A playtest that could not finish is NOT a pass (autopsy 61279465: it timed out and the gate said GREEN).
-              gameProof = { outcome: 'not-run', score: null, unplayed: true };
-              gateEvidence.game = 'not-run';
-            } catch { /* best-effort */ }
-          }
-        } else {
-          // 🔴 THE THIRD WAY THIS CHECK IS REACHED, AND IT HAD NO SENTENCE (Q-913, autopsy 50378049).
-          // The gate above is one long `if` with no `else`, so a canvas game the route could not play was
-          // SILENTLY skipped — and on the reported build that left the model's own prose ("normal for a
-          // sandbox game") as the only account of a screen that stayed dark, while the engine's own
-          // measurement for exactly that (scorePlaytest's `runs`, 0 for "blank or a single colour") never
-          // ran. `playtestSkipReason` tells "could not look" from "not applicable": a project with no
-          // canvas game, an import turn, a stopped or failed build and the kill switch stay silent.
-          try {
-            const why = playtestSkipReason({
-              enabled: gamePlaytestEnabled(),
-              buildOk: result?.ok === true,
-              isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }),
-              isImportTurn,
-              aborted: abort.signal.aborted,
-              hasRunCommand: !!actuator.runCommand,
-              hasPreviewUrl: !!lastPreviewUrl,
-              awaitsShell: !!awaitsShellNow(),
-              platformDone: !!platformDoneRef.cur,
-              timeLeft: roomFor(90_000),
-            });
-            if (why) {
-              const notRun = playtestNotRunVerdict(why);
-              buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
-              gameProof = { outcome: playtestOutcome(notRun.code), score: null, unplayed: true };
-              gateEvidence.game = 'not-run'; // a canvas game we could not play is not verified (playtestSkipReason is silent otherwise)
-              reportGameFixUnverified(gameFixPorts); // a tapped fix whose game could not be played again is said as not known
-            }
-          } catch { /* an honest line is best-effort and must never touch a build */ }
-          // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
-          try {
-            const domKind = gamePlaytestEnabled() && result?.ok && !isImportTurn && !abort.signal.aborted && !isCanvasGameProject(playtestFiles) ? domGameKind(playtestFiles, gameContract) : null;
-            if (domKind) {
-              const dom = domGameNotPlayedVerdict(domKind);
-              buildDiag.record({ phase: 'preview', severity: dom.severity, code: dom.code, message: dom.message, autoResolved: dom.autoResolved });
-              gameProof = { outcome: playtestOutcome(dom.code), score: null };
-              gateEvidence.game = 'not-run'; // BR1951: DOM controls clicked is not a game playthrough.
-            }
-          } catch { /* observation only */ }
+        // 🎮 Played, judged and said in buildPhases/gamePlaytestPhase.ts (S7, Q-3237: the route only shrinks).
+        const played = await runGamePlaytestPhase({
+          facts: {
+            enabled: gamePlaytestEnabled(), buildOk: result?.ok === true,
+            isCanvasGame: isCanvasGameProject(playtestFiles, { gameRequested: turnIsGame(gameTurnRequest(prompt, milestoneRequest)) }), // Q-3224: an R3F game is played too
+            isImportTurn, aborted: abort.signal.aborted, hasRunCommand: !!actuator.runCommand, hasPreviewUrl: !!lastPreviewUrl,
+            awaitsShell: !!awaitsShellNow(), platformDone: !!platformDoneRef.cur, timeLeft: roomFor(90_000),
+          },
+          files: playtestFiles,
+          contract: gameContract ?? null,
+          play: () => withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(lastPreviewUrl!, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest'),
+          readFile: (p) => actuator.readFile(workspaceId, p),
+          record: (issue) => buildDiag.record(issue),
+          previousIssues: async () => (await previousReportAtStart)?.issues,
+          versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),
+          turnStartedAt: buildStartedAt,
+          fix: gameFixPorts,
+        });
+        if (played) {
+          gameProof = played.proof;
+          gateEvidence.game = played.gate; // the release gate reads the same answer (autopsy 61279465)
+          if (played.played) gamePlayedRef.cur = played.played;
         }
       };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest

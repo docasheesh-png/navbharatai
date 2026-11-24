@@ -77,6 +77,9 @@ describe('📱 the playtest measures the drawing load', () => {
     expect(offer.prompt).toMatch(/InstancedMesh/);
     expect(offer.prompt).toMatch(/850 draw calls/);
     const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toMatch(/code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: \$\{heavy\.evidence\}\.`, autoResolved: false/);
+    // In the playtest phase since S7; the route hands it the report through record.
+    const phase = readFileSync(join(__dirname, '../src/server/AgentV3/buildPhases/gamePlaytestPhase.ts'), 'utf8');
+    expect(phase).toMatch(/code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: \$\{heavy\.evidence\}\.`, autoResolved: false/);
+    expect(route).toContain('record: (issue) => buildDiag.record(issue),');
   });
 });

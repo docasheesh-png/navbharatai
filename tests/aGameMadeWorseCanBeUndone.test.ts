@@ -111,9 +111,14 @@ describe('🎮 the build route and the screen', () => {
   });
 
   it('after the playtest it compares, finds the version before the turn, and records the offer with that version', () => {
-    expect(route).toMatch(/gameGotWorse\(before, \{ score: verdict\.score\?\.overall \?\? null, defects: measured\.map\(\(d\) => d\.code\) \}\)/);
-    expect(route).toMatch(/versionBeforeTurn\(versions, buildStartedAt\)/);
-    expect(route).toMatch(/code: 'GAME_GOT_WORSE', message: gameUndoMessage\(worse\), detail: versionId, autoResolved: false/);
+    // Moved to the playtest phase (S7, 2026-11-24); the route hands it the turn's start and the saved versions.
+    const phase = readFileSync(join(__dirname, '../src/server/AgentV3/buildPhases/gamePlaytestPhase.ts'), 'utf8');
+    expect(phase).toContain('const after = { score: verdict.score?.overall ?? null, defects: measured.map((d) => d.code) };');
+    expect(phase).toContain('const worse = gameGotWorse(before, after);');
+    expect(phase).toMatch(/versionBeforeTurn\(versions, p\.turnStartedAt\)/);
+    expect(phase).toMatch(/code: 'GAME_GOT_WORSE', message: gameUndoMessage\(worse\), detail: versionId, autoResolved: false/);
+    expect(route).toContain('turnStartedAt: buildStartedAt,');
+    expect(route).toContain('versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),');
   });
 
   it('the panel puts a finished build\'s offer into the ❗️ list and wires Go back to the restore', () => {

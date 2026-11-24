@@ -653,8 +653,9 @@ describe('5 · L-18: press-run → playtest → the explorer\'s repair', () => {
 
   it('the explorer\'s working start label is HANDED to the playtest, and a crashed playtest is an open warning', () => {
     // The rules the user named ride the same call since 2026-11-24 (gameRules.ts); the start labels are still handed over.
-    expect(ROUTE).toContain('gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels, rules: ');
-    expect(ROUTE).toContain('const notRun = playtestNotRunVerdict(');
+    expect(ROUTE).toContain('gamePlaytestScript(lastPreviewUrl!, { storageState: signedInState(), startLabels, rules: ');
+    // The crashed-playtest warning lives in the playtest phase since S7 (buildPhases/gamePlaytestPhase.ts).
+    expect(read('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts')).toContain('const notRun = playtestNotRunVerdict(');
     expect(ROUTE).not.toMatch(/severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true/);
     // The real 46e2d74b presses: "Start Race" worked; "Settings" and "Back" must never be vouched into a start.
     expect(startLabelsFromExplore([

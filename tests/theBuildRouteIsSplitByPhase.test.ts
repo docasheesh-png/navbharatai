@@ -9,6 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { runRouteSmokeCheck } from '../src/server/AgentV3/buildPhases/routeSmoke';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
 
 describe('phase 1 — the route smoke check', () => {
@@ -40,10 +41,16 @@ describe('phase 1 — the route smoke check', () => {
 });
 
 describe('every phase file is wired into the route', () => {
-  it('each module under buildPhases/ is imported by the route', () => {
-    const phases = readdirSync(join(__dirname, '..', 'src/server/AgentV3/buildPhases')).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+  it('each module under buildPhases/ is imported by the route, or by a phase the route imports', () => {
+    const dir = join(__dirname, '..', 'src/server/AgentV3/buildPhases');
+    const phases = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
     expect(phases.length).toBeGreaterThan(0);
-    for (const f of phases) expect(route, f).toContain(`from '../AgentV3/buildPhases/${f.replace(/\.ts$/, '')}'`);
+    const byRoute = phases.filter((f) => route.includes(`from '../AgentV3/buildPhases/${f.replace(/\.ts$/, '')}'`));
+    for (const f of phases) {
+      const name = f.replace(/\.ts$/, '');
+      const viaPhase = byRoute.some((g) => readFileSync(join(dir, g), 'utf8').includes(`from './${name}'`));
+      expect(byRoute.includes(f) || viaPhase, f).toBe(true);
+    }
   });
 });
 
@@ -77,5 +84,47 @@ describe('phase 3 — the declared port', () => {
     expect(route).toContain('await captureDeclaredPort({ pkgRaw, read: (path) => actuator.readFile(workspaceId, path),');
     expect(route).not.toContain('declaredPortFrom(portFiles)');
     expect(route).not.toMatch(/code: 'PREVIEW_NEVER_CAME_UP'/);
+  });
+});
+
+describe('phase S7 — the game playtest (locked plan, 2026-11-24)', () => {
+  const facts = { enabled: true, buildOk: true, isCanvasGame: true, isImportTurn: false, aborted: false, hasRunCommand: true, hasPreviewUrl: true, awaitsShell: false, platformDone: false, timeLeft: true };
+  const ports = (over: Record<string, unknown> = {}) => {
+    const seen: string[] = [];
+    return { seen, p: { facts, files: {}, contract: null, play: async () => ({ stdout: '' }), readFile: async () => null,
+      record: (i: { code: string }) => { seen.push(i.code); }, previousIssues: async () => null, versions: async () => [], turnStartedAt: 0,
+      fix: { fixTurn: true, record: (i: { code: string }) => { seen.push(i.code); }, say: () => {} }, ...over } as any };
+  };
+  it('a crashed playtest is an open "not run", never a pass', async () => {
+    const { runGamePlaytestPhase } = await import('../src/server/AgentV3/buildPhases/gamePlaytestPhase');
+    const { seen, p } = ports({ play: async () => { throw new Error('browser died'); } });
+    expect(await runGamePlaytestPhase(p)).toEqual({ proof: { outcome: 'not-run', score: null, unplayed: true }, gate: 'not-run' });
+    expect(seen).toContain('GAME_PLAYTEST_NOT_RUN');
+  });
+  it('a canvas game it had no time to play is said, and a tapped fix is said as not known', async () => {
+    const { runGamePlaytestPhase } = await import('../src/server/AgentV3/buildPhases/gamePlaytestPhase');
+    let played = 0;
+    const { seen, p } = ports({ facts: { ...facts, timeLeft: false }, play: async () => { played++; return { stdout: '' }; } });
+    const out = await runGamePlaytestPhase(p);
+    expect(played).toBe(0);
+    expect(out?.gate).toBe('not-run');
+    expect(seen).toEqual(['GAME_PLAYTEST_NOT_RUN', 'GAME_FIX_UNVERIFIED']);
+  });
+  it('not a game, or a failed build: nothing is said and nothing changes', async () => {
+    const { runGamePlaytestPhase } = await import('../src/server/AgentV3/buildPhases/gamePlaytestPhase');
+    const { seen, p } = ports({ facts: { ...facts, isCanvasGame: false } });
+    expect(await runGamePlaytestPhase(p)).toBeNull();
+    const b = ports({ facts: { ...facts, buildOk: false } });
+    expect(await runGamePlaytestPhase(b.p)).toBeNull();
+    expect([...seen, ...b.seen]).toEqual([]);
+  });
+  it('never throws, even when the report store does', async () => {
+    const { runGamePlaytestPhase } = await import('../src/server/AgentV3/buildPhases/gamePlaytestPhase');
+    const { p } = ports({ play: async () => { throw new Error('x'); }, record: () => { throw new Error('store down'); } });
+    await expect(runGamePlaytestPhase(p)).resolves.toBeTruthy();
+  });
+  it('the route keeps only the call; the body is not back inline', () => {
+    expect(route).toContain('const played = await runGamePlaytestPhase({');
+    expect(route).not.toMatch(/playtestVerdict\(playRun|reportRuleProbes\(|playtestSkipReason\(|domGameNotPlayedVerdict\(|gameGotWorse\(/);
   });
 });

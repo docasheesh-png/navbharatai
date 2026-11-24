@@ -41,7 +41,10 @@ describe('reportRuleProbes', () => {
 
 describe('🔒 wiring', () => {
   it('the contract rules go to the playtest, and its probes are reported right after it is read', () => {
-    expect(ROUTE).toMatch(/gamePlaytestScript\(lastPreviewUrl, \{ storageState: signedInState\(\), startLabels, rules: \(gameContract\?\.rules \?\? \[\]\)\.map\(\(r\) => r\.id\) \}\)/);
-    expect(ROUTE).toMatch(/const playRun = parsePlaytest\(out\.stdout\);\n\s+reportRuleProbes\(playRun\.rules, gameFixPorts\);/);
+    expect(ROUTE).toMatch(/gamePlaytestScript\(lastPreviewUrl!, \{ storageState: signedInState\(\), startLabels, rules: \(gameContract\?\.rules \?\? \[\]\)\.map\(\(r\) => r\.id\) \}\)/);
+    expect(ROUTE).toContain('fix: gameFixPorts,');
+    // The playtest phase (S7) reports the probes right after the run is read.
+    const phase = readFileSync(join(__dirname, '..', 'src/server/AgentV3/buildPhases/gamePlaytestPhase.ts'), 'utf8');
+    expect(phase).toMatch(/const playRun = parsePlaytest\(\(await p\.play\(\)\)\.stdout\);\n\s+reportRuleProbes\(playRun\.rules, p\.fix\);/);
   });
 });

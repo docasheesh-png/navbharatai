@@ -122,13 +122,17 @@ describe('a game nobody played says so (Q-913, autopsy 50378049)', () => {
   describe('🔒 the wiring — the gate finally has an else', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
+    // Moved to the playtest phase (S7, 2026-11-24). The gate and the reason now read ONE facts object, so they cannot
+    // disagree by construction.
+    const phase = readFileSync(join(process.cwd(), 'src/server/AgentV3/buildPhases/gamePlaytestPhase.ts'), 'utf8');
     it('the skipped path records it instead of returning silently', () => {
-      expect(route).toContain('const why = playtestSkipReason({');
-      expect(route).toContain('const notRun = playtestNotRunVerdict(why);');
+      expect(phase).toContain('const why = playtestSkipReason(p.facts);');
+      expect(phase).toContain('const notRun = playtestNotRunVerdict(why);');
+      expect(phase).toContain('return playable(p.facts) ? await playIt(p) : notPlayed(p);');
     });
 
     it('it reads the SAME conditions the gate reads, so the two cannot disagree', () => {
-      const at = route.indexOf('const why = playtestSkipReason({');
+      const at = route.indexOf('const played = await runGamePlaytestPhase({');
       const block = route.slice(at, at + 900);
       for (const field of [
         'enabled: gamePlaytestEnabled()',
@@ -140,8 +144,8 @@ describe('a game nobody played says so (Q-913, autopsy 50378049)', () => {
     });
 
     it('and it can never touch the build', () => {
-      const at = route.indexOf('const why = playtestSkipReason({');
-      expect(route.slice(at, at + 1400)).toContain('catch { /* an honest line is best-effort');
+      const at = phase.indexOf('const why = playtestSkipReason(p.facts);');
+      expect(phase.slice(at, at + 1400)).toContain('catch { /* an honest line is best-effort');
     });
   });
 });

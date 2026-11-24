@@ -175,7 +175,9 @@ describe('census: every library action the platform runs at turn start can finis
     expect(route).toContain('templateDelivered: verbatimTemplate.deliver || platformDoneRef.cur !== null');
     expect(route).toContain('platformDone: () => platformDoneRef.cur !== null');
     expect(route).toMatch(/clickExplorerEnabled\(\) && result\.ok[^\n]*\n[^\n]*!platformDoneRef\.cur/);
-    expect(route).toMatch(/gamePlaytestEnabled\(\) && result\?\.ok[^\n]*\n[^\n]*!platformDoneRef\.cur/);
+    // The playtest's facts carry it; the phase plays only when it is false (S7, buildPhases/gamePlaytestPhase.ts).
+    expect(route).toContain('awaitsShell: !!awaitsShellNow(), platformDone: !!platformDoneRef.cur, timeLeft: roomFor(90_000),');
+    expect(read('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts')).toContain('&& !f.platformDone && f.isCanvasGame && f.timeLeft');
     expect(route).toContain('platformDone: !!platformDoneRef.cur,');
     expect(route).toContain('Object.assign(est, capPlatformDoneEstimate(est, prompt));');
     expect(route).toContain('const etaShown = platformDoneEtaLine(prompt) ?? (');

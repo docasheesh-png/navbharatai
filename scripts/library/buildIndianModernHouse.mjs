@@ -77,7 +77,7 @@ export function createGlbBuffer() {
     const na=accessors.length; accessors.push({bufferView:nv,componentType:5126,count:n.length/3,type:'VEC3'});
     const ia=accessors.length; accessors.push({bufferView:iv,componentType:5123,count:ix.length,type:'SCALAR',min:[0],max:[p.length/3-1]});
     const mi=materials.length; const color=MATERIALS[material]; materials.push({name:material,pbrMetallicRoughness:{baseColorFactor:color,metallicFactor:0,roughnessFactor:.82}, ...(color[3]<1?{alphaMode:'BLEND'}:{})});
-    const meshName=`House_${material}`; meshes.push({name:meshName,primitives:[{attributes:{POSITION:pa,NORMAL:na},indices:ia,material:mi,mode:4}],extras:{parts:parts.map(x=>x.name)}}); nodes.push({name:meshName,mesh:meshes.length-1});
+    const meshName=`House_${material}`; meshes.push({name:meshName,primitives:[{attributes:{POSITION:pa,NORMAL:na},indices:ia,material:mi,mode:4}],extras:{parts:parts.map(x=>x.name)}}); nodes.push({name:meshName,mesh:meshes.length-1,rotation:[-0.7071067811865475,0,0,0.7071067811865476]});
   }
   const bin=Buffer.concat(chunks); const doc={asset:{version:'2.0',generator:'NavBharatAI Indian Modern House H01 builder'},scene:0,scenes:[{nodes:nodes.map((_,i)=>i),name:'Indian Modern House H01'}],nodes,meshes,materials,accessors,bufferViews:views,buffers:[{byteLength:bin.length}],extras:{asset:'Indian Modern House H01',units:'metres',reference:'Owner-provided exterior and floor-plan reference',license:'CC BY 4.0',walkthrough:{frontDoorOpeningMetres:1.5,interiorPartitions:true,roomDoorwaysOpen:true,rooms:['living room','bedroom 1','kitchen/dining','bedroom 2']}}};
   let json=Buffer.from(JSON.stringify(doc)); json=Buffer.concat([json,Buffer.alloc(align4(json.length)-json.length,0x20)]);

@@ -6102,3 +6102,19 @@ next-seller retry, no bench on a market refusal, 404 removed from the circuit's 
 a retried attempt on the adapter path returned before the bench decision and the report notice (Q-3019 class).
 Test: `aDeadSurplusSellerIsSkippedNotTheEngine.test.ts` (reverted ⇒ 3 fail). Open: none in this row; watch the next
 Weak build's Surplus attempts.
+
+### 2026-11-25 — Build Engines: per-day failures + tap-through engine stats; Firestore indexes ship with the code
+
+Admin: "BUILD ENGINES me … inko per day fail response karo! … tap kar ke … kitne request gayi, kitne response aye,
+kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya woh bhi likh kar ana chahiye".
+- The chip's "18 failed" was the engine-health aggregate: a rolling 24 h over the LATEST build of each project only.
+  New `agentv3_engine_day/{UTC day}` (engineDayStats.ts): each finished build adds, per engine family, answered turns,
+  failed attempts, measured answer time, failure codes (the engine's own refusal code when it gives one) and which
+  engine answered the turns it failed. One write per build at `BuildDiagnostics.finish()`.
+- To time each engine, the chain now returns `answeredBy` and AgentRunner's call row carries it as `provider`; the
+  route passes `fellBackFrom` to `recordProviderTurn` (existing lines edited, no new block in the handler).
+- UI: chips say "N failed today" / "OK today" and are buttons; `EngineDayDetail` shows 7 days (requests, answered,
+  failed, avg answer time), reasons in words, and "X answered N turns instead". Body shape-checked (src/lib/engineDays.ts).
+- Limit, stated on screen: a build whose server was lost before `finish()` is not counted (see Q-3354).
+- Q-3344 root: the revenue index was in firestore.indexes.json but Cloud Build deployed only `firestore:rules`;
+  a `deploy-firestore-indexes` step now runs on every merge (optional, no --force).

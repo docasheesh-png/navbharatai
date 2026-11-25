@@ -86,8 +86,8 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
   try {
     const playStartedAt = Date.now();
     const playRun = parsePlaytest((await p.play()).stdout);
-    const ranMs = Date.now() - playStartedAt; // GAME_PROOF (d): the playtest's own wall time in the sandbox
     reportRuleProbes(playRun.rules, p.fix); // the user's named rules, proved by playing (gameRuleProbes.ts)
+    const ranMs = Date.now() - playStartedAt; // GAME_PROOF (d): the playtest's own wall time in the sandbox
     const playedFiles = await withKitLayersFromDisk(p.files, p.readFile);
     const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
     p.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });

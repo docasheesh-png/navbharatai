@@ -445,6 +445,8 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   police: /\bnew\s+(Wanted|Dispatch)\s*\(|\.call\(\s*['"](police|ambulance|fire|security|military)['"]/,
 };
 
+/** Any file of the kit's 3D or systems layer: a kit call is a call into it only when it is on disk. */
+const KIT_LAYER = /(^|\/)src\/game\/(three|systems)\/[^/]+\.tsx?$/;
 /** A file only the 3D kit writes: with it, a Part-J feature counts only when the kit system is called. */
 const KIT_MARKER = /(^|\/)src\/game\/three\/surfaces\.ts$/;
 /**
@@ -527,8 +529,10 @@ export function scopeMatch(c: GameScopeContract, files: Record<string, string>):
   const notVerified: GameFeature[] = [];
   const evidence: Partial<Record<GameFeature, string>> = {};
   const hasKit = Object.keys(files || {}).some((p) => KIT_MARKER.test(p));
-  // null: no entry found, so what runs is not known — then no kit call is proven by reach (said as not verified).
-  const reach = hasKit ? reachableGameFiles(files || {}) : null;
+  // A kit call is a call into the kit only when the kit is on disk (the 3D layer or the systems layer — police and people
+  // live in src/game/systems). null: no kit, or no entry found so what runs is not known — then no kit call is proven.
+  const kitOnDisk = Object.keys(files || {}).some((p) => KIT_LAYER.test(p));
+  const reach = kitOnDisk ? reachableGameFiles(files || {}) : null;
   for (const f of c.requiredFeatures) {
     // The code SIGNAL decides missing exactly as it always did (the done signal, the repair and the gate read it).
     const test = !hasKit && WORD_WITHOUT_KIT[f] ? WORD_WITHOUT_KIT[f]! : PRESENT[f];

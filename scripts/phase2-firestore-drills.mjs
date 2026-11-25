@@ -597,7 +597,9 @@ async function coordinator() {
       await check('Stop racing handoff consumption cancels the ticket and flags the current successor lease', async () => {
         const observed = [];
         const reconciledOrders = [];
-        for (const order of ['stop-first', 'consume-first', 'concurrent']) {
+        // concurrent-stop-ack-loss: the Stop commits and its acknowledgement is lost (injected AFTER the real commit), so the
+        // reconcile of an unconfirmed Stop runs on EVERY run, not only when the runner happens to be slow.
+        for (const order of ['stop-first', 'consume-first', 'concurrent', 'concurrent-stop-ack-loss']) {
           const f = await readyFixture(`handoff-stop-consume-${order}`); const attemptId = randomUUID();
           assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'successor-before-stop' })).ok, true);
           const request = transfer(f, attemptId); let consumed; let stopped;
@@ -612,7 +614,14 @@ async function coordinator() {
           if (order === 'stop-first') { stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); await requireStoppedAcknowledgment(); consumed = await a.ask('bind', request); }
           else if (order === 'consume-first') { consumed = await a.ask('bind', request); stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); await requireStoppedAcknowledgment(); }
           else {
-            [consumed, stopped] = await Promise.all([a.ask('bind', request), b.ask('continuation-stop', { workspaceId: f.workspaceId })]); await requireStoppedAcknowledgment();
+            [consumed, stopped] = await Promise.all([a.ask('bind', request), b.ask('continuation-stop', { workspaceId: f.workspaceId,
+              ...(order === 'concurrent-stop-ack-loss' ? { fault: 'ack-loss' } : {}) })]);
+            if (order === 'concurrent-stop-ack-loss') assert.equal(stopped.ok, false, 'the injected Stop acknowledgement loss must be seen');
+            // Q-3035, the Stop side (CI run 45520982679 on 2026-11-25: the concurrent Stop itself timed out and the drill failed
+            // before any reconcile — #4391 reconciled only the bind). A Stop that timed out under contention is UNKNOWN, not
+            // failed; Stop is idempotent on the workspace, so it is replayed once, sequentially, and must then be confirmed.
+            if (!stopped.ok && stopped.error?.code === 'QUEUE_STORE_UNAVAILABLE') { reconciledOrders.push(`${order}:stop`); stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); }
+            await requireStoppedAcknowledgment();
             // Q-3035: a bind that timed out under contention is UNKNOWN; after the confirmed Stop the same one-use request
             // can only conflict (cancelled, or already consumed by an unconfirmed original). Replay it once to know which.
             if (!consumed.ok && consumed.error?.code === 'QUEUE_STORE_UNAVAILABLE') { reconciledOrders.push(order); consumed = await a.ask('bind', request); }
@@ -635,6 +644,8 @@ async function coordinator() {
           assert.equal(replay.ok, false); assert.equal(replay.error.code, 'QUEUE_CLAIM_CONFLICT');
           observed.push({ order, consumedBeforeStop: consumed.ok, currentLeaseStopRequested: true, oldTicketReplay: replay.error.code });
         }
+        // The unconfirmed-Stop reconcile really ran (the injected order), so it is exercised, not only reviewed.
+        assert.ok(reconciledOrders.includes('concurrent-stop-ack-loss:stop'), `unconfirmed Stop was not reconciled: ${JSON.stringify(reconciledOrders)}`);
         return { interleavings: observed, physicalLimit: 'An already-issued provider operation is not revoked by this queue/lease transaction.', contentionReconciled: reconciledOrders };
       });
 

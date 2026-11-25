@@ -52,14 +52,16 @@ describe('scope match is evidence only', () => {
       'src/game/core/meta.ts': 'leaderboard ranking',
       'src/game/shooter/Game.tsx': 'let score = 0; const enemies = [];',
     };
-    expect(scopeMatch(c, files)).toEqual({ present: ['score', 'enemies'], missing: ['leaderboard'] });
+    // Q-3360: words are not verified, never present (only a reachable kit call or a played action proves a feature).
+    expect(scopeMatch(c, files)).toEqual({ present: [], missing: ['leaderboard'], notVerified: ['score', 'enemies'] });
     const v = gameScopeVerdict(c, files)!;
     expect(v.code).toBe('GAME_SCOPE_GAP');
     expect(v.severity).toBe('info');
     expect(v.autoResolved).toBe(true);
   });
-  it('OK when all named features are present; null when none were named', () => {
-    expect(gameScopeVerdict(c, { 'src/App.tsx': 'score enemy leaderboard' })!.code).toBe('GAME_SCOPE_OK');
+  it('OK only when every named feature is PROVEN — words are a gap; null when none were named', () => {
+    expect(gameScopeVerdict(c, { 'src/App.tsx': 'score enemy leaderboard' })!.code).toBe('GAME_SCOPE_GAP');
+    expect(gameScopeVerdict(c, { 'src/App.tsx': 'score enemy leaderboard' }, { present: ['score', 'enemies', 'leaderboard'], missing: [] })!.code).toBe('GAME_SCOPE_OK');
     expect(gameScopeVerdict(buildGameContract('racing game'), {})).toBeNull();
   });
   it('kill switch', () => {

@@ -13,7 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { buildGameContract, gameContractBlock, scopeMatch } from '../src/server/AgentV3/gameIntent';
 
 const KIT = { 'src/game/three/surfaces.ts': '// kit' };
-const game = (code: string, kit = true) => ({ ...(kit ? KIT : {}), 'src/game/MyGame.ts': code });
+// A real project: an entry that loads the game file (since Q-3360 a kit call counts only in code the game reaches).
+const game = (code: string, kit = true) => ({ ...(kit ? KIT : {}), 'src/main.ts': "import './game/MyGame';", 'src/game/MyGame.ts': code });
 
 const CASES: Array<[string, string[], string, string]> = [
   // feature, requests that name it, fake code (word only), real code (the kit call)
@@ -44,10 +45,13 @@ describe('🔴 each feature: named, told how, and counted only when the kit syst
 });
 
 describe('the checker never lies the other way', () => {
-  it('a 2D / hand-written game (no kit) keeps the word check — a real hand-made feature is not called missing', () => {
+  it('a 2D / hand-written game (no kit): a real hand-made feature is not called missing — and a word is not called present', () => {
     const c = buildGameContract('a 2D platformer where the player can swim and there are villagers');
     const m = scopeMatch(c, game('function swim(p) { p.vy -= 1; } const villagers = [];', false));
-    expect(m.present).toEqual(expect.arrayContaining(['swimming', 'npcs']));
+    expect(m.missing).toEqual([]);
+    // Q-3360 (external Game Maker audit): a word is NOT VERIFIED, never present — only playing can prove it here.
+    expect(m.present).toEqual([]);
+    expect(m.notVerified).toEqual(expect.arrayContaining(['swimming', 'npcs']));
   });
   it('requests that do not name them do not get them', () => {
     const c = buildGameContract('a racing game with 3 laps, a timer and a house in the background');

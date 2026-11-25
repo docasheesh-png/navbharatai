@@ -5,6 +5,11 @@
  * build spent 80–94 s on it and fell back to the Weak ladder. The admit circuit's cool-down (1–3 min, sized for an
  * overload spike) had always expired by the next build. An outright refusal now parks Surplus for 30 min at once;
  * then one build probes it (half-open). A passing fault (429, 408, a timeout) keeps the short spike behaviour.
+ *
+ * CORRECTED the same week (live probes, 2026-11-25): Surplus's 404s are MARKET refusals of one (model, provider) pair,
+ * not the engine refusing us — other pairs answered 200 at the same minute. Parking the whole engine on a 404 kept it
+ * out of builds it could serve, so a 404 is now handled per pair (aDeadSurplusSellerIsSkippedNotTheEngine.test.ts) and
+ * only the other outright refusals (400/401/403/…) park the engine. The tests below use 403 for that reason.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -17,17 +22,17 @@ const T0 = 1_795_519_306_865; // BR2514's start
 const HOUR = 3_600_000;
 beforeEach(() => resetSurplusAdmitCircuitForTests());
 
-describe('🔴 the reported day: 404s hours apart', () => {
+describe('🔴 an outright refusal (403) hours apart', () => {
   it('ONE refused build parks Surplus at once — the next build an hour later does not burn 85 s on it again', () => {
-    recordSurplusMidBuildDeath('mid_build_after_write', T0, { httpStatus: 404 });
+    recordSurplusMidBuildDeath('mid_build_after_write', T0, { httpStatus: 403 });
     expect(shouldSkipSurplusAdmit(T0 + 60_000)).toBe(true);
     expect(shouldSkipSurplusAdmit(T0 + 20 * 60_000)).toBe(true);
   });
   it('after 30 min one build probes it; refused again ⇒ parked again; served ⇒ back for everyone', () => {
-    recordSurplusMidBuildDeath('mid_build_after_write', T0, { httpStatus: 404 });
+    recordSurplusMidBuildDeath('mid_build_after_write', T0, { httpStatus: 403 });
     const probe = T0 + SURPLUS_ADMIT_CIRCUIT_REFUSAL_COOLDOWN_MS + 1;
     expect(shouldSkipSurplusAdmit(probe)).toBe(false); // half-open: one trial
-    recordSurplusMidBuildDeath('mid_build_after_write', probe, { httpStatus: 404 });
+    recordSurplusMidBuildDeath('mid_build_after_write', probe, { httpStatus: 403 });
     expect(shouldSkipSurplusAdmit(probe + HOUR / 4)).toBe(true);
     recordSurplusAdmitProbeSuccess();
     expect(shouldSkipSurplusAdmit(probe + HOUR / 4)).toBe(false);
@@ -40,8 +45,8 @@ describe('🔴 the reported day: 404s hours apart', () => {
   });
 });
 
-describe('a passing fault is still a spike, not a refusal', () => {
-  for (const st of [429, 408, 500, 503]) {
+describe('a passing fault — or a market 404 — is still a spike, not a refusal', () => {
+  for (const st of [404, 429, 408, 500, 503]) {
     it(`HTTP ${st}: one death parks nothing (the spike threshold still applies)`, () => {
       recordSurplusMidBuildDeath('mid_build_engine_unavailable', T0, { httpStatus: st });
       expect(shouldSkipSurplusAdmit(T0 + 1)).toBe(false);

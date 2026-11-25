@@ -107,7 +107,9 @@ export function recordSurplusMidBuildDeath(
     circuit.consecutiveDeaths += 1;
     circuit.lastOpenReason = safe;
     const st = opts.httpStatus;
-    if (typeof st === 'number' && st >= 400 && st < 500 && st !== 408 && st !== 429) {
+    // 404 is NOT here: Surplus's 404s are market refusals of one (model, provider) pair (surplusPairRefusals.ts), and
+    // parking the whole engine on one for 30 min kept Surplus out of builds the market could still fill (2026-11-25).
+    if (typeof st === 'number' && st >= 400 && st < 500 && st !== 404 && st !== 408 && st !== 429) {
       circuit.opensInARow += 1;
       circuit.lastOpenReason = scrubReason(`${safe}:refused_${st}`);
       circuit.openedUntil = now + SURPLUS_ADMIT_CIRCUIT_REFUSAL_COOLDOWN_MS;

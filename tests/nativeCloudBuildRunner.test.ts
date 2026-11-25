@@ -417,6 +417,10 @@ describe('pure helpers', () => {
   it('logs lose credentials and private keys', () => {
     expect(runner.sanitizeLogLine('key AIzaSyA1234567890abcdefghijklmnopqrstuv end')).toBe('key [redacted] end');
     expect(runner.sanitizeLogLine('-----BEGIN RSA PRIVATE KEY-----MIIE')).toBe('[redacted private key]');
+    const block = `ok line\n-----BEGIN PRIVATE KEY-----\n${'A'.repeat(64)}\n${'B'.repeat(64)}\n-----END PRIVATE KEY-----\nafter`;
+    const lines = runner.sanitizeLog(block);
+    expect(lines.join('\n')).not.toContain('AAAA');
+    expect(lines).toEqual(['ok line', '[redacted private key]', 'after']);
     expect(runner.sanitizeLogLine('\u001b[31mred\u001b[0m')).toBe('red');
   });
 });

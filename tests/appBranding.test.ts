@@ -22,7 +22,7 @@ describe('which logo does the app have?', () => {
     expect(decideLogo({ iconDataUrl: 'data:text/html;base64,PGh0bWw+' }).declared).toBe('none');
   });
   it('source guard: no AI image generation anywhere in the branding path (admin 2026-10-21: "AI se logo nahi banwana")', () => {
-    for (const f of ['src/server/lib/appBranding.ts', 'src/server/routes/mobileSetup.ts', 'src/server/lib/mobileProjectAssembler.ts']) {
+    for (const f of ['src/server/lib/appBranding.ts', 'src/server/routes/mobileSetup.ts', 'src/server/lib/mobileBuild/prepareMobileProject.ts', 'src/server/lib/mobileProjectAssembler.ts']) {
       const src = readFileSync(f, 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
       expect(src, f).not.toMatch(/imageProHost|fetchImageProHostImage|generateAiLogo|serverAiLogoGenerator|aiLogoPrompt|MOBILE_AI_LOGO|IMAGE_PRO/);
     }
@@ -105,11 +105,16 @@ describe('every build lane runs the branding steps in the right order', () => {
 });
 
 describe('the ship route decides the logo', () => {
+  // 2026-11-25: the logo decision lives in the ONE preparation both Android providers share; the setup
+  // route runs it before the repository is written.
   const route = readFileSync('src/server/routes/mobileSetup.ts', 'utf8');
+  const prep = readFileSync('src/server/lib/mobileBuild/prepareMobileProject.ts', 'utf8');
   it('source guard: decideLogo runs before the project is assembled and its answer goes in', () => {
-    expect(route.indexOf('decideLogo(')).toBeGreaterThan(0);
-    expect(route.indexOf('decideLogo(')).toBeLessThan(route.indexOf('assembleMobileProject('));
-    expect(route).toContain('branding: logo');
+    expect(prep.indexOf('decideLogo(')).toBeGreaterThan(0);
+    expect(prep.indexOf('decideLogo(')).toBeLessThan(prep.indexOf('assembleMobileProject('));
+    expect(prep).toContain('branding: logo');
+    expect(route.indexOf('await prepareMobileProject(')).toBeGreaterThan(0);
+    expect(route.indexOf('await prepareMobileProject(')).toBeLessThan(route.indexOf('await ensureRepo('));
   });
 });
 

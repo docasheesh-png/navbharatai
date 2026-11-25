@@ -17,9 +17,9 @@ import { describe, expect, it, vi, beforeAll } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { NativeBuildFirestore } from './helpers/nativeBuildFirestore';
+import { makeTempDir } from './helpers/tempDir';
 
 const SDK = process.env.NBAI_REAL_GRADLE_SDK ?? '';
 const BUNDLETOOL = process.env.NBAI_BUNDLETOOL ?? '';
@@ -114,7 +114,7 @@ function localArtifacts(root: string) {
 }
 
 describe.skipIf(!enabled)('Native Cloud Build — real Gradle, end to end', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nbai-native-'));
+  const root = makeTempDir('nbai-native-');
   const db = new NativeBuildFirestore();
   const charges: Array<[string, string, string]> = [];
   let deps: any;

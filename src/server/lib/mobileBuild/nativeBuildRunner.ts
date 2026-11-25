@@ -30,6 +30,7 @@ import { toolchainForMajor } from '../capacitorToolchain';
 import { classifyBuildFailure } from '../mobileBuildRepair';
 import { normalizeRepairTier } from '../mobileBuildAiRepair';
 import { SHIP_WORKFLOWS, workflowPath } from '../../../lib/shipWorkflows';
+import { PEM_PRIVATE_KEY_MARKER, pemPrivateKeyBlocks } from '../pemKeyMaterial';
 
 export const APP_DIR = '/home/user/app';
 export const RUN_DIR = '/home/user/nbai-run';
@@ -71,16 +72,19 @@ export function nativeVersionCode(now: Date): number {
 
 /** No ANSI, no over-long lines, and nothing that looks like a credential reaches a stored log. PURE. */
 export function sanitizeLogLine(line: string): string {
+  // A private key is recognised by the ONE shared definition (pemKeyMaterial.ts); a line carrying the marker
+  // is dropped whole, since the key body that follows it is never useful in a build log.
+  if (PEM_PRIVATE_KEY_MARKER.test(line)) return '[redacted private key]';
   return line
     // eslint-disable-next-line no-control-regex
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
     .replace(/(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,})/g, '[redacted]')
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*/g, '[redacted private key]')
     .slice(0, 400);
 }
 
 export function sanitizeLog(text: string, maxLines = LOG_TAIL_LINES): string[] {
-  return text.replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '').slice(-maxLines).map(sanitizeLogLine);
+  // Whole multi-line key blocks go first, before the text is cut into lines.
+  return text.replace(pemPrivateKeyBlocks(), '[redacted private key]').replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '').slice(-maxLines).map(sanitizeLogLine);
 }
 
 /** Read the worker's progress markers. PURE. */

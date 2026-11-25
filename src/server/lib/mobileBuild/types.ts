@@ -112,6 +112,14 @@ export interface NativeBuildJob {
     expiresAt: string;
   } | null;
   billingRef: string | null;
+  /** Decided once from the VERIFIED identity at creation (free-list / test account), so no email is stored. */
+  billingExempt: boolean;
+  /** The last sanitized log lines of the build, for the logs view and the failure report. */
+  logTail: string[];
+  /** Which instance may advance this job until when — two instances never drive one build at once. */
+  leaseUntil: string | null;
+  /** Where the lane's Gradle output lands inside the project (from the translated workflow). */
+  outputPath: string;
 }
 
 /** The browser-safe view of a job — never the sandbox ids, the object path or the key id. */

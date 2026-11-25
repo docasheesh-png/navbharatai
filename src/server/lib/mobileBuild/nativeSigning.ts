@@ -46,10 +46,19 @@ cert_sha256() {
 }
 
 if [ "$MODE" = "verify-key" ]; then
-  keytool -list -keystore "$DIR/ks" -storepass:file "$DIR/storepass" >/dev/null 2>&1 \
-    || die KEYSTORE_PASSWORD "The keystore could not be opened with that password"
+  if ! LISTED="$(keytool -list -keystore "$DIR/ks" -storepass:file "$DIR/storepass" 2>&1)"; then
+    case "$LISTED" in
+      # JKS: "Keystore was tampered with, or password was incorrect"; PKCS12: "Failed PKCS12 integrity checking".
+      *"password was incorrect"*|*"ntegrity check"*|*"Given final block not properly padded"*) die KEYSTORE_PASSWORD "The keystore could not be opened with that password";;
+      *) die KEYSTORE_FORMAT "That file is not a keystore (.jks or .p12/.keystore) that Java can open";;
+    esac
+  fi
   keytool -list -keystore "$DIR/ks" -storepass:file "$DIR/storepass" -alias "$ALIAS" >/dev/null 2>&1 \
     || die KEY_ALIAS "That keystore has no key named \"$ALIAS\""
+  # A certificate request needs the PRIVATE key, so this proves the key password too — a wrong key
+  # password is caught now, not at the first signing.
+  keytool -certreq -alias "$ALIAS" -keystore "$DIR/ks" -storepass:file "$DIR/storepass" -keypass:file "$DIR/keypass" -file /dev/null >/dev/null 2>&1 \
+    || die KEY_PASSWORD "The key password does not open the key \"$ALIAS\""
   FP="$(cert_sha256)"
   [ -n "$FP" ] || die KEYSTORE_READ "The key's certificate could not be read"
   echo "::nbai-inspect::{\"certSha256\":\"$FP\"}"

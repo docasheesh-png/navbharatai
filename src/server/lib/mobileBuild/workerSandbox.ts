@@ -19,12 +19,16 @@ export interface WorkerSandbox {
   readonly id: string;
   writeFiles(files: Array<{ path: string; data: string | ArrayBuffer }>): Promise<void>;
   run(cmd: string, opts: { timeoutMs: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; cwd?: string }): Promise<RunResult>;
+  /** Start a command DETACHED: it keeps running in the machine after this call (and this server) is gone. */
+  start(cmd: string): Promise<void>;
   readBytes(path: string): Promise<Uint8Array>;
   kill(): Promise<void>;
 }
 
 export interface WorkerSandboxFactory {
   create(role: 'build' | 'sign', opts: { template: string; lifetimeMs: number; buildId: string }): Promise<WorkerSandbox>;
+  /** Reattach to a running machine by id (any server instance). Null when it no longer exists. */
+  connect(id: string): Promise<WorkerSandbox | null>;
   killById(id: string): Promise<void>;
 }
 
@@ -85,6 +89,9 @@ class E2BWorker implements WorkerSandbox {
       throw err;
     }
   }
+  async start(cmd: string): Promise<void> {
+    await this.sb.commands.run(cmd, { background: true, user: SANDBOX_USER, envs: {}, timeoutMs: 0 });
+  }
   async readBytes(path: string): Promise<Uint8Array> {
     return this.sb.files.read(path, { format: 'bytes', user: SANDBOX_USER });
   }
@@ -107,6 +114,15 @@ export const e2bWorkerFactory: WorkerSandboxFactory = {
         : { network: { allowOut: [...BUILD_EGRESS_HOSTS], denyOut: [ALL_TRAFFIC] } }),
     });
     return new E2BWorker(sb);
+  },
+  async connect(id) {
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) return null;
+    try {
+      // A short timeout never SHORTENS a running machine's lifetime (the SDK only ever extends it).
+      return new E2BWorker(await Sandbox.connect(id, { apiKey: e2bApiKey(), timeoutMs: 60_000 }));
+    } catch {
+      return null;
+    }
   },
   async killById(id) {
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) return;

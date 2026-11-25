@@ -196,6 +196,40 @@ export interface OpenWorldVenue {
   toWorld(x: number, z: number): { x: number; y: number; z: number };
 }
 const COMPASS: Record<Compass, number> = { north: 0, 'north-east': Math.PI / 4, east: Math.PI / 2, 'south-east': (3 * Math.PI) / 4, south: Math.PI, 'south-west': (5 * Math.PI) / 4, west: (3 * Math.PI) / 2, 'north-west': (7 * Math.PI) / 4 };
+/**
+ * 🧭 A DIRECTION AS A REGION MAY WRITE IT ('north-east', 'northeast', 'North East', 'NE') — or undefined when it is none.
+ * failedbr #2499: a direction outside the list made COMPASS[toward] undefined, the place's spot NaN, and its NaN pad made the
+ * map's ground NaN everywhere — every city hung in the sky as a flat layer over the sea. Read once, where the list enters.
+ */
+const COMPASS_ALIASES: Record<string, Compass> = {
+  n: 'north', north: 'north', ne: 'north-east', northeast: 'north-east', e: 'east', east: 'east', se: 'south-east', southeast: 'south-east',
+  s: 'south', south: 'south', sw: 'south-west', southwest: 'south-west', w: 'west', west: 'west', nw: 'north-west', northwest: 'north-west',
+};
+export function compassOf(value: unknown): Compass | undefined {
+  return typeof value === 'string' ? COMPASS_ALIASES[value.toLowerCase().replace(/[^a-z]/g, '')] : undefined;
+}
+/** A region as the kit reads it: its direction one of the eight (or left out, and said), its distance a finite number of metres (or left out, and said). */
+export function cleanRegion(region: WorldRegion): WorldRegion {
+  if (!region || typeof region !== 'object') return region;
+  let out = region;
+  if (region.toward !== undefined) {
+    const way = compassOf(region.toward);
+    if (way !== region.toward) {
+      const { toward: _bad, ...rest } = out;
+      out = way ? { ...rest, toward: way } : rest;
+      if (!way) console.error('[world] "' + String(region.id) + '" asks to lie toward "' + String(region.toward) + '", which is not a direction (north, north-east, east, south-east, south, south-west, west, north-west); it was laid without one.');
+    }
+  }
+  if (region.distance !== undefined) {
+    const far = Number(region.distance);
+    if (!(Number.isFinite(far) && far >= 0)) {
+      const { distance: _bad, ...rest } = out;
+      out = rest;
+      console.error('[world] "' + String(region.id) + '" asks for a distance of "' + String(region.distance) + '", which is not a number of metres; it was laid without one.');
+    } else if (far !== region.distance) out = { ...out, distance: far };
+  }
+  return out;
+}
 const REGION_PRESETS: Record<'city' | 'town' | 'village', { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
   city: { city: { blocksX: 4, blocksZ: 4, style: 'mixed' }, traffic: 12, people: 30, parkedCars: 4 },
   town: { city: { blocksX: 3, blocksZ: 3, style: 'town', maxFloors: 4 }, traffic: 6, people: 16, parkedCars: 3 },
@@ -374,7 +408,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const looping = mapMode === 'loop' || (mapMode !== 'bounded' && (mapOptions as { profile?: unknown }).profile !== 'battle-royale');
   const sized = looping && spread > loopSize ? { sizeMeters: spread } : {};
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
-  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, three: THREE } as AthreeMapOptions);
+  // 🧱 LATE GROUND EDITS ARE REDRAWN BY DEFAULT here (lateEdits: false opts out). The kit lays every pad, land and road before
+  // the first draw, but a game feature that levels ground later used to leave the drawn terrain at the old height while the
+  // player walked on the new one — one place on two layers. Nothing is redrawn while nothing changes, so it costs nothing then.
+  const lateEdits = options.lateEdits !== false;
+  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, lateEdits, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   if (!looping && spread > map.world.sizeMeters) console.error('[world] this map is an island of ' + Math.round(map.world.sizeMeters / 1000) + ' km and is never made bigger; the size asked (' + Math.round(spread / 1000) + ' km) is not used — the places stand on the island\'s dry land.');
@@ -415,7 +453,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // BEFORE any terrain is drawn, and stands on it. The list grows one entry at a time; the first is where the player starts.
   const wanted: WorldRegion[] = [
     ...(cityOption ? [{ id: 'city', kind: 'city' as const, ...(cityOption === true ? {} : { city: cityOption }) }] : []),
-    ...(regionList || []),
+    ...(Array.isArray(regionList) ? regionList : []).map(cleanRegion),
   ];
   const towns: OpenWorldCity[] = [];
   // One root per BUILT PLACE, in step with towns[] and locals[] (index i is the same place in all three). A user's map has its
@@ -1175,14 +1213,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       freeGroup(groups, farthest.id);
     }
   };
-  const anchored = new Map<THREE.Object3D, { x: number; z: number }>();
+  const anchored = new Map<THREE.Object3D, { x: number; z: number; lowest: number; lift: number }>();
   let time = 0;
-  // LATE GROUND EDITS (world: { lateEdits: true }, default off): a pad, land or road laid after this point redraws the map's
-  // chunks and plants it touches, and the walkable ground under the player is sampled again at once.
-  const lateEdits = options.lateEdits === true;
+  // LATE GROUND EDITS (on unless world: { lateEdits: false }): a pad, land or road laid after this point redraws the map's
+  // chunks and plants it touches, the walkable ground under the player is sampled again at once, and everything put down with
+  // world.place() inside the changed area stands on the new ground.
   let groundEditsSeen = map.world.editCount ? map.world.editCount() : 0;
-  /** The edit count at the first frame (-1 before it): edits after it, without lateEdits, are never redrawn (the playtest says so). */
-  let editsAtFirstFrame = -1;
+  /**
+   * The edit count when the terrain was FIRST DRAWN (the map.update() above, before any feature's setup ran): edits after it,
+   * without lateEdits, are never redrawn (the playtest says so). It used to be read at the first frame, so an edit a feature
+   * made in its setup() — after the chunks were drawn — was neither redrawn nor reported.
+   */
+  const editsAtFirstFrame = map.world.editCount ? map.world.editCount() : 0;
   const playerWorld = () => {
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
@@ -1302,7 +1344,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const o = chunks.origin, h = (x: number, z: number) => map.world.heightAt(x, z), r1 = (v: number) => Math.round(v * 10) / 10;
     const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), box = new THREE.Box3();
     // 1. The drawn terrain: a chunk's grid vertices (never its skirt, which hangs below on purpose) against the land there.
-    let samples = 0, off = 0, worst = 0;
+    // A sample that is not a number (the drawn vertex or heightAt) is OFF and is counted on its own: NaN compared false with
+    // every threshold, so a map whose ground had gone NaN everywhere was reported as 0 off (failedbr #2499).
+    let samples = 0, off = 0, worst = 0, notNumber = 0;
     for (const chunk of chunks.group.children.slice(0, 48)) {
       const pos = ((chunk as THREE.Mesh).geometry as THREE.BufferGeometry | undefined)?.getAttribute?.('position') as THREE.BufferAttribute | undefined;
       const n = pos ? Math.round(Math.sqrt(pos.count + 4) - 2) : 0;
@@ -1311,7 +1355,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (let k = 0; k < 9; k++) {
         a.fromBufferAttribute(pos, Math.min(n * n - 1, Math.floor(((k + 0.5) / 9) * n * n))).applyMatrix4(chunk.matrixWorld);
         const d = Math.abs(a.y - h(a.x + o.x, a.z + o.z));
-        samples++; if (d > 0.5) off++; worst = Math.max(worst, d);
+        samples++; if (!(d <= 0.5)) off++;
+        if (Number.isFinite(d)) worst = Math.max(worst, d); else notNumber++;
       }
     }
     // 2 and 3. What the GAME added: big flat meshes against the land under them, and road-named meshes' faces.
@@ -1364,6 +1409,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     for (const child of ctx.scene.children) visit(child);
     // 4. The player on foot, on dry land: how far its feet are from the ground (null while driving or swimming).
     const at = playerWorld(), land = h(at.x, at.z);
+    if (!Number.isFinite(land)) notNumber++;
     const player = ctx.vehicles.seated || land < map.world.seaLevel ? null : r1(at.y - land);
     // 5. Seams: where two joined tiles of one grown city meet, the ground 3 m into each side (they share one level by design).
     let seamSamples = 0, seamWorst = 0;
@@ -1410,7 +1456,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (stale) dirty++;
       }
     }
-    return { terrain: { samples, off, worst: r1(worst) }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
+    return { terrain: { samples, off, worst: r1(worst), notNumber }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
   };
   // 🔎 Where the player stands, for the placeholder look (gamePlaceholderProbe.ts): the feet, the land under them and the
   // water over that land (the sea where the land is below sea level, else a river or lake). Read-only.
@@ -1445,12 +1491,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       if (!object.parent) ctx.scene.add(object);
       const lowest = object.children.length ? localLowestY(object) : 0;
       object.position.y = restOriginY(map.world.heightAt(x, z), lowest, lift);
-      anchored.set(object, { x, z });
+      anchored.set(object, { x, z, lowest, lift });
     },
     release(object) { anchored.delete(object); },
     frame(_ctx, delta) {
       time += delta;
-      if (editsAtFirstFrame < 0) editsAtFirstFrame = map.world.editCount ? map.world.editCount() : 0;
       const at = playerWorld();
       const shift = map.update(at.x, at.z, time, at.y);
       if (shift) {
@@ -1465,7 +1510,14 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       if (lateEdits && map.world.editCount) {
         const edits = map.world.editCount();
-        if (edits !== groundEditsSeen) { groundEditsSeen = edits; centre.x = Number.NaN; centre.z = Number.NaN; }
+        if (edits !== groundEditsSeen) {
+          const changed = map.world.editsSince ? map.world.editsSince(groundEditsSeen) : [];
+          groundEditsSeen = edits; centre.x = Number.NaN; centre.z = Number.NaN;
+          // What the game put down with place() inside a changed area stands on the new ground, not on the old one.
+          for (const [object, a] of anchored) {
+            if (changed.some((e) => a.x >= e.x0 && a.x <= e.x1 && a.z >= e.z0 && a.z <= e.z1)) object.position.y = restOriginY(map.world.heightAt(a.x, a.z), a.lowest, a.lift);
+          }
+        }
       }
       layGround(at.x, at.z);
       // A place still only planned is built when the player comes near it — at most one per frame, so walking towards a

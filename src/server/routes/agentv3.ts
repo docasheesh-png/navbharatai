@@ -15036,11 +15036,11 @@ async function noteBuildOutcome(
       // build (first attempt + any escalation), so `deliveredVia` records the dominant builder
       // (GLM/KIMI/CLAUDE). This is the cheap-floor-vs-Claude rollback tripwire. Best-effort.
       const providerTurns = new Map<string, number>();
-      const captureProvider = (used: string): void => {
+      const captureProvider = (used: string, fellBackFrom?: string[]): void => {
         providerTurns.set(used, (providerTurns.get(used) ?? 0) + 1);
         // Also surface the delivering provider in the downloadable build report ("Built by: GLM …"),
-        // so the admin can see which provider actually answered each turn. Best-effort.
-        try { buildDiag.recordProviderTurn(used); } catch { /* diagnostics are best-effort */ }
+        // so the admin can see which provider actually answered each turn — and who it carried the turn for. Best-effort.
+        try { buildDiag.recordProviderTurn(used, fellBackFrom); } catch { /* diagnostics are best-effort */ }
       };
       // Billing Phase 3 — per-provider TOKEN attribution (admin usage-report + optional per-tier
       // billing). Fed by MultiProviderTurnRunner.onTurnComplete for the architect + its sub-agents
@@ -15463,7 +15463,7 @@ async function noteBuildOutcome(
         // attribute the wrong provider to a file. Only the MEMORY is shared; the callbacks stay private.
         deadRungs: fastLaneDeadRungs,
         bench: buildBench,
-        onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
+        onProviderUsed: (used, from) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used, from); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
         // what makes the fast-lane billing question answerable without answering it by accident.
         onTurnComplete: surplusSession || (!manualUsage && heal && weakCandidateActive(powerLevelReqEffective)) ? captureTurnUsage : captureShadowUsage,
@@ -15483,7 +15483,7 @@ async function noteBuildOutcome(
         complex: buildIsComplex,
         deadRungs: fastLaneDeadRungs,
         bench: buildBench,
-        onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
+        onProviderUsed: (used, from) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used, from); },
         onTurnComplete: surplusSession ? captureTurnUsage : captureShadowUsage,
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,

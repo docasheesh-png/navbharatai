@@ -1,0 +1,574 @@
+{
+  "checkedAt": "2026-11-25",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "q16-man-kurta-pajama",
+      "sha256": "7a460cbb1617a892f8b8f923505c7fcd81d4ad5662fab797d5579ababca97845",
+      "bytes": 3485340,
+      "liveDownload": true,
+      "cacheRestores": 21,
+      "proofs": [
+        {
+          "animation": "Walk_Loop",
+          "triangles": 21571,
+          "changedPixels": 780,
+          "animated": true
+        },
+        {
+          "animation": "Walk_Loop",
+          "triangles": 21571,
+          "changedPixels": 780,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 21571,
+          "changedPixels": 772,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 21571,
+          "changedPixels": 772,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 21571,
+          "changedPixels": 776,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 21571,
+          "changedPixels": 776,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 21571,
+          "changedPixels": 775,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 21571,
+          "changedPixels": 775,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 21571,
+          "changedPixels": 567,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 21571,
+          "changedPixels": 567,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 21571,
+          "changedPixels": 747,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 21571,
+          "changedPixels": 747,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 21571,
+          "changedPixels": 750,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 21571,
+          "changedPixels": 750,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 21571,
+          "changedPixels": 746,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 21571,
+          "changedPixels": 746,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 21571,
+          "changedPixels": 530,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 21571,
+          "changedPixels": 530,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 21571,
+          "changedPixels": 737,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 21571,
+          "changedPixels": 737,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 21571,
+          "changedPixels": 716,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 21571,
+          "changedPixels": 716,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q16-man-pagdi",
+      "sha256": "6be3ebc989d870216385fcd3dc76e74934a20e4a34ceda6681b92dae75b8c128",
+      "bytes": 3510300,
+      "liveDownload": true,
+      "cacheRestores": 21,
+      "proofs": [
+        {
+          "animation": "Walk_Loop",
+          "triangles": 20942,
+          "changedPixels": 766,
+          "animated": true
+        },
+        {
+          "animation": "Walk_Loop",
+          "triangles": 20942,
+          "changedPixels": 766,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 20942,
+          "changedPixels": 755,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 20942,
+          "changedPixels": 755,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 20942,
+          "changedPixels": 755,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 20942,
+          "changedPixels": 755,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 20942,
+          "changedPixels": 750,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 20942,
+          "changedPixels": 750,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 20942,
+          "changedPixels": 541,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 20942,
+          "changedPixels": 541,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 20942,
+          "changedPixels": 735,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 20942,
+          "changedPixels": 735,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 20942,
+          "changedPixels": 730,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 20942,
+          "changedPixels": 730,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 20942,
+          "changedPixels": 732,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 20942,
+          "changedPixels": 732,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 20942,
+          "changedPixels": 512,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 20942,
+          "changedPixels": 512,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 20942,
+          "changedPixels": 722,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 20942,
+          "changedPixels": 722,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 20942,
+          "changedPixels": 702,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 20942,
+          "changedPixels": 702,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q16-man-dhoti",
+      "sha256": "5e9fad7a43ecde14c4de649517d1ed299290a6435a518f70d0e46819f74aa5fb",
+      "bytes": 3457320,
+      "liveDownload": true,
+      "cacheRestores": 21,
+      "proofs": [
+        {
+          "animation": "Walk_Loop",
+          "triangles": 19242,
+          "changedPixels": 724,
+          "animated": true
+        },
+        {
+          "animation": "Walk_Loop",
+          "triangles": 19242,
+          "changedPixels": 724,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 19242,
+          "changedPixels": 716,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 19242,
+          "changedPixels": 716,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 19242,
+          "changedPixels": 731,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 19242,
+          "changedPixels": 731,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 19242,
+          "changedPixels": 739,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 19242,
+          "changedPixels": 739,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 19242,
+          "changedPixels": 517,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 19242,
+          "changedPixels": 517,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 19242,
+          "changedPixels": 708,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 19242,
+          "changedPixels": 708,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 19242,
+          "changedPixels": 708,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 19242,
+          "changedPixels": 708,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 19242,
+          "changedPixels": 709,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 19242,
+          "changedPixels": 709,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 19242,
+          "changedPixels": 485,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 19242,
+          "changedPixels": 485,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 19242,
+          "changedPixels": 693,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 19242,
+          "changedPixels": 693,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 19242,
+          "changedPixels": 687,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 19242,
+          "changedPixels": 687,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q16-woman-saree",
+      "sha256": "aef9154da1345c5e71e951c6ede393c3716b139ec8bfb1a1a894572d694f5c35",
+      "bytes": 3436788,
+      "liveDownload": true,
+      "cacheRestores": 21,
+      "proofs": [
+        {
+          "animation": "Walk_Loop",
+          "triangles": 21656,
+          "changedPixels": 981,
+          "animated": true
+        },
+        {
+          "animation": "Walk_Loop",
+          "triangles": 21656,
+          "changedPixels": 981,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 21656,
+          "changedPixels": 1019,
+          "animated": true
+        },
+        {
+          "animation": "Sprint_Loop",
+          "triangles": 21656,
+          "changedPixels": 1019,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 21656,
+          "changedPixels": 1007,
+          "animated": true
+        },
+        {
+          "animation": "Jog_Fwd_Loop",
+          "triangles": 21656,
+          "changedPixels": 1007,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 21656,
+          "changedPixels": 1271,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Loop",
+          "triangles": 21656,
+          "changedPixels": 1271,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 21656,
+          "changedPixels": 792,
+          "animated": true
+        },
+        {
+          "animation": "Crouch_Fwd_Loop",
+          "triangles": 21656,
+          "changedPixels": 792,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 21656,
+          "changedPixels": 1158,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Idle_Loop",
+          "triangles": 21656,
+          "changedPixels": 1158,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 21656,
+          "changedPixels": 1160,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Shoot",
+          "triangles": 21656,
+          "changedPixels": 1160,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 21656,
+          "changedPixels": 1163,
+          "animated": true
+        },
+        {
+          "animation": "Pistol_Reload",
+          "triangles": 21656,
+          "changedPixels": 1163,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 21656,
+          "changedPixels": 860,
+          "animated": true
+        },
+        {
+          "animation": "Death01",
+          "triangles": 21656,
+          "changedPixels": 860,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 21656,
+          "changedPixels": 1123,
+          "animated": true
+        },
+        {
+          "animation": "Hit_Chest",
+          "triangles": 21656,
+          "changedPixels": 1123,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 21656,
+          "changedPixels": 1081,
+          "animated": true
+        },
+        {
+          "animation": "Driving_Loop",
+          "triangles": 21656,
+          "changedPixels": 1081,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

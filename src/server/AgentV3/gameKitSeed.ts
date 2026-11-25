@@ -62,7 +62,7 @@ import { GAME_STARTERS } from '../lib/gameStarters';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
 import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
-import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
+import { kitTypeContract, KIT_CONTRACT_BUDGET, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { gameLanguageForRequest, gameLanguageHandoff } from './gameLanguage';
@@ -878,9 +878,8 @@ export function gameTurnHandoff(
   // name no game): the project's own list says so, and the rule that protects the other features is said regardless.
   // Only known producer paths; never dump arbitrary project files into the API block.
   const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
-  // 12_500 since 2026-11-22: the touch-layout options (joystick, buttonPositions) joined the contract, and at 12_000 a
-  // whole section (objects.ts) would have been dropped from every game turn rather than one field trimmed.
-  const kitApi = () => kitTypeContract(producers, 12_500);
+  // KIT_CONTRACT_BUDGET (kitTypeContract.ts): the one budget, sized so the whole contract fits — never a section dropped.
+  const kitApi = () => kitTypeContract(producers, KIT_CONTRACT_BUDGET);
   if (!turnIsGame(prompt)) {
     // 🔴 failedbr #2498: a turn on a game whose words name no game ("add a pause button", "fix the error") got no kit
     // API, so the builder spent five minutes reading audio.ts, synth.ts, meta.ts and input.ts with sed before writing a

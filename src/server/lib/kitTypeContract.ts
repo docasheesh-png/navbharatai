@@ -233,6 +233,13 @@ const CONTRACT: readonly ContractEntry[] = [
   { file: 'src/game/three/world.ts', names: ['ScatterOptions', 'scatterInstances'] },
 ];
 
+/**
+ * The character budget the game seed hands the contract with — ONE number, read by the seed and by the test that proves the
+ * whole contract fits it (it was two copies). 12_000 → 12_500 (2026-11-22, the touch-layout options) → 13_000 (2026-11-25,
+ * ctx.aim and ctx.onStep joined GameContext): a whole section dropped from every game turn costs more than the characters.
+ */
+export const KIT_CONTRACT_BUDGET = 13_000;
+
 /** Every name the contract covers, for the census that keeps this honest. */
 export const KIT_CONTRACT_NAMES: readonly string[] = CONTRACT.flatMap((e) => e.names);
 export const KIT_CONTRACT_FILES: readonly string[] = CONTRACT.map((e) => e.file);

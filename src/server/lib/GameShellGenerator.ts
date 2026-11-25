@@ -246,11 +246,8 @@ export interface GameContext {
    */
   follow: (object: THREE.Object3D | null) => void;
   /**
-   * WHERE THE PLAYER AIMS (play/aim.ts) — the one way every gun finds its direction; never write one by hand. A ray from
-   * the camera through the crosshair, the first thing it meets (never the player or its vehicle), the muzzle where the gun
-   * really is (the tip of what the hand holds — the player's chosen model or the kit person), and the shot from the muzzle
-   * to that point. gun.update(dt, fireHeld, a.muzzle, a.shot, bullets). In a top-down game the shot is the way the player
-   * faces. holder overrides the hand; range is how far the crosshair reaches (default 300 m).
+   * Where the player aims (play/aim.ts) — every gun's direction; never hand-write one. The crosshair point, the real
+   * muzzle, the shot between: gun.update(dt, fire, a.muzzle, a.shot, bullets). Top-down: the way the player faces.
    */
   aim: (options?: { holder?: THREE.Object3D | null; range?: number }) => AimResult;
   /**

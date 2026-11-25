@@ -20,6 +20,7 @@ import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometr
 import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage } from '../gamePlaceholderProbe';
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from './gameFixVerdict';
 import { reportRuleProbes } from './gameRuleProbes';
+import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
 
 /** What decides whether the game can be played now. All true ⇒ played; otherwise the reason is said. */
 export interface PlaytestFacts {
@@ -43,6 +44,11 @@ export interface GamePlaytestResult {
   gate: GameOutcome;
   /** Measured defects for the next turn (gamePlayedRef), when the game was played. */
   played?: GamePlayedFacts;
+  /**
+   * Named features the code only NAMES — no kit call the game reaches, no played action proved them (gameProof.ts). The
+   * release gate says them as unproven (external Game Maker audit, 2026-11-25). Absent when none or not played.
+   */
+  featuresUnverified?: string[];
 }
 
 export interface PlaytestIssue { phase: 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }
@@ -89,8 +95,10 @@ export async function runGamePlaytestPhase(p: GamePlaytestPorts): Promise<GamePl
 async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
   let out: GamePlaytestResult;
   try {
+    const playStartedAt = Date.now();
     const playRun = parsePlaytest((await p.play()).stdout);
     reportRuleProbes(playRun.rules, p.fix); // the user's named rules, proved by playing (gameRuleProbes.ts)
+    const ranMs = Date.now() - playStartedAt; // GAME_PROOF (d): the playtest's own wall time in the sandbox
     const playedFiles = await withKitLayersFromDisk(p.files, p.readFile);
     const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));
     p.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
@@ -139,11 +147,15 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         reportGameFixOutcome(before, after, p.fix); // better / unchanged, said with both scores
       } catch { /* observation only — never in the way of the build */ }
     } catch { /* observation only */ }
-    // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
+    // Scope match (gameIntent.ts) with the played half (gameProof.ts): a named feature is proven only by a kit call the game
+    // reaches or a played action whose change was observed; one the code only names is said as NOT VERIFIED. Evidence only.
     try {
-      const scope = p.contract ? gameScopeVerdict(p.contract, playedFiles) : null;
+      const evidence = p.contract ? gameFeatureEvidence(p.contract, playedFiles, playRun) : null;
+      const scope = p.contract ? gameScopeVerdict(p.contract, playedFiles, evidence) : null;
       if (scope) p.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
+      if (evidence?.notVerified?.length) out.featuresUnverified = [...evidence.notVerified];
     } catch { /* observation only */ }
+    recordProof(p, playRun, ranMs);
   } catch (err) {
     // A playtest that timed out or crashed is a check that could not look — the same open warning the runner's own
     // "never played" answer gives, never an info line that reads as a pass.
@@ -151,6 +163,7 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
     try { p.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved }); } catch { /* best-effort */ }
     // 🔴 A playtest that could not finish is NOT a pass (autopsy 61279465: it timed out and the gate said GREEN).
     out = { proof: { outcome: 'not-run', score: null, unplayed: true }, gate: 'not-run' };
+    recordProof(p, null, null, `the playtest browser stopped: ${String((err as { message?: string })?.message ?? err).slice(0, 120)}`);
   }
   return out;
 }
@@ -168,6 +181,7 @@ function notPlayed(p: GamePlaytestPorts): GamePlaytestResult | null {
       // a canvas game we could not play is not verified (playtestSkipReason is silent otherwise)
       out = { proof: { outcome: playtestOutcome(notRun.code), score: null, unplayed: true }, gate: 'not-run' };
       reportGameFixUnverified(p.fix); // a tapped fix whose game could not be played again is said as not known
+      recordProof(p, null, null, why);
     }
   } catch { /* an honest line is best-effort and must never touch a build */ }
   // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
@@ -179,7 +193,20 @@ function notPlayed(p: GamePlaytestPorts): GamePlaytestResult | null {
       const dom = domGameNotPlayedVerdict(domKind);
       p.record({ phase: 'preview', severity: dom.severity, code: dom.code, message: dom.message, autoResolved: dom.autoResolved });
       out = { proof: { outcome: playtestOutcome(dom.code), score: null }, gate: 'not-run' }; // BR1951: DOM controls clicked is not a game playthrough.
+      recordProof(p, null, null, `this ${domKind} game is drawn in the page, and the canvas playtest does not play page games`);
     }
   } catch { /* observation only */ }
   return out;
+}
+
+/**
+ * 🎮 GAME_PROOF — the four proofs of every game build the playtest reached (gameProof.ts): the contract, what it looked
+ * like, what was played, and how long and how fast it ran in the sandbox (never called a phone). A game that was not
+ * played still gets the section, with every played proof said as not taken and why. Evidence only; never throws.
+ */
+function recordProof(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest> | null, ranMs: number | null, notPlayedWhy?: string): void {
+  try {
+    const issue = gameProofIssue(gameProof({ contract: p.contract, run, ranMs, files: p.files, notPlayedWhy }));
+    p.record({ phase: 'preview', severity: issue.severity, code: issue.code, message: issue.message, autoResolved: issue.autoResolved, detail: issue.detail });
+  } catch { /* observation only */ }
 }

@@ -88,6 +88,10 @@ export const AI_MODEL_KEY_NAMES = [
   /^GROQ_/i, /^MISTRAL_/i, /^DEEPSEEK_/i, /^COHERE_/i, /^TOGETHER_/i, /^OPENROUTER_/i, /^XAI_/i, /^GROK_/i,
   /^HUGGINGFACE_/i, /^HF_/i, /^REPLICATE_/i, /^FIREWORKS_/i, /^MOONSHOT_/i, /^KIMI_/i, /^GLM_/i, /^ZHIPU_/i,
   /^CHATGPT_/i,
+  // ZAI_API_KEY is the owner's FREE-AI key (appFreeAi.ts, admin 2026-11-25). It is set up from the ❗ tray
+  // in three guided steps — a mid-build popup asking for it would be a second, worse way to do the same
+  // thing, with none of the login/key-page links that make it possible to actually get one.
+  /^ZAI_/i, /^Z_AI_/i,
 ];
 
 /** True when this name is an AI-model provider key (see AI_MODEL_KEY_NAMES). PURE. */

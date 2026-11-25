@@ -6125,6 +6125,46 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
 
+## 2026-11-25 — "FREE AI CHALU KAREIN": an app's AI, free, in three steps under the ❗ button
+
+Admin, verbatim: *"navbharatai me jab bhi koi user ai banwaye, koi bhi ai. to header me ❗ button me 2
+button dikhe — 1. login … 2. ganerate api … 3. pest api keys … login button se z.ai (glm) ka login page
+open ho, aur api se https://z.ai/manage-apikey/apikey-list … (sab user ki language me)"*, then *"'free ai
+chalu karen' ho to? glm 4.5 flash, glm 4.6v flash glm 4.7 flash — yeh teeno free module hai. yahi use hone
+chahiye only!"*, then *"han yahi bana do!!!!"*.
+
+**What shipped.** One row under the existing ❗ tray ("Turn on free AI"), offered only when the app really
+uses AI and no key of the owner's own is answering. It opens three numbered steps, English first with Hindi
+beside it: open the sign-in page, open the key page, paste the key in the box. The key is saved into the
+owner's own encrypted vault, scoped to that app, through the one shared `saveUserSecrets` write — so nobody
+has to find Settings → Secrets & API Keys at all, which is where the old flow lost people. After that the
+app's assistant answers on the owner's free account: `glm-4.7-flash` by default, `glm-4.5-flash`
+automatically when the first is busy, and the user never picks or sees a model.
+
+**The ✅ is earned, not drawn.** `/api/app-ai/free-key` asks the free model one real question on the pasted
+key BEFORE saving it; a key that is refused is not saved and not ticked, and a busy free tier is reported as
+"wait a few seconds and press Save again" rather than as a broken key. Steps 1 and 2 tick on "you opened
+this page", and the card says so — a browser cannot honestly know whether a sign-in succeeded in another tab.
+
+**The money class, locked.** The key is the USER'S, so a paid model id on it would spend their own balance
+behind a button that said "free". `appFreeAi.ts` therefore holds an explicit three-id ALLOWLIST (the three
+Z.ai prints as Free, already quoted in `providerRates.ts`) and `APP_FREE_AI_MODELS` may only narrow it. A
+matcher on the word "flash" would have been the fourth walk into the trap `providerRates.ts` records:
+`glm-4.7-flashx` and `glm-5.3-flash` both contain "flash" and both cost money.
+
+**Siblings hunted.** `browserAiKeyScan.ts` did not know `api.z.ai` or `*_ZAI_API_KEY` — and the free key is
+exactly what makes that shape reachable, since `ZAI_API_KEY` now really exists in an app's `.env`. Both are
+added, same class as the OpenAI case the module was written for. `secretRequest.ts` now refuses to let a
+build ask for the key in a mid-build popup: the ❗ box owns it, and a popup would be the same thing done
+worse, without the two links that make a key gettable.
+
+**Honest gap, recorded:** the free VISION model (`glm-4.6v-flash`) is unreachable because the app-AI gateway
+carries text only — no image input exists anywhere on that path today. It is **Q-3400** in
+`BUILD_REPORT_QUEUE.md` with what it needs, rather than shipped as a model id with nothing behind it.
+
+Gate: `typecheck`, `noUnusedImports`, `native:guard`, `typecheck:server`, `typecheck:benchmark`,
+`test:coverage`, `build`, `test:bundle`, `boot:check`, `deps:server-gate` — on the final state.
+31 new tests in `tests/freeAiChaluKarein.test.ts`.
 ### 2026-11-25 — Q-3334 root-caused live: Surplus 404 is a dead seller PAIR, not the request (PR #4536)
 
 Admin: "surplus app builder me kam nahi kar raha, vaise woh reply de raha hai". Probed /min90 with the builder's own

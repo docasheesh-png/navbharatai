@@ -29,6 +29,7 @@ export function UserActionTray({
   actions,
   busyId,
   secretCard,
+  freeAiCard,
   onClose,
   onDone,
   onNotNeeded,
@@ -51,6 +52,12 @@ export function UserActionTray({
    * handles live credentials is exactly the drift this repo keeps paying for elsewhere.
    */
   secretCard?: ReactNode;
+  /**
+   * "Turn on free AI" (admin 2026-11-25) — the three-step box, handed in as a slot for the same reason
+   * the credential form is: the row union above is mirrored on the server, and a new kind there drifts.
+   * It sits in "Your app needs this to work", beside the keys, because that is what it is.
+   */
+  freeAiCard?: ReactNode;
   onClose: () => void;
   onDone: (action: UserActionView) => void;
   onNotNeeded: (action: UserActionView) => void;
@@ -164,7 +171,7 @@ export function UserActionTray({
         <div className="flex items-start justify-between px-4 pt-4 pb-2">
           <div>
             <h3 className="text-[13px] font-black uppercase tracking-widest text-ink">What you need to do</h3>
-            <p className="text-[11px] text-muted mt-0.5">{traySummary(openCount)}</p>
+            <p className="text-[11px] text-muted mt-0.5">{traySummary(openCount + (freeAiCard ? 1 : 0))}</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-raised">
             <X className="w-4 h-4" />
@@ -176,6 +183,7 @@ export function UserActionTray({
             <div key={section.group} className="flex flex-col gap-2">
               <div className="text-[10px] font-bold uppercase tracking-wider text-faint">{GROUP_TITLES[section.group]}</div>
               {section.group === 'needed' && secretCard}
+              {section.group === 'needed' && freeAiCard}
               {section.items.map(row)}
             </div>
           ))}
@@ -184,7 +192,20 @@ export function UserActionTray({
               zero — so it says so plainly instead of inventing something to show. */}
           {note && <div className="px-3 py-2 rounded-xl border border-line bg-well text-[12px] text-body" role="status">{note}</div>}
 
-          {groups.length === 0 && !secretCard && (
+          {/* 🔒 THE SLOTS RENDER EVEN WHEN THAT SECTION HAS NO ROWS, which is the ordinary case: a finished
+              build with nothing else outstanding has no "needs this to work" group at all, and the
+              free-AI box would then be the ONE thing in the tray — the state the admin actually
+              described. Keyed off the SECTION, not off `groups.length`, so a tray holding only a
+              "worth a look" row still shows it. */}
+          {!groups.some((g) => g.group === 'needed') && (secretCard || freeAiCard) && (
+            <div className="flex flex-col gap-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-faint">{GROUP_TITLES.needed}</div>
+              {secretCard}
+              {freeAiCard}
+            </div>
+          )}
+
+          {groups.length === 0 && !secretCard && !freeAiCard && (
             <div className="px-3 py-6 text-center text-[12px] text-muted">Nothing is waiting on you right now.</div>
           )}
 

@@ -22,6 +22,7 @@ import { Donut } from '../ui/charts';
 import { cardClasses } from '../ui/variants';
 import { buildComponentTree, type TreeNode } from '../../lib/componentTree';
 import { writeFailure } from '../../lib/serverAnswer';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 interface ProjectInsightsPanelProps {
   user: FirebaseUser | null;
@@ -60,7 +61,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
   // ── Build SLO ──
   const [slo, setSlo] = useState<any>(null);
   const fetchSlo = useCallback(async () => {
-    try { const r = await fetch('/api/analytics/slo?limit=100'); if (r.ok) setSlo(await r.json()); } catch { /* ignore */ }
+    try { const r = await fetch('/api/analytics/slo?limit=100', { headers: await authJsonHeaders() }); if (r.ok) setSlo(await r.json()); } catch { /* ignore */ }
   }, []);
   useEffect(() => { fetchSlo(); }, [fetchSlo]);
 

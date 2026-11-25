@@ -4596,10 +4596,17 @@ export function registerAgentV3Routes(app: Express): void {
     // candidate with the SESSION-aware match, or auto-resume would never even offer the Resume button
     // for the caller's own anon-keyed build.
     const perWs = perWorkspaceLockEnabled();
-    const candidates = buildKeyCandidates(userId, workspaceId, perWs);
-    const buildRunning = perWs
-      ? countActiveBuildsForUser(runningBuilds.values(), userId) > 0
-      : candidates.some((k) => isBuildRunning(k));
+    // 🔒 ACCOUNT-WIDE `buildRunning` ANSWERS ONLY FOR THE VERIFIED CALLER (security audit 2026-11-21). It used
+    // to be keyed on the CLAIMED `?userId`, so anyone could ask "is account X building right now?" for any
+    // uid. Now a token decides whose account it is; with no token the answer is false. Every client caller
+    // sends its token (authJsonHeaders). The session-scoped `buildRunningHere` below is unchanged: it needs
+    // the session's random workspace id, which a stranger cannot guess.
+    const buildOwnerUid = (await verifiedIdentity(req))?.uid ?? null;
+    const buildRunning = buildOwnerUid
+      ? (perWs
+        ? countActiveBuildsForUser(runningBuilds.values(), buildOwnerUid) > 0
+        : buildKeyCandidates(buildOwnerUid, workspaceId, perWs).some((k) => isBuildRunning(k)))
+      : false;
     // `buildRunningHere` — the answer the Resume button renders from — now comes from the SAME
     // decision `/attach` uses (findAttachableBuild), under the SAME identity (the verified token,
     // falling back to the claimed uid only for legacy callers that send no token). It used to be a
@@ -4625,9 +4632,9 @@ export function registerAgentV3Routes(app: Express): void {
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
     // purchased (its wallet's paid status). They are now derived from the VERIFIED token only (the client
     // already sends its Bearer token here); an unverified caller gets billed=false/powerUnlocked=false and
-    // self-heals on the next token-refresh poll. `enabled`/`buildRunning`/`buildRunningHere` deliberately
-    // STAY on the claimed identity — tokenless auto-resume pollers depend on them and they leak nothing
-    // cross-user (build presence under a key the caller already supplies), so this never breaks resume.
+    // self-heals on the next token-refresh poll. `enabled` and `buildRunningHere` stay on the claimed identity
+    // for tokenless legacy pollers; `buildRunning` moved to the verified identity on 2026-11-21 (see above),
+    // because answering it for a claimed uid DID leak cross-user build presence.
     const verified = await verifiedIdentity(req);
     const wallet = verified?.uid ? await firestoreWalletReader(getDb())(verified.uid).catch(() => null) : null;
     res.json({

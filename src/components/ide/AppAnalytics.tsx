@@ -11,6 +11,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { shapeSessions } from '../../lib/sessionShape';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -251,7 +252,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/analytics/builds?limit=100');
+        const res = await fetch('/api/analytics/builds?limit=100', { headers: await authJsonHeaders() });
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setBuildPerf(data);
@@ -266,7 +267,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/analytics/build-optimizer?limit=100');
+        const res = await fetch('/api/analytics/build-optimizer?limit=100', { headers: await authJsonHeaders() });
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setOptimizer(data);
@@ -287,7 +288,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/analytics/reliability?limit=100');
+        const res = await fetch('/api/analytics/reliability?limit=100', { headers: await authJsonHeaders() });
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setReliability(data);

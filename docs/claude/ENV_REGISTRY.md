@@ -5333,3 +5333,21 @@ Map-request routing (`src/server/AgentV3/mapGrowthIntent.ts`, map expansion item
 ### AGENTV3_RACING_WORLD (code default: OFF; not set in Cloud Run) — 2026-11-24
 
 A race on the world's city roads (`src/server/AgentV3/raceWorld.ts`, map expansion item 8). Only `on` (or 1/true/yes) enables it. When enabled, a road-library race (`<RacingRoadGame>`) asked for cities gets ONE question from the builder (mapGrowthIntent.ts) telling the user to reply "race shehar me karo". Only on that yes (or the same said plainly: "race ko shehar ki sadkon par le jao", "move the race onto city roads"; never a negation, a question, or a new-game request) does the platform add the world race files (`src/game/play/worldRace.ts`, `worldCourse.ts`) and the open-world layers they import by the kit's own rules, and set `TRACK.world = true` in `src/game/track.ts`, last. It refuses and changes nothing for a race on the user's own track model, a hand-edited race starter, an edited kit file the race would need names from, or a different file already at those paths. Unset or `off`: the race stays on the road library and the builder says cities on the route are not available yet (as before). No cost: no model call.
+
+## 2026-11-25 — Dual Android build providers: Native Cloud Build keys (code only; NONE set in Cloud Run yet)
+
+Names only. Full design, owner steps and rollback: `MOBILE_NATIVE_BUILD.md` §6.
+
+- `MOBILE_NATIVE_BUILD_ENABLED` — code default **OFF**. `on` offers Native Cloud Build in the two-option sheet. Turning it
+  off never touches the GitHub option. Read at call time (`providerRegistry.ts`).
+- `MOBILE_NATIVE_BUILD_TEMPLATE` — alias of the E2B worker template built from `infra/e2b/e2b-android-native.Dockerfile`
+  (workflow input `template_kind: android-native`, default alias `navbharat-android-native`). **Not** the older
+  `ANDROID_E2B_TEMPLATE_ID` idea, which named the Bubblewrap/TWA template and is still unused.
+- `MOBILE_BUILD_ARTIFACT_BUCKET` — private bucket for native `.apk`/`.aab` files; falls back to `FIREBASE_STORAGE_BUCKET`.
+- `MOBILE_GITHUB_BUILD_ENABLED` — code default **ON**. `off` greys out the GitHub option and makes `/api/mobile-ship/setup`
+  and `/api/mobile-ship/trigger` answer 503 `provider-disabled`.
+- `MOBILE_NATIVE_BUILD_MAX_ACTIVE_PER_USER` (default 1, 1–5), `MOBILE_NATIVE_BUILD_MAX_ACTIVE` (default 4, 1–50),
+  `MOBILE_NATIVE_BUILD_TIMEOUT_MIN` (default 25, 5–55), `MOBILE_NATIVE_BUILD_RETENTION_DAYS` (default 30, 1–365).
+- Reused, already set: `E2B_API_KEY` (machines), `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (upload keys are sealed with
+  it; without it only `.apk` is offered natively), `APK_CHARGE_INR` (the one build price for both providers — this name
+  was missing from this registry before; default 1, `off`/`0` = free).

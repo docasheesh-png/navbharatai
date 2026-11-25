@@ -6055,3 +6055,25 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Lock:** `tests/aLiveClaimNeedsARealDeploy.test.ts` (26). Claim-audit / route / deployment suites: 1 288 pass.
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
+
+## 2026-11-25 — Dual Android build providers: NavBharatAI Native Cloud Build + the existing GitHub Actions build
+
+**Admin task:** one "Build Android App" button → exactly two genuine providers. Full design: `MOBILE_NATIVE_BUILD.md`.
+
+- **UI:** `AndroidBuildProviders.tsx` (the button + two-option sheet; the last choice is pre-selected, never auto-switched) wraps the
+  UNCHANGED `StoreBuildPanel` (GitHub) and the new `NativeBuildPanel` (native). Wired in `APKBuilder.tsx`.
+- **No second recipe:** the native worker runs the app's own generated GitHub workflow, translated step by step
+  (`workflowScript.ts`, census-tested for every step of both lanes on Capacitor 5–8; unknown actions / GitHub expressions throw).
+- **No duplicate preparation or charge:** `/api/mobile-ship/setup`'s GitHub-independent body moved verbatim into
+  `prepareMobileProject.ts`; the ₹ charge moved into `mobileBuildCharge.ts`; both providers call them. Source guards re-pointed, not weakened.
+- **Stateless native driver:** detached build in a disposable E2B machine, Firestore job row, `advanceNativeBuild` under a transactional lease
+  (a read-then-write lease race was caught by a test and fixed; the test Firestore double now models contention retries).
+- **Trust split:** untrusted build machine (no env, restricted egress) → fresh network-less signing machine (fixed script, key files deleted by trap)
+  → private bucket (md5-verified) → completed → charged once (`native_<id>`). Upload keys sealed with `secrets.ts`, consent recorded, every use audited.
+- **Real verification in this container:** real Gradle APK + signed/validated AAB from NavBharatAI-assembled projects; real keytool checks for
+  PKCS12/JKS; the whole orchestrator end to end (`tests/nativeCloudBuildRealGradle.test.ts`, opt-in).
+- **Defaults:** native OFF (`MOBILE_NATIVE_BUILD_ENABLED`), GitHub ON (`MOBILE_GITHUB_BUILD_ENABLED`).
+- **OPEN (owner-side, not code):** build the worker template (`template_kind: android-native`) — the image has never been built (no Docker
+  daemon here); set `MOBILE_NATIVE_BUILD_TEMPLATE` + `MOBILE_BUILD_ARTIFACT_BUCKET`; pin Temurin digests; bucket lifecycle rule; a first
+  live native build and a real-device install.
+- **OPEN (admin decision):** whether a native build whose paid balance cannot cover ₹1 should withhold the download (GitHub cannot; native could).

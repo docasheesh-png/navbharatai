@@ -20,7 +20,7 @@ import { SIGN_DIR, SIGN_SCRIPT, inspectionMismatch, isSafeAlias, parseSignOutput
 import { e2bWorkerFactory, type WorkerSandbox, type WorkerSandboxFactory } from './workerSandbox';
 import { gcsArtifactStore, artifactObjectPath, sha256Hex, type ArtifactStore } from './nativeArtifactStore';
 import {
-  createJobIfAbsent, getJob, getKeyRecord, listActiveJobs, listJobsForUser, nativeBuildId, openKeyForSigning, updateJob,
+  createJobIfAbsent, getJob, getKeyRecord, listActiveJobs, listJobsForUser, nativeBuildId, openKeyForSigning, tryLease, updateJob,
 } from './nativeBuildStore';
 import { nativeBuildTemplate, nativeLimits, nativeMissing } from './providerRegistry';
 import { ACTIVE_STATES, isTerminalState, type MobileArtifactKind, type NativeBuildJob } from './types';
@@ -292,12 +292,7 @@ export async function startNativeBuild(input: StartInput, deps: RunnerDeps = def
 
 /** Take the job's lease, or return null when another instance holds it (or the job is finished). */
 async function takeLease(id: string, deps: RunnerDeps): Promise<NativeBuildJob | null> {
-  const job = await getJob(id);
-  if (!job || isTerminalState(job.state)) return null;
-  const now = deps.now().getTime();
-  if (job.leaseUntil && Date.parse(job.leaseUntil) > now) return null;
-  const leased = await updateJob(id, { leaseUntil: iso(new Date(now + LEASE_MS)) });
-  return leased && !isTerminalState(leased.state) ? leased : null;
+  return tryLease(id, deps.now().getTime(), LEASE_MS);
 }
 
 /**

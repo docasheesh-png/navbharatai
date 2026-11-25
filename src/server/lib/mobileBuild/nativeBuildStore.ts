@@ -109,6 +109,25 @@ export async function updateJob(id: string, patch: Partial<NativeBuildJob>): Pro
   });
 }
 
+/**
+ * Take a job's driving lease — the check AND the write in one transaction, so two instances can never
+ * both believe they hold it (a read-then-write outside the transaction let both through). Returns the
+ * leased job, or null when the job is finished or another instance's lease has not expired.
+ */
+export async function tryLease(id: string, nowMs: number, leaseMs: number): Promise<NativeBuildJob | null> {
+  const ref = db().collection(BUILDS).doc(id);
+  return db().runTransaction(async (t) => {
+    const snap = await t.get(ref);
+    if (!snap.exists) return null;
+    const cur = snap.data() as NativeBuildJob;
+    if (isTerminalState(cur.state)) return null;
+    if (cur.leaseUntil && Date.parse(cur.leaseUntil) > nowMs) return null;
+    const next: NativeBuildJob = { ...cur, leaseUntil: new Date(nowMs + leaseMs).toISOString() };
+    t.set(ref, next);
+    return next;
+  });
+}
+
 /** Ask a build to stop. Any instance can do this; the driving instance polls the flag. */
 export async function requestCancel(id: string, userId: string): Promise<NativeBuildJob | null> {
   const ref = db().collection(BUILDS).doc(id);

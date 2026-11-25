@@ -27,6 +27,7 @@
 // PURE builder → the caller writes the files.
 
 import { GAME_ENTITIES, GAME_ENTITIES_PATH } from './GameEntitiesGenerator';
+import { GAME_DISPATCH, GAME_DISPATCH_PATH } from './GameDispatchGenerator';
 
 export interface GameSystemsResult {
   files: Record<string, string>;
@@ -1505,9 +1506,11 @@ const FILES: Record<string, string> = {
   'src/game/systems/aimassist.ts': AIMASSIST,
   // Every character (enemy, police, villager) put in the game by one assembler — spawned, verified, ticked, kept apart (audit B–D).
   [GAME_ENTITIES_PATH]: GAME_ENTITIES,
+  // Crime → wanted → REAL police (and any other service) driving in and arriving — never a sentence (audit I).
+  [GAME_DISPATCH_PATH]: GAME_DISPATCH,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist', 'entities'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist', 'entities', 'dispatch'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -1531,6 +1534,8 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     // ai.ts follows paths around walls (nav.ts).
     if (files['src/game/systems/ai.ts']) files['src/game/systems/nav.ts'] = FILES['src/game/systems/nav.ts'];
     if (files['src/game/systems/aimassist.ts']) files['src/game/systems/grenade.ts'] = FILES['src/game/systems/grenade.ts'];
+    // dispatch.ts sends its crews as entities.
+    if (files[GAME_DISPATCH_PATH]) files[GAME_ENTITIES_PATH] = FILES[GAME_ENTITIES_PATH];
     // entities.ts assembles health (combat), decisions (ai, which walks nav) and bullet targets (projectile).
     if (files[GAME_ENTITIES_PATH]) {
       for (const m of ['combat', 'combatRules', 'ai', 'nav', 'projectile']) files[`src/game/systems/${m}.ts`] = FILES[`src/game/systems/${m}.ts`];
@@ -1550,6 +1555,13 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
           'and faces, nobody walks through anybody. Bullets: npcs.applyHits(bullets.update(dt, npcs.targets())). A punch: ' +
           'npcs.melee(ctx.player.object.position, facingYaw, 25). goTo(point, onArrive) sends one somewhere (ENTITY_ARRIVED). ' +
           'Death falls, emits ENTITY_DIED, and clears the body away.\n'
+        : '') +
+      (files[GAME_DISPATCH_PATH]
+        ? 'POLICE, AMBULANCE, FIRE, GUARDS, ARMY ARE REAL (systems/dispatch.ts) — NEVER a line of text saying they came: ' +
+          'const dispatch = new Dispatch(ctx, npcs); const wanted = new Wanted(ctx, npcs, dispatch, { onArrest }). The player ' +
+          'hurting or killing a non-enemy is a crime by itself (wanted.commit("theft") for others): stars rise, a real car drives ' +
+          'in with sirens, officers get out, pursue, arrest (PLAYER_ARRESTED) and from 3 stars fight. dispatch.call("ambulance", ' +
+          'point) for anything else. "Dispatched"/"arrived" are said only when true; a failure is said (DISPATCH_FAILED).\n'
         : '') +
       '```ts\n' +
       'const hp = new Health({ max: 100, invulnerable: 0.6, damagedEvent: "PLAYER_DAMAGED", diedEvent: "PLAYER_DIED" });\n' +

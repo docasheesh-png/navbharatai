@@ -139,6 +139,7 @@ interface Inner extends Entity {
   onArrive?: (e: Entity) => void;
   deadFor: number;
   gone: boolean;
+  lastHitByPlayer: boolean;
 }
 
 let nextId = 1;
@@ -215,7 +216,7 @@ export class Entities {
         radius, height, config,
         damage: spec.damage ?? 10,
         cooldown: new Cooldown(spec.attackEvery ?? 1.2),
-        goal: null, deadFor: 0, gone: false,
+        goal: null, deadFor: 0, gone: false, lastHitByPlayer: false,
         get alive() { return !this.gone && !this.health.isDead; },
         goTo(target, onArrive) { this.goal = target ? { x: target.x, z: target.z } : null; this.onArrive = onArrive; },
         remove() {
@@ -311,16 +312,24 @@ export class Entities {
     for (const h of hits) {
       const e = h.target.ref as Inner | undefined;
       if (!e || !this.list.includes(e) || !e.alive) continue;
-      if (this.hurt(e, h.damage, h.point)) killed.push(e);
+      // No owner is the player's own gun (the kit's convention: an enemy's gun passes its id).
+      if (this.hurt(e, h.damage, h.point, !h.ownerId)) killed.push(e);
     }
     return killed;
+  }
+
+  /** Any other harm — a grenade's blastDamage, a car that hits someone. Returns true when it died. */
+  damage(entity: Entity, amount: number, byPlayer = true): boolean {
+    const e = entity as Inner;
+    if (!this.list.includes(e) || !e.alive) return false;
+    return this.hurt(e, amount, e.object.position, byPlayer);
   }
 
   /**
    * A punch, a kick, a sword: every living entity in front of origin (facing yaw — models face +Z), within range and the arc,
    * nearest first, takes the damage. Returns who was hit. The attacker itself (by object) is never hit.
    */
-  melee(origin: THREE.Vector3, yaw: number, damage: number, options: { range?: number; arc?: number; attacker?: THREE.Object3D; only?: 'first' | 'all' } = {}): Entity[] {
+  melee(origin: THREE.Vector3, yaw: number, damage: number, options: { range?: number; arc?: number; attacker?: THREE.Object3D; only?: 'first' | 'all'; byPlayer?: boolean } = {}): Entity[] {
     const range = options.range ?? 1.8;
     const half = (options.arc ?? Math.PI * 0.6) / 2;
     const fx = Math.sin(yaw);
@@ -335,7 +344,7 @@ export class Entities {
     }).filter((x) => x.ok).sort((a, b) => a.d - b.d).map((x) => x.e as Inner);
     const hit = options.only === 'all' ? inReach : inReach.slice(0, 1);
     for (const e of hit) {
-      this.hurt(e, damage, e.object.position);
+      this.hurt(e, damage, e.object.position, options.byPlayer ?? !options.attacker);
       // Knocked back a little, away from the blow, so the hit reads as a hit.
       const p = e.object.position;
       const d = Math.max(1e-6, Math.hypot(p.x - origin.x, p.z - origin.z));
@@ -350,11 +359,16 @@ export class Entities {
     this.off?.();
   }
 
-  private hurt(e: Inner, amount: number, at: { x: number; y: number; z: number }): boolean {
+  private hurt(e: Inner, amount: number, at: { x: number; y: number; z: number }, byPlayer: boolean): boolean {
     const r = e.health.damage(amount, { x: at.x, y: at.y, z: at.z });
+    if (r.applied > 0) {
+      e.lastHitByPlayer = byPlayer;
+      // Who did it is said, so a crime (systems/dispatch.ts) is the player's only when it really was.
+      events.emit('ENTITY_HURT', { id: e.id, kind: e.kind, hostile: e.hostile, byPlayer, amount: r.applied, died: r.died });
+    }
     if (r.applied > 0 && !r.died) e.humanoid?.act('hit');
     // Hurt by the player: it fights back, whatever it was doing.
-    if (r.applied > 0 && e.kind === 'enemy') e.hostile = true;
+    if (r.applied > 0 && byPlayer && e.kind === 'enemy') e.hostile = true;
     if (r.died) this.died(e);
     return r.died;
   }
@@ -369,7 +383,7 @@ export class Entities {
     const front = Math.sin(facing) * (player.x - p.x) + Math.cos(facing) * (player.z - p.z) >= 0;
     e.humanoid?.die(front);
     if (!e.humanoid) e.model.rotation.x = -Math.PI / 2;
-    events.emit('ENTITY_DIED', { id: e.id, kind: e.kind, hostile: e.hostile, position: { x: p.x, y: p.y, z: p.z } });
+    events.emit('ENTITY_DIED', { id: e.id, kind: e.kind, hostile: e.hostile, byPlayer: e.lastHitByPlayer, position: { x: p.x, y: p.y, z: p.z } });
   }
 
   private whileDead(e: Inner, dt: number): void {

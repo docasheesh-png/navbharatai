@@ -595,9 +595,13 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/systems/director.ts": [
     "c92437c33c810b3a2064440eaa25a5feb8e4a0465b40e0fd475e94e1054ca31e"
   ],
+  "src/game/systems/dispatch.ts": [
+    "ddff3cd7d3357fdaa4dce09270692e875e18fb1e2a540d1270d17acbcafdf1f1"
+  ],
   "src/game/systems/entities.ts": [
     "19cd0e366abe7a4880882d7fc7bd321aaeb3723a106322568c615f8d5fab1a3b",
-    "b57f24ac1570df3215649053178132943f0db566574bea645e2a0e8f5f6b772e"
+    "b57f24ac1570df3215649053178132943f0db566574bea645e2a0e8f5f6b772e",
+    "5a0dd41283a625474b781af045630cc48dfbc5741af2f314490f4b15482c42ab"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"

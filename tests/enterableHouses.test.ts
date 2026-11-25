@@ -44,10 +44,21 @@ describe('enterable houses',()=>{
   });
   it('blocks occupied swings and resumes once clear without invalid-dt motion',()=>{
     const {door}=setup(); door.setOpen(true); for(let i=0;i<50;i++) door.update(1/60);
-    door.setOpen(false); const actor={feet:new THREE.Vector3(0,.15,5.1),radius:.4,height:1.8};
-    for(let i=0;i<60;i++) door.update(1/60,[actor]); expect(door.blocked).toBe(true); expect(door.hinge.rotation.y).toBeLessThan(0);
+    // A door opened by game code (no actor) swings IN since 2026-11-25 (audit Part K: it used to swing out, into the player
+    // who opened it, and stuck half open) — so the body that blocks it closing stands INSIDE, in its arc.
+    door.setOpen(false); const actor={feet:new THREE.Vector3(0,.15,4.3),radius:.4,height:1.8}; // inside the 10 m house's front wall (z = 5), in the arc
+    for(let i=0;i<60;i++) door.update(1/60,[actor]); expect(door.blocked).toBe(true); expect(door.hinge.rotation.y).toBeGreaterThan(0);
     const angle=door.hinge.rotation.y; door.update(NaN); expect(door.hinge.rotation.y).toBe(angle);
     for(let i=0;i<60;i++) door.update(1/60); expect(door.hinge.rotation.y).toBe(0);
+  });
+  it('🚪 opens AWAY from whoever opens it: from outside it swings in, from inside it swings out — never into the opener',()=>{
+    // setup()'s house is 10 m deep: its front wall is at z = 5.
+    const out=setup(); buildings.interactHouseDoor(out.scene,{feet:new THREE.Vector3(0,.15,6.2),radius:.4,height:1.8});
+    for(let i=0;i<60;i++) out.door.update(1/60,[{feet:new THREE.Vector3(0,.15,6.2),radius:.4,height:1.8}]);
+    expect(out.door.isOpen).toBe(true); expect(out.door.hinge.rotation.y).toBeGreaterThan(0); expect(out.door.blocked).toBe(false);
+    const inside=setup(); buildings.interactHouseDoor(inside.scene,{feet:new THREE.Vector3(0,.15,3.8),radius:.4,height:1.8});
+    for(let i=0;i<60;i++) inside.door.update(1/60,[{feet:new THREE.Vector3(0,.15,3.8),radius:.4,height:1.8}]);
+    expect(inside.door.isOpen).toBe(true); expect(inside.door.hinge.rotation.y).toBeLessThan(0);
   });
   it('requires range and line of sight and isolates instances',()=>{
     const {scene,house,door}=setup(); const other=buildings.createEnterableHouse(); other.position.x=20; scene.add(other);

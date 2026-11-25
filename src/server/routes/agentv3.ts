@@ -26078,6 +26078,7 @@ async function noteBuildOutcome(
           // "Your app is live!" weighed against whether a deploy really SUCCEEDED this turn (TOOL_DONE is recorded only on
           // success; a failed deploy throws and is a TOOL_ERROR). Master audit Part N.
           deployedThisTurn: deployedNow,
+          githubPushedThisTurn: buildDiag.toolWasUsed('github'), // the agent has no GitHub tool: pushing is the user's button
           // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
           liveDataRequested: liveDataAsked,
           // "Drag-and-drop uploads" from an app that keeps the files as text in localStorage (Q-542, autopsy

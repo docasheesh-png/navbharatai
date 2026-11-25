@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { auditSummaryClaims, deployClaimed } from '../src/server/AgentV3/claimAudit';
+import { auditSummaryClaims, deployClaimed, githubClaimed } from '../src/server/AgentV3/claimAudit';
 import { deployedThisTurn } from '../src/server/AgentV3/deployedThisTurn';
 
 const base = { consoleCaptured: true, screenshotTaken: true, previewVerified: true };
@@ -66,5 +66,22 @@ describe('the fact itself (deployedThisTurn.ts)', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(route).toContain("const deployedNow = await deployedThisTurn(workspaceId, () => buildDiag.toolWasUsed('deploy'));");
     expect(route).toContain('deployedThisTurn: deployedNow,');
+  });
+});
+
+describe('the same rule for GitHub ("pushed to GitHub", "opened a pull request")', () => {
+  const gh = (summary: string, pushed: boolean | undefined) => auditSummaryClaims(summary, { ...base, githubPushedThisTurn: pushed }).map((c) => c.kind);
+  for (const said of ['I pushed the code to your GitHub repository.', 'Committed everything to your repo.', 'I opened a pull request with the changes.', 'Code GitHub par push ho gaya.']) {
+    it(`"${said}" with no push this turn is corrected; with a real push, or unknown, it is left alone`, () => {
+      expect(gh(said, false)).toContain('github-claimed');
+      expect(gh(said, true)).not.toContain('github-claimed');
+      expect(gh(said, undefined)).not.toContain('github-claimed');
+    });
+  }
+  for (const offer of ['Press Push to GitHub to send it to your repository.', 'You can push it to GitHub when you are ready.', 'It is not pushed to GitHub yet.']) {
+    it(`never fires on an offer: "${offer}"`, () => { expect(githubClaimed(offer)).toBe(false); });
+  }
+  it('the build route hands the fact to the audit', () => {
+    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toContain("githubPushedThisTurn: buildDiag.toolWasUsed('github')");
   });
 });

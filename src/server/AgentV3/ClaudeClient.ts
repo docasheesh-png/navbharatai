@@ -153,6 +153,8 @@ export interface TurnResult {
    * the build from (autopsy 303e8a6f: GLM crawled 15 s, KIMI answered in 3.4 s, the row said KIMI 18 s).
    */
   attemptMs?: number;
+  /** The engine (report name, e.g. `SURPLUS`, `ENGINE_R1`, `GLM#2`) that produced this result. Set by the chain. */
+  answeredBy?: string;
   /**
    * Wall time of the rungs a fallback chain TRIED and lost before the one that answered, in ms — measured per
    * failed attempt (the number the waste ledger receives), 0 when the first rung answered. Absent from a

@@ -345,7 +345,8 @@ export interface AgentRunnerOptions {
     firstOutputMs?: number;
     ok: boolean;
     error?: string;
-    /** The provider family that was serving a call a stop cancelled — set only for a stop that was ours. */
+    /** The engine that answered (TurnResult.answeredBy, on a success through a chain), or the provider family that was
+     *  serving a call a stop cancelled (set only for a stop that was ours). */
     provider?: string;
     /** Why a cancelled call was stopped — set only when it was OUR decision (`stoppedCallOwner`). */
     stopCause?: AbortCause;
@@ -1312,6 +1313,8 @@ export class AgentRunner {
             // The row names the rung that answered, so its own time rides with it (autopsy 303e8a6f); the
             // caller's wait stays `latencyMs`, which is what preparation is measured against.
             latencyMs: Date.now() - llmStartedAt, ...answerTimeOf(turn), ok: true,
+            // Which ENGINE answered (the chain sets it), so the per-day engine stats can time each engine.
+            ...(turn.answeredBy ? { provider: turn.answeredBy } : {}),
           });
         } catch { /* diagnostics capture is best-effort */ }
 

@@ -115,11 +115,12 @@ describe('the exact patched runtime is used by build, runtime, and CI', () => {
     }
   });
 
-  it('pins both independent Cloud Build rules steps to the same slim runtime', () => {
+  // Three since Q-3344 (2026-11-25): rules, storage, and the Firestore indexes step. Every one on the same runtime.
+  it('pins every Cloud Build firebase step (rules, storage, indexes) to the same slim runtime', () => {
     const cloudBuild = readFileSync(join(root, 'cloudbuild.yaml'), 'utf8');
     const tags = [...cloudBuild.matchAll(/^\s*-\s*name:\s*['"]?node:([^'"\s#]+)/gm)]
       .map((match) => match[1]);
-    expect(tags).toEqual([`${PATCHED_NODE_VERSION}-slim`, `${PATCHED_NODE_VERSION}-slim`]);
+    expect(tags).toEqual([`${PATCHED_NODE_VERSION}-slim`, `${PATCHED_NODE_VERSION}-slim`, `${PATCHED_NODE_VERSION}-slim`]);
   });
 });
 

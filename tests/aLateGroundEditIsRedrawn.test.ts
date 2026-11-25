@@ -167,9 +167,9 @@ describe('✏️ late ground edits, open world (world: { lateEdits: true })', ()
     expect(patchTop(c, world)).toBeCloseTo(123, 3);
     world.dispose();
   }, 120_000);
-  it('default: the walkable ground is not sampled again until the player moves (as before)', () => {
+  it('lateEdits: false: the walkable ground is not sampled again until the player moves (the old way; the open world redraws by default since failedbr #2499)', () => {
     const c = context();
-    const world = OW.createOpenWorld(c, { seed: 7, vegetation: false });
+    const world = OW.createOpenWorld(c, { seed: 7, lateEdits: false, vegetation: false });
     world.frame(c, 1 / 60);
     const at = world.playerWorld();
     const old = patchTop(c, world);

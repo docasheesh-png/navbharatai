@@ -15,12 +15,12 @@ const page = readFileSync(join(root, 'docs/MAP_EXPANSION_ROLLOUT.md'), 'utf8');
 const src = (p: string) => readFileSync(join(root, p), 'utf8');
 
 describe('📋 the map rollout page', () => {
-  it('lateEdits: named as off, and off in the kit unless a game asks for it', () => {
-    expect(page).toMatch(/`lateEdits: true` \| \*\*off\*\*/);
+  it('lateEdits: on in the open world (lateEdits: false opts out), off for a bare Athree map unless a game asks for it', () => {
+    expect(page).toMatch(/\*\*on\*\* in the open world, \*\*off\*\* for a bare Athree map/);
     const bridge = recipeFilePool().get('src/game/play/openWorld.ts')!.content;
-    expect(bridge).toContain('const lateEdits = options.lateEdits === true;');
+    expect(bridge).toContain('const lateEdits = options.lateEdits !== false;');
     expect(src('src/server/lib/athreeMap/AthreeMapGenerator.ts')).toContain("const lateEdits = options.lateEdits === true;");
-    expect(page).toMatch(/Until both land, `lateEdits` stays off everywhere/);
+    expect(page).toMatch(/Until both land, `lateEdits` stays off for a bare Athree map/);
   });
   it('liveCities and the 1,000 cap: the numbers the page gives are the kit\'s', () => {
     const bridge = recipeFilePool().get('src/game/play/openWorld.ts')!.content;

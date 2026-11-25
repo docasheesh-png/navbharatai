@@ -7,16 +7,26 @@
 // PDFs went straight to paid vision; and an oversized prompt repeated every few seconds kept the free
 // provider's circuit breaker open for every other user. Each of those is bounded here, in one pure place.
 //
-// The numbers are far above what the app itself sends (the client sends at most 40 history turns of
-// 2,000 characters), so no real conversation meets them; they exist to bound what a SCRIPT can send.
+// The numbers are far above what the app itself sends (the client's window is at most 120 turns inside
+// a 48,000-character budget — `lib/chatContextWindow.ts`), so no real conversation meets them; they
+// exist to bound what a SCRIPT can send.
+//
+// 🔴 THE BOUND IS NOW ON CHARACTERS, NOT ONLY ON TURNS (admin 2026-11-25, the forgetting report).
+// A per-turn-count cap of 60 was both too loose and too tight: 60 turns at 4,000 characters is a
+// 240,000-character prompt — the very overflow onto paid rungs this file exists to stop — while a
+// real conversation of 70 short turns, costing a twentieth of that, was cut off at the OLDEST end,
+// which is exactly the opening the user expects to be remembered. `CHAT_MAX_HISTORY_CHARS` bounds
+// what actually costs money, so the turn cap can be generous without widening the worst case: the
+// new worst case (120,000 characters) is HALF the old one.
 
 import { cleanTurns } from '../../lib/platformTags';
 
 export const CHAT_MAX_MESSAGE_CHARS = 100_000;
 export const CHAT_MAX_ATTACHMENTS = 10;
 export const CHAT_MAX_VISION_ATTACHMENTS = 5;
-export const CHAT_MAX_HISTORY_TURNS = 60;
+export const CHAT_MAX_HISTORY_TURNS = 200;
 export const CHAT_MAX_HISTORY_TURN_CHARS = 4_000;
+export const CHAT_MAX_HISTORY_CHARS = 120_000;
 
 export type ChatLimitVerdict =
   | { ok: true; history: unknown[] }
@@ -42,10 +52,19 @@ export function checkChatInput(input: { message: unknown; fileAttachments: unkno
   const raw = Array.isArray(input.history) ? input.history : [];
   // Strip-on-read (admin 2026-10-17): a chat saved while platform tags leaked into turns must not
   // re-send them to the model, or the model learns to quote them again (lib/platformTags.ts).
-  const history = cleanTurns(raw.slice(-CHAT_MAX_HISTORY_TURNS)).map((m) => {
+  const perTurn = cleanTurns(raw.slice(-CHAT_MAX_HISTORY_TURNS)).map((m) => {
     if (!m || typeof m !== 'object') return m;
     const t = (m as { text?: unknown }).text;
     return typeof t === 'string' && t.length > CHAT_MAX_HISTORY_TURN_CHARS ? { ...(m as object), text: t.slice(0, CHAT_MAX_HISTORY_TURN_CHARS) } : m;
   });
-  return { ok: true, history };
+  // Drop the OLDEST turns, one at a time, until the whole history fits the character bound. Keeping
+  // the newest is the only safe direction: the latest turn is the one the reply answers.
+  const turnChars = (m: unknown) => {
+    const t = (m as { text?: unknown } | null)?.text;
+    return typeof t === 'string' ? t.length : 0;
+  };
+  let total = perTurn.reduce((sum, m) => sum + turnChars(m), 0);
+  let from = 0;
+  while (from < perTurn.length && total > CHAT_MAX_HISTORY_CHARS) { total -= turnChars(perTurn[from]); from += 1; }
+  return { ok: true, history: from ? perTurn.slice(from) : perTurn };
 }

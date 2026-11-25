@@ -100,14 +100,25 @@ describe('output cap and history trim', () => {
     expect(effectiveMaxOutput(c, 'cheapinf', 1024, 'fast')).toBe(1024);
     expect(effectiveMaxOutput(freeChainConfig({ FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off' }), 'llama8b', 1024, 'normal')).toBe(1024);
   });
-  it('keeps opening user facts and the latest turns inside the same budget', () => {
+  // 🔴 THIS TEST ASSERTED THE BUG (admin 2026-11-25: "10-15 message ke baad starting me text bhul
+  // jaye"). Its first line expected ten one-character turns to arrive as SIX — ['0','1','6','7','8','9'] —
+  // because the window was a turn count. The window is now a character budget, so a conversation that
+  // costs nothing is kept whole, and only a genuinely expensive one is shortened.
+  it('keeps a whole cheap conversation, and bounds an expensive one by characters', () => {
     const h = Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: String(i) }));
-    expect(trimHistory(on(), h).map((t: any) => t.text)).toEqual(['0', '1', '6', '7', '8', '9']);
+    expect(trimHistory(on(), h).map((t: any) => t.text)).toEqual(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
     const withCommand = [{ sender: 'user', text: 'My name is Meera.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...h.slice(2)];
-    expect(trimHistory(on(), withCommand).map((t: any) => t.text)).not.toContain('devnaagri me bataao');
     expect(trimHistory(on(), withCommand).map((t: any) => t.text)).toContain('My name is Meera.');
     expect(trimHistory(on(), h.slice(0, 6)).map((t: any) => t.text)).toEqual(['0', '1', '2', '3', '4', '5']);
     expect(trimHistory(freeChainConfig({ FREE_CHAIN_HISTORY_TRIM_ENABLED: 'off' }), h)).toBe(h);
+    expect(trimHistory(freeChainConfig({ FREE_CHAIN_HISTORY_TURNS: '0' }), h)).toEqual([]);
+    // Over budget: the opening and the latest turn survive, and the budget is honoured.
+    const long = [{ sender: 'user', text: 'My name is Meera.' }, ...Array.from({ length: 300 }, (_, i) => ({ sender: i % 2 ? 'ai' : 'user', text: `turn ${i} ${'pad '.repeat(120)}` })), { sender: 'user', text: 'What is my name?' }];
+    const bounded = trimHistory(on(), long) as { text: string }[];
+    expect(bounded.length).toBeLessThan(long.length);
+    expect(bounded[0].text).toContain('My name is Meera.');
+    expect(bounded.at(-1)?.text).toBe('What is my name?');
+    expect(bounded.reduce((total, t) => total + t.text.length, 0)).toBeLessThanOrEqual(on().features.historyChars);
   });
 });
 

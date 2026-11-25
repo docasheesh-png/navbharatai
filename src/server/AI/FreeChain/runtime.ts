@@ -29,7 +29,6 @@ import { FreeChainCache, safeCacheKey } from './cache';
 import { CHAT_PAID_FALLBACK_PER_USER_LIMIT, maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendCap';
 import { trimForRung } from './trim';
 import { tryAcquireRungSlot, releaseRungSlot, routeTurn, orderForRoute, effectiveMaxOutput, trimHistory, preparedSystemPrompt, faqCacheable, reserveMonthly, settleMonthly, type TurnRoute } from './masterPlan';
-import { CHAT_CONTEXT_LIMITATION, historyForModelRequest } from '../../../lib/chatContextWindow';
 import { logFreeChain, type FreeChainTelemetry } from './telemetry';
 import { OpenAiCompatProvider, FreeChainProviderError, type FreeChainProviderResponse } from './providers/openAiCompatProvider';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
@@ -152,13 +151,12 @@ function reportedChargeNanoUsd(response: unknown): number | null {
 /** This namespace is not installed in AIRouterManager: other consumers of 'free' stay untouched. */
 function historyForChain(cfg: FreeChainConfig, history: unknown[]): unknown[] {
   if (!Array.isArray(history)) return history;
-  const text = (row: unknown) => {
-    if (!row || typeof row !== 'object') return '';
-    const value = row as { text?: unknown; content?: unknown };
-    return typeof value.text === 'string' ? value.text : typeof value.content === 'string' ? value.content : '';
-  };
-  if (history.some(row => text(row).includes(CHAT_CONTEXT_LIMITATION))) return history;
-  if (history.length > 40) return historyForModelRequest(history);
+  // ONE window, one budget. This used to pick between three behaviours by turn count — pass a
+  // history that already carried a recap through untouched, send one over 40 turns to the shared
+  // window, and trim everything else to six turns — so the shape of the memory depended on how many
+  // messages had been exchanged, and the most common case (an ordinary chat of 7 to 40 turns) got
+  // the harshest cut of the three. `trimHistory` is now itself the shared window, and the window is
+  // stable over its own output, so a payload that already carries a recap needs no special case.
   return trimHistory(cfg, history);
 }
 export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeChainConfig(), refreshConfig?: () => FreeChainConfig) {

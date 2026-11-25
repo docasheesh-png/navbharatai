@@ -19539,7 +19539,7 @@ async function noteBuildOutcome(
                 writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,
-                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
+                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.heldBack?.length ? ` Held back (they would need names from a file somebody edited): ${refresh.heldBack.slice(0, 6).map((h) => `${h.path} — ${h.why}`).join('; ')}.` : ''}${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
             }
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }

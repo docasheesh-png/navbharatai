@@ -55,6 +55,7 @@ function shellHarness(fail:'renderer'|'setup'|null) {
     three:THREE,'./core/loop':{GameLoop:class {stop(){}start(){}setPaused(){}}},'./core/input':{Input},'./core/keybinds':{loadKeyBindings:()=>({})},'./core/feel':{GameFeel:class {}},'./core/events':{events},
     './core/state':{state,setStatus(status:string){state.status=status;},resetRun(){}},'./core/meta':{startMeta(){},mountMetaToasts(){return ()=>{};},combo:{break(){}}},
     './play/aim':{aimFrom:()=>({})},
+    './play/boundary':{WorldBoundary:class {bounds=null;set(){return true;}inside(){return true;}keep(){return false;}dispose(){}}},
     './play/playerBody':{applyPlayerChoice:()=>({showing:'person',update(){},dispose(){}}),resolvePlayerChoice:()=>undefined},
     // Game.ts ticks the kit's actions every frame now (compose_action). An UNKNOWN module fails loudly here by
     // design — see the stand-in note above — so a new kit module Game.ts imports is listed, exactly as

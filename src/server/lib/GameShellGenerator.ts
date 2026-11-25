@@ -30,6 +30,7 @@ import { kitTypeContract } from './kitTypeContract';
 import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerator';
 import { GAME_ACTIONS, GAME_ACTIONS_PATH } from './GameActionsGenerator';
 import { GAME_AIM, GAME_AIM_PATH } from './GameAimGenerator';
+import { GAME_BOUNDARY, GAME_BOUNDARY_PATH } from './GameBoundaryGenerator';
 import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
@@ -66,6 +67,7 @@ import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOption
 import { applyPlayerChoice, resolvePlayerChoice, findBones, playerModelRoot, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateActions } from './play/actions';
 import { aimFrom, type AimResult } from './play/aim';
+import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -192,6 +194,11 @@ export interface GameOptions {
    */
   minimap?: boolean | MinimapOptions;
   /**
+   * Where the map ends (play/boundary.ts): the player, the vehicle they drive and every character stay inside, behind real
+   * walls (walls: 'invisible' when the map's own mountains or sea are the edge). Same as ctx.world.setBounds in setup().
+   */
+  bounds?: WorldBounds & BoundaryOptions;
+  /**
    * Keep the player's progress between visits: the kit's state (level, score, lives, the bag, unlocks) is saved when the
    * game pauses, a round ends or the page is hidden, and the start screen offers Continue / New game. Turn it on when the
    * game's progress lives in that state (an RPG, a level game) — a world the game builds itself is not saved.
@@ -274,6 +281,8 @@ export interface GameContext {
    * driveVehicle(), your code wins and the shell stops driving that vehicle.
    */
   vehicles: VehicleSeats;
+  /** The map's edge (play/boundary.ts): setBounds(area, { walls }) in setup(); inside(x, z) before putting anything somewhere. */
+  world: { readonly bounds: WorldBounds | null; setBounds: (area: WorldBounds | null, options?: BoundaryOptions) => boolean; inside: (x: number, z: number) => boolean };
 }
 
 export class Game {
@@ -582,6 +591,8 @@ export class Game {
 
     // The player's own character (src/game/player.ts) takes the default body's place before the game's setup runs.
     this.playerModel = applyPlayerChoice(this.context, this.playerChoice);
+    // The map's edge from the options first, so setup() can still change it (ctx.world.setBounds).
+    if (options.bounds) this.boundary.set(options.bounds, options.bounds);
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
@@ -622,6 +633,8 @@ export class Game {
    * one playtest) and the car never moved. Whatever a game stores here now survives, and the members are
    * live getters, so nothing on it can go stale either.
    */
+  /** The map's edge: walls and the per-step keep-inside (play/boundary.ts). */
+  readonly boundary = new WorldBoundary(this.scene);
   /** What ctx.onStep registered, run each step after the game's update. */
   private readonly stepHooks = new Set<(delta: number) => void>();
   private ctxObject: GameContext | null = null;
@@ -647,6 +660,11 @@ export class Game {
         });
       },
       onStep: (fn) => { game.stepHooks.add(fn); return () => { game.stepHooks.delete(fn); }; },
+      world: {
+        get bounds() { return game.boundary.bounds; },
+        setBounds: (area, o) => game.boundary.set(area, o),
+        inside: (x, z) => game.boundary.inside(x, z),
+      },
       get hero() { return game.hero; },
       get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
       splitScreen: (camera) => { this.secondCamera = camera; },
@@ -659,6 +677,18 @@ export class Game {
       },
     };
     return this.ctxObject;
+  }
+
+  /**
+   * Nobody leaves the map (play/boundary.ts): the player, the vehicle the player drives — stopped at the edge, or it would
+   * keep pushing — and every object marked userData.bounded (Entities characters, dispatched cars). A no-op without bounds.
+   */
+  private keepInsideMap(): void {
+    if (!this.boundary.bounds) return;
+    this.boundary.keep(this.player.object, 0.4);
+    const v = this.seated;
+    if (v && this.boundary.keep(v, 1.2)) { const seat = this.seats.get(v); if (seat) seat.state = { ...seat.state, speed: 0 }; }
+    for (const o of this.scene.children) if (o.userData.bounded && o !== v) this.boundary.keep(o, 0.4);
   }
 
   /** Run the game's own code, listening for the vehicles it drives and the buttons it reads. */
@@ -809,6 +839,7 @@ export class Game {
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
       groundScene(this.scene);
+      this.keepInsideMap();
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
       // Debris from broken crates and walls flies, falls, settles and goes (three/breakable.ts).
@@ -1159,6 +1190,7 @@ export class Game {
   dispose(): void {
     if (this.disposed) return;
     this.stepHooks.clear();
+    this.boundary.dispose();
     this.disposed = true;
     // Partial construction is valid here; one broken cleanup must not strand later resources.
     const safe = (release: () => void) => { try { release(); } catch { /* teardown must never throw */ } };
@@ -4839,9 +4871,10 @@ const FILES: Record<string, string> = {
   [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
   [GAME_ACTIONS_PATH]: GAME_ACTIONS,
   [GAME_AIM_PATH]: GAME_AIM,
+  [GAME_BOUNDARY_PATH]: GAME_BOUNDARY,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'aim', 'racingroadgame', 'racecustom', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'aim', 'boundary', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -4940,6 +4973,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/Game.ts']) files[GAME_PLAYER_BODY_PATH] = FILES[GAME_PLAYER_BODY_PATH];
     if (files['src/game/Game.ts']) files[GAME_ACTIONS_PATH] = FILES[GAME_ACTIONS_PATH];
     if (files['src/game/Game.ts']) files[GAME_AIM_PATH] = FILES[GAME_AIM_PATH];
+    if (files['src/game/Game.ts']) files[GAME_BOUNDARY_PATH] = FILES[GAME_BOUNDARY_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -4956,6 +4990,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
+      (files[GAME_BOUNDARY_PATH] ? 'THE MAP HAS AN EDGE: pass bounds: { minX, maxX, minZ, maxZ } in the options (or ctx.world.setBounds in setup) — the player, the car they drive and every character stay inside behind real walls (walls: "invisible" when mountains or sea are the visible edge); never let anyone drive or walk off the map.\n' : '') +
       (files[GAME_AIM_PATH] ? 'EVERY GUN AIMS WITH ctx.aim(): const a = ctx.aim(); gun.update(dt, fire, a.muzzle, a.shot, bullets) — the crosshair point from the real muzzle; never a hand-written direction (a constant one fires the same way whatever the aim).\n' : '') +
       (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +

@@ -192,6 +192,7 @@ export class Entities {
       created.humanoid = humanoid;
       controller.object.add(model);
       controller.object.name = kind;
+      controller.object.userData.bounded = true; // kept inside the map's edge by the shell (play/boundary.ts)
       this.host.scene.add(controller.object);
       controller.object.updateMatrixWorld(true);
       // 🔒 VERIFIED, NOT ASSUMED: in the scene, at a finite position, with something the player can see.

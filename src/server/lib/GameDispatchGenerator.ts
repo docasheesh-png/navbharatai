@@ -97,7 +97,7 @@ export class Dispatch {
   private readonly off: (() => void) | null;
   private readonly options: DispatchOptions;
 
-  constructor(private readonly host: EntityHost & { camera?: THREE.Camera }, private readonly entities: Entities, options: DispatchOptions = {}) {
+  constructor(private readonly host: EntityHost & { camera?: THREE.Camera; world?: { inside: (x: number, z: number) => boolean } }, private readonly entities: Entities, options: DispatchOptions = {}) {
     this.options = options;
     this.off = host.onStep ? host.onStep((dt) => this.update(dt)) : null;
   }
@@ -125,6 +125,7 @@ export class Dispatch {
       try {
         const car = createCar({ color: spec.car.color });
         car.name = service + ' car';
+        car.userData.bounded = true; // kept inside the map's edge by the shell (play/boundary.ts)
         const toTarget = Math.atan2(at(target).x - point.x, at(target).z - point.z);
         car.position.set(point.x, groundHeightAt(point.x, point.z), point.z);
         car.rotation.y = toTarget;
@@ -265,6 +266,8 @@ export class Dispatch {
         const a = (i / 16) * Math.PI * 2;
         const p = { x: target.x + Math.sin(a) * r, z: target.z + Math.cos(a) * r };
         if (b && (p.x < b.minX || p.x > b.maxX || p.z < b.minZ || p.z > b.maxZ)) continue;
+        // The map's own edge (ctx.world, play/boundary.ts): nothing is sent from outside the map.
+        if (this.host.world && !this.host.world.inside(p.x, p.z)) continue;
         if (!Number.isFinite(groundHeightAt(p.x, p.z))) continue;
         if (this.options.isValidSpawn && !this.options.isValidSpawn(p.x, p.z)) continue;
         ok.push({ p, hidden: !inView(camera, p) });

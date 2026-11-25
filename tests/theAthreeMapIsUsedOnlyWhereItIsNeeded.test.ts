@@ -118,13 +118,14 @@ describe('ON: the request also decides WHICH modules (admin 2026-11-15: modules 
   beforeEach(() => { process.env.AGENTV3_ATHREE_MAP = 'on'; });
   const has = (m: string): boolean => act.files.has(`src/game/athree/${m}.ts`);
 
-  it('an open-world racing game with cars gets roads and vehicles and none of the sea, plants, rivers or sky', async () => {
+  // 2026-11-25 (admin, problem 5: "2 city ke beech me bas green ghas" — "intention, not words"): naming cars no longer strips the
+  // world of its nature. An open-world racing game with cars gets roads and vehicles AND the trees, rivers, sea and sky.
+  it('an open-world racing game with cars gets roads and vehicles, and the rest of the world too', async () => {
     const res = await run('ek 3D open world racing game banao jisme gaadi chale');
     expect(res.is_error).toBeFalsy();
     expect(has('roadmesh')).toBe(true); expect(has('vehicles')).toBe(true);
-    for (const m of ['ocean', 'water', 'plants', 'vegetation', 'riverwater', 'sky', 'budget']) expect(has(m), m).toBe(false);
+    for (const m of ['ocean', 'plants', 'vegetation', 'riverwater', 'sky']) expect(has(m), m).toBe(true);
     expect(has('world')).toBe(true); expect(has('roads')).toBe(true);
-    expect(res.content).toMatch(/Modules NOT in this build/);
   });
   it('a request for a river and trees gets those', async () => {
     await run('3D open world game, sirf nadi aur ped chahiye');

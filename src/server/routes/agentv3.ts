@@ -8,7 +8,7 @@ import { withReplyLanguage, replyVoiceForRequest, replyLanguageBinding } from '.
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
-import { planKitRefreshAgainstSandbox } from '../lib/gameRecipeLayers';
+import { kitHeldBackHandoff, planKitRefreshAgainstSandbox } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -34,7 +34,7 @@ import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction, weakForceContinueDecision } from '../AgentV3/weakBuildPreflight';
-import { toSafeClientMessage } from '../lib/httpError';
+import { toSafeClientMessage, sendSafeError } from '../lib/httpError';
 import { clarityGateEnabled, clarityDecision, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
@@ -4597,10 +4597,17 @@ export function registerAgentV3Routes(app: Express): void {
     // candidate with the SESSION-aware match, or auto-resume would never even offer the Resume button
     // for the caller's own anon-keyed build.
     const perWs = perWorkspaceLockEnabled();
-    const candidates = buildKeyCandidates(userId, workspaceId, perWs);
-    const buildRunning = perWs
-      ? countActiveBuildsForUser(runningBuilds.values(), userId) > 0
-      : candidates.some((k) => isBuildRunning(k));
+    // 🔒 ACCOUNT-WIDE `buildRunning` ANSWERS ONLY FOR THE VERIFIED CALLER (security audit 2026-11-21). It used
+    // to be keyed on the CLAIMED `?userId`, so anyone could ask "is account X building right now?" for any
+    // uid. Now a token decides whose account it is; with no token the answer is false. Every client caller
+    // sends its token (authJsonHeaders). The session-scoped `buildRunningHere` below is unchanged: it needs
+    // the session's random workspace id, which a stranger cannot guess.
+    const buildOwnerUid = (await verifiedIdentity(req))?.uid ?? null;
+    const buildRunning = buildOwnerUid
+      ? (perWs
+        ? countActiveBuildsForUser(runningBuilds.values(), buildOwnerUid) > 0
+        : buildKeyCandidates(buildOwnerUid, workspaceId, perWs).some((k) => isBuildRunning(k)))
+      : false;
     // `buildRunningHere` — the answer the Resume button renders from — now comes from the SAME
     // decision `/attach` uses (findAttachableBuild), under the SAME identity (the verified token,
     // falling back to the claimed uid only for legacy callers that send no token). It used to be a
@@ -4626,9 +4633,9 @@ export function registerAgentV3Routes(app: Express): void {
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
     // purchased (its wallet's paid status). They are now derived from the VERIFIED token only (the client
     // already sends its Bearer token here); an unverified caller gets billed=false/powerUnlocked=false and
-    // self-heals on the next token-refresh poll. `enabled`/`buildRunning`/`buildRunningHere` deliberately
-    // STAY on the claimed identity — tokenless auto-resume pollers depend on them and they leak nothing
-    // cross-user (build presence under a key the caller already supplies), so this never breaks resume.
+    // self-heals on the next token-refresh poll. `enabled` and `buildRunningHere` stay on the claimed identity
+    // for tokenless legacy pollers; `buildRunning` moved to the verified identity on 2026-11-21 (see above),
+    // because answering it for a claimed uid DID leak cross-user build presence.
     const verified = await verifiedIdentity(req);
     const wallet = verified?.uid ? await firestoreWalletReader(getDb())(verified.uid).catch(() => null) : null;
     res.json({
@@ -4691,7 +4698,7 @@ export function registerAgentV3Routes(app: Express): void {
         }),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not load your conversations.', err, 'agentv3 conversations list');
     }
   });
 
@@ -4747,7 +4754,7 @@ export function registerAgentV3Routes(app: Express): void {
       // report and adminDetail stay on the server record for admin views.
       res.json({ conversation: userConversationView(rec), workspaceState });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not open this conversation.', err, 'agentv3 conversation read');
     }
   });
 
@@ -4813,7 +4820,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       res.json({ ok: true }); // removed, or already gone — idempotent
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not delete this conversation.', err, 'agentv3 conversation delete');
     }
   });
 
@@ -4854,7 +4861,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       res.json({ ok: true, pinned });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not pin this conversation.', err, 'agentv3 conversation pin');
     }
   });
 
@@ -5031,7 +5038,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       res.json({ ok: true, name: validated.name, repoRenamed, ...(repoNote ? { repoNote } : {}) });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not rename this conversation.', err, 'agentv3 conversation rename');
     }
   });
 
@@ -6024,7 +6031,10 @@ async function noteBuildOutcome(
         ...(planNote ? { planNote } : {}),
       });
     } catch (e) {
-      res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
+      // The message comes from the user's own Render account, so a redacted copy is kept as the detail.
+      // Same shape as before (ok/reason kept for any client that reads them); only the text is made safe.
+      console.error('[HTTP 502] agentv3 render deploy:', e instanceof Error ? e.message : String(e));
+      res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${toSafeClientMessage(e, 'unknown error')}` });
     }
   });
 
@@ -6180,7 +6190,10 @@ async function noteBuildOutcome(
         pushedBranch: target.branch, defaultBranch: repo.defaultBranch || 'main', mode: target.mode,
       });
     } catch (e) {
-      res.status(502).json({ error: `Could not save your app to GitHub: ${e instanceof Error ? e.message : String(e)}` });
+      // The reason comes from the user's own GitHub and helps them fix it, so it stays — redacted (no URLs,
+      // tokens or vendor names); the raw error goes to the server log.
+      console.error('[HTTP 502] agentv3 github save:', e instanceof Error ? e.message : String(e));
+      res.status(502).json({ error: `Could not save your app to GitHub: ${toSafeClientMessage(e, 'unknown error')}` });
     }
   });
 
@@ -7183,7 +7196,7 @@ async function noteBuildOutcome(
         ...(idleServe ? { idleSnapshotUrl: idleServe.url, idleSnapshotNote: SNAPSHOT_IDLE_NOTE, snapshotAt: idleServe.at } : {}),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not check the preview right now.', err, 'agentv3 preview-health');
     }
   });
 
@@ -7363,7 +7376,7 @@ async function noteBuildOutcome(
       // Idempotent: removed just now, or already gone → 200 either way.
       res.json({ ok: true, stopped, truncated, purgedMemory });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not undo that message.', err, 'agentv3 unsend');
     }
   });
 
@@ -7539,7 +7552,7 @@ async function noteBuildOutcome(
         note: flow.note || (flow.merged ? `Merged into ${access.defaultBranch}.` : 'Nothing to merge yet — make an edit first.'),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not ship your app right now.', err, 'agentv3 ship');
     }
   });
 
@@ -7592,7 +7605,7 @@ async function noteBuildOutcome(
         skipped: round.triage.skipped.map((s) => ({ id: s.id, why: s.why })),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not start the review.', err, 'agentv3 review');
     }
   });
 
@@ -7645,7 +7658,7 @@ async function noteBuildOutcome(
           : 'There was nothing to reply to on that pull request.',
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not send your reply to the review.', err, 'agentv3 review reply');
     }
   });
 
@@ -7706,7 +7719,7 @@ async function noteBuildOutcome(
       }
       res.json({ reverted: true, sha: revertSha, base, note: `Reverted the last change on ‘${base}’ — restored to the previous state (a new revert commit, undoable).` });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not restore that version.', err, 'agentv3 revert');
     }
   });
 
@@ -7819,7 +7832,7 @@ async function noteBuildOutcome(
       // result then syncs via the normal conversation reload.
       res.json({ events, seq, gap, running: isBuildRunning(verifiedUid) });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not load the live status.', err, 'agentv3 live');
     }
   });
 
@@ -19540,9 +19553,10 @@ async function noteBuildOutcome(
                 writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,
-                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
+                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.heldBack?.length ? ` Held back (they would need names from a file somebody edited): ${refresh.heldBack.slice(0, 6).map((h) => `${h.path} — ${h.why}`).join('; ')}.` : ''}${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
             }
           }
+          { const waiting = kitHeldBackHandoff(refresh.heldBack); if (waiting) buildPrompt = `${waiting}\n\n---\n\n${buildPrompt}`; } // the builder restores what the edited file lacks (Q-3331)
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
       // 🗺️🧍 WHAT IS PICKED IN THE LIBRARY IS DONE BY THE PLATFORM ITSELF (growthTurn.ts): a map place (worldGrow.ts) or the

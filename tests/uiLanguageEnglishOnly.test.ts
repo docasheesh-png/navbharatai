@@ -47,6 +47,12 @@ const ALLOWED: Record<string, string> = {
   'src/lib/firestoreRules.ts': 'owner-requested {en, hi} step pairs for the Firestore rules card (#4043); English always present',
   'src/lib/registrarGuide.ts': 'owner-requested Hindi registrar DNS steps (#4043) beside the English steps for each registrar',
   'src/lib/nextStepGuide.ts': 'owner-requested {en, hi} copy pairs for the NEXT STEP card (#4045); English always present',
+  // Admin 2026-11-25, asking for this box twice: "login - sirf login kare, aur band kar de (user ki
+  // language me) … (sab user ki language me)". Same shape as the NEXT STEP card above and for the same
+  // reason the 2026-09-14 correction gives: English is ALWAYS present and shown first, with the Hindi
+  // line beside it — never instead of it, so a Tamil or Telugu speaker can still read every step.
+  // `tests/freeAiChaluKarein.test.ts` fails if any step ever loses its English.
+  'src/lib/freeAiSetup.ts': 'owner-requested {en, hi} copy pairs for the "Turn on free AI" steps; English always present and always first',
   'src/lib/apnapanEngine.ts': 'greeting DETECTION patterns + a key passed to the AI, never shown as UI',
   'src/lib/platformStopNotices.ts': 'RECOGNITION only: the opening of the server\'s Hindi wallet notice (balanceRechargeNotice.ts), matched so "Fix with AI" is not offered under it; never rendered',
   // A translation editor the user runs on THEIR OWN app. A language picker must print each language

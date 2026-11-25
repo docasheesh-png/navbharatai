@@ -17,7 +17,9 @@ import { isPublicAppWorkspaceId } from '../lib/publicAppWorkspace';
 import { appAiGatewayEnabled, readGatewayRequest, ownerFacingMessage } from '../lib/appAiGateway';
 import { answerForApp, type AppAiRefusal } from '../lib/appAiAnswer';
 import { getAppAiSettings, setAppAiDisabled } from '../lib/AppAiSettingsStore';
-import { ownKeyFor, forgetOwnKey } from '../lib/appAiOwnKey';
+import { ownKeyFor, forgetOwnKey, askFreeAi } from '../lib/appAiOwnKey';
+import { FREE_AI_KEY_NAME, freeAiKeyLooksUsable } from '../lib/appFreeAi';
+import { saveUserSecrets } from '../lib/supabaseProvisionFlow';
 import { appAiUsageStore } from '../lib/AppAiUsageStore';
 import { lastDayKeys, spendHistory } from '../../lib/appAiSpendHistory';
 import { dayKey } from '../lib/siteAnalytics';
@@ -32,6 +34,18 @@ export const PREVIEW_IMAGE_PATH = '/api/app-ai/preview-image';
 /** "Can this app make pictures yet?" for the owner's preview — asked before anyone presses Generate (Q-966). */
 export const PREVIEW_IMAGE_READY_PATH = '/api/app-ai/preview-image-ready';
 export const SETTINGS_PATH = '/api/app-ai/settings';
+/** Where the ❗ tray's "Free AI" box sends the key the owner pasted (admin 2026-11-25). */
+export const FREE_KEY_PATH = '/api/app-ai/free-key';
+
+/** What the owner is told when the key they pasted could not be turned on. One place, honest words. */
+export const FREE_KEY_MESSAGES = {
+  shape: 'That does not look like an API key. Copy the whole key from the key page and paste it again.',
+  refused: 'That key was refused. Check you copied all of it, or make a new key and paste that.',
+  busy: 'The free AI is busy right now. Wait a few seconds and press Save again.',
+  failed: 'Could not check that key just now. Please try again.',
+  unsaved: 'The key worked, but it could not be saved just now. Please press Save again.',
+  ok: 'Your app\u2019s AI is ready, and it is free.',
+} as const;
 
 /** The preview's daily ceiling per app, in ₹. Unreadable ⇒ the default, never "no limit". */
 export function previewDailyCapInr(env: NodeJS.ProcessEnv = process.env): number {
@@ -47,11 +61,16 @@ export function previewCounterId(workspaceId: string): string {
 
 /** What the OWNER is told when their preview assistant does not answer. Plain, true, theirs. */
 export function previewRefusalMessage(reason: AppAiRefusal, provider?: string): string {
-  const who = provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
+  // The owner's OWN account, so it is named — the White-Label Law covers which engine NAVBHARATAI ran,
+  // never a key the user made themselves. The free one is named by what it IS to them, not by its vendor.
+  const who = provider === 'anthropic' ? 'Anthropic' : provider === 'zai' ? 'free AI' : 'OpenAI';
   switch (reason) {
     case 'switched-off': return 'NavBharatAI AI is switched off for this app. Turn it on in Keys & Secrets, or add your own key there.';
     case 'own-key-refused': return `Your ${who} key was refused (wrong key, or no credit left). Check it in Keys & Secrets.`;
     case 'own-key-failed': return `Your ${who} key did not answer just now. Please try again.`;
+    // The free models have a rate limit, and waiting really is the fix — so that is what it says, instead
+    // of a "failed" that would send the owner looking for a broken key (admin 2026-11-25).
+    case 'own-key-busy': return 'Your free AI is busy right now. Please wait a few seconds and ask again.';
     case 'app-cap': return 'Today’s preview AI limit for this app is used up. It resets tomorrow — or add your own key in Keys & Secrets.';
     default: return ownerFacingMessage(reason as Parameters<typeof ownerFacingMessage>[0]);
   }
@@ -127,6 +146,44 @@ export function registerAppAiOwnerRoutes(app: Express): void {
     const ready = await appImageReadiness(ownerId, workspaceId);
     if (ready.ready) { res.json({ ok: true, ready: true }); return; }
     res.json({ ok: true, ready: false, code: ready.code, message: ready.owner });
+  });
+
+  /**
+   * TURN ON THE FREE AI — the last step of the ❗ tray's three (admin 2026-11-25).
+   *
+   * 🔒 THE KEY IS PROVEN BEFORE IT IS SAVED, AND THAT IS THE WHOLE POINT OF THE ROUTE. A vault that
+   * accepts anything and answers "Saved" is true about the storage and silent about the credential —
+   * the exact bug `/api/secrets/:userId/verify` exists to undo. Here the ✅ the owner sees is a claim
+   * that their app's AI WORKS, so it is earned by one real call to the free model on the key they just
+   * pasted. A key that does not answer is not saved and not ticked; the owner is told why, in words
+   * about what to do next. (NO FAKE FEATURE, CLAUDE.md.)
+   *
+   * The value is written straight into the owner's own encrypted vault, scoped to THIS app, through the
+   * same `saveUserSecrets` the Settings save and the database provisioning use — so there is one write
+   * path, one scope rule, and no second place for a live credential to travel.
+   */
+  const freeKeyLimiter = rateLimiter({ name: 'app-ai-free-key', authed: 20, anon: 0, noun: 'key checks', durable: false });
+  app.post(FREE_KEY_PATH, freeKeyLimiter, async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const ownerId = await ownerOf(req, workspaceId);
+    if (!ownerId) { res.status(403).json({ ok: false, message: 'Sign in as this app\u2019s owner to turn on its AI.' }); return; }
+    const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+    if (!freeAiKeyLooksUsable(key)) { res.json({ ok: false, code: 'shape', message: FREE_KEY_MESSAGES.shape }); return; }
+
+    // The proof. One tiny question on the free model — it costs the owner nothing, which is why this
+    // feature can afford to check at all.
+    const probe = await askFreeAi(key, 'Answer with one word.', 'Say ok.');
+    if (!probe.ok) {
+      const code = probe.reason === 'refused' ? 'refused' : probe.reason === 'busy' ? 'busy' : 'failed';
+      res.json({ ok: false, code, message: FREE_KEY_MESSAGES[code] });
+      return;
+    }
+
+    const saved = await saveUserSecrets(ownerId, { [FREE_AI_KEY_NAME]: key }, workspaceId);
+    if (!saved) { res.status(503).json({ ok: false, code: 'unsaved', message: FREE_KEY_MESSAGES.unsaved }); return; }
+    // The next question must use it, not the minute-old cached answer that said there was no key.
+    forgetOwnKey(ownerId);
+    res.json({ ok: true, message: FREE_KEY_MESSAGES.ok });
   });
 
   app.get('/api/app-ai/settings', limiter, async (req: Request, res: Response) => {

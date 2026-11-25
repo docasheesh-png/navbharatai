@@ -15,8 +15,16 @@ import { strictFreeRequired } from '../AI/inferencePolicy';
 
 import { BoundedCache } from './boundedCache';
 import { loadUserVaultSecrets } from './secrets';
+import {
+  FREE_AI_ENDPOINT, FREE_AI_KEY_NAME, FREE_AI_MODELS, freeAiKeyLooksUsable, freeAiTextLadder, isFreeAiBusy, isFreeAiModel,
+} from './appFreeAi';
 
-export type OwnKeyProvider = 'openai' | 'anthropic';
+/**
+ * `zai` is the FREE one (appFreeAi.ts, admin 2026-11-25): the owner's own Z.ai account on the three
+ * models Z.ai prints as Free, set up from the ❗ tray. The other two are paid accounts the owner typed
+ * into Keys & Secrets themselves.
+ */
+export type OwnKeyProvider = 'openai' | 'anthropic' | 'zai';
 
 export interface OwnKey {
   provider: OwnKeyProvider;
@@ -29,9 +37,19 @@ export const DEFAULT_ANTHROPIC_MODEL = 'claude-3-5-haiku-latest';
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_TOKENS = 1024;
 
-/** Pick the owner's key from their vault secrets. OpenAI first when both exist. Pure. */
+/**
+ * Pick the owner's key from their vault secrets.
+ *
+ * 🔒 THE FREE KEY WINS, AND THAT IS DELIBERATE (admin 2026-11-25). An owner who has set up the free
+ * AI from the ❗ tray asked for an app that costs nothing to answer; sending their questions to a paid
+ * account they saved months ago would spend real money behind a button that said "free". The Keys &
+ * Secrets card says plainly which key is answering and deleting it goes back to the other one, so the
+ * choice stays theirs — but the default can never be the one that charges them. PURE.
+ */
 export function ownKeyFromSecrets(secrets: Readonly<Record<string, string>> | null | undefined): OwnKey | null {
   if (!secrets) return null;
+  const free = String(secrets[FREE_AI_KEY_NAME] ?? '').trim();
+  if (freeAiKeyLooksUsable(free)) return { provider: 'zai', key: free, model: freeAiTextLadder()[0] ?? FREE_AI_MODELS.chat };
   const openai = String(secrets.OPENAI_API_KEY ?? '').trim();
   if (openai.length >= 20) {
     return { provider: 'openai', key: openai, model: String(secrets.OPENAI_MODEL ?? '').trim() || DEFAULT_OPENAI_MODEL };
@@ -69,7 +87,58 @@ export function forgetOwnKey(userId: string): void {
   forgottenAt.set(userId, Date.now());
 }
 
-export type OwnKeyAnswer = { ok: true; text: string } | { ok: false; reason: 'refused' | 'failed' };
+/** `busy` is the free tier's rate limit: the same question works a moment later, so it is said as such. */
+export type OwnKeyAnswer = { ok: true; text: string } | { ok: false; reason: 'refused' | 'failed' | 'busy' };
+
+/**
+ * THE FREE LADDER (admin 2026-11-25: *"agar 4.7 busy ho ya limit lag jaye, to apne aap isse jawab aaye"*).
+ *
+ * The default model, then the second free model when the first is busy or rate-limited — the user never
+ * picks one and never sees one named. Only ids on `appFreeAi.ts`'s allowlist are sent, so this can never
+ * spend the owner's own Z.ai balance on a paid model. Both rungs busy is reported as `busy`, never as a
+ * failure, because "wait a moment and ask again" is the true and useful thing to say.
+ *
+ * `fetchImpl` is a test seam. Never throws.
+ */
+export async function askFreeAi(
+  key: string,
+  system: string,
+  prompt: string,
+  fetchImpl: typeof fetch = fetch,
+  models: readonly string[] = freeAiTextLadder(),
+): Promise<OwnKeyAnswer> {
+  const ladder = models.filter(isFreeAiModel);
+  if (ladder.length === 0) return { ok: false, reason: 'failed' };
+  let lastBusy = false;
+  for (const model of ladder) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), CALL_TIMEOUT_MS);
+    try {
+      const res = await fetchImpl(FREE_AI_ENDPOINT, {
+        method: 'POST', signal: ac.signal,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model, max_tokens: MAX_OUTPUT_TOKENS,
+          messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+        }),
+      });
+      const body = res.ok ? null : await res.json().catch(() => null);
+      if (!res.ok && isFreeAiBusy(res.status, body)) { lastBusy = true; continue; } // the next free model
+      // 401/403 is the key itself: no other model on the same key can answer, so stop here.
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'refused' };
+      if (!res.ok) return { ok: false, reason: 'failed' };
+      const j = (await res.json().catch(() => null)) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+      const text = j?.choices?.[0]?.message?.content;
+      if (typeof text === 'string' && text.trim()) return { ok: true, text };
+      return { ok: false, reason: 'failed' };
+    } catch {
+      return { ok: false, reason: 'failed' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { ok: false, reason: lastBusy ? 'busy' : 'failed' };
+}
 
 /** Ask with the owner's key. `fetchImpl` is a test seam. Never throws. */
 export async function askWithOwnKey(
@@ -79,6 +148,7 @@ export async function askWithOwnKey(
   fetchImpl: typeof fetch = fetch,
 ): Promise<OwnKeyAnswer> {
   if (strictFreeRequired()) return { ok: false, reason: 'refused' }; // An owner key does not establish zero cost.
+  if (own.provider === 'zai') return askFreeAi(own.key, system, prompt, fetchImpl);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), CALL_TIMEOUT_MS);
   try {

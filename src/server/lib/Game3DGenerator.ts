@@ -5556,6 +5556,8 @@ export interface HouseOptions extends BaseOpts {
   /** 'flat' — RCC roof with a parapet and a water tank (towns, most villages). 'tiled' — sloped clay tiles. */
   /** 'tile' is accepted as 'tiled' — the SurfaceKind spelling a builder reaches for (autopsy 61279465: TS2820). */
   roof?: 'flat' | 'tiled' | 'tile';
+  roofColor?: number;
+  sideDoor?: 'left' | 'right';
 }
 
 /** The colours houses in an Indian village or town are really washed in — not white boxes. */
@@ -5571,7 +5573,7 @@ export const HOUSE_WASHES: readonly number[] = [0xe9c46a, 0xf4a6a6, 0x9ec9e6, 0x
  * builds the texture ONCE). Returns a Group whose origin is the centre of the footprint at ground level.
  */
 export function createHouse(options: HouseOptions = {}): THREE.Group {
-  if (options.enterable) return createEnterableHouse({ width: options.width, depth: options.depth, storeys: options.storeys });
+  if (options.enterable) return createEnterableHouse({ width: options.width, depth: options.depth, storeys: options.storeys, roofColor: options.roofColor, sideDoor: options.sideDoor });
   const d = tier(options);
   const r = rng(options.seed ?? 11);
   const W = options.width ?? 6 + r() * 3;

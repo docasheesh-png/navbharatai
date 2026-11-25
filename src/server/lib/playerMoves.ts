@@ -9,7 +9,7 @@
  * in tests/theUsersCharacterJoinsEveryGame.test.ts runs both over the same clip names and fails if they ever drift. PURE.
  */
 
-export const PLAYER_MOVES = ['idle', 'walk', 'run', 'jump', 'land', 'punch', 'kick', 'block', 'hit', 'die', 'fire', 'swing', 'throw', 'use', 'slide'] as const;
+export const PLAYER_MOVES = ['idle', 'walk', 'run', 'jump', 'land', 'swim', 'dive', 'punch', 'kick', 'block', 'hit', 'die', 'fire', 'swing', 'throw', 'use', 'slide'] as const;
 export type PlayerMoveName = typeof PLAYER_MOVES[number];
 
 /** The words a clip name carries for each move, most specific first. Matched per word of the name (camelCase split). */
@@ -19,6 +19,8 @@ export const PLAYER_MOVE_WORDS: Readonly<Record<PlayerMoveName, readonly string[
   run: ['run', 'sprint', 'jog'],
   jump: ['jump'],
   land: ['land'],
+  swim: ['swim'],
+  dive: ['dive', 'underwater'],
   punch: ['punch', 'jab', 'hook', 'uppercut', 'strike'],
   kick: ['kick'],
   block: ['block', 'guard', 'defend', 'parry'],

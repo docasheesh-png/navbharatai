@@ -8,7 +8,7 @@ import { withReplyLanguage, replyVoiceForRequest, replyLanguageBinding } from '.
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
-import { planKitRefreshAgainstSandbox } from '../lib/gameRecipeLayers';
+import { kitHeldBackHandoff, planKitRefreshAgainstSandbox } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -19539,9 +19539,10 @@ async function noteBuildOutcome(
                 writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,
-                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
+                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.${refresh.heldBack?.length ? ` Held back (they would need names from a file somebody edited): ${refresh.heldBack.slice(0, 6).map((h) => `${h.path} — ${h.why}`).join('; ')}.` : ''}${refresh.reconciled.length ? ` Judged as the sandbox holds them (the saved copy differed): ${refresh.reconciled.slice(0, 8).join(', ')}.` : ''}` });
             }
           }
+          { const waiting = kitHeldBackHandoff(refresh.heldBack); if (waiting) buildPrompt = `${waiting}\n\n---\n\n${buildPrompt}`; } // the builder restores what the edited file lacks (Q-3331)
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
       // 🗺️🧍 WHAT IS PICKED IN THE LIBRARY IS DONE BY THE PLATFORM ITSELF (growthTurn.ts): a map place (worldGrow.ts) or the

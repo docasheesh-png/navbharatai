@@ -6084,6 +6084,7 @@ The admin approved building the garments ourselves: "haan, Indian kapde banana s
   - The kurta still shows a little of the base body's muscle shape.
   - More colours and outfits (a woman's salwar-kameez, a lungi, a sherwani) can come from the same builder when asked.
 ## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3353…Q-3356)
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3357…Q-3360)
 
 Admin 2026-11-22, on their GTA-style game: *"mujhe lag raha hai, maps me sabhi city/village ko ek plane me na bana kar vertical
 layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea under a flat slab with lamps, people and cars on it.
@@ -6107,7 +6108,7 @@ layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea 
   new ground, and counts edits from the FIRST DRAW, so an edit in a feature's `setup()` is reported when the redraw is off.
 - **Lock:** `tests/oneGroundNeverLayers.test.ts` (9) — every fix reverted on its own and watched fail (guard, cleanRegion,
   notNumber, default redraw, prop re-stand, first-draw count).
-- **🟡 Q-3356 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
+- **🟡 Q-3360 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
   world.ts / features. Needs those files or one rebuild on the fixed kit (the console then names the refused value).
 ## 2026-11-25 — Autopsy of BR2514–BR2519 (last six builds; all "succeeded", none played)
 

@@ -81,7 +81,7 @@ import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions, type H
 import type { MinimapOptions } from './ui/worldMap';
 // Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
 // (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
-export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions };
+export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions, WorldBounds, BoundaryOptions };
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one

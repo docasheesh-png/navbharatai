@@ -77,7 +77,7 @@ import { audio } from './fx/audio';
 import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 // NavBharatAI's recorded sounds when this game was seeded with them; otherwise a stand-in that keeps built-in voices.
 import { loadSoundLibrary } from './fx/soundLibrary';
-import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
+import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions, type HudElementSpec } from './ui/touchControls';
 import type { MinimapOptions } from './ui/worldMap';
 // Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
 // (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
@@ -1079,6 +1079,15 @@ export class Game {
   get minimapOption(): boolean | undefined { const m = this.options.minimap; return m === undefined ? undefined : m !== false; }
   /** The minimap's look as the game asked for it (corner, size, names, range, fullMap); {} for the defaults. */
   get minimapStyle(): MinimapOptions { const m = this.options.minimap; return m && typeof m === 'object' ? m : {}; }
+  /**
+   * Put a HUD element in the player's layout editor (Settings → Edit controls), saved with the controls. Without touch
+   * controls (a desktop with no touch screen) nothing edits it: apply is called once with size 1, and the element keeps its spot.
+   */
+  registerHud(id: string, spec: HudElementSpec): () => void {
+    if (this.touch) return this.touch.addHudElement(id, spec);
+    try { spec.apply({ size: 1 }); } catch { /* best-effort */ }
+    return () => undefined;
+  }
 
   /**
    * What the minimap draws: where the player (or the vehicle it drives) is, which way the camera looks (screen up),
@@ -1682,7 +1691,19 @@ export function Minimap({ game, onOpen }: { game: Game; onOpen?: () => void }) {
   const [distance, setDistance] = useState('');
   const off = game.minimapOption === false || prefs.showMinimap === false;
   const style = minimapStyle(off ? {} : game.minimapStyle, hasWorld);
-  const { size, range, names } = style;
+  // The player's own place and size for it (Settings → Edit controls — the same editor and saved layout as the buttons).
+  const [place, setPlace] = useState<{ x?: number; y?: number; size: number }>({ size: 1 });
+  const box = useRef<HTMLDivElement>(null);
+  const size = Math.round(Math.max(64, Math.min(320, style.size * place.size)));
+  const { range, names } = style;
+  useEffect(() => {
+    if (off || !visible) return;
+    return game.registerHud('minimap', {
+      label: t('minimap'), width: style.size, height: style.size,
+      home: () => { const r = box.current?.getBoundingClientRect(); return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.width / 2 } : null; },
+      apply: (p) => setPlace((was) => (was.x === p.x && was.y === p.y && was.size === p.size ? was : p)),
+    });
+  }, [game, off, visible, style.size]);
   const tappable = !off && style.fullMap && !!onOpen;
   useEffect(() => {
     if (off) return;
@@ -1739,9 +1760,13 @@ export function Minimap({ game, onOpen }: { game: Game; onOpen?: () => void }) {
   if (off || !visible) return null;
   const px = Math.round(size * pixelRatio());
   const side = style.corner === 'right' ? { right: 'max(12px, env(safe-area-inset-right))' } : { left: 'max(12px, env(safe-area-inset-left))' };
+  // Placed by the player: its centre where they put it; otherwise the game's corner.
+  const where = place.x !== undefined && place.y !== undefined
+    ? { left: place.x * 100 + '%', top: place.y * 100 + '%', transform: 'translate(-50%, ' + (-size / 2) + 'px)' }
+    : { ...side, top: 'max(56px, calc(env(safe-area-inset-top) + 48px))' };
   const picture = <canvas ref={canvas} width={px} height={px} aria-label="Minimap" role="img" style={{ display: 'block', width: size, height: size }} />;
   return (
-    <div style={{ position: 'absolute', ...side, top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', width: size, pointerEvents: 'none', zIndex: 5 }}>
+    <div ref={box} style={{ position: 'absolute', ...where, width: size, pointerEvents: 'none', zIndex: 5 }}>
       {tappable ? (
         <button type="button" aria-label={t('openMap')} title={t('openMap') + ' (M)'} onClick={onOpen}
           style={{ display: 'block', width: size, height: size, padding: 0, margin: 0, border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer', pointerEvents: 'auto', touchAction: 'manipulation' }}>
@@ -2706,6 +2731,19 @@ export interface TouchJoystickOptions {
 }
 
 /** The layout a player saved in Settings → Edit controls. Each field is optional: a missing one keeps the default. */
+/** A HUD element the layout editor can move and resize (TouchControls.addHudElement). */
+export interface HudElementSpec {
+  /** The name shown on its box in the editor. */
+  label: string;
+  /** Its size in pixels at size 1. */
+  width: number;
+  height: number;
+  /** Where its centre is now, in page pixels (getBoundingClientRect), when the layout has not placed it. */
+  home: () => { x: number; y: number } | null;
+  /** Called with where to draw it: x and y (0..1 of the screen) when placed, and always its size (1 = its own). */
+  apply: (placement: { x?: number; y?: number; size: number }) => void;
+}
+
 export interface SavedTouchLayout {
   controls: Record<string, { x?: number; y?: number; size?: number }>;
   opacity?: number;
@@ -2998,6 +3036,9 @@ const CSS = [
   '.nbg-tc.editing .nbg-tc-move{pointer-events:none;outline:2px dashed rgba(255,255,255,0.25);outline-offset:-2px}',
   '.nbg-tc.editing .nbg-tc-base{pointer-events:auto;opacity:1;cursor:move}',
   '.nbg-tc.editing .nbg-tc-btn{cursor:move}',
+  // A HUD element's box (the minimap): only while editing, dragged and pinched like a control.
+  '.nbg-tc-hud{display:none}',
+  '.nbg-tc.editing .nbg-tc-hud{display:flex;align-items:center;justify-content:center;border-radius:999px;border:2px dashed rgba(255,255,255,0.8);background:rgba(0,0,0,0.35);color:#fff;font:600 13px system-ui,sans-serif;pointer-events:auto;cursor:move;touch-action:none}',
   '.nbg-tc.editing .nbg-tc-sel{outline:3px solid #fde047;outline-offset:3px}',
   '.nbg-tc-edit{position:absolute;left:50%;top:max(12px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:8px 12px;border-radius:12px;background:rgba(0,0,0,0.78);color:#fff;font:600 14px/1.2 system-ui,sans-serif;pointer-events:auto;width:max-content;max-width:calc(100% - 24px);z-index:1}',
   '.nbg-tc-edit button{min-height:40px;padding:8px 12px;border-radius:8px;border:2px solid rgba(255,255,255,0.55);background:rgba(255,255,255,0.14);color:#fff;font:inherit;cursor:pointer}',
@@ -3022,6 +3063,12 @@ export class TouchControls {
   private readonly buttonsDown = new Map<number, { action: string; el: HTMLElement }>();
   /** Each movable control by its layout id: an action button, 'joystick' (its base), 'steer', 'pedals'. */
   private readonly controls = new Map<string, HTMLElement>();
+  /**
+   * HUD ELEMENTS IN THE SAME EDITOR (master audit 2026-11-25, Part H — "the touch controls can be moved and resized, the map
+   * cannot"). The minimap (and any HUD element) registers here by id; the editor shows a proxy box for it that is dragged,
+   * pinched, nudged, reset and saved exactly like a button, in the SAME saved layout, and the real element follows.
+   */
+  private readonly hud = new Map<string, { proxy: HTMLElement; spec: HudElementSpec }>();
   /** The action buttons in the order they were drawn, with the grid they live in when they are not placed. */
   private readonly homes: Array<{ id: string; el: HTMLElement; home: HTMLElement }> = [];
   private readonly placed = new Set<HTMLElement>();
@@ -3284,6 +3331,8 @@ export class TouchControls {
 
   /** Half the width and height, in pixels, of a control drawn at a size multiplier. */
   private halfPx(id: string, size: number): { hw: number; hh: number } {
+    const extra = this.hud.get(id);
+    if (extra) return { hw: (extra.spec.width * size) / 2, hh: (extra.spec.height * size) / 2 };
     if (id === 'steer' || id === 'pedals') {
       const el = id === 'steer' ? this.steer : this.pedals;
       const w = el.offsetWidth || PAD * 2 + BTN_GAP;
@@ -3300,6 +3349,14 @@ export class TouchControls {
     const right = Math.max(16, safe.right);
     const bottom = Math.max(16, safe.bottom);
     const stickRight = this.options.joystick?.side === 'right';
+    const extra = this.hud.get(id);
+    if (extra) {
+      // Where the element really is (its own default corner), in the editor's own coordinates.
+      const at = (() => { try { return extra.spec.home(); } catch { return null; } })();
+      const scr = this.screen();
+      const { hw, hh } = this.halfPx(id, 1);
+      return at ? { x: at.x - scr.left, y: at.y - scr.top } : { x: left + hw, y: Math.max(16, safe.top) + 48 + hh };
+    }
     if (id === JOYSTICK_CONTROL) {
       const R = this.halfPx(id, L.controls[id]?.size ?? 1).hw;
       return { x: stickRight ? w - right - R : left + R, y: h - bottom - R };
@@ -3332,7 +3389,8 @@ export class TouchControls {
     this.boxesNow = [];
     if (scr.w > 0 && scr.h > 0) {
       const safe = this.safeInset();
-      const ids = this.current === 'drive' ? ['steer', 'pedals'] : [JOYSTICK_CONTROL, ...this.homes.map((b) => b.id)];
+      // The HUD elements (the minimap) take part in BOTH layouts, so nothing is ever put on top of them.
+      const ids = [...(this.current === 'drive' ? ['steer', 'pedals'] : [JOYSTICK_CONTROL, ...this.homes.map((b) => b.id)]), ...this.hud.keys()];
       const boxes = ids.map((id) => {
         const p = L.controls[id];
         const { hw, hh } = this.halfPx(id, p ? p.size : 1);
@@ -3421,6 +3479,48 @@ export class TouchControls {
     // A joystick placed high up needs its half of the screen to reach that high.
     this.moveZone.style.height = isPlaced(j) ? '100%' : '';
     if (this.stickId === -1) this.restStick();
+    this.renderHud(scr, inset);
+  }
+
+  /** The HUD elements: the editor's proxy box where the layout puts it, and the real element told where to draw. */
+  private renderHud(scr: { w: number; h: number }, inset: ScreenInset): void {
+    for (const [id, { proxy, spec }] of this.hud) {
+      const p = this.drawn.controls[id];
+      const size = p ? p.size : 1;
+      const box = this.boxesNow.find((b) => b.id === id);
+      if (box && scr.w > 0 && scr.h > 0) this.place(proxy, id, { x: box.x / scr.w, y: box.y / scr.h, size: 1 }, scr, inset);
+      proxy.style.width = Math.round(spec.width * size) + 'px';
+      proxy.style.height = Math.round(spec.height * size) + 'px';
+      try { spec.apply(isPlaced(p) ? { x: p.x, y: p.y, size } : { size }); } catch { /* a HUD element's own drawing never breaks the controls */ }
+    }
+  }
+
+  /**
+   * Put a HUD element (the minimap, a compass, a health bar…) in this editor: it is moved, resized, reset and saved with the
+   * controls, in the same layout. Returns the way to take it out again.
+   */
+  addHudElement(id: string, spec: HudElementSpec): () => void {
+    if (!id || this.controls.has(id) && !this.hud.has(id)) return () => undefined;
+    { const old = this.hud.get(id)?.proxy; old?.parentElement?.removeChild(old); }
+    const proxy = document.createElement('div');
+    proxy.className = 'nbg-tc-hud';
+    proxy.textContent = spec.label;
+    proxy.setAttribute('aria-label', spec.label);
+    proxy.setAttribute('tabindex', '0'); // hidden (display:none) except while editing, so Tab reaches it only then
+    proxy.setAttribute('role', 'button');
+    this.on(proxy, 'pointerdown', (e) => { if (this.editor) this.editDown(e, id, proxy); });
+    proxy.addEventListener('focus', () => { if (this.editor) this.select(id); });
+    this.root.appendChild(proxy);
+    this.controls.set(id, proxy);
+    this.hud.set(id, { proxy, spec });
+    this.applyLayout();
+    return () => {
+      if (this.hud.get(id)?.proxy !== proxy) return;
+      this.hud.delete(id);
+      this.controls.delete(id);
+      proxy.parentElement?.removeChild(proxy);
+      if (this.selected === id) this.select(null);
+    };
   }
 
   private place(el: HTMLElement, id: string, p: { x: number; y: number; size: number }, scr: { w: number; h: number }, inset: ScreenInset): void {

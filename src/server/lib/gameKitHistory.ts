@@ -489,7 +489,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/fx/particles.ts": [
     "959d5a2a5c2de08c15db1b0c23e83da423ab4aa1672c1a8a01bff1b26883d436",
-    "4358d7fc329c00b3e64da2944da3cf936a3f92263ff6ddc565b714d5dcbdaea7"
+    "4358d7fc329c00b3e64da2944da3cf936a3f92263ff6ddc565b714d5dcbdaea7",
+    "6ebd7d1611d5e84686be826823a2adf13bcfb054aaef8f19cfdfe4c384ab1331"
   ],
   "src/game/fx/soundLibrary.ts": [
     "fc0a6dedfcfce13aa3ef7f16edd54776290ad253c4237643400d5396d0c8e436"

@@ -251,6 +251,11 @@ export interface GameContext {
    */
   aim: (options?: { holder?: THREE.Object3D | null; range?: number }) => AimResult;
   /**
+   * Run fn(dt) every game step, after update() — paused and frozen with the game. Returns the way to stop it. The kit's
+   * own systems tick through it (Entities, systems/entities.ts), so a system cannot be forgotten in update().
+   */
+  onStep: (fn: (delta: number) => void) => () => void;
+  /**
    * The default player body (createHumanoid), or null when the game brought its own or is first-person. It already
    * plays the action poses for the buttons (see actionPoses); call ctx.hero.act('kick') yourself for anything else
    * the game does — a throw, a reach, a flinch.
@@ -617,6 +622,8 @@ export class Game {
    * one playtest) and the car never moved. Whatever a game stores here now survives, and the members are
    * live getters, so nothing on it can go stale either.
    */
+  /** What ctx.onStep registered, run each step after the game's update. */
+  private readonly stepHooks = new Set<(delta: number) => void>();
   private ctxObject: GameContext | null = null;
   get context(): GameContext {
     if (this.ctxObject) return this.ctxObject;
@@ -639,6 +646,7 @@ export class Game {
           topDownFacing: game.options.camera === 'top-down' ? (game.hero?.root.rotation.y ?? game.player.object.rotation.y) : null,
         });
       },
+      onStep: (fn) => { game.stepHooks.add(fn); return () => { game.stepHooks.delete(fn); }; },
       get hero() { return game.hero; },
       get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
       splitScreen: (camera) => { this.secondCamera = camera; },
@@ -793,6 +801,10 @@ export class Game {
       // Power-ups count down in game time only: frozen by a hit-stop, a conversation or the pause menu (core/powerups.ts).
       powerUps.update(delta);
       this.asGame(() => this.options.update?.(this.context, delta));
+      // ctx.onStep: the kit's systems (and the game's own) tick here. One that throws is dropped and said, never a dead loop.
+      for (const fn of [...this.stepHooks]) {
+        try { this.asGame(() => fn(delta)); } catch (error) { this.stepHooks.delete(fn); console.error('[game] a step hook failed and was stopped', error); }
+      }
       this.poseActionButtons();
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
@@ -1146,6 +1158,7 @@ export class Game {
    */
   dispose(): void {
     if (this.disposed) return;
+    this.stepHooks.clear();
     this.disposed = true;
     // Partial construction is valid here; one broken cleanup must not strand later resources.
     const safe = (release: () => void) => { try { release(); } catch { /* teardown must never throw */ } };

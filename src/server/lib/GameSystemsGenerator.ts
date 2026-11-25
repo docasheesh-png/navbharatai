@@ -26,6 +26,8 @@
 //
 // PURE builder → the caller writes the files.
 
+import { GAME_ENTITIES, GAME_ENTITIES_PATH } from './GameEntitiesGenerator';
+
 export interface GameSystemsResult {
   files: Record<string, string>;
   dependencies: Array<{ name: string; version: string }>;
@@ -1501,9 +1503,11 @@ const FILES: Record<string, string> = {
   'src/game/systems/weapon.ts': WEAPON,
   'src/game/systems/grenade.ts': GRENADE,
   'src/game/systems/aimassist.ts': AIMASSIST,
+  // Every character (enemy, police, villager) put in the game by one assembler — spawned, verified, ticked, kept apart (audit B–D).
+  [GAME_ENTITIES_PATH]: GAME_ENTITIES,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist', 'entities'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -1527,6 +1531,10 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     // ai.ts follows paths around walls (nav.ts).
     if (files['src/game/systems/ai.ts']) files['src/game/systems/nav.ts'] = FILES['src/game/systems/nav.ts'];
     if (files['src/game/systems/aimassist.ts']) files['src/game/systems/grenade.ts'] = FILES['src/game/systems/grenade.ts'];
+    // entities.ts assembles health (combat), decisions (ai, which walks nav) and bullet targets (projectile).
+    if (files[GAME_ENTITIES_PATH]) {
+      for (const m of ['combat', 'combatRules', 'ai', 'nav', 'projectile']) files[`src/game/systems/${m}.ts`] = FILES[`src/game/systems/${m}.ts`];
+    }
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -1535,6 +1543,14 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     dependencies: [], // pure arithmetic; the spawner reuses the 3D layer's seeded RNG
     instructions:
       `Added gameplay systems (${Object.keys(files).length} files under src/game/systems).\n` +
+      (files[GAME_ENTITIES_PATH]
+        ? 'EVERY CHARACTER (enemy, police, villager, guard) GOES IN WITH Entities (systems/entities.ts) — never a hand-wired body, ' +
+          'AI and health: const npcs = new Entities(ctx, { playerHealth }); npcs.spawn({ x, z, kind: "enemy", ai: "ranged" }) ' +
+          '(null + ENTITY_SPAWN_FAILED when it could not be verified). It ticks itself (ctx.onStep): the AI chases, the body walks ' +
+          'and faces, nobody walks through anybody. Bullets: npcs.applyHits(bullets.update(dt, npcs.targets())). A punch: ' +
+          'npcs.melee(ctx.player.object.position, facingYaw, 25). goTo(point, onArrive) sends one somewhere (ENTITY_ARRIVED). ' +
+          'Death falls, emits ENTITY_DIED, and clears the body away.\n'
+        : '') +
       '```ts\n' +
       'const hp = new Health({ max: 100, invulnerable: 0.6, damagedEvent: "PLAYER_DAMAGED", diedEvent: "PLAYER_DIED" });\n' +
       'const swing = new Cooldown(1.2);\n' +

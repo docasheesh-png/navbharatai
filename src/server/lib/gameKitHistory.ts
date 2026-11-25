@@ -104,7 +104,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "f039244202b5aeae8aed796cf8214b96c21bd8b79922b07d45b1474e698b74fb",
     "af607d6b3def017de39465aa5958d22887123e101a8e94a31a2ee76f3e8e2df4",
     "5183ee30ae01a24c2583f4d811c468ccd6c79578b65ebefceafcc6d558ebe466",
-    "75568da20a5949955b79d1715a14e95a2fcb5e93e23563f8a2607d20ae82bef2"
+    "75568da20a5949955b79d1715a14e95a2fcb5e93e23563f8a2607d20ae82bef2",
+    "46cda7dbc9c9c740df4f2673d3ea1fda2919be245b44cb66d15d0d199a0d8c73"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -593,6 +594,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/systems/director.ts": [
     "c92437c33c810b3a2064440eaa25a5feb8e4a0465b40e0fd475e94e1054ca31e"
+  ],
+  "src/game/systems/entities.ts": [
+    "19cd0e366abe7a4880882d7fc7bd321aaeb3723a106322568c615f8d5fab1a3b",
+    "b57f24ac1570df3215649053178132943f0db566574bea645e2a0e8f5f6b772e"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"

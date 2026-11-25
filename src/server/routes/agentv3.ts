@@ -34,7 +34,7 @@ import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction, weakForceContinueDecision } from '../AgentV3/weakBuildPreflight';
-import { toSafeClientMessage } from '../lib/httpError';
+import { toSafeClientMessage, sendSafeError } from '../lib/httpError';
 import { clarityGateEnabled, clarityDecision, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
@@ -4690,7 +4690,7 @@ export function registerAgentV3Routes(app: Express): void {
         }),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not load your conversations.', err, 'agentv3 conversations list');
     }
   });
 
@@ -4746,7 +4746,7 @@ export function registerAgentV3Routes(app: Express): void {
       // report and adminDetail stay on the server record for admin views.
       res.json({ conversation: userConversationView(rec), workspaceState });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not open this conversation.', err, 'agentv3 conversation read');
     }
   });
 
@@ -4812,7 +4812,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       res.json({ ok: true }); // removed, or already gone — idempotent
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not delete this conversation.', err, 'agentv3 conversation delete');
     }
   });
 
@@ -4853,7 +4853,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       res.json({ ok: true, pinned });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not pin this conversation.', err, 'agentv3 conversation pin');
     }
   });
 
@@ -5030,7 +5030,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       res.json({ ok: true, name: validated.name, repoRenamed, ...(repoNote ? { repoNote } : {}) });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not rename this conversation.', err, 'agentv3 conversation rename');
     }
   });
 
@@ -6023,7 +6023,10 @@ async function noteBuildOutcome(
         ...(planNote ? { planNote } : {}),
       });
     } catch (e) {
-      res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
+      // The message comes from the user's own Render account, so a redacted copy is kept as the detail.
+      // Same shape as before (ok/reason kept for any client that reads them); only the text is made safe.
+      console.error('[HTTP 502] agentv3 render deploy:', e instanceof Error ? e.message : String(e));
+      res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${toSafeClientMessage(e, 'unknown error')}` });
     }
   });
 
@@ -6179,7 +6182,10 @@ async function noteBuildOutcome(
         pushedBranch: target.branch, defaultBranch: repo.defaultBranch || 'main', mode: target.mode,
       });
     } catch (e) {
-      res.status(502).json({ error: `Could not save your app to GitHub: ${e instanceof Error ? e.message : String(e)}` });
+      // The reason comes from the user's own GitHub and helps them fix it, so it stays — redacted (no URLs,
+      // tokens or vendor names); the raw error goes to the server log.
+      console.error('[HTTP 502] agentv3 github save:', e instanceof Error ? e.message : String(e));
+      res.status(502).json({ error: `Could not save your app to GitHub: ${toSafeClientMessage(e, 'unknown error')}` });
     }
   });
 
@@ -7182,7 +7188,7 @@ async function noteBuildOutcome(
         ...(idleServe ? { idleSnapshotUrl: idleServe.url, idleSnapshotNote: SNAPSHOT_IDLE_NOTE, snapshotAt: idleServe.at } : {}),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not check the preview right now.', err, 'agentv3 preview-health');
     }
   });
 
@@ -7362,7 +7368,7 @@ async function noteBuildOutcome(
       // Idempotent: removed just now, or already gone → 200 either way.
       res.json({ ok: true, stopped, truncated, purgedMemory });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not undo that message.', err, 'agentv3 unsend');
     }
   });
 
@@ -7538,7 +7544,7 @@ async function noteBuildOutcome(
         note: flow.note || (flow.merged ? `Merged into ${access.defaultBranch}.` : 'Nothing to merge yet — make an edit first.'),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not ship your app right now.', err, 'agentv3 ship');
     }
   });
 
@@ -7591,7 +7597,7 @@ async function noteBuildOutcome(
         skipped: round.triage.skipped.map((s) => ({ id: s.id, why: s.why })),
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not start the review.', err, 'agentv3 review');
     }
   });
 
@@ -7644,7 +7650,7 @@ async function noteBuildOutcome(
           : 'There was nothing to reply to on that pull request.',
       });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not send your reply to the review.', err, 'agentv3 review reply');
     }
   });
 
@@ -7705,7 +7711,7 @@ async function noteBuildOutcome(
       }
       res.json({ reverted: true, sha: revertSha, base, note: `Reverted the last change on ‘${base}’ — restored to the previous state (a new revert commit, undoable).` });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not restore that version.', err, 'agentv3 revert');
     }
   });
 
@@ -7818,7 +7824,7 @@ async function noteBuildOutcome(
       // result then syncs via the normal conversation reload.
       res.json({ events, seq, gap, running: isBuildRunning(verifiedUid) });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      sendSafeError(res, 500, 'Could not load the live status.', err, 'agentv3 live');
     }
   });
 

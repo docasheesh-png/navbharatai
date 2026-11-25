@@ -296,7 +296,8 @@ export interface AthreeWorld {
   heightAt(x: number, z: number): number;
   /**
    * Level a rectangle of ground for something flat (a city, a base): one height inside, easing back into the land over the
-   * margin. Call it BEFORE the first map.update(), so the terrain is drawn level. Returns the pad's height.
+   * margin. Call it BEFORE the first map.update(), so the terrain is drawn level. Returns the pad's height. A value that is
+   * not a finite number is refused (said in the console, nothing laid): the ground there is returned, or NaN without a place.
    */
   levelGround(x: number, z: number, halfX: number, halfZ: number, margin?: number, height?: number): number;
   /** True on levelled ground: nothing grows there. */
@@ -608,7 +609,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return null;
   }
   function setLand(x: number, z: number, radius: number, land: LandBiome, options?: { joined?: boolean }): void {
-    if (!Number.isFinite(x) || !Number.isFinite(z) || !(radius > 0)) return;
+    if (!finiteEdit('setLand', [x, z, radius]) || !(radius > 0)) return;
     const r = Math.min(4000, Math.max(60, radius));
     const joined = options?.joined === true;
     lands.push(joined ? { x, z, r, land, joined } : { x, z, r, land });
@@ -630,7 +631,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const ROAD_CELL = 100, ROAD_SHOULDER = 30;
   function addRoad(points: ReadonlyArray<{ x: number; z: number }>, width = 9): Array<{ x: number; y: number; z: number }> {
     const src = (points || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.z));
-    if (src.length < 2) return [];
+    if (src.length < 2 || !finiteEdit('addRoad (width)', [width])) return [];
     const line: Array<{ x: number; z: number }> = [];
     for (let i = 0; i < src.length - 1; i++) {
       const a = src[i], b = src[i + 1], len = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(len / 10));
@@ -703,7 +704,18 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     return t;
   }
+  // 🧱 ONE GROUND, NEVER A HOLE (admin 2026-11-22, failedbr #2499: "maps me sabhi city/village ko ek plane me na bana kar
+  // vertical layers me banaya ja raha hai"). heightAt adds every pad that can reach a point, and a pad whose place is not a
+  // number is filed under "everywhere" — so ONE pad with a NaN in it made heightAt NaN at EVERY point of the map: no terrain
+  // was drawn, the player fell into the sea, and every city already planned hung in the sky at its own height, a stack of
+  // flat layers. A ground edit that is not finite is refused here, where it enters, and said; it never reaches heightAt.
+  function finiteEdit(what: string, values: ReadonlyArray<unknown>): boolean {
+    if (values.every((v) => typeof v === 'number' && Number.isFinite(v))) return true;
+    console.error('[map] ' + what + ' was given a value that is not a number (' + values.map((v) => String(v)).join(', ') + '); it was not laid, so the ground stays whole.');
+    return false;
+  }
   function levelGround(x: number, z: number, halfX: number, halfZ: number, margin = 40, height?: number): number {
+    if (!finiteEdit('levelGround', [x, z, halfX, halfZ, margin])) return Number.isFinite(x) && Number.isFinite(z) ? heightAt(x, z) : Number.NaN;
     let sum = 0, n = 0;
     for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) { sum += naturalHeightAt(x + (i / 2) * halfX, z + (j / 2) * halfZ); n++; }
     // A given height joins this pad to a neighbour at the same level (a city that grows by another block of streets).

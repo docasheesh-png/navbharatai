@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { openedTranscript } from './chatHistory';
-import { CHAT_CONTEXT_LIMITATION, compactConversationForModel, historyForModelRequest } from './chatContextWindow';
+import { CHAT_CONTEXT_LIMITATION, CHAT_MODEL_WINDOW_CHARS, compactConversationForModel, historyForModelRequest } from './chatContextWindow';
 import { GUEST_DAILY_DEFAULT, SIGNED_IN_DAILY_DEFAULT } from '../server/lib/unifiedWallet/policy';
 
 function thread(count: number, early = 'Remember that my city is Pune.') {
@@ -18,11 +18,53 @@ function thread(count: number, early = 'Remember that my city is Pune.') {
 }
 
 describe('long conversation window', () => {
-  it('keeps early facts and the latest turn from 100 messages without rewriting the stored transcript', () => {
-    const messages = thread(100);
+  // 🔴 THE REPORT ITSELF (admin 2026-11-25): "aisa na ho kuch 10-15 message ke baad starting me text
+  // bhul jaye". These four cases are the contract that answers it. The first two FAIL on the old
+  // 10-turn design: at 15 messages it replaced the whole middle with 180-character user-only bullets.
+  it('forgets nothing at all after 15 messages — the exact case the user reported', () => {
+    const messages = thread(13);
+    const compact = compactConversationForModel(messages);
+    expect(messages.length).toBe(16);
+    expect(compact.shortened).toBe(false);
+    expect(compact.turns).toHaveLength(messages.length);
+    expect(compact.turns[0].content).toBe('Remember that my city is Pune.');
+    expect(compact.turns.map(turn => turn.content).join('\n')).not.toContain(CHAT_CONTEXT_LIMITATION);
+    // Every single turn survives verbatim, the assistant's included.
+    expect(compact.turns.map(turn => turn.content)).toEqual(
+      messages.map(message => message.text),
+    );
+  });
+
+  it('keeps a 40-message conversation whole, both sides of it', () => {
+    const compact = compactConversationForModel(thread(38));
+    expect(compact.originalCount).toBe(41);
+    expect(compact.shortened).toBe(false);
+    expect(compact.turns.filter(turn => turn.role === 'assistant')).toHaveLength(20);
+    expect(compact.turns[0].content).toContain('Pune');
+  });
+
+  it('shortens the middle rather than erasing it, and keeps the assistant there too', () => {
+    const compact = compactConversationForModel(thread(400));
+    expect(compact.shortened).toBe(true);
+    const middle = compact.turns.slice(7, -30);
+    expect(middle.length).toBeGreaterThan(10);
+    expect(middle.some(turn => turn.role === 'assistant')).toBe(true);
+    expect(compact.turns.reduce((total, turn) => total + turn.content.length, 0))
+      .toBeLessThanOrEqual(CHAT_MODEL_WINDOW_CHARS);
+  });
+
+  it('honours a smaller budget the free chain may set, and still keeps the opening', () => {
+    const compact = compactConversationForModel(thread(200), { budgetChars: 24_000 });
+    expect(compact.turns[0].content).toContain('Pune');
+    expect(compact.turns.at(-1)?.content).toContain('What city did I name first?');
+    expect(compact.turns.reduce((total, turn) => total + turn.content.length, 0)).toBeLessThanOrEqual(24_000);
+  });
+
+  it('keeps early facts and the latest turn from a very long thread without rewriting the stored transcript', () => {
+    const messages = thread(400);
     const before = JSON.stringify(messages);
     const compact = compactConversationForModel(messages);
-    expect(messages.length).toBeGreaterThan(100);
+    expect(messages.length).toBeGreaterThan(400);
     expect(JSON.stringify(messages)).toBe(before);
     expect(compact.shortened).toBe(true);
     expect(compact.originalCount).toBe(messages.length);
@@ -33,11 +75,13 @@ describe('long conversation window', () => {
   });
 
   it('keeps that early fact when the same window is prepared again', () => {
-    const payload = historyForModelRequest(thread(120));
+    const payload = historyForModelRequest(thread(400));
     const again = historyForModelRequest(payload);
     expect(again.some(row => row.text.includes('Pune'))).toBe(true);
     expect(again.at(-1)?.text).toContain('What city did I name first?');
     expect(again.filter(row => row.text.includes(CHAT_CONTEXT_LIMITATION))).toHaveLength(1);
+    // Stable over its own output: preparing a prepared window changes nothing.
+    expect(again).toEqual(payload);
   });
 
   it('reloads one owner transcript and still shows the early fact', () => {
@@ -56,7 +100,7 @@ describe('long conversation window', () => {
 
   it('keeps the start of a very long early message and states the summary limit', () => {
     const huge = `PINNED-FACT-PUNE ${'x'.repeat(20_000)}`;
-    const compact = compactConversationForModel(thread(100, huge));
+    const compact = compactConversationForModel(thread(400, huge));
     expect(compact.turns[0].content.startsWith('PINNED-FACT-PUNE')).toBe(true);
     expect(compact.turns[0].content.length).toBeLessThan(huge.length);
     expect(compact.turns.map(turn => turn.content).join('\n')).toContain('can omit details');
@@ -64,8 +108,8 @@ describe('long conversation window', () => {
 
   it('does not charge another answer credit or change the daily allowances', () => {
     const credits = { used: 1 };
-    compactConversationForModel(thread(100));
-    historyForModelRequest(thread(100));
+    compactConversationForModel(thread(400));
+    historyForModelRequest(thread(400));
     expect(credits.used).toBe(1);
     expect(SIGNED_IN_DAILY_DEFAULT).toBe(50);
     expect(GUEST_DAILY_DEFAULT).toBe(10);

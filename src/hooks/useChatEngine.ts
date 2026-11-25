@@ -6,12 +6,10 @@ import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnsw
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
 // PAT/repo capture, attachment encoding, streaming reply, build-mode code extraction) and handleSend
-// (the 'nbi_chat' wrapper), plus their private helpers callGeminiFrontend, runFrontendPipeline,
-// readFileRaw, downscaleImage, filesToBase64. Code moved BYTE-IDENTICAL — pure relocation, zero logic
+// (the 'nbi_chat' wrapper), plus their private helpers readFileRaw, downscaleImage, filesToBase64. Code moved BYTE-IDENTICAL — pure relocation, zero logic
 // change. Everything the engine reads from the rest of the app is injected via deps, and App.tsx
 // destructures the SAME handleSendForTab/handleSend identifiers back, so every call site is unchanged.
 
-import axios from 'axios';
 import { useRef, useEffect } from 'react';
 import { PendingChatQuestions } from '../lib/pendingChatQuestions';
 import type { Dispatch, SetStateAction } from 'react';
@@ -23,7 +21,7 @@ import { previewAttachment } from '../lib/attachmentPreview';
 import { trackEvent } from '../lib/analytics';
 import { auth } from '../lib/firebase';
 import { authHeader } from '../lib/authHeaders';
-import { GUEST_LIMIT_CODE, guestLimitReached, openSignIn } from '../lib/guestId';
+import { guestLimitReached } from '../lib/guestId';
 import { rememberGithubOwner } from '../lib/githubTokenStore';
 import { parseVialTeaching } from '../lib/neonatalDosing';
 import { loadVials, saveVial } from '../lib/vialMemory';
@@ -89,7 +87,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
   const {
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, githubToken, files,
+    hasGeneratedCode, generatedCode, githubToken,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsAppBuilt,
@@ -122,147 +120,27 @@ export function useChatEngine(deps: ChatEngineDeps) {
     }));
   };
 
-  const callGeminiFrontend = async (
-    turn: ChatTurnScope,
-    prompt: string, 
-    enableSearch: boolean = false, 
-    history: Message[] = [], 
-    intent: string = 'general', 
-    target?: string,
-    agent: string = 'navbharatai',
-    mode: string = 'chat',
-    memorySummary?: string,
-    answerRequestId?: string
-  ): Promise<string> => {
-    let endpoint = '/api/chat/navbharatai';
-
-    const controller = new AbortController();
-    assertActiveTurn(turn);
-    turn.controller = controller;
-    const timeoutId = setTimeout(() => controller.abort(), CHAT_CLIENT_DEADLINE_MS);
-
-    try {
-      const headers = { ...(await authHeader()) };
-      assertActiveTurn(turn);
-      notifyFreeAnswerChanged();
-      const response = await axios.post(endpoint, {
-        message: prompt,
-        preferredModel: selectedModel === 'auto' ? 'gemini' : selectedModel,
-        history: historyForModelRequest(history),
-        replyLanguage: resolveChatReplyLanguage(prompt, history) ?? chatReplyLanguageFromPicker(preferredLanguage),
-        mode: mode,
-        intent: intent,
-        target: target,
-        files: files,
-        agent: agent,
-        ...(memorySummary ? { memorySummary } : {})
-      }, {
-        signal: controller.signal,
-        headers: {
-          // The account token (or, signed out, this device's guest id): the server counts a guest's daily
-          // messages and must recognise a signed-in user as one. This route used to receive neither.
-          ...headers,
-          ...(answerRequestId ? { 'x-nb-answer-request': answerRequestId } : {}),
-          'x-gemini-key': keys.gemini,
-          'x-groq-key': keys.groq,
-          'x-openai-key': keys.openai,
-          'x-claude-key': keys.claude,
-          'x-deepseek-key': keys.deepseek,
-          'x-openrouter-key': keys.openrouter,
-          ...(user ? {
-            'x-user-id': user.uid,
-            'x-user-email': user.email || '',
-            'x-user-name': user.displayName || 'NavBharat Client'
-          } : {})
-        }
-      });
-      
-      clearTimeout(timeoutId);
-      assertActiveTurn(turn);
-      if (controller.signal.aborted) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
-      const terminal = gatewayChatFailure(response.data);
-      if (terminal) throw new ChatStreamTerminalError(terminal);
-      if (response.data.stalled === true) turn.incomplete = true;
-      return response.data.reply;
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      assertActiveTurn(turn);
-      console.error("AI REQUEST FAILURE", error);
-
-      if (error instanceof ChatStreamTerminalError) throw error;
-      const terminal = gatewayChatFailure(error.response?.data);
-      if (terminal) throw new ChatStreamTerminalError(terminal);
-      if (axios.isCancel(error) || !error.response || error.response.status >= 500) {
-        // An aborted request may already have generated/billed. Never create a second logical request.
-        throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({}).text, partial: false });
-      }
-      
-      let errMsg = "AI request failed.";
-      // A signed-out visitor who has used today's free messages: open sign-in and say so plainly.
-      if (error.response?.status === 403 && error.response?.data?.code === GUEST_LIMIT_CODE) {
-        openSignIn();
-        const notice = String(error.response.data.error || 'Please sign in to keep chatting.');
-        setMessages(prev => ownsTurn(turn) && !turn.stopped ? [...prev, { id: `guest-limit-${answerRequestId}`, text: notice, sender: 'ai', timestamp: new Date() }] : prev);
-        throw Object.assign(new Error(notice), { guestLimit: true });
-      }
-
-      const axCode = error.response?.data?.code; const axStatus = error.response?.status;
-      if ((typeof axCode === 'string' && USER_FACING_CHAT_CODES[axCode]) || axStatus === 402 || axStatus === 429) {
-        const notice = chatFailureNotice({ status: axStatus, code: axCode, serverText: error.response?.data?.reply ?? error.response?.data?.error });
-        throw new ChatStreamTerminalError({ code: typeof axCode === 'string' ? axCode : notice.reason, message: notice.text, partial: false });
-      }
-      if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
-      else if (error.response?.status === 401) errMsg = "API key invalid or expired. Go to Settings → Secrets & API Keys to update your key.";
-      else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
-      else if (error.response?.status === 403) errMsg = "AI permission/authentication failure detected.";
-      else if (error.message.includes('failed to fetch')) errMsg = "Frontend could not reach backend service.";
-      else if (error.message.includes('timeout')) errMsg = "NavBharatAI is busy right now. Please try again.";
-      else errMsg = scrubVendorBrands(String(error.response?.data?.error || error.message || "Application runtime error detected."));
-
-      // A 402 used to open the ₹100 Vishwakarma entry-pass modal. That pass is deleted, and no server
-      // route ever sent the `requirePass` flag this also watched for, so the honest response to a 402
-      // here is the error message itself rather than a purchase prompt for something that is gone.
-      throw new Error(errMsg);
-    }
-  };
-
-  const runFrontendPipeline = async (
-    turn: ChatTurnScope,
-    message: string, 
-    enableSearch: boolean = false, 
-    history: Message[] = [], 
-    intent: string = 'general', 
-    target?: string,
-    agent: string = 'navbharatai',
-    mode: string = 'chat',
-    answerRequestId?: string
-  ): Promise<{ reply: string, model: string }> => {
-    if (intent === 'security') {
-        addLog('Security Auditor: Analyzing project architecture...', 'info');
-    } else if (intent === 'github') {
-        addLog('GitHub Core: Synchronizing repository data...', 'info');
-    } else {
-        addLog(enableSearch ? 'Accessing live knowledge banks...' : 'Generating your solution...', 'info');
-    }
-    
-    // The user's message goes to the server EXACTLY as typed. This block used to wrap it in bracketed
-    // instruction tags ("[Follow-up. No greeting needed. Respond in same language as user.]", "[FIX MODE]",
-    // "[COMPONENT FOCUS]" …). A model treats text inside the user turn as part of the conversation, so those
-    // tags were quoted back into free-chat replies (admin 2026-10-17: the Follow-up line appeared in the answer).
-    // The server already receives `intent` and `history` as fields and owns the system prompt, so nothing was
-    // gained by the tags — and no instruction text may ride inside a user message, ever.
-    // 7.1 — Project Memory: the session summary travels as its own field (the server reads `memorySummary`),
-    // not as a "[SESSION MEMORY]" block pasted in front of the message — same leak class as the tags above.
-    const activeSession = sessions.find(s => s.id === currentSessionId);
-
-    // Switch to a single high-speed call for near-instant response
-    const response = await callGeminiFrontend(turn, message, enableSearch || (intent === 'security'), history, intent, target, agent, mode, activeSession?.memorySummary, answerRequestId);
-    
-    return { 
-      reply: response, 
-      model: intent === 'security' ? 'navBharat Security Auditor' : (enableSearch ? 'Navbharat (Live Search)' : 'Navbharat (Fast)') 
-    };
-  };
+  // 🔴 THE TWO HELPERS THAT USED TO SIT HERE ARE GONE, AND THAT IS THE SPEED FIX (admin 2026-11-25,
+  // verbatim: "navbharatai (ai chat) me response bahut [slow] hai … response jitna ho sake fast aye").
+  //
+  // `runFrontendPipeline` → `callGeminiFrontend` was a single BLOCKING `axios.post` to
+  // `/api/chat/navbharatai` with no `stream` field, and the comment above it read "Switch to a single
+  // high-speed call for near-instant response". That premise was backwards: one blocking call has the
+  // WORST time to first word there is. Nothing reached the screen until the model had finished the
+  // entire answer, so a 20-second reply was 20 seconds of empty screen — and the free chat took that
+  // path on EVERY message, because `isGeminiSovereign` was true for the NBI tab whenever there were no
+  // attachments. The server's real token stream (`aiRouter.routeStream`, SSE) and this hook's own
+  // consumer of it existed the whole time and were reachable only as an ERROR fallback.
+  //
+  // Worse, on a grounded question (prices, scores, "aaj") the route spends up to ten seconds on a live
+  // web lookup before the model speaks. The streaming branch opens the stream FIRST and says what it is
+  // doing — chat.ts says so in its own comment — and that status frame can only arrive on a request
+  // that asked for a stream. The blocking path turned a narrated ten seconds into a silent one.
+  //
+  // It was also strictly the POORER request: the server reads neither `files` nor `target`, which were
+  // the only two fields that path sent and the streaming one does not, while the streaming path sends
+  // `currentApp` (canvas edits), `userProfile` (Apnapan personalisation) and `vials` — all three of
+  // which free chat was silently losing on every turn. So there is now ONE send path for chat text.
 
   const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = [], queued = false) => {
       // ... (existing logic, maybe add files to messages)
@@ -450,7 +328,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
 
       const performStreamingBackendCall = async (): Promise<{ reply: string; model?: string }> => {
         assertActiveTurn(turn!);
-        addLog('Falling back to background AI processing...', 'info');
+        addLog(isRealTime || detectedIntent === 'security' ? 'Accessing live knowledge banks...' : 'Generating your solution...', 'info');
         // The account token (or, signed out, this device's guest id) — see the axios path above.
         // …and its platform, so the iPhone app's assistant never teaches a way to pay (Q-123).
         assertActiveTurn(turn!);
@@ -618,33 +496,15 @@ export function useChatEngine(deps: ChatEngineDeps) {
         throw new Error('Unreachable');
       };
 
-      // File attachments (images/PDFs/docs) MUST go to the backend — the frontend
-      // pipeline is text-only and would make the AI hallucinate about the file.
-      const hasAttachments = files.length > 0;
-
-      // Call Gemini locally if we are on NBI or preferred model is gemini, etc.
-      // (but never for attachments — those need the backend vision route)
-      const isGeminiSovereign = !hasAttachments && (isNbi || selectedModel === 'gemini' || (selectedModel === 'auto' && !keys.openai && !keys.claude));
-      if (isGeminiSovereign) {
-        try {
-          // Extract potential URL from message if security intent
-          let potentialTarget = '';
-          if (detectedIntent === 'security') {
-            const urlMatch = messageToSend.match(/https?:\/\/[^\s]+/);
-            potentialTarget = urlMatch ? urlMatch[0] : '';
-          }
-
-          data = await runFrontendPipeline(turn, messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode, answerRequestId);
-        } catch (frontendErr: any) {
-          assertActiveTurn(turn);
-          if (frontendErr instanceof ChatStreamTerminalError || frontendErr?.guestLimit === true) throw frontendErr;
-          console.warn('Frontend path failed, trying backend fallback...', frontendErr.message);
-          data = await callWithRetry();
-        }
-      } else {
-        data = await callWithRetry();
+      // ONE path for chat text, and it is the streaming one. The branch that used to sit here sent the
+      // free chat (and any `gemini`/auto selection without attachments) down the blocking `axios` call
+      // described above, and reached the stream only when that call had already FAILED. See that note.
+      if (detectedIntent === 'security') {
+        const urlMatch = messageToSend.match(/https?:\/\/[^\s]+/);
+        if (urlMatch) addLog(`Security Auditor: analyzing ${urlMatch[0]}`, 'info');
       }
-      
+      data = await callWithRetry();
+
       assertActiveTurn(turn);
       // The bubble this reply lives in — the streamed one, or the one added just below. A successful code
       // sync marks THIS bubble as a build (Q-781), so its View preview / deploy row appear under it.

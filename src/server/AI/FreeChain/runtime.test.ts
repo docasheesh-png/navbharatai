@@ -226,7 +226,14 @@ describe('free chat chain central dispatch', () => {
  for (const [request] of m.execute.mock.calls) {
    expect(request.systemPrompt).toContain('Hindi using Devanagari script, not Romanized Hindi or Hinglish');
    expect(request.systemPrompt).not.toContain('Reply in Hinglish using Roman script.');
-   expect(request.prompt).not.toContain('devnaagri me bataao'); // policy survives the six-turn history window
+   // The conversation's own words stay in the conversation. This line used to assert the opposite —
+   // that the turn where the user asked for Devanagari was DROPPED — which was true only because the
+   // window was six turns wide (admin 2026-11-25: that window is what made the chat forget the start
+   // of a conversation). Thirteen short turns now arrive whole, this one among them, and the policy is
+   // carried where policy belongs: the SYSTEM prompt, asserted on the two lines above. The model seeing
+   // that the user asked for Devanagari agrees with the instruction; it never competed with it.
+   expect(request.prompt).toContain('devnaagri me bataao');
+   expect(request.prompt).toContain('Please explain world trade.'); // and the opening is still there
  }
  expect(m.paid).not.toHaveBeenCalled(); // no paid translation/rewrite hop
  });

@@ -88,6 +88,8 @@ export interface FreeChainConfig {
 export interface FreeChainFeatures {
   concurrency: boolean; router: boolean; routeReorder: boolean; stablePrefix: boolean; compactPrompt: boolean;
   outputCap: boolean; replyMaxTokens: number; fastMaxTokens: number; historyTrim: boolean; historyTurns: number;
+  /** Character budget for one conversation's history (lib/chatContextWindow.ts). Replaces the turn cap. */
+  historyChars: number;
   faqCache: boolean; monthlyCap: boolean; monthlyCapNanoUsd: number; throttle: boolean; throttlePercent: number;
 }
 const MODELS: Record<ProviderId, string> = {
@@ -234,6 +236,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
       stablePrefix: flag('FREE_CHAIN_STABLE_PREFIX_ENABLED', true), compactPrompt: flag('FREE_CHAIN_COMPACT_PROMPT_ENABLED', true),
       outputCap: flag('FREE_CHAIN_OUTPUT_CAP_ENABLED', true), replyMaxTokens: num('FREE_CHAIN_REPLY_MAX_TOKENS', 250, 64, 4096), fastMaxTokens: num('FREE_CHAIN_FAST_MAX_TOKENS', 80, 32, 1024),
       historyTrim: flag('FREE_CHAIN_HISTORY_TRIM_ENABLED', true), historyTurns: num('FREE_CHAIN_HISTORY_TURNS', 6, 0, 50),
+      historyChars: num('FREE_CHAIN_HISTORY_CHARS', 24_000, 2_000, 120_000),
       faqCache: flag('FREE_CHAIN_FAQ_CACHE_ENABLED', true),
       monthlyCap: flag('FREE_CHAIN_MONTHLY_CAP_ENABLED', true), monthlyCapNanoUsd: money('FREE_CHAIN_MONTHLY_CAP_USD', 520, 0, 520),
       throttle: flag('FREE_CHAIN_THROTTLE_ENABLED', true), throttlePercent: num('FREE_CHAIN_THROTTLE_PERCENT', 80, 1, 100) } };

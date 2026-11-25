@@ -194,7 +194,12 @@ describe('the client', () => {
     const engine = read('src/hooks/useChatEngine.ts');
     // (the platform header rides along since Q-123 — the account token is what is guarded)
     expect(engine).toMatch(/const headers: Record<string, string> = \{ 'Content-Type': 'application\/json', \.\.\.\(await authHeader\(\)\), \.\.\.platformHeader\(\) \};/);
-    expect(engine.match(/\.\.\.\(await authHeader\(\)\)/g)?.length).toBe(2);
+    // ONE send path, so ONE account token. This expected 2 while the engine also kept a blocking
+    // `axios` send; that path is deleted (admin 2026-11-25, the slow-reply report), and the guard is
+    // now that EVERY chat send carries the token — asserted by counting both, not by a fixed number.
+    const sends = engine.match(/await fetch\(endpoint/g)?.length ?? 0;
+    expect(sends).toBe(1);
+    expect(engine.match(/\.\.\.\(await authHeader\(\)\)/g)?.length).toBe(sends);
   });
 
   it('the refusal is read BEFORE the 401 branch that signs the user out', () => {

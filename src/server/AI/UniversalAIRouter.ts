@@ -12,6 +12,7 @@ import type { FreeTextResult } from './LiveRegistry/dispatcher';
 import type { ProviderUsage } from './Router/ProviderTypes';
 import type { StreamOutcome } from './Router/AIRouter';
 import { isGatewayRouteSelected, isGatewayTerminalError } from './InferenceGateway/runtime';
+import { compactConversationForModel } from '../../lib/chatContextWindow';
 
 /**
  * What one routed call really was.
@@ -228,24 +229,24 @@ export class UniversalAIRouter {
     return 'free';
   }
 
-  // Rolling context: last 15 turns at full detail, older ones as a compact summary line.
+  /**
+   * The model-facing prompt for one conversation.
+   *
+   * 🔴 WHY THIS DELEGATES NOW (admin 2026-11-25: the chat forgets the opening after 10–15 messages).
+   * This method kept its own private rule — the last 15 turns at 1,500 characters, everything older
+   * squeezed into one 150-characters-per-turn summary line. That is the third of the three
+   * independent cuts described at the top of `lib/chatContextWindow.ts`, and because each one ran on
+   * the output of the last, their losses multiplied: by the time a conversation reached fifteen
+   * messages the opening had been shortened twice before this line ever saw it. There is now ONE
+   * window, so changing how much a chat remembers is one edit in one file.
+   */
   private buildPrompt(message: string, history: any[]): string {
     if (!history || history.length === 0) return message;
-    const MAX_RECENT = 15;
-    const RECENT_CHARS = 1500;
-    const OLDER_CHARS = 150;
-
-    const summaryPart = history.length > MAX_RECENT
-      ? `[Earlier session — ${history.length - MAX_RECENT} messages]: ` +
-        history.slice(0, -MAX_RECENT)
-          .map(m => `${m.sender === 'user' ? 'U' : 'A'}: ${String(m.text || m.content || '').slice(0, OLDER_CHARS)}`)
-          .join(' | ') + '\n\n'
-      : '';
-
-    const recentHistory = history.slice(-MAX_RECENT)
-      .map(m => `${m.sender === 'user' ? 'User' : 'Assistant'}: ${String(m.text || m.content || '').slice(0, RECENT_CHARS)}`)
+    const turns = compactConversationForModel(history).turns;
+    if (!turns.length) return message;
+    const rendered = turns
+      .map(turn => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content}`)
       .join('\n');
-
-    return `${summaryPart}${recentHistory}\nUser: ${message}`;
+    return `${rendered}\nUser: ${message}`;
   }
 }

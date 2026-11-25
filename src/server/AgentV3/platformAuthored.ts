@@ -58,6 +58,8 @@ import { isKnownSeedVersion } from './seedVersions';
 import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GamePlayerBodyGenerator';
 import { GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
 import { isUneditedGeneratedGameAssetFile } from './gameAssets/generatedAssetFiles';
+import { CAR_FILE_PATH, raceCarFile } from './carSwap';
+import { STARTER_CAR_PAINTS } from '../lib/projectVariety';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -120,6 +122,10 @@ function buildSeededIndex(): Map<string, Set<string>> {
   try {
     add(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE);
     add(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX);
+  } catch { /* same */ }
+  // 🎲 A new race's car file (src/game/car.ts), written once by the shell recipe in one of the starter paints (projectVariety.ts).
+  try {
+    for (const paint of STARTER_CAR_PAINTS) add(CAR_FILE_PATH, raceCarFile(null, paint));
   } catch { /* same */ }
   return index;
 }

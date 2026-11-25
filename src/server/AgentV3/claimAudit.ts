@@ -128,6 +128,19 @@ export interface MeasuredFacts {
    * was missing.
    */
   filesWritten?: number;
+  /**
+   * Did a deploy really SUCCEED on this turn (a deploy tool call that returned, not one that threw)? false = none did,
+   * undefined = the caller cannot tell (silence is never an accusation). Master audit 2026-11-25, Part N: "claiming a
+   * deployment succeeded without checking deployment status" — the summary could say "your app is live" on a turn where
+   * nothing was published.
+   */
+  deployedThisTurn?: boolean;
+  /**
+   * Did a GitHub push / PR really happen on this turn through a tool that returned? The build agent has no GitHub tool
+   * (pushing is the user's own button, /api/agentv3/github/push-app), so this is false on every build turn today; if a
+   * GitHub tool is ever added, the route's toolWasUsed('github') answers it truthfully with no change here.
+   */
+  githubPushedThisTurn?: boolean;
   /** Did the USER ask for an app to be built or changed on this turn? (Not: "explain this code".) */
   buildWasRequested?: boolean;
   /**
@@ -185,7 +198,7 @@ export interface WorldFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored' | 'visual-fix-unseen';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored' | 'visual-fix-unseen' | 'deploy-claimed' | 'github-claimed';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -412,6 +425,19 @@ const APP_DELIVERED = new RegExp([
  * uses when it walks through a screenshot. Free prose is deliberately not mined: an ordinary sentence
  * mentioning a word is not a claim that the word was on screen.
  */
+const DEPLOY_DONE = /\b(?:(?:is|are|it's|now)\s+(?:now\s+)?live|(?:has\s+been|was|got|successfully|just)\s+(?:deployed|published)|deployed\s+(?:to|at|on)\s+|published\s+(?:to|at|on)\s+|live\s+(?:at|on)\s+https?:\/\/|(?:deploy|publish|live)\s+(?:ho\s+gaya|ho\s+gayi|kar\s+diya|kar\s+di))/i;
+const DEPLOY_NOT_DONE = /\b(?:not|n't|never|yet|nahi|nahin|nhi|press|tap|click|you\s+can|ready\s+to|when\s+you|once\s+you|if\s+you|to\s+make\s+it|want\s+to|would\s+you|shall\s+i|kya\s+main)\b/i;
+/** Does a sentence claim the app WAS deployed / is live (not "press Publish to make it live")? PURE. */
+export function deployClaimed(summary: string): boolean {
+  return String(summary ?? '').split(/(?<=[.!?\n।])\s*/).some((s) => DEPLOY_DONE.test(s) && !DEPLOY_NOT_DONE.test(s));
+}
+
+const GITHUB_DONE = /\b(?:(?:pushed|committed|uploaded)\s+(?:it\s+|the\s+code\s+|your\s+code\s+|everything\s+)?(?:to|on|into)\s+(?:your\s+)?(?:github|the\s+repo|your\s+repo(?:sitory)?)|(?:opened|created|raised)\s+(?:a\s+|the\s+)?(?:pull\s+request|pr)\b|github\s+(?:par|pe)\s+(?:push|upload)\s+(?:ho\s+gaya|kar\s+diya))/i;
+/** Does a sentence claim code WAS pushed to GitHub / a PR WAS opened (not "press Push to GitHub")? PURE. */
+export function githubClaimed(summary: string): boolean {
+  return String(summary ?? '').split(/(?<=[.!?\n।])\s*/).some((s) => GITHUB_DONE.test(s) && !DEPLOY_NOT_DONE.test(s));
+}
+
 export function describedUiLabels(summary: string): string[] {
   const out: string[] = [];
   const re = /\*\*([^*\n]{2,40})\*\*/g;
@@ -699,6 +725,24 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'app-delivered',
       claimed: 'that the app you asked for is built and ready',
       measured: 'not one file was created or changed on this turn, so nothing was actually built',
+    });
+  }
+
+  // DEPLOYED / LIVE, SAID ON A TURN THAT PUBLISHED NOTHING (audit Part N). Only a sentence that claims it HAPPENED; an
+  // instruction or an offer ("press Publish to make it live", "ready to deploy") is never one.
+  if (facts.deployedThisTurn === false && deployClaimed(text)) {
+    out.push({
+      kind: 'deploy-claimed',
+      claimed: 'that your app is deployed and live',
+      measured: 'no deploy succeeded on this turn, so nothing was published — press Publish to put it online',
+    });
+  }
+
+  if (facts.githubPushedThisTurn === false && githubClaimed(text)) {
+    out.push({
+      kind: 'github-claimed',
+      claimed: 'that the code was pushed to GitHub (or a pull request was opened)',
+      measured: 'nothing was pushed to GitHub on this turn — use Push to GitHub to send your code to your repository',
     });
   }
 

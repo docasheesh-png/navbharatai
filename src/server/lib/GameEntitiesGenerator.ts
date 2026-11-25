@@ -330,7 +330,7 @@ export class Entities {
    * A punch, a kick, a sword: every living entity in front of origin (facing yaw — models face +Z), within range and the arc,
    * nearest first, takes the damage. Returns who was hit. The attacker itself (by object) is never hit.
    */
-  melee(origin: THREE.Vector3, yaw: number, damage: number, options: { range?: number; arc?: number; attacker?: THREE.Object3D; only?: 'first' | 'all'; byPlayer?: boolean } = {}): Entity[] {
+  melee(origin: THREE.Vector3, yaw: number, damage: number, options: { range?: number; arc?: number; attacker?: THREE.Object3D; only?: 'first' | 'all'; byPlayer?: boolean; world?: (from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }) => number | null } = {}): Entity[] {
     const range = options.range ?? 1.8;
     const half = (options.arc ?? Math.PI * 0.6) / 2;
     const fx = Math.sin(yaw);
@@ -341,7 +341,9 @@ export class Entities {
       const dz = p.z - origin.z;
       const d = Math.hypot(dx, dz);
       const angle = d > 1e-6 ? Math.acos(THREE.MathUtils.clamp((dx * fx + dz * fz) / d, -1, 1)) : 0;
-      return { e, d, ok: d - e.radius <= range && angle <= half && Math.abs(p.y - origin.y) < 2 };
+      // A wall between the fist and the body stops the blow (the same world test a bullet uses: worldBlocker, play/aim.ts).
+      const walled = !!options.world && options.world({ x: origin.x, y: origin.y + 1.2, z: origin.z }, { x: p.x, y: p.y + 1.2, z: p.z }) !== null;
+      return { e, d, ok: !walled && d - e.radius <= range && angle <= half && Math.abs(p.y - origin.y) < 2 };
     }).filter((x) => x.ok).sort((a, b) => a.d - b.d).map((x) => x.e as Inner);
     const hit = options.only === 'all' ? inReach : inReach.slice(0, 1);
     for (const e of hit) {

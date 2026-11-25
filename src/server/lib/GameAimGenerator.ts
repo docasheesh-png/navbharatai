@@ -21,6 +21,7 @@ export const GAME_AIM = String.raw`// WHERE THE PLAYER AIMS — the one way ever
 // is not at the camera. A point behind the muzzle (something between the camera and the player) falls back to the camera's
 // own direction. In a top-down game there is no crosshair: the shot is the way the player faces, level with the ground.
 import * as THREE from 'three';
+import { worldColliders } from '../three/collision';
 
 export interface AimResult {
   /** Where the aim ray starts (the camera, or the muzzle in a top-down game). */
@@ -130,5 +131,29 @@ export function aimFrom(camera: THREE.Camera, scene: THREE.Object3D, options: Ai
   muzzle.addScaledVector(shot, 0.05);
   void _v;
   return { origin, dir, point, hit, muzzle, shot };
+}
+
+/**
+ * The world, for ProjectileSystem.update(dt, targets, world): the fraction along a bullet's step where it first meets a
+ * world collider (the same registry the character, cars, camera and doors use), or null. Make it ONCE and reuse it: the
+ * collider list is refreshed every refreshSeconds, not rebuilt per bullet.
+ */
+export function worldBlocker(scene: THREE.Object3D, refreshSeconds = 0.5): (from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }) => number | null {
+  let list: THREE.Mesh[] = [];
+  let at = -Infinity;
+  const ray = new THREE.Raycaster();
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  return (from, to) => {
+    const now = Date.now() / 1000;
+    if (now - at > refreshSeconds) { list = worldColliders(scene); at = now; }
+    a.set(from.x, from.y, from.z); b.set(to.x, to.y, to.z);
+    const len = a.distanceTo(b);
+    if (!(len > 1e-6) || !list.length) return null;
+    ray.set(a, b.sub(a).divideScalar(len));
+    ray.far = len;
+    const hit = ray.intersectObjects(list, false)[0];
+    return hit ? hit.distance / len : null;
+  };
 }
 `;

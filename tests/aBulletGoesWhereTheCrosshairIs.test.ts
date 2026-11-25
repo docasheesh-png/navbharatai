@@ -14,13 +14,15 @@ import * as THREE from 'three';
 import { GAME_AIM, GAME_AIM_PATH } from '../src/server/lib/GameAimGenerator';
 import { generateGameSystems } from '../src/server/lib/GameSystemsGenerator';
 import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
+import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const DIR = join(__dirname, `.tmp-aim-${process.pid}`);
 let A: any; let P: any;
 beforeAll(async () => {
-  const files: Record<string, string> = { ...generateGameRuntime(['events']).files, ...generateGameSystems(['projectile']).files, [GAME_AIM_PATH]: GAME_AIM };
+  // aim.ts reads the world colliders (worldBlocker, audit Part L), so the 3D layer it always ships with is written too.
+  const files: Record<string, string> = { ...generateGameRuntime().files, ...generateGame3D().files, ...generateGameSystems(['projectile']).files, [GAME_AIM_PATH]: GAME_AIM };
   for (const [p, c] of Object.entries(files)) { mkdirSync(dirname(join(DIR, p)), { recursive: true }); writeFileSync(join(DIR, p), c); }
   A = await import(join(DIR, GAME_AIM_PATH));
   P = await import(join(DIR, 'src/game/systems/projectile.ts'));

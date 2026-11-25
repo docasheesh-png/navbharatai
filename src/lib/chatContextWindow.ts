@@ -37,10 +37,14 @@ export const CHAT_MODEL_WINDOW_CHARS = 48_000;
 /** A window never exceeds this many turns, so no later per-turn-count bound can clip its opening. */
 export const CHAT_MODEL_WINDOW_TURNS = 120;
 
+/** A recent turn survives up to this many characters — the server's own per-turn bound
+ *  (`CHAT_MAX_HISTORY_TURN_CHARS`), so a turn is never clipped twice to two different lengths. */
+export const CHAT_MODEL_TURN_CHARS = 4_000;
+
 const EARLY_TURNS = 6;
 const EARLY_CHARS = 2_000;
 const RECENT_TURNS = 30;
-const RECENT_CHARS = 4_000;
+const RECENT_CHARS = CHAT_MODEL_TURN_CHARS;
 const MIDDLE_CHARS = 600;
 const EXCERPT_CHARS = 180;
 const MAX_EXCERPTS = 12;

@@ -10,8 +10,9 @@ export interface HouseDoor {
   readonly isOpen: boolean;
   readonly targetOpen: boolean;
   readonly blocked: boolean;
-  setOpen(open: boolean): void;
-  toggle(): void;
+  /** from: who opens it (world position) — the door swings AWAY from them, so it never swings into the person opening it. */
+  setOpen(open: boolean, from?: THREE.Vector3): void;
+  toggle(from?: THREE.Vector3): void;
   update(dt: number, occupants?: readonly DoorOccupant[]): void;
 }
 export type HouseLayout = 'living' | 'bedroom' | 'kitchen' | 'bathroom';
@@ -82,7 +83,16 @@ export function createEnterableHouse(options: EnterableHouseOptions = {}): THREE
   const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.46, 2.37, 0.08), wood);
   leaf.position.set(0.73, 1.185, 0); leaf.castShadow = true;
   hinge.add(markWorldCollider(leaf)); root.add(hinge);
-  let targetOpen = false, blocked = false;
+  // 🚪 THE DOOR OPENS AWAY FROM WHOEVER OPENS IT (master audit 2026-11-25, Part K). It always swung OUT (−π/2), into the
+  // player standing at it who had just pressed Use: the "never swing through a body" guard then stopped it half open
+  // (measured: −0.54 rad) and the half-open leaf blocked the doorway — the house could not be entered. +1 swings in.
+  let targetOpen = false, blocked = false, swing = 1;
+  const awayFrom = (from: THREE.Vector3 | undefined) => {
+    if (!from || ![from.x, from.y, from.z].every(Number.isFinite)) return;
+    root.updateWorldMatrix(true, false);
+    const local = root.worldToLocal(from.clone());
+    swing = local.z > depth / 2 ? 1 : -1; // outside the front wall ⇒ swing in; inside ⇒ swing out
+  };
   const occupied = (occupants: readonly DoorOccupant[]) => {
     const bounds = new THREE.Box3().setFromObject(leaf);
     return occupants.some(actor => {
@@ -96,12 +106,14 @@ export function createEnterableHouse(options: EnterableHouseOptions = {}): THREE
   };
   const door: HouseDoor = {
     hinge, leaf,
-    get isOpen() { return Math.abs(hinge.rotation.y + Math.PI / 2) < 1e-8; },
+    get isOpen() { return Math.abs(Math.abs(hinge.rotation.y) - Math.PI / 2) < 1e-8; },
     get targetOpen() { return targetOpen; }, get blocked() { return blocked; },
-    setOpen(open) { targetOpen = open; }, toggle() { targetOpen = !targetOpen; },
+    // The swing is chosen only while the door is shut — a moving door never reverses through the doorway.
+    setOpen(open, from) { if (open && !targetOpen && Math.abs(hinge.rotation.y) < 1e-6) awayFrom(from); targetOpen = open; },
+    toggle(from) { door.setOpen(!targetOpen, from); },
     update(dt, occupants = []) {
       if (!Number.isFinite(dt) || dt <= 0) return;
-      const target = targetOpen ? -Math.PI / 2 : 0;
+      const target = targetOpen ? swing * Math.PI / 2 : 0;
       const difference = target - hinge.rotation.y;
       blocked = false;
       if (difference === 0) return;
@@ -171,7 +183,7 @@ export function interactHouseDoor(scene: THREE.Object3D, actor: DoorOccupant, ra
   });
   candidates.sort((a, b) => a.distance - b.distance);
   if (!candidates.length) return false;
-  candidates[0].door.toggle(); return true;
+  candidates[0].door.toggle(actor.feet); return true;
 }
 
 /** A solid library mesh is scenery. The walkable house is a hollow shell the size of its footprint. */

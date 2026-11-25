@@ -513,6 +513,22 @@ export class CharacterController {
       }
     }
     this.stepSupport.set(0, 0, 0);
+    // 🦶 THE FOOT IS A DISK, NOT A POINT (master audit 2026-11-25, Part E). One ray from the centre found nothing over a seam
+    // narrower than the foot (between two floor pieces, a step and a landing, a kerb and the road), so the character was
+    // "in the air" while its rounded foot rested on both edges: it could not fall, and an airborne character cannot climb
+    // the next edge — stuck for ever. When the centre misses (or finds only a lower floor), the rim of the foot is felt too,
+    // and the highest walkable support under it holds the character.
+    if (!centre || centre.y < position.y - 0.01) {
+      const reach = this.radius * 0.7;
+      let best: GroundContact | null = null;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const at = position.clone().add(new THREE.Vector3(Math.sin(a) * reach, 0, Math.cos(a) * reach));
+        const hit = this.floorAt(at, skin, fall);
+        if (hit && hit.normal.y >= this.slopeLimit && (!best || hit.y > best.y)) best = hit;
+      }
+      if (best && (!centre || best.y > centre.y + 0.01)) return best;
+    }
     return centre;
   }
 

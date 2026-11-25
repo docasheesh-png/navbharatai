@@ -26,7 +26,9 @@ export type GameDimension = '2d' | '3d' | 'unspecified';
 export type GameControl = 'keyboard' | 'touch' | 'mouse' | 'gamepad';
 export type GameFeature =
   | 'score' | 'levels' | 'lives' | 'timer' | 'enemies' | 'powerups' | 'leaderboard'
-  | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health' | 'throttle' | 'braking' | 'crashDamage' | 'police';
+  | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health' | 'throttle' | 'braking' | 'crashDamage' | 'police'
+  // Master audit Part J (2026-11-25): features users name that used to be acknowledged and then written as text or props.
+  | 'swimming' | 'enterableHouses' | 'destructible' | 'traffic' | 'npcs';
 /** The vehicle the player drives or flies, when the request names one. */
 export type GameVehicle = 'train' | 'car' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'aircraft' | 'boat' | 'tractor' | 'rickshaw';
 /** Explicit runner requirements are not collapsed into a generic 'powerups' bucket. */
@@ -230,6 +232,13 @@ const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['crashDamage', /\b(dents?|dented|crumpl\w*|(car|vehicle) damage|realistic (crash|accident)\w*|(crash|accident)\w* (realistic|real lagni|real lage))\b|dent pad/i],
   // Master audit Part I (2026-11-25): "when any crime happens, police should arrive" — police, an ambulance, a fire brigade,
   // a wanted level. Hindi/Hinglish forms too ("pulis aa jaye", "पुलिस").
+  ['swimming', /\b(swim(s|ming)?|dive|diving|underwater)\b|\btair(na|ta|te|ke|ega|engi)\b|तैर/i],
+  ['enterableHouses', /\b(enter(able)?|walk[- ]?in(to)?|go(es)? inside|get inside|inside the)\s+(a\s+|the\s+)?(houses?|homes?|buildings?|shops?)\b|\b(enterable|walk-?in|walkable)\s+(houses?|homes?|buildings?)\b|\b(ghar|makan|dukan)\s+(ke\s+)?andar\b|घर के अंदर/i],
+  ['destructible', /\b(destructibles?|breakables?|destroyable)\b|\b(break|smash|destroy)\w*\s+(the\s+)?(doors?|walls?|crates?|boxes|glass|windows?|barrels?)\b|\b(darwaza|deewar|diwar)\s+tod/i],
+  // ASKED FOR ("with traffic", "add traffic", "traffic chahiye"), never the bare word: the platform's own city answer line
+  // ("streets, buildings and traffic", gameKitSeed CITY_LINE) describes what the kit gives and is not a request.
+  ['traffic', /\b(with|add|have|has|needs?|want|wants)\s+(some\s+|real\s+|moving\s+|heavy\s+)?traffic\b|\btraffic\s+(system|lights?|jams?|ho|chahiye|chale|chalni|chalna)\b|\b(cars?|vehicles?|buses)\s+(that\s+)?(drive|run|move|follow)s?\s+(on\s+|along\s+)?(the\s+)?roads?\b|\bsadak\s+par\s+gaadi/i],
+  ['npcs', /\b(npcs?|villagers?|civilians?|pedestrians?|townsfolk|bystanders?)\b|\bpeople\s+(walking|on the streets?)\b|\blog\s+ghoom/i],
   ['police', /\b(police|cops?|wanted level|wanted stars?|ambulance|fire ?brigade|fire ?truck|pulis)\b|पुलिस|एम्बुलेंस/i],
 ];
 
@@ -389,6 +398,11 @@ export function gameContractBlock(c: GameScopeContract): string {
     gameRulesBlock(c.rules ?? []),
     'Any OTHER rule the user states (scoring, levels, game over, hits to kill, bleeding) is made real with run_recipe({ name: "compose_rule", input: { rule } }) — the kit then runs it as data; a rule it refuses is written as code.',
     c.combat && gameCombatLines(c.combat).length ? ['Combat rules the user named — the kit applies them as data, the game must use its Health:', ...gameCombatLines(c.combat)].join('\n') : '',
+    c.requiredFeatures.includes('swimming') ? 'Swimming must REALLY work: give the water to the player (ctx.player.setWater(height or (x, z) => height), or addWater from src/game/three/surfaces) — the controller swims, dives (C / Ctrl) and runs out of breath. Never a blue plane the player walks across.' : '',
+    c.requiredFeatures.includes('enterableHouses') ? 'Houses must be ENTERABLE: createEnterableHouse from src/game/three/buildings (a door that opens with Use, a hollow inside with floor, walls and ceiling that collide, the roof fading while inside); a library house is wrapped with enterableShellFor. A closed shell is not a house the player can enter.' : '',
+    c.requiredFeatures.includes('destructible') ? 'Things that break must REALLY break: makeBreakable(object) from src/game/three/breakable, then hitBreakables / damageBreakable from a shot, punch or crash — debris flies and settles. Never a mesh that only disappears or a message that says it broke.' : '',
+    c.requiredFeatures.includes('traffic') ? 'Traffic must REALLY drive the roads: createCityTraffic(city) from src/game/three/citytraffic (cars follow the lanes and stop at the lights), or createTraffic from src/game/three/objects for one road. Parked cars are not traffic.' : '',
+    c.requiredFeatures.includes('npcs') ? 'People must REALLY be there and move: new Entities(ctx) from src/game/systems/entities (spawned, verified, walking, kept apart) or createCityPeople(city) for a city crowd. Never a count in the HUD with nobody on screen.' : '',
     c.requiredFeatures.includes('police') ? 'Police (or an ambulance, a fire brigade) must REALLY come: new Wanted(ctx, npcs, new Dispatch(ctx, npcs)) from src/game/systems/dispatch.ts — a crime raises the wanted level and a real car with sirens brings officers who pursue and arrest. Never a line of text saying they came.' : '',
     c.requiredFeatures.includes('crashDamage') ? 'Crashes must DENT the car: call enableVehicleDents() once from src/game/three/dents (the kit pushes the body in where it hit, deeper for a harder crash, and says VEHICLE_DAMAGED { vehicle, damage }); repairVehicle(car) restores it.' : '',
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
@@ -416,7 +430,28 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   braking: /\b(brak\w*|decelerat\w*|driveVehicle)\b/i,
   crashDamage: /\b(enableVehicleDents|dentVehicle)\b/,
   // Only the REAL system counts (systems/dispatch.ts): a line of text saying "police arrived" is not police (audit Part I).
+  // Part J: each counts only when the game calls the kit system that really does it (in a game that has the kit — a
+  // hand-written 2D game has no kit APIs, so for it the plain word still decides: see KIT_ONLY / scopeMatch).
+  swimming: /\b(setWater|addWater|stepSwim|createRiverWater)\b/,
+  enterableHouses: /\b(createEnterableHouse|enterableShellFor)\b/,
+  destructible: /\b(makeBreakable|hitBreakables|damageBreakable|breakNow)\b/,
+  traffic: /\b(createCityTraffic|createTraffic)\b/,
+  npcs: /\bnew\s+Entities\s*\(|\bcreateCityPeople\b|\bcreateHumanoid\b/,
   police: /\bnew\s+(Wanted|Dispatch)\s*\(|\.call\(\s*['"](police|ambulance|fire|security|military)['"]/,
+};
+
+/** A file only the 3D kit writes: with it, a Part-J feature counts only when the kit system is called. */
+const KIT_MARKER = /(^|\/)src\/game\/three\/surfaces\.ts$/;
+/**
+ * Without the kit (a 2D game, a hand-written one) there is no kit API to call, so reporting these "missing" would be the
+ * checker lying. There the old word-level signal decides, as it always did.
+ */
+const WORD_WITHOUT_KIT: Partial<Record<GameFeature, RegExp>> = {
+  swimming: /\b(swim\w*|water)\b/i,
+  enterableHouses: /\b(door|interior|inside)\w*/i,
+  destructible: /\b(destroy\w*|break\w*|destructible\w*)\b/i,
+  traffic: /\b(traffic|cars?)\b/i,
+  npcs: /\b(npcs?|villagers?|civilians?|pedestrians?|people)\b/i,
 };
 
 /** The same code signal `scopeMatch` uses, for one feature. Kit engine files are not the game. PURE. */
@@ -445,7 +480,11 @@ export function scopeMatch(c: GameScopeContract, files: Record<string, string>):
   const code = `${written}\n${written.replace(/([a-z0-9])([A-Z])/g, '$1 $2')}`;
   const present: GameFeature[] = [];
   const missing: GameFeature[] = [];
-  for (const f of c.requiredFeatures) (PRESENT[f].test(code) ? present : missing).push(f);
+  const hasKit = Object.keys(files || {}).some((p) => KIT_MARKER.test(p));
+  for (const f of c.requiredFeatures) {
+    const test = !hasKit && WORD_WITHOUT_KIT[f] ? WORD_WITHOUT_KIT[f]! : PRESENT[f];
+    (test.test(code) ? present : missing).push(f);
+  }
   const unverified = [
     ...(c.runnerMechanics ?? []),
     ...(c.collectibles ?? []),

@@ -623,6 +623,7 @@ function sessionCostCapUsd(): number {
   const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
+import { deployedThisTurn } from '../AgentV3/deployedThisTurn';
 import { deploymentStore, withDeploymentPersistence, readDeploymentForPublish, isLiveDeployment, publishedAppList, pausedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { resolvePublishState } from '../AgentV3/publishState';
 import { ensureBootEnv, bootEnvNote, type BootEnvIo } from '../AgentV3/devSecretsBoot';
@@ -26036,6 +26037,7 @@ async function noteBuildOutcome(
       // A wrong verdict is a bug. A fabricated observation is the platform telling the user something
       // that never happened, in the confident voice of a verification — and the user has no way to know
       // which sentence to distrust. So the platform corrects itself, in its own reply, out loud.
+      const deployedNow = await deployedThisTurn(workspaceId, () => buildDiag.toolWasUsed('deploy')); // "your app is live" vs the truth (deployedThisTurn.ts)
       try {
         const contradictions = auditSummaryClaims(result.summary, {
           consoleCaptured: runtimeCaptureAvailable,
@@ -26073,6 +26075,10 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped. Our game kit alone is not a delivery.
           filesWritten: builderWroteCount(),
           buildWasRequested: userAskedToBuildAnApp && !answerOnlyNow(),
+          // "Your app is live!" weighed against whether a deploy really SUCCEEDED this turn (TOOL_DONE is recorded only on
+          // success; a failed deploy throws and is a TOOL_ERROR). Master audit Part N.
+          deployedThisTurn: deployedNow,
+          githubPushedThisTurn: buildDiag.toolWasUsed('github'), // the agent has no GitHub tool: pushing is the user's button
           // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
           liveDataRequested: liveDataAsked,
           // "Drag-and-drop uploads" from an app that keeps the files as text in localStorage (Q-542, autopsy

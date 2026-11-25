@@ -911,6 +911,8 @@ export interface FeedbackSpec {
 export const FEEDBACK: Partial<Record<GameEvent, FeedbackSpec>> = {
   WEAPON_FIRED:   { particle: 'muzzleFlash', sound: 'shoot',    trauma: 0.14, hitStop: 0.02 },
   PROJECTILE_HIT: { particle: 'impact',      sound: 'impact',   trauma: 0.10, haptic: 12 },
+  // A bullet stopped by a wall (ProjectileSystem with a world, audit Part L): sparks and the crack where it struck.
+  PROJECTILE_HIT_WORLD: { particle: 'sparks', sound: 'impact', trauma: 0.04 },
   ENEMY_DAMAGED:  { particle: 'blood',       sound: 'hit',      trauma: 0.12, hitStop: 0.04 },
   ENEMY_DIED:     { particle: 'explosion',   sound: 'die',      trauma: 0.35, hitStop: 0.09, particleScale: 0.8, haptic: 30 },
   PLAYER_DAMAGED: { particle: 'blood',       sound: 'hurt',     trauma: 0.45, hitStop: 0.07, haptic: [45, 30, 45] },

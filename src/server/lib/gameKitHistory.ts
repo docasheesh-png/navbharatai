@@ -348,7 +348,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2e6ae3de8fab6a4148b1d83a42ef39e8305f16dfb005db32e83b6ddf96d0bb29",
     "58afe75ccda3c61e5206571a3aa602f55c6036553dc5852609e1263fe03c50ba",
     "49992550ae54aec705d3a3fd59b857c28a81d56b71db8d0dd80bd76bc20081d8",
-    "0894372937214040b8b25c49599522b4eac706bc76fffd86cb098307a52311a4"
+    "0894372937214040b8b25c49599522b4eac706bc76fffd86cb098307a52311a4",
+    "fd1cd406e310aebfb086c08d14cacfe7f030b02a79be16e46ddf269833d11cad"
   ],
   "src/game/core/feel.ts": [
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
@@ -485,7 +486,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b24bb48a0a85cff4c6b92a534c2ba4f8a5324fc793aeced49109d0bbb1edeb97",
     "1cb1260ae5b8a06669f86ae06e13d19c65ade1bc46c0dbaa984af20444ea5e6d",
     "38707d870fa12b534e70acf0da4a415ecc468a28593071eb3daee524e793de59",
-    "6e2cd5e5cc973a4abaeacc9e1c5bd57e1793e7e3b93f69da787c05ddadf0c060"
+    "6e2cd5e5cc973a4abaeacc9e1c5bd57e1793e7e3b93f69da787c05ddadf0c060",
+    "967b7fdb9418c2de0d17f11529cdc2e1301fd3a37f05f763ca288c39d53337e2"
   ],
   "src/game/fx/music.ts": [
     "9236e81cb871e1e42f8d51efac8ee6b84a392e7ec5a0ba55c893af945f906dd1"
@@ -505,7 +507,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3"
   ],
   "src/game/play/aim.ts": [
-    "f9803ff82045872507a1e60657b343fc203c4fa00528561f00636f8875913ebf"
+    "f9803ff82045872507a1e60657b343fc203c4fa00528561f00636f8875913ebf",
+    "32c2f1d6864ee59de9126fbbd4fa8fd826df8d27e20dd636c361f65c9dbb4fc3"
   ],
   "src/game/play/boundary.ts": [
     "a95200280ddd4e78fbd494cd3cda6253e19fb55d7f957c405ee8015c8e61c392"
@@ -518,7 +521,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0ff9ef98f777142f8c6e8fa88f6b1c3174faf4df324ebcfbd180b21c5e5380fa",
     "6015bd1aaea3129a95c5198fcc3147f1bc53d247ee94c74c50f1b01634358642",
     "ec13ef9b8ed4bff26006f30d0e9743f13cff2f6bbbcc3d1ee07ddbf21922f8d4",
-    "1d488bb92891605c983ffd1c90b852599aeb80c618159223d83812166108eae2"
+    "1d488bb92891605c983ffd1c90b852599aeb80c618159223d83812166108eae2",
+    "a783c10adc502f7ba9232d6d47e3d3b1c56e2ba289373035a07d077aa9ce6440"
   ],
   "src/game/play/features.ts": [
     "e09a02029b1467748dedfd26bcf67f94980bbb61362f0059c5dcf03dc3c7512c",
@@ -611,7 +615,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "19cd0e366abe7a4880882d7fc7bd321aaeb3723a106322568c615f8d5fab1a3b",
     "b57f24ac1570df3215649053178132943f0db566574bea645e2a0e8f5f6b772e",
     "5a0dd41283a625474b781af045630cc48dfbc5741af2f314490f4b15482c42ab",
-    "a687e1e6ffc7a08082cd1ff6a86461dde0fdef9c9c9f4501d0ed2de726900cce"
+    "a687e1e6ffc7a08082cd1ff6a86461dde0fdef9c9c9f4501d0ed2de726900cce",
+    "b2fa00c4e7db9c78014754291d132454b292a1588616fc91be9c31c62900f019"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"
@@ -624,7 +629,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "10553042b746135b191f535de32868a67cb30feb2dea7ff7602a4f99730ad71f",
     "f95683e7a263734463937bf84d42837041cb8e6ce4e8b82b5c9f393c5fe0c7a7",
     "257db10ef378cbaa1b5540bfd59cf66837584900d1520d304a84f86a04a6a124",
-    "d98b72cdfc739846759ffd3452c6e838928b95d28a90a304172131bf1bb9e7ba"
+    "d98b72cdfc739846759ffd3452c6e838928b95d28a90a304172131bf1bb9e7ba",
+    "8dad405219839927d63bcfaa92b143e301d20fd7e7d63871996aff63ca772510"
   ],
   "src/game/systems/spawner.ts": [
     "01a6cdaf392fce48c6e970ad68fb77c20deef9710b9f900a199ca587312389a5"
@@ -642,7 +648,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/three/buildings.ts": [
     "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f",
-    "9d12b3a208ad65fd8f050d5a18ab47d1a6039c64f95804348fb5e42a8e703b98"
+    "9d12b3a208ad65fd8f050d5a18ab47d1a6039c64f95804348fb5e42a8e703b98",
+    "582e614dcc6573fb8588f404c28d2fb2bb2bb4e45174ad0fd8eb5239e7d0627b"
   ],
   "src/game/three/camera.ts": [
     "2563e14758586a40217ed8efca551ed71133223b9f4775a025360afd060715b0",

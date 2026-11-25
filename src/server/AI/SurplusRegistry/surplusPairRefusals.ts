@@ -17,18 +17,19 @@
  * served recently stays out only 2 min (a seller's momentary capacity, not a dead route). The selector skips them and
  * picks the next pair, so a dead pair costs one 0.3 s refusal per 20 minutes instead of a build.
  */
+import { BoundedCache } from '../../lib/boundedCache';
+
 export const SURPLUS_MARKET_REFUSAL_CODES: ReadonlySet<string> = new Set(['no_sellers_for_model', 'minimum_discount_not_met']);
 export const SURPLUS_PAIR_UNSERVED_REFUSAL_MS = 20 * 60_000;
 export const SURPLUS_PAIR_SERVED_REFUSAL_MS = 2 * 60_000;
 const SERVED_RECENTLY_MS = 30 * 60_000;
 const MAX_PAIRS = 512;
 
-const refusedUntil = new Map<string, number>();
-const servedAt = new Map<string, number>();
+// BoundedCache (tests/boundedCaches.test.ts): per-instance state must not grow with traffic. A refusal lives at most
+// the longest skip; a "served" mark only matters for SERVED_RECENTLY_MS.
+const refusedUntil = new BoundedCache<string, number>({ maxEntries: MAX_PAIRS, ttlMs: SURPLUS_PAIR_UNSERVED_REFUSAL_MS });
+const servedAt = new BoundedCache<string, number>({ maxEntries: MAX_PAIRS, ttlMs: SERVED_RECENTLY_MS });
 const key = (model: string, providerId: string) => `${model}\0${providerId}`;
-function bound(map: Map<string, number>): void {
-  while (map.size > MAX_PAIRS) { const first = map.keys().next().value; if (first === undefined) break; map.delete(first); }
-}
 
 /** Is this a market refusal (the router found no qualifying seller), as opposed to any other 404/4xx? */
 export function isSurplusMarketRefusal(engineCode: string | undefined): boolean {
@@ -38,9 +39,9 @@ export function isSurplusMarketRefusal(engineCode: string | undefined): boolean 
 /** Remember that the router could not fill this pair. Returns until when it is skipped. Never throws. */
 export function recordSurplusPairRefusal(model: string, providerId: string, now: number = Date.now()): number {
   const k = key(model, providerId);
-  const served = servedAt.get(k);
+  const served = servedAt.get(k, now);
   const until = now + (served !== undefined && now - served <= SERVED_RECENTLY_MS ? SURPLUS_PAIR_SERVED_REFUSAL_MS : SURPLUS_PAIR_UNSERVED_REFUSAL_MS);
-  refusedUntil.delete(k); refusedUntil.set(k, until); bound(refusedUntil);
+  refusedUntil.set(k, until, now);
   return until;
 }
 
@@ -48,11 +49,11 @@ export function recordSurplusPairRefusal(model: string, providerId: string, now:
 export function recordSurplusPairServed(model: string, providerId: string, now: number = Date.now()): void {
   const k = key(model, providerId);
   refusedUntil.delete(k);
-  servedAt.delete(k); servedAt.set(k, now); bound(servedAt);
+  servedAt.set(k, now, now);
 }
 
 export function surplusPairRefused(model: string, providerId: string, now: number = Date.now()): boolean {
-  const until = refusedUntil.get(key(model, providerId));
+  const until = refusedUntil.get(key(model, providerId), now);
   return until !== undefined && now < until;
 }
 

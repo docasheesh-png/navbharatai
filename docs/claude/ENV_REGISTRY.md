@@ -5354,3 +5354,7 @@ unrelated and unchanged. The vault name the owner's key is stored under is `ZAI_
 (widened to all of their apps only from Keys & Secrets, by them). The builder may never ask for it mid-build
 (`AI_MODEL_KEY_NAMES` in `secretRequest.ts`), and a built app calling `api.z.ai` from its own page is caught by
 `browserAiKeyScan.ts`.
+
+### AGENTV3_GAME_PLACEHOLDER_PROBE (code default: ON; not set in Cloud Run) — 2026-11-25
+
+The placeholder look (`src/server/AgentV3/gamePlaceholderProbe.ts`). During the game playtest it checks whether the page shows placeholder art (a plain stand-in shape where a real model should be) and reports it, so a placeholder is not called finished. Only `off` (any case) disables it; the playtest then does not run this check. The check is read-only and costs no model call.

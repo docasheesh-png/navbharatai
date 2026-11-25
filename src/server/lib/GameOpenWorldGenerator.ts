@@ -31,7 +31,7 @@ import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '..
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { softwareRenderer } from '../three/surfaces';
+import { softwareRenderer, setGround } from '../three/surfaces';
 import { localLowestY } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
@@ -1085,6 +1085,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   layGround(spawn.x, spawn.z);
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
   ctx.player.setWater(map.world.seaLevel);
+  // 🧭 THE KIT'S GROUND IS THE MAP'S GROUND (admin 2026-11-25: "bahut dur ja kar jameen me dhansne lagta hai"). standOnGround,
+  // the enemies (systems/entities.ts), the police cars (systems/dispatch.ts) and every placed object ask the kit's one ground,
+  // groundHeightAt(). Nothing in an open world ever told it about the Athree terrain, so it answered 0 everywhere: an object
+  // "stood on the ground" sank into a hill or floated over a valley. Registered here, in RENDER metres (the origin is read live,
+  // so it stays right after every origin shift), and cleared in dispose().
+  setGround((x, z) => { const h = map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z); return Number.isFinite(h) ? h : 0; });
 
   // 🏙️ THE NEAREST CITIES LIVE (map expansion item 4; owner decision: phone 2, mid 5, desktop 8). A city — all the tiles of a
   // grown city together — counts once. When the player nears a place and the budget is full, the standing city farthest from
@@ -1500,6 +1506,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (const m of Object.values(venueMats)) m.dispose();
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
+      setGround(null);
       unregisterMap();
       if (probeWindow && probeWindow.__nbWorld === probeHook) delete probeWindow.__nbWorld;
     },
@@ -1785,6 +1792,124 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
     '',
   ].join('\n');
 }
+
+/**
+ * 🦹 STREET DANGER — the fight an open-world (GTA-style) game has by nature (admin 2026-11-25, problem 4: "enemy nahi ban rahe hai,
+ * na police car ati hai hero ko pakadne … bas wahi template rattu tote ki tarah sabhi game me suna diya jata hai"). The kit had
+ * enemies that chase and attack (systems/entities.ts) and a wanted level with police cars (systems/dispatch.ts), but the open-world
+ * starter created none of them: every GTA build was the same peaceful city. Written by the platform as the game's first FEATURE
+ * when the request has a fight in it — one file the user owns and edits, listed in src/game/features/index.ts.
+ */
+export const GAME_STREET_DANGER_PATH = 'src/game/features/streetDanger.ts';
+export const GAME_STREET_DANGER_FEATURE = String.raw`// STREET DANGER — enemies who come for the hero, people who can be hurt, and the police who answer a crime.
+// Written by NavBharatAI for this game. It is YOUR file: change the numbers below, the kinds of enemy, or the whole idea.
+// · Enemies spawn near the player, chase and attack (they hurt the player's health on the HUD). Beat one: score.
+// · Bystanders walk around. Punching one is a crime: wanted stars rise, a police car drives in with sirens, officers pursue
+//   and arrest you; from 3 stars they fight.
+// · Losing a life, or an arrest, puts the player back at the start with the stars cleared.
+import { defineFeature } from '../play/features';
+import type { OpenWorld } from '../play/openWorld';
+import { Entities, type Entity } from '../systems/entities';
+import { Dispatch, Wanted } from '../systems/dispatch';
+import { events } from '../core/events';
+import { state, damagePlayer, addScore } from '../core/state';
+
+/** Tune the danger here. */
+export const STREET_DANGER = {
+  enemies: 3,          // hostile people near the player at once (0 = none)
+  bystanders: 4,       // people who can be hurt — hurting one is a crime
+  spawnEvery: 6,       // seconds between new arrivals
+  near: 18,            // spawn ring around the player, metres
+  far: 34,
+  leaveBeyond: 90,     // metres: people farther than this leave the game
+  punchDamage: 34,     // three punches beat an enemy
+  enemyDamage: 8,
+  scorePerEnemy: 100,
+};
+
+/** The running danger (one per game): the feature's own update() and dispose() drive it. */
+let run: { update(dt: number): void; dispose(): void } | null = null;
+
+export default defineFeature<OpenWorld>({
+  id: 'street-danger',
+  about: ['enemy', 'enemies', 'dushman', 'gang', 'goon', 'police', 'cop', 'sipahi', 'wanted', 'crime', 'fight', 'punch', 'health'],
+  setup(ctx, world) {
+    const npcs = new Entities(ctx, { onAttack: (_e, damage) => damagePlayer(damage), playerRadius: 0.4 });
+    const dispatch = new Dispatch(ctx, npcs);
+    const respawn = (why: string) => {
+      const pw = world.playerWorld(), pp = ctx.player.object.position;
+      const s = world.spawn;
+      ctx.player.reset(s.x - (pw.x - pp.x), s.y + 0.2, s.z - (pw.z - pp.z));
+      state.health = state.maxHealth;
+      events.emit('PLAYER_HEALED', { amount: state.maxHealth, health: state.health });
+      wanted.clear(why);
+    };
+    const wanted = new Wanted(ctx, npcs, dispatch, { onArrest: () => respawn('arrested') });
+    const offs = [
+      events.on('PLAYER_DIED', () => { if (state.status === 'playing') respawn('died'); }),
+      events.on('ENTITY_DIED', (p: { kind?: string; byPlayer?: boolean }) => { if (p?.kind === 'enemy' && p.byPlayer) addScore(STREET_DANGER.scorePerEnemy); }),
+    ];
+    const mine = new Set<Entity>();
+    let clock = 0, next = 2;
+    /** One person in the spawn ring around the player, on the map's own ground, kept through origin shifts. */
+    const bring = (kind: 'enemy' | 'villager') => {
+      const pp = ctx.player.object.position, pw = world.playerWorld();
+      const a = Math.random() * Math.PI * 2, r = STREET_DANGER.near + Math.random() * (STREET_DANGER.far - STREET_DANGER.near);
+      const x = pp.x + Math.sin(a) * r, z = pp.z + Math.cos(a) * r;
+      const wx = x + (pw.x - pp.x), wz = z + (pw.z - pp.z);
+      if (!Number.isFinite(world.heightAt(wx, wz))) return;
+      const e = npcs.spawn(kind === 'enemy'
+        ? { x, z, kind: 'enemy', hostile: true, ai: Math.random() < 0.3 ? 'flanker' : 'melee', damage: STREET_DANGER.enemyDamage, health: 100 }
+        : { x, z, kind: 'villager', hostile: false, patrolRadius: 8, health: 60 });
+      if (!e) return;
+      world.place(e.object, wx, wz, 0.05);
+      mine.add(e);
+    };
+    run = {
+      update(dt: number) {
+        clock += dt;
+        // The punch: the Attack button (F / J, or Attack on a phone) lands on whoever is in front of the hero.
+        if (ctx.input.wasPressed('attack')) {
+          const yaw = ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y;
+          npcs.melee(ctx.player.object.position, yaw, STREET_DANGER.punchDamage, { byPlayer: true, attacker: ctx.player.object });
+        }
+        const pp = ctx.player.object.position;
+        for (const e of [...mine]) {
+          if (!e.alive || e.object.position.distanceTo(pp) > STREET_DANGER.leaveBeyond) {
+            if (e.alive) e.remove();
+            world.release(e.object); mine.delete(e);
+          }
+        }
+        if (clock >= next) {
+          next = clock + STREET_DANGER.spawnEvery;
+          if (npcs.alive('enemy').length < STREET_DANGER.enemies) bring('enemy');
+          if (npcs.alive('villager').length < STREET_DANGER.bystanders) bring('villager');
+        }
+      },
+      dispose() { for (const off of offs) off(); for (const e of mine) world.release(e.object); wanted.dispose(); dispatch.dispose(); npcs.dispose(); },
+    };
+    // Shared with other features (api.get('street-danger')): a mission can read who is wanted, or spawn through the same Entities.
+    return { npcs, dispatch, wanted };
+  },
+  update(_ctx, _world, dt) { run?.update(dt); },
+  dispose() { run?.dispose(); run = null; },
+});
+`;
+
+/** The game's list of features with street danger already in it (the platform wrote the file beside it). */
+export const GAME_FEATURES_INDEX_WITH_DANGER = [
+  '// THIS GAME, AS A LIST. Each feature is one file in this folder that adds one thing to the game.',
+  '// To ADD something: create src/game/features/<name>.ts with defineFeature({ id, setup, update }) and add it to the list below.',
+  '// To CHANGE one thing: edit only that feature\'s file. To REMOVE it: take it out of the list. Nothing else needs to change.',
+  "import type { GameFeature } from '../play/features';",
+  "import type { OpenWorld } from '../play/openWorld';",
+  "import streetDanger from './streetDanger';",
+  '',
+  'export const FEATURES: GameFeature<OpenWorld>[] = [',
+  '  streetDanger, // enemies, bystanders and the police — src/game/features/streetDanger.ts',
+  '];',
+  '',
+].join('\n');
 
 export const GAME_FEATURES_INDEX_PATH = 'src/game/features/index.ts';
 /** The game's own list of features — the user's file (never a kit file): created once, then only ever added to. */

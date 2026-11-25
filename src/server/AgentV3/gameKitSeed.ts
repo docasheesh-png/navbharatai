@@ -134,7 +134,11 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
     // A game played on foot on the big map gets the open-world starter after the shell: a player standing on the map,
     // mounted in src/App.tsx, playable before the first model call. A race or a flight has its own vehicle to stand on.
     const onFoot: GameKitRecipe[] = map.length && openWorldOnFoot(text) ? ['generate_open_world'] : [];
-    return ['generate_game_runtime', 'generate_game_3d', ...map, ...combatKit(text), 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
+    // 🦹 A CITY YOU WALK THROUGH HAS A FIGHT IN IT (admin 2026-11-25, problem 4 — "intention, not words"): a GTA-style world gets the
+    // combat layer whether or not the request said "enemy" or "police" (wantsCombatKit only read those words, and a GTA title
+    // implies none), unless the user asked for a peaceful game. openWorldHasAFight decides; streetDanger.ts is what it lays down.
+    const fight = combatKit(text).length || (onFoot.length && openWorldHasAFight(text)) ? ['generate_game_systems' as GameKitRecipe] : [];
+    return ['generate_game_runtime', 'generate_game_3d', ...map, ...fight, 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
   }
   // 🗺️ A 2D game whose user wants a big world (the wish, not one word: world2dIntent → largeWorldIntent, admin 2026-11-19)
   // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
@@ -165,6 +169,18 @@ export function openWorldOnFoot(prompt: string | null | undefined): boolean {
   let profile: string | null = null;
   try { profile = mapProfileFor(String(prompt ?? '')); } catch { return false; }
   return profile === 'open-world' || profile === 'battle-royale' || profile === 'explore';
+}
+
+/** A game the user wants calm: no fighting, for small children, farming, a quiet walk. PURE. */
+const PEACEFUL = /\b(?:peaceful|peace|calm|cozy|cosy|relax\w*|non[\s-]?violent|no\s+(?:violence|fighting|fight|enemies|enemy|combat|killing|guns?|police)|without\s+(?:violence|fighting|enemies|enemy|combat)|bina\s+(?:ladai|lada?i|dushman|maar\s*peet|hinsa)|(?:ladai|dushman|enemy|enemies|hinsa)\s+(?:nahi|nahin|na|mat)|kids?|children|bachch?on?\s+ke\s+liye|bachcho|farming|kheti|educational|sightseeing|ghoomne\s+(?:ke\s+liye|wala))\b/i;
+/**
+ * Does an on-foot open world have a fight in it? A CITY world (GTA-style) does by nature — enemies, police, health — unless the
+ * user asked for a peaceful one. An open country with no city (a walk through hills) does not, unless its words say so. PURE.
+ */
+export function openWorldHasAFight(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '');
+  if (PEACEFUL.test(text)) return false;
+  return openWorldWantsCity(text);
 }
 
 /** Hinglish for a city and its streets — the contract's subject list reads the English words. */
@@ -303,7 +319,7 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
   // city when the game's world has one.
-  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request) };
+  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request), ...(plan.includes('generate_game_systems') ? { danger: true } : {}) };
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
   // a weak builder toward the wrong genre. Without a request (a caller that cannot say), the whole shell, as before.

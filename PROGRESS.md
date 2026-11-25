@@ -6087,3 +6087,18 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
   - start reserve off → 1 fails.
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
+
+### 2026-11-25 — Q-3334 root-caused live: Surplus 404 is a dead seller PAIR, not the request (PR #4536)
+
+Admin: "surplus app builder me kam nahi kar raha, vaise woh reply de raha hai". Probed /min90 with the builder's own
+shape (provider pin + si_route + tools + reasoning_effort, prompts up to 211k tokens, max_tokens up to 64k, tool history):
+qwen3-coder/bedrock and glm-5.3-flash/mistral → 200 at every size; glm-5.3 and deepseek-v4.1-flash pinned to
+dashscope-cn → 404 `no_sellers_for_model` on every request; glm-5.3/zai → 404 `minimum_discount_not_met` (router 80%,
+market page 99.5%). Over ~260k tokens qwen3-coder also gets `minimum_discount_not_met` (context, expected).
+Class: the selector trusted the public market's `discount_pct` as "the router will fill this pair", and treated a
+pair refusal as a MODEL failure (bench) and — in #4536's first cut — as an ENGINE refusal (30-min park).
+Fix: `surplusPairRefusals.ts` (process-wide pair memory, 20 min / 2 min if recently served), selector skip, same-model
+next-seller retry, no bench on a market refusal, 404 removed from the circuit's immediate open; sibling found and fixed:
+a retried attempt on the adapter path returned before the bench decision and the report notice (Q-3019 class).
+Test: `aDeadSurplusSellerIsSkippedNotTheEngine.test.ts` (reverted ⇒ 3 fail). Open: none in this row; watch the next
+Weak build's Surplus attempts.

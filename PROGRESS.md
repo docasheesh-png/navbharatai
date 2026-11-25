@@ -6082,3 +6082,22 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
   - start reserve off → 1 fails.
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
+
+## 2026-11-25 — Autopsy failedbr #2523 + #2525 (FPS shooter, server lost, continue build)
+
+**Billing check (code read, not assumed):** both build debits (`debitWalletForBuild`, agentv3.ts settle and watchdog
+finalizer) run only at the END of a build, and a build with `!result.ok` bills 0. #2523's server died without running
+JS, so it never reached a debit: it was not charged. #2525 is charged only if it settles ok, for its own spend (estimate
+₹0.10).
+
+**Fixed in PR (claude/kit-typechecks-in-app):** Q-3353 — the seeded game kit failed its own first typecheck (6 errors
+across playerBody, externalAssets ×2, RacingRoadGame, openWorld, worldLayer, plus the LOD block). New census
+`tests/theKitTypechecksInTheAppItShipsTo.test.ts` compiles the whole kit under the scaffold tsconfig and strict; each
+fix reverted-and-failed; a scratch app with three@0.180 + @types/three + TS 5.9.3 compiles it with 0 errors.
+
+**Recorded in BUILD_REPORT_QUEUE.md:** Q-3354 (vitest declared, never installed — decision), Q-3355 (typecheck note says
+test errors fail the release), Q-3356 (four servers lost in a row; two builds died within 14 s on one instance — needs
+Cloud Run logs; deploys ruled out), Q-3357 (no live dead-build sweep), Q-3358 (Surplus 404 on six models → provider
+breaker; evidence for Q-3316), Q-3359 (fallbackMs 0), Q-3360 (COMPLEX vs cheapest band), Q-3361 (fallback message names
+the wrong ladder), Q-3362 (HERO_OBJECTS "table"), Q-3363 (Surplus on COMPLEX game builds — decision), Q-3364 (no
+continue hand-off), Q-3365 (seed assets serial after recipes).

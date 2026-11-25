@@ -17,7 +17,7 @@
 // What "the request names it" means is decided here, in one place, from the user's own words: the feature's or place's id
 // (its words), a request about everything ("sab", "poora game"), or a repair ("fix", "theek karo") for edits; removing a
 // thing always needs a removal word AND its name. Kill switch: AGENTV3_GROWTH_GUARD=off.
-import { recipeFilePool } from '../lib/gameRecipeLayers';
+import { exportedNames, recipeFilePool } from '../lib/gameRecipeLayers';
 import { PART_NAMES_FILE, partKnowledge, requestMeans, kitPartVocabulary, kitPartOwnName, type PartKnowledge } from './partMeaning';
 
 export const FEATURES_INDEX = 'src/game/features/index.ts';
@@ -322,10 +322,30 @@ export function growthVerdict(input: { path: string; before: string | undefined;
     // 🔓 The user asked for THIS part of the kit to change ("apna camera chahiye", "joystick bada karo") or gave a free hand:
     // this game's own copy of it is theirs (an edited kit file is never overwritten by a kit refresh).
     if (after === null ? mayRemoveKit(request, path) : mayEditKit(request, path)) return { allow: true };
+    // 🔓 Restoring what the engine needs (Q-3331): an EDIT that keeps every line the file had and only adds exports the kit's
+    // current version of this file has — the platform asked for exactly that when a kit update was held back by this file.
+    if (after !== null && restoresKitExports(before, after, recipeFilePool().get(path)?.content)) return { allow: true };
     // Otherwise the kit is the engine under every feature: a request that does not touch it never changes it.
     return { allow: false, restore: before, reason: 'a game-kit file was changed, and the request is not about that part of the game' };
   }
   return { allow: true };
+}
+
+/**
+ * Does `after` only ADD exports the kit's own version has, keeping every line `before` had (each line, as many times)? The one
+ * kit-file edit a request need not name: it restores what a held-back kit update needs from a file somebody edited (Q-3331),
+ * and cannot remove or change anything that was there. PURE.
+ */
+export function restoresKitExports(before: string, after: string, kit: string | undefined): boolean {
+  if (typeof kit !== 'string') return false;
+  const had = new Map<string, number>();
+  for (const l of before.split('\n')) { const k = l.trim(); if (k) had.set(k, (had.get(k) ?? 0) + 1); }
+  for (const l of after.split('\n')) { const k = l.trim(); const n = had.get(k); if (n) had.set(k, n - 1); }
+  if ([...had.values()].some((n) => n > 0)) return false;               // a line that was there is gone or changed
+  const was = exportedNames(before); const now = exportedNames(after); const kitHas = exportedNames(kit);
+  if (!was || !now || !kitHas) return false;
+  const added = [...now].filter((n) => !was.has(n));
+  return added.length > 0 && added.every((n) => kitHas.has(n));
 }
 
 /**

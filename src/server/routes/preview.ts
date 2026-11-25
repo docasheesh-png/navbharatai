@@ -13,7 +13,7 @@ import { getPreviewService } from '../runtime/PreviewService';
 import { buildProxyUrl } from '../runtime/proxyUrl';
 import { sanitizeProxyRequestHeaders, sanitizeProxyResponseHeaders } from '../lib/proxyHeaders';
 import { buildVuePreview } from '../runtime/VuePreview';
-import { sendSafeError } from '../lib/httpError';
+import { sendSafeError, toSafeClientMessage } from '../lib/httpError';
 import { splatPath, routeParam } from '../lib/expressCompat';
 import { sendUntrustedHtml } from '../lib/untrustedHtml';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
@@ -326,7 +326,9 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
       console.error('[preview-bundle] error:', err?.message || err);
       // Include the real esbuild problems (file/line/message) so the IDE's Problems panel can list them.
       const problems = Array.isArray(err?.problems) ? err.problems : [];
-      return res.status(500).json({ error: err?.message || 'Bundle failed', problems });
+      // The compile error describes the user's OWN code, so a redacted copy is kept; internals never are.
+      console.error('[HTTP 500] preview bundle:', err?.message || err);
+      return res.status(500).json({ error: toSafeClientMessage(err, 'Bundle failed'), problems });
     }
   });
 
@@ -340,7 +342,8 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
       return res.json({ html });
     } catch (err: any) {
       console.error('[preview-vue] error:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Vue preview failed' });
+      console.error('[HTTP 500] preview vue:', err?.message || err);
+      return res.status(500).json({ error: toSafeClientMessage(err, 'Vue preview failed') });
     }
   });
 
@@ -359,7 +362,8 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
       return res.status(result.ok ? 200 : 202).json(result);
     } catch (err: any) {
       console.error('[PREVIEW] start error:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Preview failed' });
+      console.error('[HTTP 500] preview:', err?.message || err);
+      return res.status(500).json({ error: toSafeClientMessage(err, 'Preview failed') });
     }
   });
 

@@ -1731,7 +1731,7 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
               // workspace so recovery can never re-attach a different session's build, and time-box it
               // so a still-dead connection fails fast into the next backoff attempt instead of hanging.
               if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
-              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
+              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000), headers: await authJsonHeaders() });
               const j = await probe.json().catch(() => ({}));
               if (isStale(gen)) break;
               const aliveHere = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
@@ -1792,7 +1792,7 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
           // SESSION-SCOPED (audit #4): without workspaceId this account-wide probe could re-attach a
           // DIFFERENT session's build into this panel. Bounded so a dead connection can't hang the net.
           if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
-          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
+          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000), headers: await authJsonHeaders() });
           const j = await r.json().catch(() => ({}));
           const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
           const action = stallWatchdogAction({ alive, heldElsewhere: j?.buildHeldElsewhere === true, sawResult: sawResultRef.current });

@@ -27,7 +27,8 @@ describe('the report names what the engine answered', () => {
   });
   it('the status travels from the attempt to the report line', () => {
     const runner = read('src/server/AgentV3/providers/SurplusTurnRunner.ts');
-    expect(runner).toMatch(/const status = httpStatusOf\(raw\);\s*const failure: SurplusTurnFailure = Object\.freeze\(\{ stage: 'response_validation'[^}]*httpStatus: status/);
+    // (the engine's own code rides with it since BR2514–BR2519 — aSurplusRefusalSaysWhichRefusal)
+    expect(runner).toMatch(/const status = httpStatusOf\(raw\);\s*(?:const engineCode = engineCodeOf\(raw\);\s*)?const failure: SurplusTurnFailure = Object\.freeze\(\{ stage: 'response_validation'[^}]*httpStatus: status/);
     expect(read('src/server/AI/SurplusRegistry/buildSession.ts')).toMatch(/notifyAttemptFailed\(callbacks, \{[^}]*\n?[^}]*httpStatus: failure\.httpStatus/);
   });
 });

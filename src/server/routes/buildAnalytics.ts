@@ -1,4 +1,5 @@
-import type { Express, Request, Response } from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
+import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { BuildJobManager } from '../AppMakerLab/jobs/BuildJobManager';
 import { aggregateBuildAnalytics } from '../AppMakerLab/jobs/BuildAnalytics';
 import { summarizeSlo } from '../AppMakerLab/intelligence/BuildSLATracker';
@@ -13,8 +14,18 @@ import { analyzeBuildOptimizations } from '../AppMakerLab/AIBuildOptimizer';
  *     status breakdown, and the top failure signatures. Real data from the job store; honest
  *     zeros when no builds have run yet (never fabricated).
  */
+/**
+ * Signed-in only (security audit 2026-11-21). These are platform-wide build counts and timings — no person in
+ * them — but they are the business's own numbers and were open to anyone on the internet. Every screen that
+ * shows them (App Analytics, Project Insights) is behind sign-in and now sends its token.
+ */
+async function requireSignedIn(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (await verifyFirebaseToken(req)) { next(); return; }
+  res.status(401).json({ error: 'Please sign in to see build analytics.' });
+}
+
 export function registerBuildAnalyticsRoutes(app: Express): void {
-  app.get('/api/analytics/builds', async (req: Request, res: Response) => {
+  app.get('/api/analytics/builds', requireSignedIn, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
       const jobs = await BuildJobManager.listRecent(limit);
@@ -27,7 +38,7 @@ export function registerBuildAnalyticsRoutes(app: Express): void {
 
   // P-PME.11 — build-time SLO compliance (violation rate + p95 per complexity tier). Honest zeros
   // until builds have run; never fabricated.
-  app.get('/api/analytics/slo', async (req: Request, res: Response) => {
+  app.get('/api/analytics/slo', requireSignedIn, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
       const jobs = await BuildJobManager.listRecent(limit);
@@ -40,7 +51,7 @@ export function registerBuildAnalyticsRoutes(app: Express): void {
 
   // P-TQA.13 — MTTD/MTTR reliability from real build-job history (failure→recovery). Honest zeros
   // until failures have occurred; unresolved failures never invent a repair time.
-  app.get('/api/analytics/reliability', async (req: Request, res: Response) => {
+  app.get('/api/analytics/reliability', requireSignedIn, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
       const jobs = await BuildJobManager.listRecent(limit);
@@ -53,7 +64,7 @@ export function registerBuildAnalyticsRoutes(app: Express): void {
 
   // P-BRE.11 — AI build optimizer: prioritized, deterministic optimization suggestions from the real
   // aggregated build telemetry. Empty until 10+ builds have run (never over-fits a tiny sample).
-  app.get('/api/analytics/build-optimizer', async (req: Request, res: Response) => {
+  app.get('/api/analytics/build-optimizer', requireSignedIn, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
       const jobs = await BuildJobManager.listRecent(limit);

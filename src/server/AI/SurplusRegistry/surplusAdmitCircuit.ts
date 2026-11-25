@@ -30,6 +30,14 @@ export const SURPLUS_ADMIT_CIRCUIT_FAILURE_THRESHOLD = 2;
 export const SURPLUS_ADMIT_CIRCUIT_BASE_COOLDOWN_MS = 60_000;
 /** Cap so a bad evening cannot park Surplus for hours without a half-open probe. */
 export const SURPLUS_ADMIT_CIRCUIT_MAX_COOLDOWN_MS = 180_000;
+/**
+ * 🚫 A REFUSAL IS NOT A SPIKE (failedbr BR2514–BR2519, 2026-11-24). Six builds hours apart each spent 80–94 s on Surplus,
+ * every model answering "the engine refused the request, HTTP 404", then fell back to the Weak ladder — the same 404s, build
+ * after build, because the 1–3 min cool-down above (sized for an overload spike) had always expired before the next build.
+ * An outright refusal (a 4xx other than 408/429 — buildSession `refusedOutright`) is the engine saying it will not serve
+ * this, not a passing fault: it opens the circuit at ONCE for this long; then a half-open probe (one build) tries again.
+ */
+export const SURPLUS_ADMIT_CIRCUIT_REFUSAL_COOLDOWN_MS = 30 * 60_000;
 
 export type SurplusAdmitCircuitState = 'closed' | 'open' | 'half_open';
 
@@ -92,11 +100,19 @@ export function shouldSkipSurplusAdmit(now: number = Date.now()): boolean {
 export function recordSurplusMidBuildDeath(
   reason: SurplusPreWriteFailOpenReason | string,
   now: number = Date.now(),
+  opts: { httpStatus?: number } = {},
 ): number {
   try {
     const safe = scrubReason(String(reason ?? 'mid_build_engine_unavailable') || 'mid_build_engine_unavailable');
     circuit.consecutiveDeaths += 1;
     circuit.lastOpenReason = safe;
+    const st = opts.httpStatus;
+    if (typeof st === 'number' && st >= 400 && st < 500 && st !== 408 && st !== 429) {
+      circuit.opensInARow += 1;
+      circuit.lastOpenReason = scrubReason(`${safe}:refused_${st}`);
+      circuit.openedUntil = now + SURPLUS_ADMIT_CIRCUIT_REFUSAL_COOLDOWN_MS;
+      return circuit.openedUntil;
+    }
 
     if (circuit.consecutiveDeaths < SURPLUS_ADMIT_CIRCUIT_FAILURE_THRESHOLD) {
       return 0;

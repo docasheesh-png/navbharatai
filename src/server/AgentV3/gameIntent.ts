@@ -26,7 +26,7 @@ export type GameDimension = '2d' | '3d' | 'unspecified';
 export type GameControl = 'keyboard' | 'touch' | 'mouse' | 'gamepad';
 export type GameFeature =
   | 'score' | 'levels' | 'lives' | 'timer' | 'enemies' | 'powerups' | 'leaderboard'
-  | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health' | 'throttle' | 'braking' | 'crashDamage';
+  | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health' | 'throttle' | 'braking' | 'crashDamage' | 'police';
 /** The vehicle the player drives or flies, when the request names one. */
 export type GameVehicle = 'train' | 'car' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'aircraft' | 'boat' | 'tractor' | 'rickshaw';
 /** Explicit runner requirements are not collapsed into a generic 'powerups' bucket. */
@@ -228,6 +228,9 @@ const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['braking', /\bbrak(e|es|ing)\b/i],
   // Question 9 (admin 2026-11-24): "car me dent padna chahiye", "realistic accident".
   ['crashDamage', /\b(dents?|dented|crumpl\w*|(car|vehicle) damage|realistic (crash|accident)\w*|(crash|accident)\w* (realistic|real lagni|real lage))\b|dent pad/i],
+  // Master audit Part I (2026-11-25): "when any crime happens, police should arrive" — police, an ambulance, a fire brigade,
+  // a wanted level. Hindi/Hinglish forms too ("pulis aa jaye", "पुलिस").
+  ['police', /\b(police|cops?|wanted level|wanted stars?|ambulance|fire ?brigade|fire ?truck|pulis)\b|पुलिस|एम्बुलेंस/i],
 ];
 
 /**
@@ -386,6 +389,7 @@ export function gameContractBlock(c: GameScopeContract): string {
     gameRulesBlock(c.rules ?? []),
     'Any OTHER rule the user states (scoring, levels, game over, hits to kill, bleeding) is made real with run_recipe({ name: "compose_rule", input: { rule } }) — the kit then runs it as data; a rule it refuses is written as code.',
     c.combat && gameCombatLines(c.combat).length ? ['Combat rules the user named — the kit applies them as data, the game must use its Health:', ...gameCombatLines(c.combat)].join('\n') : '',
+    c.requiredFeatures.includes('police') ? 'Police (or an ambulance, a fire brigade) must REALLY come: new Wanted(ctx, npcs, new Dispatch(ctx, npcs)) from src/game/systems/dispatch.ts — a crime raises the wanted level and a real car with sirens brings officers who pursue and arrest. Never a line of text saying they came.' : '',
     c.requiredFeatures.includes('crashDamage') ? 'Crashes must DENT the car: call enableVehicleDents() once from src/game/three/dents (the kit pushes the body in where it hit, deeper for a harder crash, and says VEHICLE_DAMAGED { vehicle, damage }); repairVehicle(car) restores it.' : '',
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
   ];
@@ -411,6 +415,8 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   throttle: /\b(throttle|accelerat\w*|setSpeed|driveVehicle)\b|\bspeed\s*[+-]?=/i,
   braking: /\b(brak\w*|decelerat\w*|driveVehicle)\b/i,
   crashDamage: /\b(enableVehicleDents|dentVehicle)\b/,
+  // Only the REAL system counts (systems/dispatch.ts): a line of text saying "police arrived" is not police (audit Part I).
+  police: /\bnew\s+(Wanted|Dispatch)\s*\(|\.call\(\s*['"](police|ambulance|fire|security|military)['"]/,
 };
 
 /** The same code signal `scopeMatch` uses, for one feature. Kit engine files are not the game. PURE. */

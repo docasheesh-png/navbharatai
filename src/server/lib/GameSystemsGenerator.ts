@@ -651,7 +651,13 @@ export class ProjectileSystem {
    * Advance and resolve hits. Call from the FIXED update.
    * \`targets\` is re-read every step so a dead enemy stops being hittable immediately.
    */
-  update(delta: number, targets: ProjectileTarget[] = []): ProjectileHit[] {
+  /**
+   * world (optional): the fraction 0..1 along a segment where it first meets the world (a wall, a crate, the ground), or
+   * null — play/aim.ts worldBlocker(ctx.scene) is the kit's. With it a bullet stops at the wall, hits nobody behind it, and
+   * says PROJECTILE_HIT_WORLD (master audit 2026-11-25, Part L: the projectile was the one movement path in the kit that
+   * ignored the world colliders every other path uses, so a bullet went through walls).
+   */
+  update(delta: number, targets: ProjectileTarget[] = [], world?: (from: Vec3, to: Vec3) => number | null): ProjectileHit[] {
     const hits: ProjectileHit[] = [];
     for (const s of this.slots) {
       if (!s.active) continue;
@@ -673,6 +679,15 @@ export class ProjectileSystem {
         // FIRST along the path, not nearest to the line. Two enemies lined up dead ahead are both at
         // distance zero, so ranking by distance would credit whichever came first in the array.
         if (along < bestT) { bestT = along; best = t; }
+      }
+
+      // A wall nearer along the path than the first target stops the bullet there.
+      const wallT = world ? world(from, to) : null;
+      if (wallT !== null && wallT !== undefined && Number.isFinite(wallT) && wallT >= 0 && wallT <= 1 && (!best || wallT < bestT)) {
+        s.active = false;
+        const point = { x: from.x + (to.x - from.x) * wallT, y: from.y + (to.y - from.y) * wallT, z: from.z + (to.z - from.z) * wallT };
+        events.emit('PROJECTILE_HIT_WORLD', { position: point, ownerId: s.ownerId });
+        continue;
       }
 
       if (best) {
@@ -1552,7 +1567,7 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
         ? 'EVERY CHARACTER (enemy, police, villager, guard) GOES IN WITH Entities (systems/entities.ts) — never a hand-wired body, ' +
           'AI and health: const npcs = new Entities(ctx, { playerHealth }); npcs.spawn({ x, z, kind: "enemy", ai: "ranged" }) ' +
           '(null + ENTITY_SPAWN_FAILED when it could not be verified). It ticks itself (ctx.onStep): the AI chases, the body walks ' +
-          'and faces, nobody walks through anybody. Bullets: npcs.applyHits(bullets.update(dt, npcs.targets())). A punch: ' +
+          'and faces, nobody walks through anybody. Bullets: npcs.applyHits(bullets.update(dt, npcs.targets(), worldBlocker(ctx.scene))) — worldBlocker from play/aim.ts, made once; a bullet stops at a wall. A punch: ' +
           'npcs.melee(ctx.player.object.position, facingYaw, 25). goTo(point, onArrive) sends one somewhere (ENTITY_ARRIVED). ' +
           'Death falls, emits ENTITY_DIED, and clears the body away.\n'
         : '') +
@@ -1572,7 +1587,8 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       'hp.tick(dt); swing.tick(dt);\n' +
       'const decision = stepEnemyAI(enemy.state, { player, neighbours, canSeePlayer }, DEFAULT_ENEMY, dt);\n' +
       'if (decision.wantsAttack && swing.tryUse()) hp.damage(10, enemy.state.position);\n' +
-      'for (const hit of bullets.update(dt, targets)) (hit.target.ref as Health).damage(hit.damage);\n' +
+      '// Pass the world (worldBlocker from play/aim.ts, made once) so a bullet stops at a wall: const walls = worldBlocker(ctx.scene);\n' +
+      'for (const hit of bullets.update(dt, targets, walls)) (hit.target.ref as Health).damage(hit.damage);\n' +
       '// A GUN is a Weapon, not one projectile per click (weapon.ts):\n' +
       "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
       '// isDown OR wasPressed: a quick tap that goes down and up inside one step must still fire.\n' +

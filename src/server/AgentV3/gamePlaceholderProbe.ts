@@ -146,7 +146,7 @@ export function pagePlaceholderFindings(start: PlaceholderPageRead | null | unde
     out.push({
       kind: isModel ? 'MISSING_MODEL' : 'FAILED_TEXTURE',
       path: url,
-      evidence: `${url} did not load (${clean(f?.why, 20) || 'failed'}) while the game was played`,
+      evidence: `${url} did not load (${clean(f?.why, 20) || 'failed'}) in the playtest's browser`,
       fix: isModel ? 'make the path point at a model the project has (public/…), or add the model; the loader shows a code-built stand-in until it loads'
         : 'make the texture path point at an image the project has, or drop the texture; a material whose image failed draws flat',
     });
@@ -220,7 +220,7 @@ export function placeholderRepairNote(issues: ReadonlyArray<IssueLike> | null | 
   const msg = hit ? String(hit.message ?? '').replace(/^Placeholder look \(builder-only\):\s*/, '').trim() : '';
   if (!msg) return null;
   return [
-    'PLACEHOLDERS FOUND BY THE LAST PLAYTEST (builder-only; do not mention it to the user). The game was played after the last turn and shows a stand-in where the real thing should be:',
+    'PLACEHOLDERS FOUND BY THE LAST PLAYTEST (builder-only; do not mention it to the user). The last playtest looked at the game after the last turn and saw a stand-in where the real thing should be:',
     msg.slice(0, 1800),
     'Repair each one in this turn as said (the smallest change that removes it; never delete the feature to hide it). The game is played again after this turn and every item is looked at once more.',
   ].join('\n');

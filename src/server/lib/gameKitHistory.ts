@@ -144,7 +144,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c7ea438236cd31125d333f42fc9f2160dfd1ade6c38a7bf1d8d0678efb3be61f",
     "2da0a2fde705007cec51137c3ad9d4705bad9fba420fafef810649dd0ed16046",
     "12d11ad8ce51b01b0bc1e8f33c7bb3e4f194c819073d9abe3a616b9927116be0",
-    "1fc69964aa1f6861ea80bab3d929b9913c4191ab2e0eff410fcb254f73302ca0"
+    "1fc69964aa1f6861ea80bab3d929b9913c4191ab2e0eff410fcb254f73302ca0",
+    "e7a54b73e4f0e2b10691d8a2ad47e467aa899c9f2f69dfe7b1acc04ce44c9172"
   ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
@@ -566,14 +567,16 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d95ed61c4b329c4319342b76f4e46958fcf168c9c24b5d3fb9f26f835e56402e",
     "de3efe1cb7635242d37061ab50941beae78be55e7e254266ee71592a7ba41152",
     "487ac129699447ae024c554b5040d2164c3826d5dab427e9089662e0fe1704ab",
-    "2978e707c64f5a091ac68a1a7593c23923a9bcbdab144a88c77963eeb40552db"
+    "2978e707c64f5a091ac68a1a7593c23923a9bcbdab144a88c77963eeb40552db",
+    "36eddb021e39dac35dbd0e606ee5a88db68fb4420b62eab14b9b724765c37d28"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
     "795e63a219ed1b40b80de950fb709153af4847941c15b40975a2b363751a9e07",
     "b11dbc6f0577383a719629d5fc46529b0c34111c0b2afd33cae0eff8f374bba1",
     "c60fff089f93a0ceada4afb3f70cd1daeb7c60e6782de352ef01e74906a49026",
-    "6534e7fec5a7c5352589a3e14abca6fa96ecf5c2b5ad1458d64e01f39428e171"
+    "6534e7fec5a7c5352589a3e14abca6fa96ecf5c2b5ad1458d64e01f39428e171",
+    "f17967bef421308f182516467bf976d32fc4ef01632b95b4803b9953f520a237"
   ],
   "src/game/play/raceCustom.ts": [
     "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0",
@@ -581,7 +584,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/play/worldLayer.ts": [
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
-    "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d"
+    "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
+    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8"
   ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9",

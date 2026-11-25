@@ -418,7 +418,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         widest = Math.max(widest, t.r, t.box ? Math.max(t.x - t.box.x0, t.box.x1 - t.x, t.z - t.box.z0, t.box.z1 - t.z) : 0);
       },
       /** Whether any entry passes the test — the same entries the test would pass over the whole list, in list order. */
-      some(x: number, z: number, extra: number, test: (t: { x: number; z: number; r: number }) => boolean): boolean {
+      some(x: number, z: number, extra: number, test: (t: TakenSpot) => boolean): boolean {
         const reach = widest + extra;
         if (!(reach >= 0) || !Number.isFinite(reach) || !Number.isFinite(x) || !Number.isFinite(z) || reach > CELL * 40) return all.some(test);
         const cx0 = Math.floor((x - reach) / CELL), cx1 = Math.floor((x + reach) / CELL), cz0 = Math.floor((z - reach) / CELL), cz1 = Math.floor((z + reach) / CELL);

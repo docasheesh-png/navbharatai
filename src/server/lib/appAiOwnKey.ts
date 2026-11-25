@@ -9,6 +9,12 @@ import { strictFreeRequired } from '../AI/inferencePolicy';
 // is read from the encrypted vault on our server and is never written into the page, the bundle, or any
 // response.
 //
+// SINCE 2026-11-25 THERE IS A THIRD, FREE ONE: `ZAI_API_KEY`, set up from the ❗ tray in three guided
+// steps (appFreeAi.ts, freeAiSetup.ts). Same shape as the two above — the owner's own account, read on
+// our server, never in the page — with one difference that matters: the models it may use are an
+// ALLOWLIST of the three Z.ai prints as free, so an app set up through a button that said "free" can
+// never spend the owner's own balance on a paid model.
+//
 // 🔒 A KEY THAT IS REFUSED IS NOT SILENTLY REPLACED BY OURS. If the owner chose their own key and it fails
 // (revoked, out of credit), the answer is an honest failure — quietly falling back to NavBharatAI's engine
 // would spend the owner's wallet behind a choice they made not to.
@@ -122,13 +128,15 @@ export async function askFreeAi(
           messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
         }),
       });
-      const body = res.ok ? null : await res.json().catch(() => null);
-      if (!res.ok && isFreeAiBusy(res.status, body)) { lastBusy = true; continue; } // the next free model
+      // ONE read of the body, because Z.ai answers some limits with a 200 and an error code in the
+      // body — a check that only looked at `res.status` would call that a broken reply.
+      const body = (await res.json().catch(() => null)) as
+        { choices?: Array<{ message?: { content?: unknown } }>; error?: { code?: unknown } } | null;
+      if (isFreeAiBusy(res.status, body)) { lastBusy = true; continue; } // the next free model
       // 401/403 is the key itself: no other model on the same key can answer, so stop here.
       if (res.status === 401 || res.status === 403) return { ok: false, reason: 'refused' };
       if (!res.ok) return { ok: false, reason: 'failed' };
-      const j = (await res.json().catch(() => null)) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
-      const text = j?.choices?.[0]?.message?.content;
+      const text = body?.choices?.[0]?.message?.content;
       if (typeof text === 'string' && text.trim()) return { ok: true, text };
       return { ok: false, reason: 'failed' };
     } catch {

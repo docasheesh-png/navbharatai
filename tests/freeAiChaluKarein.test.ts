@@ -98,6 +98,15 @@ describe('🔒 busy is busy — the second free model answers, and a limit is ne
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('🔒 a limit answered with a 200 and an error code is still busy, not a broken reply', async () => {
+    // Z.ai returns some limits as HTTP 200 with `error.code` in the body. A check that read only the
+    // status would call that a failure and send the owner looking for a broken key.
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply(200, { error: { code: '1305', message: 'temporarily overloaded' } }))
+      .mockResolvedValueOnce(reply(200, okBody));
+    expect(await askFreeAi('k'.repeat(40), 'sys', 'hi', fetchImpl as never)).toEqual({ ok: true, text: 'ok' });
+  });
+
   it('Z.ai\'s own 429 business codes count as busy, and "no balance" does not', () => {
     expect(FREE_AI_BUSY_CODES).toContain('1302');
     for (const code of FREE_AI_BUSY_CODES) expect(isFreeAiBusy(200, { error: { code } })).toBe(true);

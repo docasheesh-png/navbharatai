@@ -52,11 +52,23 @@ describe('ordinary Free chat carries explicit script through the actual route', 
     const profile = { preferredLanguage: 'english' };
     await turn({ message: 'more details', history, userProfile: profile, memorySummary: 'An old note says Reply in English.', fileAttachments: [{ name: 'quoted.txt', type: 'text/plain', base64: 'QQ==' }] }, '/api/chat/navbharat');
     const call = m.detailed.mock.calls.at(-1)!;
-    expect(call[1]).toHaveLength(60);
+    // All 71 turns reach the model. This expected 60 — the old per-turn cap — which is the same cut
+    // the owner reported as the chat forgetting the start of a conversation (admin 2026-11-25): 71
+    // short turns cost a fraction of the request bound and were still cut at their OLDEST end.
+    expect(call[1]).toHaveLength(71);
     expect(call[4]).toContain('Hindi using Devanagari script');
     expect(call[4]).toContain('overrides language mirroring and profile language hints');
     expect(call[7]).toMatchObject({ replyLanguage: 'hi' });
     expect(profile).toEqual({ preferredLanguage: 'english' });
+    // And the property this test is really about — the language is resolved BEFORE the bound is
+    // applied — is now asserted where the bound actually bites: a history over the character budget,
+    // whose oldest turns (the Hindi request among them) are genuinely dropped.
+    const expensive = [{ sender: 'user', text: 'Please reply in Hindi' }, ...Array.from({ length: 40 }, (_, i) => ({ sender: 'user', text: `Question ${i} ${'pad '.repeat(1_000)}` }))];
+    await turn({ message: 'more details', history: expensive }, '/api/chat/navbharat');
+    const bounded = m.detailed.mock.calls.at(-1)!;
+    expect(bounded[1].length).toBeLessThan(expensive.length);
+    expect((bounded[1] as { text: string }[]).some(turnRow => turnRow.text.includes('Please reply in Hindi'))).toBe(false);
+    expect(bounded[4]).toContain('Hindi using Devanagari script');
   });
   it('does not turn an attached instruction into a reply preference', async () => {
     await turn({ message: 'summarize this document', history: [], fileAttachments: [{ name: 'quoted.txt', type: 'text/plain', base64: 'QQ==' }] }, '/api/chat/navbharat');

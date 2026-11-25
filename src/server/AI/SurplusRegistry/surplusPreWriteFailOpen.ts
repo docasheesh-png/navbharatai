@@ -34,7 +34,7 @@ import {
   type SafeSurplusAdmissionReason,
 } from './admitOrFallback';
 import { recordSurplusMidBuildDeath, recordSurplusAdmitProbeSuccess } from './surplusAdmitCircuit';
-import { formatEngineSafeDiag } from '../../lib/engineSafeDiag';
+import { formatEngineSafeDiag, readEngineSafeDiag } from '../../lib/engineSafeDiag';
 import type { ProChainV2Build } from '../../AgentV3/proChainV2/buildContext';
 
 /** Safe mid-build reasons appended to the admission allowlist. Never secret/URL-bearing. */
@@ -162,7 +162,8 @@ export function tryConsumeSurplusPreWriteFailOpen(
   hooks.state.dropped = true;
   const reason: SurplusPreWriteFailOpenReason = files > 0 ? 'mid_build_after_write' : surplusPreWriteFailOpenReason(error);
   // Spike signal for the admit circuit — next builds skip Surplus during cool-down.
-  try { recordSurplusMidBuildDeath(reason); } catch { /* never block fail-open */ }
+  // An outright refusal (the engine's own HTTP 4xx) parks Surplus far longer than a spike (surplusAdmitCircuit.ts).
+  try { const httpStatus = readEngineSafeDiag(error)?.status; if (typeof httpStatus === 'number') recordSurplusMidBuildDeath(reason, Date.now(), { httpStatus }); else recordSurplusMidBuildDeath(reason); } catch { /* never block fail-open */ }
   // The diag argument is passed only when the failure carried one, so untagged callers see the old call.
   try { const diag = formatEngineSafeDiag(error); if (diag) hooks.onFailOpen?.(reason, diag); else hooks.onFailOpen?.(reason); } catch { /* audit must never block fail-open */ }
   return reason;

@@ -169,6 +169,7 @@ import { buildTrafficBoard } from '../AI/ProviderHealth/trafficBoard';
 import { aggregateEngineHealth, ENGINE_DISPLAY_NAMES } from '../AgentV3/engineHealth';
 import { weakLeadEngines } from '../AgentV3/weakLeadEngines';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
+import { readEngineDays, ENGINE_REASON_TEXT } from '../AgentV3/engineDayStats';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
 import { listReports } from '../lib/userReportStore';
 import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
@@ -2296,6 +2297,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const recent = await listAllDiagnostics(300, Date.now() - windowHours * 3_600_000);
       out.health = aggregateEngineHealth(recent, windowHours);
     } catch { out.health = null; }
+
+    // PER DAY, PER ENGINE (admin 2026-11-25): requests, answers, failures, average answer time, why it failed and who
+    // carried on — the chip's "failed today" and the tap-through detail. `null` = could not read (engineDayStats.ts).
+    try {
+      out.engineDays = { days: await readEngineDays(7), reasonText: ENGINE_REASON_TEXT };
+    } catch { out.engineDays = { days: null, reasonText: ENGINE_REASON_TEXT }; }
 
     // WHAT REALLY SERVED TODAY. `null` is "could not read" and the screen says so; `{}` is the real
     // answer "nothing has built today yet".

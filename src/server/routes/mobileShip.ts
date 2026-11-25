@@ -100,6 +100,7 @@ import { mapRunSteps, buildMobileBuildReport } from '../lib/mobileBuildReport';
 export { isValidArtifactId, pickBinaryName } from '../lib/buildArtifact';
 import { fetchBuildArtifact, isValidArtifactId, type ArtifactFetcher } from '../lib/buildArtifact';
 import { routeParam, routeParams } from '../lib/expressCompat';
+import { toSafeClientMessage } from '../lib/httpError';
 
 /** The real HTTP call, kept at the edge so the fetching logic itself stays testable without a network. */
 const githubZipFetcher: ArtifactFetcher = async (url, token) => {
@@ -624,7 +625,9 @@ export function registerMobileShipRoutes(app: Express): void {
       });
       res.json(kit);
     } catch (e) {
-      res.status(500).json({ error: (e as { message?: string })?.message || 'Could not generate the ship kit' });
+      // The kit's own validation messages are written for the user; the redactor still strips URLs, keys and vendor names.
+      console.error('[HTTP 500] mobile ship kit:', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ error: toSafeClientMessage(e, 'Could not generate the ship kit') });
     }
   });
 

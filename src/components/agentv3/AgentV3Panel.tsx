@@ -3025,7 +3025,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           if (userId) params.set('userId', userId);
           if (email) params.set('email', email);
           if (row?.workspaceId) params.set('workspaceId', row.workspaceId);
-          const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
+          // With the token: the account-wide answer is given only for the verified caller (2026-11-21).
+          const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders() });
           const j = await probe.json().catch(() => ({} as Record<string, unknown>));
           buildRunning = row?.workspaceId ? (j as { buildRunningHere?: unknown })?.buildRunningHere === true : (j as { buildRunning?: unknown })?.buildRunning === true;
         } catch { /* probe unreachable — the age gate below still protects young chats from branding */ }

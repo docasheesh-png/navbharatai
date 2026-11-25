@@ -6056,7 +6056,7 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
-## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3344…Q-3347)
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3353…Q-3356)
 
 Admin 2026-11-22, on their GTA-style game: *"mujhe lag raha hai, maps me sabhi city/village ko ek plane me na bana kar vertical
 layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea under a flat slab with lamps, people and cars on it.
@@ -6080,8 +6080,13 @@ layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea 
   new ground, and counts edits from the FIRST DRAW, so an edit in a feature's `setup()` is reported when the redraw is off.
 - **Lock:** `tests/oneGroundNeverLayers.test.ts` (9) — every fix reverted on its own and watched fail (guard, cleanRegion,
   notNumber, default redraw, prop re-stand, first-draw count).
-- **🟡 Q-3347 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
+- **🟡 Q-3356 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
   world.ts / features. Needs those files or one rebuild on the fixed kit (the console then names the refused value).
+## 2026-11-25 — Autopsy of BR2514–BR2519 (last six builds; all "succeeded", none played)
+
+Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this PR: **Q-3330** kit refresh was all-or-nothing → partial, safe, named (real kit: 0 → 124 of 137 files reach the existing game); **Q-3333** Surplus refusal (HTTP 4xx) parks the engine 30 min instead of costing 80–94 s on every build; evidence fixes for the two classes that had no root cause — **Q-3332** the playtest says each stage's seconds (real-browser proof) and **Q-3337** the kit seed says each recipe's seconds. Already fixed upstream (merged #4532/#4533, after these builds): **Q-3335** the user's repeated asks (enemies, bullets to the sky, walking through bots, knock-back, police). BLOCKED with options: Q-3331 (the shell chain behind an edited playerBody.ts), Q-3334 (why Surplus 404s every model — the provider), Q-3336/3339/3340/3343 (need project files or fuller records), Q-3338 (weak model tier, follows Q-3334), Q-3341 (report storage cap), Q-3342 (charging an unplayed game — a policy decision).
+- **Q-3331 (admin "continue next" → the recommended option):** a held-back kit update is finished by the builder, safely — `kitHeldBackHandoff` names the exports the edited file must add; the growth guard's `restoresKitExports` lets through only an edit that keeps every line and adds only exports the kit's own version has. Test on the real playerBody.ts (8).
+- **Q-3344 (admin, 2026-11-25):** the admin analytics 500 — seven independent reads in one Promise.all; one failure sank the page. Each read is settled and named now (`adminAnalyticsReads.ts`, `analyticsUnread.ts`); the failing read itself is named on the page after deploy (it is in Cloud Run logs this session cannot read).
 ## 2026-11-25 — failedbr #2499: places stand close, with a road between (Q-3350–Q-3352, claude/places-close-road)
 
 - Admin: "maine kaha map me 4 village/city add karo, to add huye hi nahi" — then "maps thode pas pas rahe, aur beech me road ho".

@@ -50,6 +50,10 @@ export interface SurplusTurnFailure {
   /** The transport's integer HTTP status for this attempt, when it answered at all (failedbr #2485, Q-3234: six attempts
    *  answered 404 and the report called each one "invalid_completion"). An integer only — never upstream text. */
   readonly httpStatus?: number;
+  /** The engine's own machine code for a refused request (`no_sellers_for_model`, `minimum_discount_not_met`, …) — a short
+   *  code-shaped token only, never upstream text. BR2514–BR2519: six builds 404'd on every model while the same models
+   *  served the small admission call, and the report could not say WHICH documented 404 it was. */
+  readonly engineCode?: string;
 }
 /** Issued only after the session has reconciled this failed attempt to durable, known expense. */
 export interface SurplusFailureResolution {
@@ -83,6 +87,19 @@ function httpStatusOf(raw: unknown): number | undefined {
   try {
     const status = raw !== null && typeof raw === 'object' ? (raw as { status?: unknown }).status : undefined;
     return typeof status === 'number' && Number.isSafeInteger(status) && status >= 100 && status <= 599 ? status : undefined;
+  } catch { return undefined; }
+}
+/** body.error.code (or .type) when it is a short code-shaped token; undefined otherwise. Never upstream prose. */
+export function engineCodeOf(raw: unknown): string | undefined {
+  try {
+    const body = raw !== null && typeof raw === 'object' ? (raw as { body?: unknown }).body : undefined;
+    const top = body && typeof body === 'object' ? (body as { error?: unknown; data?: unknown }) : undefined;
+    // The same two spellings the adapter's envelope reads: body.error, or body.data.error.
+    const nested = top?.data && typeof top.data === 'object' ? (top.data as { error?: unknown }).error : undefined;
+    const error = top?.error ?? nested;
+    if (!error || typeof error !== 'object') return undefined;
+    const e = error as { code?: unknown; type?: unknown };
+    return [e.code, e.type].find((v): v is string => typeof v === 'string' && /^[A-Za-z0-9_.-]{1,48}$/.test(v));
   } catch { return undefined; }
 }
 const ENDPOINT = 'https://api.surplusintelligence.ai/min90/v1';
@@ -306,7 +323,8 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
             });
           } catch (error) {
             const status = httpStatusOf(raw);
-            const failure: SurplusTurnFailure = Object.freeze({ stage: 'response_validation', reason: failureReason(error), attempt, hasResponse: true, ...(status !== undefined ? { httpStatus: status } : {}) });
+            const engineCode = engineCodeOf(raw);
+            const failure: SurplusTurnFailure = Object.freeze({ stage: 'response_validation', reason: failureReason(error), attempt, hasResponse: true, ...(status !== undefined ? { httpStatus: status } : {}), ...(engineCode ? { engineCode } : {}) });
             // Accounting can outlive the turn timer; a known refusal must never become availability.
             if (failure.reason === 'content_filter') policyRefused = true;
             const next = await fallback(await accountFailure(error, failure), failure, error);

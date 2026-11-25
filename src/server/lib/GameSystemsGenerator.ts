@@ -26,6 +26,9 @@
 //
 // PURE builder → the caller writes the files.
 
+import { GAME_ENTITIES, GAME_ENTITIES_PATH } from './GameEntitiesGenerator';
+import { GAME_DISPATCH, GAME_DISPATCH_PATH } from './GameDispatchGenerator';
+
 export interface GameSystemsResult {
   files: Record<string, string>;
   dependencies: Array<{ name: string; version: string }>;
@@ -1501,9 +1504,13 @@ const FILES: Record<string, string> = {
   'src/game/systems/weapon.ts': WEAPON,
   'src/game/systems/grenade.ts': GRENADE,
   'src/game/systems/aimassist.ts': AIMASSIST,
+  // Every character (enemy, police, villager) put in the game by one assembler — spawned, verified, ticked, kept apart (audit B–D).
+  [GAME_ENTITIES_PATH]: GAME_ENTITIES,
+  // Crime → wanted → REAL police (and any other service) driving in and arriving — never a sentence (audit I).
+  [GAME_DISPATCH_PATH]: GAME_DISPATCH,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'combatrules', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist', 'entities', 'dispatch'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -1527,6 +1534,12 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     // ai.ts follows paths around walls (nav.ts).
     if (files['src/game/systems/ai.ts']) files['src/game/systems/nav.ts'] = FILES['src/game/systems/nav.ts'];
     if (files['src/game/systems/aimassist.ts']) files['src/game/systems/grenade.ts'] = FILES['src/game/systems/grenade.ts'];
+    // dispatch.ts sends its crews as entities.
+    if (files[GAME_DISPATCH_PATH]) files[GAME_ENTITIES_PATH] = FILES[GAME_ENTITIES_PATH];
+    // entities.ts assembles health (combat), decisions (ai, which walks nav) and bullet targets (projectile).
+    if (files[GAME_ENTITIES_PATH]) {
+      for (const m of ['combat', 'combatRules', 'ai', 'nav', 'projectile']) files[`src/game/systems/${m}.ts`] = FILES[`src/game/systems/${m}.ts`];
+    }
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -1535,6 +1548,21 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     dependencies: [], // pure arithmetic; the spawner reuses the 3D layer's seeded RNG
     instructions:
       `Added gameplay systems (${Object.keys(files).length} files under src/game/systems).\n` +
+      (files[GAME_ENTITIES_PATH]
+        ? 'EVERY CHARACTER (enemy, police, villager, guard) GOES IN WITH Entities (systems/entities.ts) — never a hand-wired body, ' +
+          'AI and health: const npcs = new Entities(ctx, { playerHealth }); npcs.spawn({ x, z, kind: "enemy", ai: "ranged" }) ' +
+          '(null + ENTITY_SPAWN_FAILED when it could not be verified). It ticks itself (ctx.onStep): the AI chases, the body walks ' +
+          'and faces, nobody walks through anybody. Bullets: npcs.applyHits(bullets.update(dt, npcs.targets())). A punch: ' +
+          'npcs.melee(ctx.player.object.position, facingYaw, 25). goTo(point, onArrive) sends one somewhere (ENTITY_ARRIVED). ' +
+          'Death falls, emits ENTITY_DIED, and clears the body away.\n'
+        : '') +
+      (files[GAME_DISPATCH_PATH]
+        ? 'POLICE, AMBULANCE, FIRE, GUARDS, ARMY ARE REAL (systems/dispatch.ts) — NEVER a line of text saying they came: ' +
+          'const dispatch = new Dispatch(ctx, npcs); const wanted = new Wanted(ctx, npcs, dispatch, { onArrest }). The player ' +
+          'hurting or killing a non-enemy is a crime by itself (wanted.commit("theft") for others): stars rise, a real car drives ' +
+          'in with sirens, officers get out, pursue, arrest (PLAYER_ARRESTED) and from 3 stars fight. dispatch.call("ambulance", ' +
+          'point) for anything else. "Dispatched"/"arrived" are said only when true; a failure is said (DISPATCH_FAILED).\n'
+        : '') +
       '```ts\n' +
       'const hp = new Health({ max: 100, invulnerable: 0.6, damagedEvent: "PLAYER_DAMAGED", diedEvent: "PLAYER_DIED" });\n' +
       'const swing = new Cooldown(1.2);\n' +
@@ -1548,10 +1576,13 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       '// A GUN is a Weapon, not one projectile per click (weapon.ts):\n' +
       "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
       '// isDown OR wasPressed: a quick tap that goes down and up inside one step must still fire.\n' +
-      'gun.update(dt, input.isDown("attack") || input.wasPressed("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
+      '// THE DIRECTION COMES FROM ctx.aim() (play/aim.ts) — the crosshair\'s point, from the real muzzle. Never a hand-written\n' +
+      '// direction (a constant (0,0,1) fires "always north"; the hero\'s rotation fires the way it last walked):\n' +
+      'const a = ctx.aim(); gun.update(dt, input.isDown("attack") || input.wasPressed("attack"), a.muzzle, a.shot, bullets); // camera.pitch += gun.kick\n' +
       'const sword = new MeleeWeapon(30); if (input.wasPressed("attack")) sword.swing();\n' +
       '// An ENEMY\'s gun or sword passes its id, so only the player\'s own shot poses the player\'s body:\n' +
-      '// enemyGun.update(dt, wantsShot, enemyMuzzle, enemyAim, bullets, enemy.id); enemySword.swing(enemy.id);\n' +
+      '// enemyGun.update(dt, wantsShot, enemyMuzzle, shotFrom(enemyMuzzle, playerChest, toPlayer), bullets, enemy.id); enemySword.swing(enemy.id);\n' +
+      '// (shotFrom from play/aim.ts: the unit vector from the enemy\'s muzzle to the player\'s chest — never a fixed axis)\n' +
       'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +      '// The RHYTHM and the FLOW (director.ts): build → peak → breather, and difficulty that follows the player.\n' +
       "const director = new Director({ gameId: 'my-game' });   // adapt: false when scores are compared\n" +
       'const offDirector = director.bind();                   // listens to PLAYER_DAMAGED / DIED / ENEMY_DIED\n' +

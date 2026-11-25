@@ -35,7 +35,9 @@ describe('BR1977 — this Hinglish city prompt names a driveable car', () => {
     expect(c.genre).toBe('unknown');
     expect(c.dimension).toBe('3d');
     expect(c.subjects).toEqual(['building']);
-    expect(c.requiredFeatures).toEqual([]);
+    // "police aur bail ka system ho": the user ASKED for police. Until 2026-11-25 the contract dropped the word, so the build
+    // was never checked for it and police could only be a sentence (master audit Part I). It is a required feature now.
+    expect(c.requiredFeatures).toEqual(['police']);
     expect(c.camera).toBe('third-person');
     expect(c.externalAssets).toBe(false);
     expect(gameContractBlock(c)).toContain('The player drives: a car');
@@ -65,8 +67,9 @@ describe('BR1977 — this Hinglish city prompt names a driveable car', () => {
 
   it('still plans the 3D kit and stays in the game domain (this is not Q-2650)', () => {
     expect(analyzeRequirementGaps(PROMPT).domain).toBe('game');
+    // generate_game_systems: it carries the real police (systems/dispatch.ts) this request asks for (audit Part I).
     expect(gameKitPlan(PROMPT, 'vite-react')).toEqual([
-      'generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', 'generate_game_shell',
+      'generate_game_runtime', 'generate_game_3d', 'generate_game_systems', 'generate_game_vfx', 'generate_melody', 'generate_game_shell',
     ]);
     expect(analyzeRequirementGaps('Mujhe ak bike race app bana kar dedo').domain).not.toBe('game');
     expect(gameKitPlan('type of super market simulator', 'vite-react').includes('generate_game_3d')).toBe(false);

@@ -138,6 +138,18 @@ function specFor(name: string): ParticleSpec {
 
 interface Slot { life: number; maxLife: number; vx: number; vy: number; vz: number; spec: ParticleSpec; }
 
+/** Where a dead particle is put: far below any world, so it is never drawn even by a shader that ignores its size. */
+export const DEAD_Y = -1e6;
+
+/** The points shader, made to read each point's own size. Unchanged (and said) when the line it needs is not there. */
+export function withParticleSize(vertexShader: string): string {
+  if (!vertexShader.includes('gl_PointSize = size;')) {
+    console.warn('[particles] this three.js points shader has no "gl_PointSize = size;" — sizes are not per particle (dead ones are still hidden)');
+    return vertexShader;
+  }
+  return 'attribute float particleSize;\\n' + vertexShader.replace('gl_PointSize = size;', 'gl_PointSize = size * particleSize;');
+}
+
 /**
  * One buffer, one blend mode, one draw call.
  *
@@ -166,16 +178,22 @@ class ParticleLayer {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-    geo.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
+    // 🔴 THE PERMANENT YELLOW MUZZLE FLASH (master audit 2026-11-25, Part G). three's PointsMaterial draws every point at
+    // its ONE size uniform and never reads a per-point size, so setting a dead particle's size to 0 hid nothing: it stayed
+    // drawn, forever, where it died, in its last colour — the flash's hot orange on the additive layer. So the material now
+    // reads this attribute (patched below), and a dead particle is ALSO moved out of the world (update), which hides it even
+    // if a future three changes the shader line the patch looks for.
+    geo.setAttribute('particleSize', new THREE.BufferAttribute(this.sizes, 1));
     const mat = new THREE.PointsMaterial({
       vertexColors: true,
-      size: 0.2,
+      size: 1, // × particleSize: the size of each point is its own
       sizeAttenuation: true,
       transparent: true,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       // The line that stops additive particles punching holes in each other.
       depthWrite: false,
     });
+    mat.onBeforeCompile = (shader) => { shader.vertexShader = withParticleSize(shader.vertexShader); };
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false; // bursts appear anywhere; culling by the initial bounds hides them
   }
@@ -207,7 +225,7 @@ class ParticleLayer {
       const s = this.slots[i];
       if (s.life <= 0) continue;
       s.life -= delta;
-      if (s.life <= 0) { this.sizes[i] = 0; continue; }
+      if (s.life <= 0) { this.sizes[i] = 0; this.positions[i * 3] = 0; this.positions[i * 3 + 1] = DEAD_Y; this.positions[i * 3 + 2] = 0; continue; }
       const t = 1 - s.life / s.maxLife;
 
       const drag = Math.exp(-(s.spec.drag ?? 1) * delta);
@@ -227,7 +245,7 @@ class ParticleLayer {
     const geo = this.points.geometry;
     (geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (geo.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
-    (geo.getAttribute('size') as THREE.BufferAttribute).needsUpdate = true;
+    (geo.getAttribute('particleSize') as THREE.BufferAttribute).needsUpdate = true;
   }
 
   get activeCount(): number { return this.slots.reduce((n, s) => n + (s.life > 0 ? 1 : 0), 0); }

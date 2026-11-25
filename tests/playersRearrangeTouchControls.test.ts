@@ -287,6 +287,76 @@ describe('the editor (Settings → Edit controls)', () => {
   });
 });
 
+describe('🗺️ the minimap is in the SAME editor (master audit 2026-11-25, Part H — "the map cannot be resized")', () => {
+  /** A HUD element registered the way the Minimap registers itself; records every placement it is told. */
+  function withMap(seed: Record<string, string> = {}) {
+    const t = setup({ gameId: 'g1' }, seed);
+    const told: any[] = [];
+    const off = t.tc.addHudElement('minimap', { label: 'Minimap', width: 128, height: 128, home: () => ({ x: 80, y: 120 }), apply: (p: any) => told.push(p) });
+    const proxy = t.root.find('nbg-tc-hud')!;
+    return { ...t, told, off, proxy };
+  }
+  it('it gets a box in the editor and is told its spot (unplaced = its own corner, size 1)', () => {
+    const { proxy, told } = withMap();
+    expect(proxy).toBeTruthy();
+    expect(proxy.textContent).toBe('Minimap');
+    expect(told.at(-1)).toEqual({ size: 1 });
+  });
+  it('drag moves it and SAVES it with the controls; the map is told where to draw', () => {
+    const { tc, proxy, told, ev, storage } = withMap();
+    tc.editLayout();
+    proxy.fire('pointerdown', ev(3, 80, 120));
+    proxy.fire('pointermove', ev(3, 400, 200));
+    proxy.fire('pointerup', ev(3, 400, 200));
+    const stored = JSON.parse(storage.map.get('nbg-touch-layout-v1:g1')!);
+    expect(stored.controls.minimap.x).toBeCloseTo(0.5, 1);
+    expect(stored.controls.minimap.y).toBeCloseTo(0.5, 1);
+    expect(told.at(-1).x).toBeCloseTo(0.5, 1);
+    expect(told.at(-1).y).toBeCloseTo(0.5, 1);
+  });
+  it('Bigger resizes it (and the box), Reset puts it back in its corner at its own size', () => {
+    const { tc, root, proxy, told, ev, storage } = withMap();
+    tc.editLayout();
+    proxy.fire('pointerdown', ev(4, 80, 120)); proxy.fire('pointerup', ev(4, 80, 120));
+    const bar = root.find('nbg-tc-edit')!;
+    bar.all('nbg-tc-bigger')[0].fire('click', {});
+    expect(told.at(-1).size).toBe(1.15);
+    expect(proxy.style.width).toBe(Math.round(128 * 1.15) + 'px');
+    expect(JSON.parse(storage.map.get('nbg-touch-layout-v1:g1')!).controls.minimap.size).toBe(1.15);
+    bar.all('nbg-tc-reset')[0].fire('click', {});
+    expect(told.at(-1)).toEqual({ size: 1 });
+  });
+  it('a saved place is applied on the next game start (backward compatible: an old layout has no minimap and keeps the corner)', () => {
+    const saved = withMap({ 'nbg-touch-layout-v1:g1': JSON.stringify({ controls: { minimap: { x: 0.8, y: 0.3, size: 1.4 } } }) });
+    expect(saved.told.at(-1)).toEqual({ x: 0.8, y: 0.3, size: 1.4 });
+    const old = withMap({ 'nbg-touch-layout-v1:g1': JSON.stringify({ controls: { attack: { x: 0.5, y: 0.5 } } }) });
+    expect(old.told.at(-1)).toEqual({ size: 1 });
+  });
+  it('no control is put on top of it — the map takes part in the overlap solver', () => {
+    const { tc } = withMap();
+    const map = tc.onScreen.find((b: any) => b.id === 'minimap');
+    expect(map).toBeTruthy();
+    for (const b of tc.onScreen) if (b.id !== 'minimap') {
+      const apart = Math.abs(b.x - map.x) >= b.hw + map.hw - 1e-6 || Math.abs(b.y - map.y) >= b.hh + map.hh - 1e-6;
+      expect(apart, b.id).toBe(true);
+    }
+  });
+  it('taking it out removes its box; a real control id cannot be stolen', () => {
+    const { tc, root, off } = withMap();
+    off();
+    expect(root.find('nbg-tc-hud')).toBeUndefined();
+    const none = tc.addHudElement('attack', { label: 'x', width: 10, height: 10, home: () => null, apply: () => {} });
+    none();
+    expect(root.all('nbg-tc-btn').some((b: any) => b.attrs['data-action'] === 'attack')).toBe(true);
+  });
+  it('the Minimap registers itself and draws where the layout says, at the layout\'s size', () => {
+    expect(HUD).toContain("game.registerHud('minimap'");
+    expect(HUD).toMatch(/style\.size \* place\.size/);
+    expect(HUD).toContain("left: place.x * 100 + '%'");
+    expect(GAME).toContain('registerHud(id: string, spec: HudElementSpec): () => void {');
+  });
+});
+
 describe('the game wires it in', () => {
   it('the Settings panel offers Edit controls, which closes the panel and opens the editor', () => {
     expect(HUD).toContain('<TouchLayoutSection game={game} onBack={onBack} />');

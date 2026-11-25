@@ -8,7 +8,7 @@ import { BR1954_PROMPT } from './fixtures/br1954';
 import { buildGameContract, gameContractBlock, scopeMatch } from '../src/server/AgentV3/gameIntent';
 import { gameScopeVerdict } from '../src/server/AgentV3/gamePlaytest';
 import { gameTurnHandoff } from '../src/server/AgentV3/gameKitSeed';
-import { extractExportedDeclaration, kitTypeContract, KIT_CONTRACT_FILES } from '../src/server/lib/kitTypeContract';
+import { extractExportedDeclaration, kitTypeContract, KIT_CONTRACT_BUDGET, KIT_CONTRACT_FILES } from '../src/server/lib/kitTypeContract';
 import { declaredMembers } from '../src/server/AgentV3/typeMembers';
 import { recipeFilePool } from '../src/server/lib/gameRecipeLayers';
 
@@ -197,9 +197,9 @@ describe('BR1954 — known compiler API errors are prevented by a source-derived
     expect(extractExportedDeclaration('export class A {}', '[')).toBeNull();
   });
   it('bounds the API snapshot without promising an exhaustive inventory or cutting a declaration silently', () => {
-    // The budget gameKitSeed passes (12_500 since the touch-layout options joined, 2026-11-22): the full contract fits it,
-    // so no section is ever dropped from a real game turn.
-    expect(kitTypeContract(files).length).toBeLessThanOrEqual(12_500);
+    // The budget gameKitSeed passes (KIT_CONTRACT_BUDGET, one number): the full contract fits it, so no section is ever
+    // dropped from a real game turn.
+    expect(kitTypeContract(files).length).toBeLessThanOrEqual(KIT_CONTRACT_BUDGET);
     const small = kitTypeContract(files, 1000);
     expect(small.length).toBeLessThanOrEqual(1000);
     expect(small).toContain('INCOMPLETE API snapshot');

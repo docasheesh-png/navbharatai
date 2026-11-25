@@ -59,7 +59,8 @@ describe('particles — the difference between an effect and a frame-rate bug', 
   });
 
   it('flags the buffers dirty, or nothing on screen ever moves', () => {
-    for (const attr of ['position', 'color', 'size']) {
+    // 'particleSize': the per-point size the shader really reads (audit G — PointsMaterial ignores a 'size' attribute).
+    for (const attr of ['position', 'color', 'particleSize']) {
       expect(particles).toContain(`getAttribute('${attr}') as THREE.BufferAttribute).needsUpdate = true`);
     }
   });

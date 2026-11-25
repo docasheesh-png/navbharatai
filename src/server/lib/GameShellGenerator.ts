@@ -29,6 +29,8 @@
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerator';
 import { GAME_ACTIONS, GAME_ACTIONS_PATH } from './GameActionsGenerator';
+import { GAME_AIM, GAME_AIM_PATH } from './GameAimGenerator';
+import { GAME_BOUNDARY, GAME_BOUNDARY_PATH } from './GameBoundaryGenerator';
 import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
@@ -62,8 +64,10 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
-import { applyPlayerChoice, resolvePlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
+import { applyPlayerChoice, resolvePlayerChoice, findBones, playerModelRoot, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateActions } from './play/actions';
+import { aimFrom, type AimResult } from './play/aim';
+import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -73,11 +77,11 @@ import { audio } from './fx/audio';
 import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 // NavBharatAI's recorded sounds when this game was seeded with them; otherwise a stand-in that keeps built-in voices.
 import { loadSoundLibrary } from './fx/soundLibrary';
-import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
+import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions, type HudElementSpec } from './ui/touchControls';
 import type { MinimapOptions } from './ui/worldMap';
 // Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
 // (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
-export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions };
+export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions, WorldBounds, BoundaryOptions };
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -190,6 +194,11 @@ export interface GameOptions {
    */
   minimap?: boolean | MinimapOptions;
   /**
+   * Where the map ends (play/boundary.ts): the player, the vehicle they drive and every character stay inside, behind real
+   * walls (walls: 'invisible' when the map's own mountains or sea are the edge). Same as ctx.world.setBounds in setup().
+   */
+  bounds?: WorldBounds & BoundaryOptions;
+  /**
    * Keep the player's progress between visits: the kit's state (level, score, lives, the bag, unlocks) is saved when the
    * game pauses, a round ends or the page is hidden, and the start screen offers Continue / New game. Turn it on when the
    * game's progress lives in that state (an RPG, a level game) — a world the game builds itself is not saved.
@@ -244,6 +253,16 @@ export interface GameContext {
    */
   follow: (object: THREE.Object3D | null) => void;
   /**
+   * Where the player aims (play/aim.ts) — every gun's direction; never hand-write one. The crosshair point, the real
+   * muzzle, the shot between: gun.update(dt, fire, a.muzzle, a.shot, bullets). Top-down: the way the player faces.
+   */
+  aim: (options?: { holder?: THREE.Object3D | null; range?: number }) => AimResult;
+  /**
+   * Run fn(dt) every game step, after update() — paused and frozen with the game. Returns the way to stop it. The kit's
+   * own systems tick through it (Entities, systems/entities.ts), so a system cannot be forgotten in update().
+   */
+  onStep: (fn: (delta: number) => void) => () => void;
+  /**
    * The default player body (createHumanoid), or null when the game brought its own or is first-person. It already
    * plays the action poses for the buttons (see actionPoses); call ctx.hero.act('kick') yourself for anything else
    * the game does — a throw, a reach, a flinch.
@@ -262,6 +281,8 @@ export interface GameContext {
    * driveVehicle(), your code wins and the shell stops driving that vehicle.
    */
   vehicles: VehicleSeats;
+  /** The map's edge (play/boundary.ts): setBounds(area, { walls }) in setup(); inside(x, z) before putting anything somewhere. */
+  world: { readonly bounds: WorldBounds | null; setBounds: (area: WorldBounds | null, options?: BoundaryOptions) => boolean; inside: (x: number, z: number) => boolean };
 }
 
 export class Game {
@@ -570,6 +591,8 @@ export class Game {
 
     // The player's own character (src/game/player.ts) takes the default body's place before the game's setup runs.
     this.playerModel = applyPlayerChoice(this.context, this.playerChoice);
+    // The map's edge from the options first, so setup() can still change it (ctx.world.setBounds).
+    if (options.bounds) this.boundary.set(options.bounds, options.bounds);
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
@@ -610,6 +633,10 @@ export class Game {
    * one playtest) and the car never moved. Whatever a game stores here now survives, and the members are
    * live getters, so nothing on it can go stale either.
    */
+  /** The map's edge: walls and the per-step keep-inside (play/boundary.ts). */
+  readonly boundary = new WorldBoundary(this.scene);
+  /** What ctx.onStep registered, run each step after the game's update. */
+  private readonly stepHooks = new Set<(delta: number) => void>();
   private ctxObject: GameContext | null = null;
   get context(): GameContext {
     if (this.ctxObject) return this.ctxObject;
@@ -624,6 +651,20 @@ export class Game {
       get input() { return game.input; },
       get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
+      aim: (o = {}) => {
+        const model = playerModelRoot(game.context);
+        const hand = o.holder !== undefined ? o.holder : model ? (findBones(model).rightHand ?? null) : (game.hero?.joints.rightHand ?? null);
+        return aimFrom(game.rig.camera, game.scene, {
+          range: o.range, own: [game.player.object, game.chased], holder: hand, body: game.player.object,
+          topDownFacing: game.options.camera === 'top-down' ? (game.hero?.root.rotation.y ?? game.player.object.rotation.y) : null,
+        });
+      },
+      onStep: (fn) => { game.stepHooks.add(fn); return () => { game.stepHooks.delete(fn); }; },
+      world: {
+        get bounds() { return game.boundary.bounds; },
+        setBounds: (area, o) => game.boundary.set(area, o),
+        inside: (x, z) => game.boundary.inside(x, z),
+      },
       get hero() { return game.hero; },
       get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
       splitScreen: (camera) => { this.secondCamera = camera; },
@@ -636,6 +677,18 @@ export class Game {
       },
     };
     return this.ctxObject;
+  }
+
+  /**
+   * Nobody leaves the map (play/boundary.ts): the player, the vehicle the player drives — stopped at the edge, or it would
+   * keep pushing — and every object marked userData.bounded (Entities characters, dispatched cars). A no-op without bounds.
+   */
+  private keepInsideMap(): void {
+    if (!this.boundary.bounds) return;
+    this.boundary.keep(this.player.object, 0.4);
+    const v = this.seated;
+    if (v && this.boundary.keep(v, 1.2)) { const seat = this.seats.get(v); if (seat) seat.state = { ...seat.state, speed: 0 }; }
+    for (const o of this.scene.children) if (o.userData.bounded && o !== v) this.boundary.keep(o, 0.4);
   }
 
   /** Run the game's own code, listening for the vehicles it drives and the buttons it reads. */
@@ -778,10 +831,15 @@ export class Game {
       // Power-ups count down in game time only: frozen by a hit-stop, a conversation or the pause menu (core/powerups.ts).
       powerUps.update(delta);
       this.asGame(() => this.options.update?.(this.context, delta));
+      // ctx.onStep: the kit's systems (and the game's own) tick here. One that throws is dropped and said, never a dead loop.
+      for (const fn of [...this.stepHooks]) {
+        try { this.asGame(() => fn(delta)); } catch (error) { this.stepHooks.delete(fn); console.error('[game] a step hook failed and was stopped', error); }
+      }
       this.poseActionButtons();
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
       groundScene(this.scene);
+      this.keepInsideMap();
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
       // Debris from broken crates and walls flies, falls, settles and goes (three/breakable.ts).
@@ -1021,6 +1079,15 @@ export class Game {
   get minimapOption(): boolean | undefined { const m = this.options.minimap; return m === undefined ? undefined : m !== false; }
   /** The minimap's look as the game asked for it (corner, size, names, range, fullMap); {} for the defaults. */
   get minimapStyle(): MinimapOptions { const m = this.options.minimap; return m && typeof m === 'object' ? m : {}; }
+  /**
+   * Put a HUD element in the player's layout editor (Settings → Edit controls), saved with the controls. Without touch
+   * controls (a desktop with no touch screen) nothing edits it: apply is called once with size 1, and the element keeps its spot.
+   */
+  registerHud(id: string, spec: HudElementSpec): () => void {
+    if (this.touch) return this.touch.addHudElement(id, spec);
+    try { spec.apply({ size: 1 }); } catch { /* best-effort */ }
+    return () => undefined;
+  }
 
   /**
    * What the minimap draws: where the player (or the vehicle it drives) is, which way the camera looks (screen up),
@@ -1131,6 +1198,8 @@ export class Game {
    */
   dispose(): void {
     if (this.disposed) return;
+    this.stepHooks.clear();
+    this.boundary.dispose();
     this.disposed = true;
     // Partial construction is valid here; one broken cleanup must not strand later resources.
     const safe = (release: () => void) => { try { release(); } catch { /* teardown must never throw */ } };
@@ -1622,7 +1691,19 @@ export function Minimap({ game, onOpen }: { game: Game; onOpen?: () => void }) {
   const [distance, setDistance] = useState('');
   const off = game.minimapOption === false || prefs.showMinimap === false;
   const style = minimapStyle(off ? {} : game.minimapStyle, hasWorld);
-  const { size, range, names } = style;
+  // The player's own place and size for it (Settings → Edit controls — the same editor and saved layout as the buttons).
+  const [place, setPlace] = useState<{ x?: number; y?: number; size: number }>({ size: 1 });
+  const box = useRef<HTMLDivElement>(null);
+  const size = Math.round(Math.max(64, Math.min(320, style.size * place.size)));
+  const { range, names } = style;
+  useEffect(() => {
+    if (off || !visible) return;
+    return game.registerHud('minimap', {
+      label: t('minimap'), width: style.size, height: style.size,
+      home: () => { const r = box.current?.getBoundingClientRect(); return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.width / 2 } : null; },
+      apply: (p) => setPlace((was) => (was.x === p.x && was.y === p.y && was.size === p.size ? was : p)),
+    });
+  }, [game, off, visible, style.size]);
   const tappable = !off && style.fullMap && !!onOpen;
   useEffect(() => {
     if (off) return;
@@ -1679,9 +1760,13 @@ export function Minimap({ game, onOpen }: { game: Game; onOpen?: () => void }) {
   if (off || !visible) return null;
   const px = Math.round(size * pixelRatio());
   const side = style.corner === 'right' ? { right: 'max(12px, env(safe-area-inset-right))' } : { left: 'max(12px, env(safe-area-inset-left))' };
+  // Placed by the player: its centre where they put it; otherwise the game's corner.
+  const where = place.x !== undefined && place.y !== undefined
+    ? { left: place.x * 100 + '%', top: place.y * 100 + '%', transform: 'translate(-50%, ' + (-size / 2) + 'px)' }
+    : { ...side, top: 'max(56px, calc(env(safe-area-inset-top) + 48px))' };
   const picture = <canvas ref={canvas} width={px} height={px} aria-label="Minimap" role="img" style={{ display: 'block', width: size, height: size }} />;
   return (
-    <div style={{ position: 'absolute', ...side, top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', width: size, pointerEvents: 'none', zIndex: 5 }}>
+    <div ref={box} style={{ position: 'absolute', ...where, width: size, pointerEvents: 'none', zIndex: 5 }}>
       {tappable ? (
         <button type="button" aria-label={t('openMap')} title={t('openMap') + ' (M)'} onClick={onOpen}
           style={{ display: 'block', width: size, height: size, padding: 0, margin: 0, border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer', pointerEvents: 'auto', touchAction: 'manipulation' }}>
@@ -2646,6 +2731,19 @@ export interface TouchJoystickOptions {
 }
 
 /** The layout a player saved in Settings → Edit controls. Each field is optional: a missing one keeps the default. */
+/** A HUD element the layout editor can move and resize (TouchControls.addHudElement). */
+export interface HudElementSpec {
+  /** The name shown on its box in the editor. */
+  label: string;
+  /** Its size in pixels at size 1. */
+  width: number;
+  height: number;
+  /** Where its centre is now, in page pixels (getBoundingClientRect), when the layout has not placed it. */
+  home: () => { x: number; y: number } | null;
+  /** Called with where to draw it: x and y (0..1 of the screen) when placed, and always its size (1 = its own). */
+  apply: (placement: { x?: number; y?: number; size: number }) => void;
+}
+
 export interface SavedTouchLayout {
   controls: Record<string, { x?: number; y?: number; size?: number }>;
   opacity?: number;
@@ -2938,6 +3036,9 @@ const CSS = [
   '.nbg-tc.editing .nbg-tc-move{pointer-events:none;outline:2px dashed rgba(255,255,255,0.25);outline-offset:-2px}',
   '.nbg-tc.editing .nbg-tc-base{pointer-events:auto;opacity:1;cursor:move}',
   '.nbg-tc.editing .nbg-tc-btn{cursor:move}',
+  // A HUD element's box (the minimap): only while editing, dragged and pinched like a control.
+  '.nbg-tc-hud{display:none}',
+  '.nbg-tc.editing .nbg-tc-hud{display:flex;align-items:center;justify-content:center;border-radius:999px;border:2px dashed rgba(255,255,255,0.8);background:rgba(0,0,0,0.35);color:#fff;font:600 13px system-ui,sans-serif;pointer-events:auto;cursor:move;touch-action:none}',
   '.nbg-tc.editing .nbg-tc-sel{outline:3px solid #fde047;outline-offset:3px}',
   '.nbg-tc-edit{position:absolute;left:50%;top:max(12px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:8px 12px;border-radius:12px;background:rgba(0,0,0,0.78);color:#fff;font:600 14px/1.2 system-ui,sans-serif;pointer-events:auto;width:max-content;max-width:calc(100% - 24px);z-index:1}',
   '.nbg-tc-edit button{min-height:40px;padding:8px 12px;border-radius:8px;border:2px solid rgba(255,255,255,0.55);background:rgba(255,255,255,0.14);color:#fff;font:inherit;cursor:pointer}',
@@ -2962,6 +3063,12 @@ export class TouchControls {
   private readonly buttonsDown = new Map<number, { action: string; el: HTMLElement }>();
   /** Each movable control by its layout id: an action button, 'joystick' (its base), 'steer', 'pedals'. */
   private readonly controls = new Map<string, HTMLElement>();
+  /**
+   * HUD ELEMENTS IN THE SAME EDITOR (master audit 2026-11-25, Part H — "the touch controls can be moved and resized, the map
+   * cannot"). The minimap (and any HUD element) registers here by id; the editor shows a proxy box for it that is dragged,
+   * pinched, nudged, reset and saved exactly like a button, in the SAME saved layout, and the real element follows.
+   */
+  private readonly hud = new Map<string, { proxy: HTMLElement; spec: HudElementSpec }>();
   /** The action buttons in the order they were drawn, with the grid they live in when they are not placed. */
   private readonly homes: Array<{ id: string; el: HTMLElement; home: HTMLElement }> = [];
   private readonly placed = new Set<HTMLElement>();
@@ -3224,6 +3331,8 @@ export class TouchControls {
 
   /** Half the width and height, in pixels, of a control drawn at a size multiplier. */
   private halfPx(id: string, size: number): { hw: number; hh: number } {
+    const extra = this.hud.get(id);
+    if (extra) return { hw: (extra.spec.width * size) / 2, hh: (extra.spec.height * size) / 2 };
     if (id === 'steer' || id === 'pedals') {
       const el = id === 'steer' ? this.steer : this.pedals;
       const w = el.offsetWidth || PAD * 2 + BTN_GAP;
@@ -3240,6 +3349,14 @@ export class TouchControls {
     const right = Math.max(16, safe.right);
     const bottom = Math.max(16, safe.bottom);
     const stickRight = this.options.joystick?.side === 'right';
+    const extra = this.hud.get(id);
+    if (extra) {
+      // Where the element really is (its own default corner), in the editor's own coordinates.
+      const at = (() => { try { return extra.spec.home(); } catch { return null; } })();
+      const scr = this.screen();
+      const { hw, hh } = this.halfPx(id, 1);
+      return at ? { x: at.x - scr.left, y: at.y - scr.top } : { x: left + hw, y: Math.max(16, safe.top) + 48 + hh };
+    }
     if (id === JOYSTICK_CONTROL) {
       const R = this.halfPx(id, L.controls[id]?.size ?? 1).hw;
       return { x: stickRight ? w - right - R : left + R, y: h - bottom - R };
@@ -3272,7 +3389,8 @@ export class TouchControls {
     this.boxesNow = [];
     if (scr.w > 0 && scr.h > 0) {
       const safe = this.safeInset();
-      const ids = this.current === 'drive' ? ['steer', 'pedals'] : [JOYSTICK_CONTROL, ...this.homes.map((b) => b.id)];
+      // The HUD elements (the minimap) take part in BOTH layouts, so nothing is ever put on top of them.
+      const ids = [...(this.current === 'drive' ? ['steer', 'pedals'] : [JOYSTICK_CONTROL, ...this.homes.map((b) => b.id)]), ...this.hud.keys()];
       const boxes = ids.map((id) => {
         const p = L.controls[id];
         const { hw, hh } = this.halfPx(id, p ? p.size : 1);
@@ -3361,6 +3479,48 @@ export class TouchControls {
     // A joystick placed high up needs its half of the screen to reach that high.
     this.moveZone.style.height = isPlaced(j) ? '100%' : '';
     if (this.stickId === -1) this.restStick();
+    this.renderHud(scr, inset);
+  }
+
+  /** The HUD elements: the editor's proxy box where the layout puts it, and the real element told where to draw. */
+  private renderHud(scr: { w: number; h: number }, inset: ScreenInset): void {
+    for (const [id, { proxy, spec }] of this.hud) {
+      const p = this.drawn.controls[id];
+      const size = p ? p.size : 1;
+      const box = this.boxesNow.find((b) => b.id === id);
+      if (box && scr.w > 0 && scr.h > 0) this.place(proxy, id, { x: box.x / scr.w, y: box.y / scr.h, size: 1 }, scr, inset);
+      proxy.style.width = Math.round(spec.width * size) + 'px';
+      proxy.style.height = Math.round(spec.height * size) + 'px';
+      try { spec.apply(isPlaced(p) ? { x: p.x, y: p.y, size } : { size }); } catch { /* a HUD element's own drawing never breaks the controls */ }
+    }
+  }
+
+  /**
+   * Put a HUD element (the minimap, a compass, a health bar…) in this editor: it is moved, resized, reset and saved with the
+   * controls, in the same layout. Returns the way to take it out again.
+   */
+  addHudElement(id: string, spec: HudElementSpec): () => void {
+    if (!id || this.controls.has(id) && !this.hud.has(id)) return () => undefined;
+    { const old = this.hud.get(id)?.proxy; old?.parentElement?.removeChild(old); }
+    const proxy = document.createElement('div');
+    proxy.className = 'nbg-tc-hud';
+    proxy.textContent = spec.label;
+    proxy.setAttribute('aria-label', spec.label);
+    proxy.setAttribute('tabindex', '0'); // hidden (display:none) except while editing, so Tab reaches it only then
+    proxy.setAttribute('role', 'button');
+    this.on(proxy, 'pointerdown', (e) => { if (this.editor) this.editDown(e, id, proxy); });
+    proxy.addEventListener('focus', () => { if (this.editor) this.select(id); });
+    this.root.appendChild(proxy);
+    this.controls.set(id, proxy);
+    this.hud.set(id, { proxy, spec });
+    this.applyLayout();
+    return () => {
+      if (this.hud.get(id)?.proxy !== proxy) return;
+      this.hud.delete(id);
+      this.controls.delete(id);
+      proxy.parentElement?.removeChild(proxy);
+      if (this.selected === id) this.select(null);
+    };
   }
 
   private place(el: HTMLElement, id: string, p: { x: number; y: number; size: number }, scr: { w: number; h: number }, inset: ScreenInset): void {
@@ -4810,9 +4970,11 @@ const FILES: Record<string, string> = {
   // Who the player is, for every game on the shell: src/game/player.ts swaps the character (2026-11-22).
   [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
   [GAME_ACTIONS_PATH]: GAME_ACTIONS,
+  [GAME_AIM_PATH]: GAME_AIM,
+  [GAME_BOUNDARY_PATH]: GAME_BOUNDARY,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'racingroadgame', 'racecustom', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'aim', 'boundary', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -4910,6 +5072,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     // Game reads who the player is (src/game/player.ts) through it, so the two always ship together.
     if (files['src/game/Game.ts']) files[GAME_PLAYER_BODY_PATH] = FILES[GAME_PLAYER_BODY_PATH];
     if (files['src/game/Game.ts']) files[GAME_ACTIONS_PATH] = FILES[GAME_ACTIONS_PATH];
+    if (files['src/game/Game.ts']) files[GAME_AIM_PATH] = FILES[GAME_AIM_PATH];
+    if (files['src/game/Game.ts']) files[GAME_BOUNDARY_PATH] = FILES[GAME_BOUNDARY_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -4926,6 +5090,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
+      (files[GAME_BOUNDARY_PATH] ? 'THE MAP HAS AN EDGE: pass bounds: { minX, maxX, minZ, maxZ } in the options (or ctx.world.setBounds in setup) — the player, the car they drive and every character stay inside behind real walls (walls: "invisible" when mountains or sea are the visible edge); never let anyone drive or walk off the map.\n' : '') +
+      (files[GAME_AIM_PATH] ? 'EVERY GUN AIMS WITH ctx.aim(): const a = ctx.aim(); gun.update(dt, fire, a.muzzle, a.shot, bullets) — the crosshair point from the real muzzle; never a hand-written direction (a constant one fires the same way whatever the aim).\n' : '') +
       (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +

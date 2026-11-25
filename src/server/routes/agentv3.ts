@@ -747,6 +747,7 @@ import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, 
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { gameGeometryProbeEnabled, geometryRepairNote } from '../AgentV3/gameGeometryProbe';
+import { gamePlaceholderProbeEnabled, placeholderRepairNote } from '../AgentV3/gamePlaceholderProbe';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -19751,6 +19752,11 @@ async function noteBuildOutcome(
           const geometryNote = geometryRepairNote((await raceTimeout(previousReportAtStart, 1500, 'geometryNote').catch(() => null))?.issues);
           if (geometryNote) buildPrompt = `${geometryNote}\n\n---\n\n${buildPrompt}`;
         }
+        // The last playtest's placeholder look, for the builder only (gamePlaceholderProbe.ts) — repaired this turn, played again after it.
+        if (gameHandoff.block && gamePlaceholderProbeEnabled()) {
+          const placeholderNote = placeholderRepairNote((await raceTimeout(previousReportAtStart, 1500, 'placeholderNote').catch(() => null))?.issues);
+          if (placeholderNote) buildPrompt = `${placeholderNote}\n\n---\n\n${buildPrompt}`;
+        }
         if (gameContract) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true,
           message: `Game scope contract: ${JSON.stringify(gameContract)}` });
       } catch { /* unavailable contract is not permission to change an existing project */ }
@@ -24881,6 +24887,7 @@ async function noteBuildOutcome(
           contract: gameContract ?? null,
           play: () => withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(lastPreviewUrl!, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest'),
           readFile: (p) => actuator.readFile(workspaceId, p),
+          listFiles: () => actuator.listFiles(workspaceId),
           record: (issue) => buildDiag.record(issue),
           previousIssues: async () => (await previousReportAtStart)?.issues,
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),

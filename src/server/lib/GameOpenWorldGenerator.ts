@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // THE OPEN-WORLD STARTER (failedbr #2485, 2026-11-21 — admin: "is game me to map aya hi nahi, bas ek character aya … jo
 // joystick se hawa me move kar raha hai … library ka use kyu nahi ho raha, hona chahiye").
 //
@@ -194,6 +196,29 @@ const REGION_PRESETS: Record<'city' | 'town' | 'village', { city: CityOptions; t
   town: { city: { blocksX: 3, blocksZ: 3, style: 'town', maxFloors: 4 }, traffic: 6, people: 16, parkedCars: 3 },
   village: { city: { blocksX: 2, blocksZ: 2, style: 'town', maxFloors: 2, parks: 0.3 }, traffic: 2, people: 8, parkedCars: 1 },
 };
+/** The seed every map had before each game got its own (WORLD.seed: 7). A map with it keeps exactly the places it had. */
+export const LEGACY_WORLD_SEED = 7;
+/**
+ * 🎲 A PLACE'S OWN LOOK, FIXED BY THE MAP (external Game Maker audit, 2026-11-25: six new games must not all stand in the
+ * same city). Every place used to get seed 11 + 17n whatever the map, so every game's first city had the same buildings on
+ * the same lots. Now the place's seed (its lots, buildings and traffic paint) and, for a city that asks for no style, its
+ * style (mixed or downtown) come from the map's own seed (WORLD.seed, written once into the game's src/game/world.ts) and
+ * the place's position in the list — the same map always has the same places, so an edit never changes them, and a map on
+ * the old seed 7 keeps exactly what it had. PURE.
+ */
+export function placeLook(worldSeed: unknown, kind: RegionKind, n: number): { seed: number; style?: CityOptions['style'] } {
+  const base = 11 + n * 17;
+  const s = Math.floor(Number(worldSeed));
+  if (!Number.isFinite(s) || s === LEGACY_WORLD_SEED) return { seed: base };
+  const mixed = (Math.imul((s ^ (s >>> 16)) >>> 0, 0x45d9f3b) + Math.imul(base, 0x9e3779b1)) >>> 0;
+  return { seed: (mixed % 999999937) + 1, ...(kind === 'city' ? { style: (mixed >>> 7) % 2 ? 'downtown' as const : 'mixed' as const } : {}) };
+}
+/** How far along the parked-car paints a map starts (0 on the old seed 7, so old maps keep their cars). PURE. */
+export function parkedPaintShift(worldSeed: unknown, paints: number): number {
+  const s = Math.floor(Number(worldSeed));
+  if (!Number.isFinite(s) || s === LEGACY_WORLD_SEED || paints < 1) return 0;
+  return (Math.imul((s ^ (s >>> 13)) >>> 0, 0x2c1b3c6d) >>> 0) % paints;
+}
 
 /** The city standing on the map. Its own numbers (plan, routes, lots) are in CITY metres: use toWorld() to leave it. */
 export interface OpenWorldCity {
@@ -425,6 +450,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const userMaps: Array<{ id: string; model: string; centre: { x: number; y: number; z: number }; size: number; status: OpenWorldUserMap['status']; reason?: string; root?: THREE.Object3D }> = [];
   const venueList: Array<{ id: string; venue: VenueKind; centre: { x: number; y: number; z: number }; width: number; depth: number; scale: number; joinedTo?: string; root?: THREE.Group }> = [];
   const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
+  const worldSeed = (mapOptions as { seed?: unknown }).seed, paintShift = parkedPaintShift(worldSeed, colours.length);
   // 🌌 A UNIVERSE OF PLACES (admin 2026-11-22: "mujhe chahiye 10—100 maps jod kar bahut bada universe bhi bana sake"). Up to
   // MAX_REGIONS places and lands. Every place is PLANNED up front — its spot on the map and its levelled ground, which are cheap
   // and must exist before the first terrain is drawn — but its CITY (buildings, traffic, people, parked cars) is built only when
@@ -665,7 +691,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       if (cell) {
         const own = region.city || {};
-        const cityOptions: CityOptions = { ...root.cityOptions, ...(own.style ? { style: own.style } : {}), ...(own.maxFloors ? { maxFloors: own.maxFloors } : {}), seed: 11 + planned.length * 17 };
+        const cityOptions: CityOptions = { ...root.cityOptions, ...(own.style ? { style: own.style } : {}), ...(own.maxFloors ? { maxFloors: own.maxFloors } : {}), seed: placeLook(worldSeed, root.region.kind, planned.length).seed };
         const x = root.centre.x + cell[0] * stepX, z = root.centre.z + cell[1] * stepZ;
         map.world.levelGround(x, z, rootPlan.width / 2 + 8, rootPlan.depth / 2 + 8, 60, root.centre.y);
         taken.push({ x, z, r: root.reach });
@@ -675,7 +701,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     }
     const preset = REGION_PRESETS[region.kind] || REGION_PRESETS.city;
     const { traffic: _t, people: _p, parkedCars: _c, ...own } = region.city || {};
-    const cityOptions: CityOptions = { ...preset.city, seed: 11 + planned.length * 17, ...own };
+    const cityOptions: CityOptions = { ...preset.city, ...placeLook(worldSeed, region.kind, planned.length), ...own };
     const plan = planCity(cityOptions);
     const hx = plan.width / 2 + 8, hz = plan.depth / 2 + 8, reach = Math.max(hx, hz);
     // Where to look: the first place is at the start; the others go the way they were asked, clear of what is there.
@@ -735,7 +761,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const sx = plan.streetsX[(i * 2 + 1) % plan.streetsX.length];
       const zi = i % Math.max(1, plan.streetsZ.length - 1);
       const z0 = plan.streetsZ[zi], z1 = plan.streetsZ[Math.min(plan.streetsZ.length - 1, zi + 1)];
-      const car = createCar({ color: colours[(i + towns.length) % colours.length] });
+      const car = createCar({ color: colours[(i + towns.length + paintShift) % colours.length] });
       car.position.set(sx + (plan.road / 2 - 1.3) * (i % 2 ? 1 : -1), city.heightAt(sx, (z0 + z1) / 2), z0 + (z1 - z0) * (0.3 + 0.4 * ((i * 0.37) % 1)));
       car.rotation.y = i % 2 ? Math.PI : 0;
       root.add(car); parked.push(car); ctx.vehicles.add(car);
@@ -1231,7 +1257,15 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     }
     return { terrain: { samples, off, worst: r1(worst) }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
   };
-  const probeHook = { geometry: geometryReport };
+  // 🔎 Where the player stands, for the placeholder look (gamePlaceholderProbe.ts): the feet, the land under them and the
+  // water over that land (the sea where the land is below sea level, else a river or lake). Read-only.
+  const standingReport = () => {
+    const at = playerWorld(), land = map.world.heightAt(at.x, at.z), river = map.world.waterAt(at.x, at.z);
+    const water = Math.max(land < map.world.seaLevel ? map.world.seaLevel : -Infinity, river ? river.surface : -Infinity);
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    return { feet: r1(at.y), land: r1(land), water: Number.isFinite(water) ? r1(water) : null, seated: !!ctx.vehicles.seated };
+  };
+  const probeHook = { geometry: geometryReport, standing: standingReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
   if (probeWindow) probeWindow.__nbWorld = probeHook;
   return {
@@ -1649,7 +1683,10 @@ export { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH };
 
 export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
 /** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
-export function gameWorldFileSource(options: { city?: boolean } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; workspaceId?: string } = {}): string {
+  const seed = options.workspaceId
+    ? createHash('sha256').update('world:' + options.workspaceId).digest().readUInt32BE(0) || 1
+    : 7;
   return [
     '// THIS GAME\'S MAP. The land is NavBharatAI\'s big Athree map; the places on it are the regions list below.',
     '// To make the map BIGGER: add one more region (a city, a town or a village; say which way with toward, or leave it out).',
@@ -1661,7 +1698,7 @@ export function gameWorldFileSource(options: { city?: boolean } = {}): string {
     "import type { OpenWorldOptions } from './play/openWorld';",
     '',
     'export const WORLD: OpenWorldOptions = {',
-    '  seed: 7,',
+    '  seed: ' + seed + ',',
     '  regions: [',
     ...(options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
     '  ],',

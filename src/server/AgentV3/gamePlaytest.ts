@@ -44,6 +44,7 @@ import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
 import { locatedErrorText } from './runtimeErrorSite';
 import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead, type HeapRead } from './gameGeometryProbe';
+import { gamePlaceholderProbeEnabled, PLACEHOLDER_PAGE_HOOK, type ControlsRead, type PlaceholderPageRead } from './gamePlaceholderProbe';
 import { withoutComments } from '../lib/codeOnly';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
@@ -306,6 +307,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     progressMs: PROGRESS_PLAY_MS,
     // The read-only geometry look (gameGeometryProbe.ts) — false when AGENTV3_GAME_GEOMETRY_PROBE=off.
     geometry: gameGeometryProbeEnabled(env),
+    // The placeholder look (gamePlaceholderProbe.ts) — false when AGENTV3_GAME_PLACEHOLDER_PROBE=off.
+    placeholders: gamePlaceholderProbeEnabled(env),
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
@@ -391,6 +394,8 @@ const soundCounter = () => {
 // window.__THREE_DEVTOOLS__ at the end of its constructor; wrapping that renderer's render() hands us the scene and the
 // camera it draws with. Positions are STATE — a loaded machine that draws few frames moves them less, never the wrong
 // way — so where a three.js game is found, the camera and steering verdicts read them first and pixels second.
+// The placeholder look's own read-only hook (gamePlaceholderProbe.ts), added after sceneHook on the same hub.
+const placeholderHook = ${PLACEHOLDER_PAGE_HOOK};
 const sceneHook = () => {
   const hub = new EventTarget();
   const seen = { scene: null, camera: null };
@@ -885,6 +890,7 @@ try {
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(soundCounter);
   await ctx.addInitScript(sceneHook);
+  if (cfg.placeholders) await ctx.addInitScript(placeholderHook);
   if (cfg.seed != null) await ctx.addInitScript(seedRandom, cfg.seed);
   const page = await ctx.newPage();
   watch(page);
@@ -947,6 +953,7 @@ try {
     if (typeof heap0 === 'number') out.heap = { start: heap0 };
   }
 
+  if (cfg.placeholders) out.placeholderStart = await page.evaluate(() => (window.__nbPlaceholders ? window.__nbPlaceholders() : null)).catch(() => null);
   out.stage = 'timing the controls';
   out.feelMs = await feel(page).catch(() => null); // S4
   out.stage = 'driving it with the keyboard';
@@ -1122,6 +1129,7 @@ try {
     // What the last frame asked of the GPU, read from the kit game's own renderer after a round of play (budget check).
     out.load = await page.evaluate(() => (window.__nbKit && window.__nbKit.load ? window.__nbKit.load() : null)).catch(() => null);
     // Models still loading after a round of play, and how many never got past 0% (window.__nbKit.models) — advisory.
+    if (cfg.placeholders) out.placeholderEnd = await page.evaluate(() => (window.__nbPlaceholders ? window.__nbPlaceholders() : null)).catch(() => null);
     if (cfg.geometry) out.models = await page.evaluate(() => (window.__nbKit && window.__nbKit.models ? window.__nbKit.models() : null)).catch(() => null);
     if (cfg.geometry && out.heap) {
       const heap1 = await page.evaluate(() => (performance && performance.memory ? performance.memory.usedJSHeapSize : null)).catch(() => null);
@@ -1180,6 +1188,7 @@ try {
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
   out.stage = 'playing it with touch controls on a phone';
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  if (cfg.placeholders) await m.addInitScript(placeholderHook);
   const mp = await m.newPage();
   watch(mp);
   await mp.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
@@ -1201,6 +1210,7 @@ try {
       }
       return n;
     });
+    if (cfg.placeholders) out.controlsOff = await mp.evaluate(() => (window.__nbControlsOff ? window.__nbControlsOff() : null)).catch(() => null);
     const t0 = await shot(mp, mbox);
     await mp.waitForTimeout(600);
     const t1 = await shot(mp, mbox);
@@ -1430,6 +1440,10 @@ export interface PlaytestRun {
   models?: ModelsRead | null;
   /** The page's JS heap after the start and at the end of the desktop round (performance.memory) — advisory. */
   heap?: HeapRead | null;
+  /** The placeholder look before and after the desktop round, and the phone's controls (gamePlaceholderProbe.ts). */
+  placeholderStart?: PlaceholderPageRead | null;
+  placeholderEnd?: PlaceholderPageRead | null;
+  controlsOff?: ControlsRead | null;
   /** The play-again probe: the status after the round was ended, the control pressed (null: none found), the status after. */
   restartCheck?: { ended?: string; pressed?: string | null; after?: string; error?: string };
   errors?: string[];

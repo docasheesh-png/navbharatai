@@ -2410,9 +2410,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'generate_game_royale',
-      description: 'Add an ORIGINAL offline 3D royale practice starter when the user requests a battle-royale-style game. '
-        + 'This is a bounded procedural arena with two local bots, a shrinking zone and restart, not PUBG, multiplayer or photorealism. '
-        + 'Requires the operator-enabled experimental flag. Emits RoyalePractice.tsx and its rules; mount it in a NEW project only. '
+      description: 'Add an ORIGINAL 3D royale starter when the user requests a battle-royale-style game: an offline Practice mode '
+        + '(a bounded procedural arena with two local bots, a shrinking zone and restart) and an Online mode (a real 2–4 player match '
+        + 'decided on NavBharatAI\'s match server, for games opened from its App Store; elsewhere the Online tab says it is unavailable). '
+        + 'Not PUBG, not photorealism. Requires the operator-enabled experimental flag. Emits RoyaleGame.tsx (the mode switch), '
+        + 'RoyalePractice.tsx, RoyaleOnline.tsx and their modules; mount RoyaleGame in a NEW project only. '
         + 'Existing user files are preserved. Never replace an existing game or a selected Athree map with this starter. '
         + 'No billing or artificial waiting is added. Read the tool result for preserved files and required integration.',
       input_schema: { type: 'object', properties: {} },

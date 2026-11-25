@@ -124,6 +124,7 @@ import { getPreviewService } from './src/server/runtime/PreviewService';
 import { previewSandboxGate } from './src/server/lib/previewHost';
 import { sanitizeProxyRequestHeaders, sanitizeUpgradeResponseHeaders } from './src/server/lib/proxyHeaders';
 import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
+import { handleRoyaleUpgrade } from './src/server/lib/royaleOnline/royaleWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
 import { aiMaintenanceGuard } from './src/server/lib/aiMaintenanceGuard';
@@ -1313,6 +1314,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
       // Sonic Chat (Nova Sonic voice) — isolated, flag+creds gated. Owns the upgrade for its
       // own path only; returns false (falls through to preview) for everything else.
       if (handleSonicUpgrade(req, clientSocket, head)) return;
+      // Online Royale matches (store games) — owns its own path only; kill switch AGENTV3_ONLINE_MATCH, hard quotas inside.
+      if (handleRoyaleUpgrade(req, clientSocket, head)) return;
       const m = url.match(/^\/preview-app\/([^/?]+)(\/[^?]*)?(\?.*)?$/);
       if (!m) { clientSocket.destroy(); return; }
       // Same registry as the HTTP proxy. Production never registers a server-container target

@@ -55,8 +55,10 @@ describe('🧭 every place asked for gets ground', () => {
     }
     expect(overlaps).toBe(0);
     expect(Math.max(...world.places.map((p: any) => Math.hypot(p.centre.x - world.places[0].centre.x, p.centre.z - world.places[0].centre.z)))).toBeLessThan(45000);
-    expect(text).toMatch(/\d+ place\(s\) had no dry ground where they were asked and stand on the nearest dry ground, as close as they can to the direction they were asked: "v\d+"/);
-    expect(text.split('\n').filter((l) => /stand on the nearest dry ground/.test(l)).length).toBe(1);
+    // Since failedbr #2499 (Q-3350) a place with no direction takes the nearest free dry ground around the others directly, so a
+    // list of villages needs no rescue at all; whatever the rescue does take is still said once, and nothing is left out.
+    expect(text.split('\n').filter((l) => /stand on the nearest dry ground/.test(l)).length).toBeLessThanOrEqual(1);
+    expect(text).not.toMatch(/was left out|were left out/);
     world.dispose();
   }, 180_000);
   const mixed = (n: number) => { const kinds = ['city', 'town', 'village', 'desert', 'jungle']; return Array.from({ length: n }, (_, i) => ({ id: 'p' + i, kind: kinds[i % 5], ...(i % 4 === 1 ? { toward: 'north' } : {}) })); };

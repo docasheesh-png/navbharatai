@@ -223,9 +223,11 @@ export interface WorldRace {
   dispose(): void;
 }
 
+// A race needs road between its towns: since places stand close together by default (failedbr #2499, PLACE_GAP), the race's
+// own towns name their distance, so the default course is still a real drive (the distances the old spiral gave them).
 const TOWNS: WorldRegion[] = [
-  { id: 'start-town', kind: 'town' }, { id: 'east-town', kind: 'town', toward: 'east' },
-  { id: 'north-town', kind: 'town', toward: 'north' }, { id: 'far-town', kind: 'town', toward: 'north-east' },
+  { id: 'start-town', kind: 'town' }, { id: 'east-town', kind: 'town', toward: 'east', distance: 600 },
+  { id: 'north-town', kind: 'town', toward: 'north', distance: 850 }, { id: 'far-town', kind: 'town', toward: 'north-east', distance: 1050 },
 ] as WorldRegion[];
 
 function ownRegions(): ReadonlyArray<WorldRegion> | null {

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // THE OPEN-WORLD STARTER (failedbr #2485, 2026-11-21 — admin: "is game me to map aya hi nahi, bas ek character aya … jo
 // joystick se hawa me move kar raha hai … library ka use kyu nahi ho raha, hona chahiye").
 //
@@ -1649,7 +1651,10 @@ export { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH };
 
 export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
 /** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
-export function gameWorldFileSource(options: { city?: boolean } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; workspaceId?: string } = {}): string {
+  const seed = options.workspaceId
+    ? createHash('sha256').update('world:' + options.workspaceId).digest().readUInt32BE(0) || 1
+    : 7;
   return [
     '// THIS GAME\'S MAP. The land is NavBharatAI\'s big Athree map; the places on it are the regions list below.',
     '// To make the map BIGGER: add one more region (a city, a town or a village; say which way with toward, or leave it out).',
@@ -1661,7 +1666,7 @@ export function gameWorldFileSource(options: { city?: boolean } = {}): string {
     "import type { OpenWorldOptions } from './play/openWorld';",
     '',
     'export const WORLD: OpenWorldOptions = {',
-    '  seed: 7,',
+    '  seed: ' + seed + ',',
     '  regions: [',
     ...(options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
     '  ],',

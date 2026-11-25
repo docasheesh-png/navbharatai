@@ -38,6 +38,28 @@ describe('enterable houses',()=>{
     walk(player,140,-1); expect(player.object.position.z).toBeLessThan(3); expect(player.object.position.y).toBeGreaterThan(.1);
     walk(player,200,-1); expect(player.object.position.z).toBeGreaterThan(-5); expect(house.children.length).toBeGreaterThan(5);
   });
+  it.each([['left', -1], ['right', 1]] as const)('renders a tinted roof and walks through the %s entrance', (sideDoor, sign) => {
+    const {scene,house,player}=setup();
+    scene.remove(house);
+    const edited = objects.createHouse({enterable:true,width:8,depth:10,sideDoor,roofColor:0x933522});
+    scene.add(edited);
+    expect(edited.userData.indoorRoof.material.color.getHex()).toBe(0x933522);
+    const actor={feet:new THREE.Vector3(sign*5.2,.15,4),radius:.4,height:1.8};
+    const walkAcross = () => {
+      for(let i=0;i<110;i++) player.update(1/60,{...still,moveX:-sign});
+    };
+    player.reset(sign*5.2,0,4);
+    walkAcross();
+    expect(sign*player.object.position.x).toBeGreaterThan(4);
+    expect(buildings.interactHouseDoor(scene,actor)).toBe(true);
+    for(let i=0;i<60;i++) buildings.updateHouseDoors(scene,1/60,[actor]);
+    expect(buildings.houseDoor(edited).targetOpen).toBe(false);
+    walkAcross();
+    expect(sign*player.object.position.x).toBeLessThan(3);
+    player.reset(sign*5.2,0,1);
+    walkAcross();
+    expect(sign*player.object.position.x).toBeGreaterThan(4);
+  });
   it('walks upstairs onto the second floor',()=>{
     const {player}=setup(2); player.reset(3.175,.15,3.2); walk(player,180,-1);
     expect(player.object.position.y).toBeGreaterThan(3.05); expect(player.object.position.z).toBeLessThan(-3.3);

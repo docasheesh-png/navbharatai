@@ -55,7 +55,7 @@ import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/Temp
 import { seededForms } from './strictTrial';
 import { recipeFilePool, isKnownKitVersion } from '../lib/gameRecipeLayers';
 import { isKnownSeedVersion } from './seedVersions';
-import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GamePlayerBodyGenerator';
+import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE_VARIANTS } from '../lib/GamePlayerBodyGenerator';
 import { GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
 import { isUneditedGeneratedGameAssetFile } from './gameAssets/generatedAssetFiles';
 
@@ -119,6 +119,7 @@ function buildSeededIndex(): Map<string, Set<string>> {
   // untouched player.ts read as the user's code. Byte-exact only: the moment the user changes their character it is theirs.
   try {
     add(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE);
+    for (const source of GAME_PLAYER_FILE_VARIANTS) add(GAME_PLAYER_FILE_PATH, source);
     add(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX);
   } catch { /* same */ }
   return index;

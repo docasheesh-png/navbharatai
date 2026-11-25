@@ -1,3 +1,4 @@
+import { gamePlayerFileSource } from '../lib/GamePlayerBodyGenerator';
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
 import { askStandIn, generateStandIn } from './gameAssets/standInObject';
 import { composeAction } from './gameAssets/composeAction';
@@ -400,7 +401,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -4132,7 +4133,7 @@ export class ToolDispatcher {
   private async ensurePlayerFile(agent: AgentRole, source: string): Promise<boolean> {
     try { await this.actuator.readFile(this.workspaceId, GAME_PLAYER_FILE_PATH); return false; }
     catch (error) { if (!isNotFoundError(error)) throw error; }
-    const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE, { agent, source });
+    const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, gamePlayerFileSource(this.workspaceId), { agent, source });
     this.state?.recordFileChange({ path: GAME_PLAYER_FILE_PATH, kind: playerFile.kind }, agent);
     getWorkspaceMemory(this.workspaceId).indexFile(GAME_PLAYER_FILE_PATH, playerFile.content);
     return true;
@@ -10602,7 +10603,7 @@ export class ToolDispatcher {
             try { await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH); mapped = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!mapped) {
-              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true }), { agent, source: 'generate_open_world' });
+              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }

@@ -19,7 +19,7 @@ A step that shows a glitch the owner would see stops the rollout; the switch goe
 
 | Item | What | Switch | Default | Where |
 |---|---|---|---|---|
-| 2 | Late ground edits redraw terrain and plants | world option `lateEdits: true` | **off** | `GameOpenWorldGenerator.ts` (`options.lateEdits === true`), `AthreeMapGenerator.ts` |
+| 2 | Late ground edits redraw terrain and plants | world option `lateEdits: false` (open world) / map option `lateEdits: true` (a bare Athree map) | **on** in the open world, **off** for a bare Athree map | `GameOpenWorldGenerator.ts` (`options.lateEdits !== false`), `AthreeMapGenerator.ts` (`options.lateEdits === true`) |
 | 4 | Only the nearest cities stand built (phone 2, mid 5, desktop 8) | world option `liveCities: false` (all stay built) or a number | on, by device tier | `GameOpenWorldGenerator.ts` (`LIVE_CITIES`) |
 | 4 | Up to 1,000 places | `MAX_REGIONS` in the game's own `play/openWorld.ts`; an older copy reads 100 | 1,000 | `GameOpenWorldGenerator.ts`, `worldGrow.ts` (`placesTheMapHolds`) |
 | 7 | A world around a cricket or football ground, only when the user asks: the platform adds the venue kit (`play/worldVenue.ts`), the builder stands the match in one group on it | env `AGENTV3_SPORTS_WORLD=on` | **off** | `sportsWorld.ts`, `GameWorldVenueGenerator.ts`, `mapGrowthIntent.ts` |
@@ -44,4 +44,10 @@ A step that shows a glitch the owner would see stops the rollout; the switch goe
 ## Before lateEdits may be turned on (follow-ups from #4466)
 - Rivers and road meshes are redrawn over an edited area (today only terrain chunks and plants are).
 - The stored physics heightfield is refreshed over an edited area.
-Until both land, `lateEdits` stays off everywhere.
+Until both land, `lateEdits` stays off for a bare Athree map.
+
+**The open world turned it on (2026-11-25, failedbr #2499 "vertical layers").** Neither follow-up applies there: the open world
+keeps no stored heightfield (the player walks on a ground patch it samples again after every edit, and what a game put down with
+`world.place()` is stood on the new ground), and its rivers and road meshes draw their own heights, which a redraw would not
+change — they are the same with the switch on or off. With it off, a feature's late edit left the drawn terrain on the old
+ground while the player walked on the new one. `lateEdits: false` restores the old behaviour.

@@ -174,6 +174,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   app_mart_affinity:   { kind: 'user', why: 'doc id IS the uid: topic/creator weights for that person’s own For You feed (appMartSignals.ts), erased with the account' },
   web_risk_budget:     { kind: 'platform', why: 'one doc per calendar month, replaced in place' },
   agentv3_engine_use:  { kind: 'platform', why: 'one doc per day of engine use' },
+  agentv3_engine_day:  { kind: 'platform', why: 'one doc per day of per-engine requests, failures, times and reasons (admin Build Engines)' },
   platform_settings:   { kind: 'platform', why: 'admin-set platform knobs (the build discount, buildDiscount.ts); one doc per setting, no person in it' },
   image_free_paid_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier images a PAID engine served; no person in it' },
   explorer_repair_weak_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier explorer repairs attempted; no person in it' },

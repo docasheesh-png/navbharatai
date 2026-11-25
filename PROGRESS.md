@@ -6056,6 +6056,32 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3357…Q-3360)
+
+Admin 2026-11-22, on their GTA-style game: *"mujhe lag raha hai, maps me sabhi city/village ko ek plane me na bana kar vertical
+layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea under a flat slab with lamps, people and cars on it.
+
+- **Reproduced in Chromium (real kit, vite build, swiftshader).** With valid regions, both the kit at build time (acae9e7c, 11
+  places, admin-like world) and main (20 mixed regions: cities, joinTo tiles, desert/jungle/mountain/snow/beach/grassland, a
+  venue) stand every place, the player and the drawn terrain on one ground: terrain off 0 at every place, pending 0, player
+  0.2–0.6 m over heightAt. With ONE region asked toward `'southwest'` (not one of the eight directions) the spot became NaN, its
+  pad was filed under "every point" in the pad index, and heightAt was NaN EVERYWHERE: no terrain was drawn, the player dropped
+  into the sea, and the cities already planned hung at their pad heights (11 m) — exactly the screenshots. The geometry report
+  said `off: 0` (NaN compares false).
+- **Class:** one bad number poisons the whole ground, silently. **Fix (at the entry):** `levelGround` / `setLand` / `addRoad`
+  refuse a non-finite value and say so (`finiteEdit`, AthreeMapGenerator); the open world reads each region's `toward`
+  (aliases such as `northeast`, `NE`, `North East` mapped; anything else left out and said) and `distance` (metres or left out)
+  before laying it (`cleanRegion`).
+- **Honesty (rule 5):** geometry() counts a non-finite sample as off and as `terrain.notNumber`; `geometryFindings` names it
+  first ("The map's ground is NOT A NUMBER…").
+- **Late edits (builds on #4466 — aedfd171, 896c8ba9, 3df5395d):** the open world now redraws late ground edits by default
+  (`lateEdits: false` opts out; a bare Athree map stays off — the rollout page's two follow-ups do not apply to the open world,
+  which keeps no stored heightfield and whose rivers/roads draw their own heights), re-stands `world.place()` objects on the
+  new ground, and counts edits from the FIRST DRAW, so an edit in a feature's `setup()` is reported when the redraw is off.
+- **Lock:** `tests/oneGroundNeverLayers.test.ts` (9) — every fix reverted on its own and watched fail (guard, cleanRegion,
+  notNumber, default redraw, prop re-stand, first-draw count).
+- **🟡 Q-3360 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
+  world.ts / features. Needs those files or one rebuild on the fixed kit (the console then names the refused value).
 ## 2026-11-25 — Autopsy of BR2514–BR2519 (last six builds; all "succeeded", none played)
 
 Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this PR: **Q-3330** kit refresh was all-or-nothing → partial, safe, named (real kit: 0 → 124 of 137 files reach the existing game); **Q-3333** Surplus refusal (HTTP 4xx) parks the engine 30 min instead of costing 80–94 s on every build; evidence fixes for the two classes that had no root cause — **Q-3332** the playtest says each stage's seconds (real-browser proof) and **Q-3337** the kit seed says each recipe's seconds. Already fixed upstream (merged #4532/#4533, after these builds): **Q-3335** the user's repeated asks (enemies, bullets to the sky, walking through bots, knock-back, police). BLOCKED with options: Q-3331 (the shell chain behind an edited playerBody.ts), Q-3334 (why Surplus 404s every model — the provider), Q-3336/3339/3340/3343 (need project files or fuller records), Q-3338 (weak model tier, follows Q-3334), Q-3341 (report storage cap), Q-3342 (charging an unplayed game — a policy decision).
@@ -6087,3 +6113,34 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
   - start reserve off → 1 fails.
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
+
+### 2026-11-25 — Q-3334 root-caused live: Surplus 404 is a dead seller PAIR, not the request (PR #4536)
+
+Admin: "surplus app builder me kam nahi kar raha, vaise woh reply de raha hai". Probed /min90 with the builder's own
+shape (provider pin + si_route + tools + reasoning_effort, prompts up to 211k tokens, max_tokens up to 64k, tool history):
+qwen3-coder/bedrock and glm-5.3-flash/mistral → 200 at every size; glm-5.3 and deepseek-v4.1-flash pinned to
+dashscope-cn → 404 `no_sellers_for_model` on every request; glm-5.3/zai → 404 `minimum_discount_not_met` (router 80%,
+market page 99.5%). Over ~260k tokens qwen3-coder also gets `minimum_discount_not_met` (context, expected).
+Class: the selector trusted the public market's `discount_pct` as "the router will fill this pair", and treated a
+pair refusal as a MODEL failure (bench) and — in #4536's first cut — as an ENGINE refusal (30-min park).
+Fix: `surplusPairRefusals.ts` (process-wide pair memory, 20 min / 2 min if recently served), selector skip, same-model
+next-seller retry, no bench on a market refusal, 404 removed from the circuit's immediate open; sibling found and fixed:
+a retried attempt on the adapter path returned before the bench decision and the report notice (Q-3019 class).
+Test: `aDeadSurplusSellerIsSkippedNotTheEngine.test.ts` (reverted ⇒ 3 fail). Open: none in this row; watch the next
+Weak build's Surplus attempts.
+
+### 2026-11-25 — Build Engines: per-day failures + tap-through engine stats; Firestore indexes ship with the code
+
+Admin: "BUILD ENGINES me … inko per day fail response karo! … tap kar ke … kitne request gayi, kitne response aye,
+kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya woh bhi likh kar ana chahiye".
+- The chip's "18 failed" was the engine-health aggregate: a rolling 24 h over the LATEST build of each project only.
+  New `agentv3_engine_day/{UTC day}` (engineDayStats.ts): each finished build adds, per engine family, answered turns,
+  failed attempts, measured answer time, failure codes (the engine's own refusal code when it gives one) and which
+  engine answered the turns it failed. One write per build at `BuildDiagnostics.finish()`.
+- To time each engine, the chain now returns `answeredBy` and AgentRunner's call row carries it as `provider`; the
+  route passes `fellBackFrom` to `recordProviderTurn` (existing lines edited, no new block in the handler).
+- UI: chips say "N failed today" / "OK today" and are buttons; `EngineDayDetail` shows 7 days (requests, answered,
+  failed, avg answer time), reasons in words, and "X answered N turns instead". Body shape-checked (src/lib/engineDays.ts).
+- Limit, stated on screen: a build whose server was lost before `finish()` is not counted (see Q-3354).
+- Q-3344 root: the revenue index was in firestore.indexes.json but Cloud Build deployed only `firestore:rules`;
+  a `deploy-firestore-indexes` step now runs on every merge (optional, no --force).

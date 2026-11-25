@@ -391,7 +391,7 @@ export interface KitRefreshPlan {
    * file somebody edited — each with the reason. Everything else WAS refreshed (failedbr BR2518/BR2519: one edited
    * playerBody.ts used to hold back the whole kit, so none of the kit's fixes reached that game).
    */
-  heldBack?: Array<{ path: string; why: string }>;
+  heldBack?: Array<{ path: string; why: string; edited?: string; missing?: string[] }>;
 }
 
 /**
@@ -431,12 +431,12 @@ export function planKitRefresh(
   // compiles against what stays, and a file somebody edited is never written.
   const write: Record<string, string> = {};
   const added = new Set<string>();
-  const heldBack: Array<{ path: string; why: string }> = [];
+  const heldBack: Array<{ path: string; why: string; edited?: string; missing?: string[] }> = [];
   for (const [path, content] of Object.entries(stale)) {
     const one = planKitLayers({ [path]: content }, has, existing, pool, reasonOf);
     if (one.kept.length > 0) {
       const k = one.kept[0];
-      heldBack.push({ path, why: `${k.importer} would need ${k.missing.join(', ')} from ${k.path}, which was edited` });
+      heldBack.push({ path, why: `${k.importer} would need ${k.missing.join(', ')} from ${k.path}, which was edited`, edited: k.path, missing: [...k.missing] });
       continue;
     }
     write[path] = content;
@@ -467,6 +467,30 @@ export function planKitRefresh(
  * is refreshed, anything else is somebody's code and kept), and the plan is made again on that until every file it writes
  * was read and agrees. A file is still never written over unseen. PURE apart from `read`; never throws.
  */
+/**
+ * 🧬 THE BUILDER IS TOLD WHAT THE EDITED FILE IS MISSING (Q-3331 — failedbr BR2518/BR2519). A partial refresh holds back the
+ * shell chain behind an edited kit file (there: playerBody.ts lacked aimBone, boneKey, playerModelRoot, holdItem, so Game.ts
+ * and twelve others stayed old). Overwriting the user's file is never done; instead the builder is told exactly which names
+ * the kit needs from it, to ADD them to that file (keeping the user's own changes) — and the next turn's refresh brings the
+ * rest. '' when nothing is held back. PURE.
+ */
+export function kitHeldBackHandoff(heldBack: KitRefreshPlan['heldBack']): string {
+  const need = new Map<string, Set<string>>();
+  for (const h of heldBack ?? []) {
+    if (!h.edited || !h.missing?.length) continue;
+    const set = need.get(h.edited) ?? new Set<string>();
+    for (const n of h.missing) set.add(n);
+    need.set(h.edited, set);
+  }
+  if (!need.size) return '';
+  const lines = [...need].map(([path, names]) => `- ${path} (edited in this project) must export: ${[...names].join(', ')}`);
+  return [
+    '[KIT UPDATE WAITING] Part of the game engine could not be brought up to date, because a file somebody edited is missing names the new engine imports:',
+    ...lines,
+    'Add each missing export to that file from the kit\'s current version of it, KEEPING every change already in the file (never replace the file, never remove what is there). Then the rest of the engine updates on the next turn. Do this only if this turn touches the game; say in your summary that you did it.',
+  ].join('\n');
+}
+
 export async function planKitRefreshAgainstSandbox(
   saved: Readonly<Record<string, string>>,
   read: (path: string) => Promise<string | null>,

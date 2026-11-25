@@ -6087,3 +6087,34 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
   - start reserve off → 1 fails.
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
+
+### 2026-11-25 — Q-3334 root-caused live: Surplus 404 is a dead seller PAIR, not the request (PR #4536)
+
+Admin: "surplus app builder me kam nahi kar raha, vaise woh reply de raha hai". Probed /min90 with the builder's own
+shape (provider pin + si_route + tools + reasoning_effort, prompts up to 211k tokens, max_tokens up to 64k, tool history):
+qwen3-coder/bedrock and glm-5.3-flash/mistral → 200 at every size; glm-5.3 and deepseek-v4.1-flash pinned to
+dashscope-cn → 404 `no_sellers_for_model` on every request; glm-5.3/zai → 404 `minimum_discount_not_met` (router 80%,
+market page 99.5%). Over ~260k tokens qwen3-coder also gets `minimum_discount_not_met` (context, expected).
+Class: the selector trusted the public market's `discount_pct` as "the router will fill this pair", and treated a
+pair refusal as a MODEL failure (bench) and — in #4536's first cut — as an ENGINE refusal (30-min park).
+Fix: `surplusPairRefusals.ts` (process-wide pair memory, 20 min / 2 min if recently served), selector skip, same-model
+next-seller retry, no bench on a market refusal, 404 removed from the circuit's immediate open; sibling found and fixed:
+a retried attempt on the adapter path returned before the bench decision and the report notice (Q-3019 class).
+Test: `aDeadSurplusSellerIsSkippedNotTheEngine.test.ts` (reverted ⇒ 3 fail). Open: none in this row; watch the next
+Weak build's Surplus attempts.
+
+### 2026-11-25 — Build Engines: per-day failures + tap-through engine stats; Firestore indexes ship with the code
+
+Admin: "BUILD ENGINES me … inko per day fail response karo! … tap kar ke … kitne request gayi, kitne response aye,
+kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya woh bhi likh kar ana chahiye".
+- The chip's "18 failed" was the engine-health aggregate: a rolling 24 h over the LATEST build of each project only.
+  New `agentv3_engine_day/{UTC day}` (engineDayStats.ts): each finished build adds, per engine family, answered turns,
+  failed attempts, measured answer time, failure codes (the engine's own refusal code when it gives one) and which
+  engine answered the turns it failed. One write per build at `BuildDiagnostics.finish()`.
+- To time each engine, the chain now returns `answeredBy` and AgentRunner's call row carries it as `provider`; the
+  route passes `fellBackFrom` to `recordProviderTurn` (existing lines edited, no new block in the handler).
+- UI: chips say "N failed today" / "OK today" and are buttons; `EngineDayDetail` shows 7 days (requests, answered,
+  failed, avg answer time), reasons in words, and "X answered N turns instead". Body shape-checked (src/lib/engineDays.ts).
+- Limit, stated on screen: a build whose server was lost before `finish()` is not counted (see Q-3354).
+- Q-3344 root: the revenue index was in firestore.indexes.json but Cloud Build deployed only `firestore:rules`;
+  a `deploy-firestore-indexes` step now runs on every merge (optional, no --force).

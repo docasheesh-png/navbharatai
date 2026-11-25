@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as THREE from 'three';
-import { readGlb, writeGlb, readAccessor, appendAccessor, sha256, type Glb } from './glbEdit.mts';
+import { readGlb, writeGlb, readAccessor, appendAccessor, pruneGlb, sha256, type Glb } from './glbEdit.mts';
 import { validateGlb } from '../../src/server/AgentV3/gameAssets/assetPolicy';
 import { REVIEWED_LIBRARY_BATCH_7 } from '../../src/server/AgentV3/gameAssets/reviewedLibraryBatch7';
 import type { ReviewedAsset } from '../../src/server/AgentV3/gameAssets/providers';
@@ -329,6 +329,7 @@ for (const variant of VARIANTS) {
   const body = restoreFullBody(g, baseDir, variant.base);
   detach(g, ['Arms', 'Body', 'Legs', 'Feet']); // the fantasy boots came to the knee and showed through; feet are bare
   variant.dress(g, body);
+  pruneGlb(g); // the detached outfit and the old head-only face list leave the file, not only the scene
   const bytes = writeGlb(g);
   const stats = validateGlb(bytes);
   const sha = sha256(bytes);

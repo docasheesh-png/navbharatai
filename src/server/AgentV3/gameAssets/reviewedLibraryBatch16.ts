@@ -8,8 +8,8 @@ export const REVIEWED_LIBRARY_BATCH_16: readonly ReviewedAsset[] = [
     "sourceUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "downloadUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "packaged": true,
-    "sha256": "7a460cbb1617a892f8b8f923505c7fcd81d4ad5662fab797d5579ababca97845",
-    "bytes": 3485340,
+    "sha256": "1de8b0770a3b5d1d19a79cdfc3e83575206c8a6ef797a6e035f3817fde7c3f00",
+    "bytes": 2394656,
     "libraryCategory": "character",
     "subjects": [
       "man in kurta pajama",
@@ -75,8 +75,8 @@ export const REVIEWED_LIBRARY_BATCH_16: readonly ReviewedAsset[] = [
     "sourceUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "downloadUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "packaged": true,
-    "sha256": "6be3ebc989d870216385fcd3dc76e74934a20e4a34ceda6681b92dae75b8c128",
-    "bytes": 3510300,
+    "sha256": "a50e60b1514cfb0ae4dd6fb1d216664867dfd94b9b906ad172d45bfff6363cc8",
+    "bytes": 2379176,
     "libraryCategory": "character",
     "subjects": [
       "man in pagdi",
@@ -142,8 +142,8 @@ export const REVIEWED_LIBRARY_BATCH_16: readonly ReviewedAsset[] = [
     "sourceUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "downloadUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "packaged": true,
-    "sha256": "5e9fad7a43ecde14c4de649517d1ed299290a6435a518f70d0e46819f74aa5fb",
-    "bytes": 3457320,
+    "sha256": "454fcaa622191c6681be63a61511c95fa1921f96c428ae22ad4d631311983f58",
+    "bytes": 2326200,
     "libraryCategory": "character",
     "subjects": [
       "man in dhoti",
@@ -209,8 +209,8 @@ export const REVIEWED_LIBRARY_BATCH_16: readonly ReviewedAsset[] = [
     "sourceUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "downloadUrl": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
     "packaged": true,
-    "sha256": "aef9154da1345c5e71e951c6ede393c3716b139ec8bfb1a1a894572d694f5c35",
-    "bytes": 3436788,
+    "sha256": "ea3fca7e77b37bc186f1c8df76c09f4ca36a37334588778899686fa647c0a5dc",
+    "bytes": 2540732,
     "libraryCategory": "character",
     "subjects": [
       "woman in saree",

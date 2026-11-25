@@ -6183,3 +6183,7 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - Limit, stated on screen: a build whose server was lost before `finish()` is not counted (see Q-3354).
 - Q-3344 root: the revenue index was in firestore.indexes.json but Cloud Build deployed only `firestore:rules`;
   a `deploy-firestore-indexes` step now runs on every merge (optional, no --force).
+- **2026-11-25 update, CI on the merge with #4535:** `libraryBatch14.test.ts` held a 300 MiB snapshot of the library. With #4535's realistic humans, `main` alone was 298.4 MiB.
+  - **Smaller files:** the garment files now drop what nothing references (`pruneGlb`: the detached outfit, its materials and textures, the old head-only face list). Each model went from 3.45 to 2.4 MB, and the four look identical (the same changed-pixel proof at admission).
+  - **Size now:** the catalogue is 307.6 MiB, inside the admin's 320 MiB budget, which stays the only limit. The snapshot line was replaced by a note.
+  - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.

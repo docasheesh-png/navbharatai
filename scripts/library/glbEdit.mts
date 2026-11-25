@@ -68,3 +68,55 @@ export function writeGlb(g: Glb): Uint8Array {
   const bh = Buffer.alloc(8); bh.writeUInt32LE(bin.length, 0); bh.writeUInt32LE(0x004e4942, 4);
   return new Uint8Array(Buffer.concat([header, jh, json, bh, bin]));
 }
+
+/**
+ * Drop what nothing references any more — meshes no node shows, accessors no primitive, skin or animation reads, buffer
+ * views no accessor or image uses — and rebuild the BIN from what is left. Detaching a node only takes it out of the
+ * scene; its geometry stayed in the file and counted against the library's storage budget (batch 16: ~0.4 MB a model).
+ */
+export function pruneGlb(g: Glb): void {
+  const j = g.json;
+  const meshMap = new Map<number, number>(); const meshes: any[] = [];
+  for (const n of j.nodes) if (n.mesh !== undefined) { if (!meshMap.has(n.mesh)) { meshMap.set(n.mesh, meshes.length); meshes.push(j.meshes[n.mesh]); } n.mesh = meshMap.get(n.mesh); }
+  j.meshes = meshes;
+  // Materials no kept primitive draws, then textures, images and samplers no kept material reads (the old outfit's
+  // texture was ~0.35 MB of each villager file).
+  if (j.materials) {
+    const matMap = new Map<number, number>(); const materials: any[] = [];
+    for (const m of meshes) for (const p of m.primitives) if (p.material !== undefined) { if (!matMap.has(p.material)) { matMap.set(p.material, materials.length); materials.push(j.materials[p.material]); } p.material = matMap.get(p.material); }
+    j.materials = materials;
+    const infos = (m: any): any[] => [m.pbrMetallicRoughness?.baseColorTexture, m.pbrMetallicRoughness?.metallicRoughnessTexture, m.normalTexture, m.occlusionTexture, m.emissiveTexture].filter(Boolean);
+    const texMap = new Map<number, number>(); const textures: any[] = [];
+    for (const m of materials) for (const info of infos(m)) { if (!texMap.has(info.index)) { texMap.set(info.index, textures.length); textures.push(j.textures[info.index]); } info.index = texMap.get(info.index); }
+    j.textures = textures;
+    const imgMap = new Map<number, number>(); const images: any[] = []; const smpMap = new Map<number, number>(); const samplers: any[] = [];
+    for (const t of textures) {
+      if (t.source !== undefined) { if (!imgMap.has(t.source)) { imgMap.set(t.source, images.length); images.push(j.images[t.source]); } t.source = imgMap.get(t.source); }
+      if (t.sampler !== undefined) { if (!smpMap.has(t.sampler)) { smpMap.set(t.sampler, samplers.length); samplers.push(j.samplers[t.sampler]); } t.sampler = smpMap.get(t.sampler); }
+    }
+    j.images = images; j.samplers = samplers;
+    for (const k of ['textures', 'images', 'samplers']) if (!j[k].length) delete j[k];
+  }
+  const used = new Set<number>();
+  for (const m of meshes) for (const p of m.primitives) { Object.values(p.attributes).forEach((a) => used.add(a as number)); if (p.indices !== undefined) used.add(p.indices); for (const t of p.targets ?? []) Object.values(t).forEach((a) => used.add(a as number)); }
+  for (const s of j.skins ?? []) if (s.inverseBindMatrices !== undefined) used.add(s.inverseBindMatrices);
+  for (const a of j.animations ?? []) for (const s of a.samplers) { used.add(s.input); used.add(s.output); }
+  const accMap = new Map<number, number>(); const accessors: any[] = [];
+  [...used].sort((x, y) => x - y).forEach((i) => { accMap.set(i, accessors.length); accessors.push(j.accessors[i]); });
+  const re = (i: number) => accMap.get(i)!;
+  for (const m of meshes) for (const p of m.primitives) { for (const k of Object.keys(p.attributes)) p.attributes[k] = re(p.attributes[k]); if (p.indices !== undefined) p.indices = re(p.indices); for (const t of p.targets ?? []) for (const k of Object.keys(t)) t[k] = re(t[k]); }
+  for (const s of j.skins ?? []) if (s.inverseBindMatrices !== undefined) s.inverseBindMatrices = re(s.inverseBindMatrices);
+  for (const a of j.animations ?? []) for (const s of a.samplers) { s.input = re(s.input); s.output = re(s.output); }
+  j.accessors = accessors;
+  const views = new Set<number>(accessors.map((a: any) => a.bufferView).filter((v: unknown) => v !== undefined));
+  for (const im of j.images ?? []) if (im.bufferView !== undefined) views.add(im.bufferView);
+  const viewMap = new Map<number, number>(); const bufferViews: any[] = []; const chunks: Buffer[] = []; let offset = 0;
+  [...views].sort((x, y) => x - y).forEach((i) => {
+    const v = j.bufferViews[i]; const bytes = g.bin.subarray(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength);
+    const pad = (4 - (offset % 4)) % 4; if (pad) { chunks.push(Buffer.alloc(pad)); offset += pad; }
+    viewMap.set(i, bufferViews.length); bufferViews.push({ ...v, byteOffset: offset }); chunks.push(bytes); offset += bytes.length;
+  });
+  for (const a of accessors) if (a.bufferView !== undefined) a.bufferView = viewMap.get(a.bufferView);
+  for (const im of j.images ?? []) if (im.bufferView !== undefined) im.bufferView = viewMap.get(im.bufferView);
+  j.bufferViews = bufferViews; g.bin = Buffer.concat(chunks);
+}

@@ -58,7 +58,10 @@ describe('🛣️ the highway tree of a thousand places', () => {
   });
   it('the bridge lays its highways from that tree', () => {
     const bridge = recipeFilePool().get(OPEN_WORLD_BRIDGE_PATH)!.content;
-    expect(bridge).toMatch(/for \(const best of spanningPairs\(stops\)\)/);
+    // Since failedbr #2499 (Q-3351) the tree comes through highwayTree(): spanningPairs(stops) itself, unless a pair in it is
+    // too steep for a car — then rebuilt with the steep pairs last.
+    expect(bridge).toMatch(/const tree = spanningPairs\(stops\);\n\s+if \(!tree\.some\(\(\[a, b, d\]\) => !joinedPairs\.has\(a \+ ',' \+ b\) && tooSteep\(a, b, d\)\)\) return tree;/);
+    expect(bridge).toMatch(/for \(const best of highwayTree\(\)\)/);
     expect(bridge).not.toMatch(/for \(const a of joined\) for \(let b = 0; b < stops\.length; b\+\+\)/);
   });
 });

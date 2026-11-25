@@ -127,7 +127,7 @@ export function gameCombatLines(c: GameCombatData): string[] {
 export function wantsCombatKit(text: string | null | undefined, genre: string, features: readonly string[]): boolean {
   if (genre === 'shooter' || genre === 'fighting') return true;
   // Police / an ambulance come through systems/dispatch.ts (audit Part I): without the systems kit they could only be a sentence.
-  if (features.includes('enemies') || features.includes('health') || features.includes('police')) return true;
+  if (features.includes('enemies') || features.includes('health') || features.includes('police') || features.includes('npcs')) return true; // npcs are Entities (systems kit)
   const c = gameCombatFrom(text);
   if (c.enemyHitsToKill || c.playerHitsToKill || c.bleed) return true;
   return gameRulesFrom(text).some((r) => r.id === 'enemy-dies-score-up' || r.id === 'enemy-hit-health-down');

@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Download, CheckCircle2, AlertTriangle, Key, RefreshCw, CircleStop, Cloud, FileText, Upload } from 'lucide-react';
 import { authedHeaders } from '../../lib/authHeaders';
-import { readAnswer } from '../../lib/serverAnswer';
+import { readAnswer, writeFailure } from '../../lib/serverAnswer';
 import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 import { chargeHint } from '../../lib/apkChargeNotice';
 import {
@@ -69,6 +69,7 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
   const [consent, setConsent] = useState(false);
   const [neverPublished, setNeverPublished] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // One request id per press of "Build": a double click or a retried network call is the SAME build.
   const pendingKey = useRef<string | null>(null);
 
@@ -226,6 +227,19 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
     }
   }, [keyMode, ksFile, appId, alias, storePw, keyPw, consent, appName, neverPublished]);
 
+  const removeKey = useCallback(async () => {
+    setKeyBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/mobile-builds/signing-key?appId=${encodeURIComponent(appId)}`, { method: 'DELETE', headers: await authedHeaders() });
+      const failure = await writeFailure(res, 'The key could not be deleted. It is still saved.');
+      if (failure) setError(failure); else { setKey(null); setConfirmDelete(false); setNote('The saved upload key was deleted from NavBharatAI.'); }
+    } catch {
+      setError('The key could not be deleted. It is still saved.');
+    } finally {
+      setKeyBusy(false);
+    }
+  }, [appId]);
+
   const needsKey = kind === 'aab' && key === null;
   const progress = build ? realProgress(build) : null;
   const label = kind === 'apk' ? '.apk' : 'Play Store bundle (.aab)';
@@ -261,6 +275,19 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
           <div className="px-3 py-2.5 rounded-lg border border-line bg-raised text-xs text-body">
             <p className="font-semibold text-ink flex items-center gap-1.5"><Key size={13} /> Upload key saved ({key.source === 'imported' ? 'your own key' : 'created by NavBharatAI'})</p>
             <p className="text-[11px] text-muted break-all mt-1">Alias: {key.alias} · SHA-256: {key.certSha256}</p>
+            {!active && (
+              confirmDelete ? (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-[11px] text-warn">Delete the saved key? Keep your own copy first: Google Play only accepts updates signed with this key.</p>
+                  <div className="flex gap-2">
+                    <button onClick={() => void removeKey()} disabled={keyBusy} className="flex-1 px-3 py-1.5 rounded-lg border border-line text-danger font-semibold disabled:opacity-40">Delete key</button>
+                    <button onClick={() => setConfirmDelete(false)} className="flex-1 px-3 py-1.5 rounded-lg border border-line text-body font-semibold">Keep it</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDelete(true)} className="mt-1.5 text-[11px] text-accent-text font-semibold">Delete saved key</button>
+              )
+            )}
           </div>
         )}
         {backup && (

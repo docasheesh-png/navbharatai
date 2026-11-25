@@ -101,7 +101,7 @@ export function registerMobileBuildRoutes(app: Express, limiter?: RequestHandler
     try {
       const jobs = await listJobsForUser(id.uid);
       const fresh: NativeBuildJob[] = [];
-      for (const j of jobs) fresh.push(await expireIfDue(j));
+      for (const j of jobs) fresh.push(await expireIfDue(j, defaultRunnerDeps));
       res.json({ builds: fresh.map(toView) });
     } catch {
       res.status(502).json({ error: 'Could not read your builds right now.' });
@@ -212,8 +212,8 @@ export function registerMobileBuildRoutes(app: Express, limiter?: RequestHandler
   app.get('/api/mobile-builds/:buildId', async (req: Request, res: Response) => {
     const owned = await ownedOr404(req, res);
     if (!owned) return;
-    const advanced = (await advanceNativeBuild(owned.job.id).catch(() => null)) ?? owned.job;
-    res.json({ build: toView(await expireIfDue(advanced)) });
+    const advanced = (await advanceNativeBuild(owned.job.id, defaultRunnerDeps).catch(() => null)) ?? owned.job;
+    res.json({ build: toView(await expireIfDue(advanced, defaultRunnerDeps)) });
   });
 
   app.get('/api/mobile-builds/:buildId/logs', async (req: Request, res: Response) => {
@@ -226,7 +226,7 @@ export function registerMobileBuildRoutes(app: Express, limiter?: RequestHandler
     const owned = await ownedOr404(req, res);
     if (!owned) return;
     const asked = await requestCancel(owned.job.id, owned.uid);
-    const now = (asked && asked.state === 'cancelling') ? ((await advanceNativeBuild(owned.job.id).catch(() => null)) ?? asked) : asked;
+    const now = (asked && asked.state === 'cancelling') ? ((await advanceNativeBuild(owned.job.id, defaultRunnerDeps).catch(() => null)) ?? asked) : asked;
     res.json({ build: toView(now ?? owned.job) });
   });
 
@@ -234,7 +234,7 @@ export function registerMobileBuildRoutes(app: Express, limiter?: RequestHandler
   app.get('/api/mobile-builds/:buildId/download', async (req: Request, res: Response) => {
     const owned = await ownedOr404(req, res);
     if (!owned) return;
-    const job = await expireIfDue(owned.job);
+    const job = await expireIfDue(owned.job, defaultRunnerDeps);
     if (job.state === 'expired') return res.status(410).json({ error: 'This build has expired. Build the app again to get a fresh file.' });
     if (job.state !== 'completed' || !job.artifact) return res.status(409).json({ error: 'This build has no file yet.' });
     const a = job.artifact;

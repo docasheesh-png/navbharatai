@@ -861,6 +861,14 @@ function framesBetween(before, after, ms) {
 
 const browser = await chromium.launch({ args: cfg.browserArgs });
 const out = { ok: true, stage: 'loading the game' };
+// 🕒 WHERE THE TIME WENT, PER STAGE (failedbr BR2514–BR2519: six games in a row "ran out of time while starting the game"
+// and the report could not say whether the page took 50 s to load or a press hung — so the class had no root cause).
+// Each stage's seconds are kept, the unfinished one marked, and said with the out-of-time line.
+const startedAt = Date.now();
+let stageAt = startedAt;
+out.timings = {};
+const enter = (name) => { const now = Date.now(); out.timings[out.stage] = Math.round((now - stageAt) / 100) / 10; out.stage = name; stageAt = now; };
+const spent = () => { const t = { ...out.timings, [out.stage]: Math.round((Date.now() - stageAt) / 100) / 10 }; return Object.entries(t).map(([k, v]) => k + ' ' + v + ' s' + (k === out.stage ? ' (unfinished)' : '')).join(' · '); };
 // THE SCRIPT ENDS ITSELF IN TIME (autopsy 61279465: a heavy 3D train scene ran past the route's 80 s
 // timeout, which killed the browser and left only "timed out" — no stage, no frame rate, nothing to fix).
 // At its own budget it says which stage it reached and how fast the page was drawing, then exits.
@@ -876,7 +884,7 @@ const watchdog = setTimeout(async () => {
     process.exit(0);
   }
   say({ ok: false, partial: true, webgl: out.webgl, stage: out.stage, fps, started: out.started ?? null, geometry: out.geometry ?? null,
-    error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
+    timings: out.timings, error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') + ' — time spent: ' + spent() });
   process.exit(0);
 }, Math.max(10000, Number(cfg.budgetMs) || 60000));
 try {
@@ -902,7 +910,7 @@ try {
       return String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || 'webgl');
     } catch (e) { return false; }
   }).catch(() => null);
-  out.stage = 'starting the game';
+  enter('starting the game');
   out.started = await pressStart(page);
   let box = await surface(page);
   if (!box) {
@@ -947,9 +955,9 @@ try {
     if (typeof heap0 === 'number') out.heap = { start: heap0 };
   }
 
-  out.stage = 'timing the controls';
+  enter('timing the controls');
   out.feelMs = await feel(page).catch(() => null); // S4
-  out.stage = 'driving it with the keyboard';
+  enter('driving it with the keyboard');
   const moves = [];
   let prev = b;
   const step = async (label, act) => {
@@ -1114,9 +1122,9 @@ try {
   // move — and the play-again control is found by its words and PRESSED, as a player would.
   out.playedKeyboard = true;   // from here on a timeout keeps what the keyboard stage measured (the watchdog above)
   // S4: play a round long enough to see the score or the level move (a timeout keeps what was measured before it).
-  out.stage = 'playing a round to see it progress';
+  enter('playing a round to see it progress');
   out.progression = await progress(page, box, Number(cfg.progressMs) || 0).catch(() => null);
-  out.stage = 'checking the score, the sound and play again';
+  enter('checking the score, the sound and play again');
   try {
     out.sounds = await page.evaluate(() => (typeof window.__nbSounds === 'number' ? window.__nbSounds : null));
     // What the last frame asked of the GPU, read from the kit game's own renderer after a round of play (budget check).
@@ -1178,7 +1186,7 @@ try {
   await ctx.close();
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
-  out.stage = 'playing it with touch controls on a phone';
+  enter('playing it with touch controls on a phone');
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const mp = await m.newPage();
   watch(mp);

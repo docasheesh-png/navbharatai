@@ -6077,3 +6077,34 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
   daemon here); set `MOBILE_NATIVE_BUILD_TEMPLATE` + `MOBILE_BUILD_ARTIFACT_BUCKET`; pin Temurin digests; bucket lifecycle rule; a first
   live native build and a real-device install.
 - **OPEN (admin decision):** whether a native build whose paid balance cannot cover ₹1 should withhold the download (GitHub cannot; native could).
+## 2026-11-25 — Autopsy of BR2514–BR2519 (last six builds; all "succeeded", none played)
+
+Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this PR: **Q-3330** kit refresh was all-or-nothing → partial, safe, named (real kit: 0 → 124 of 137 files reach the existing game); **Q-3333** Surplus refusal (HTTP 4xx) parks the engine 30 min instead of costing 80–94 s on every build; evidence fixes for the two classes that had no root cause — **Q-3332** the playtest says each stage's seconds (real-browser proof) and **Q-3337** the kit seed says each recipe's seconds. Already fixed upstream (merged #4532/#4533, after these builds): **Q-3335** the user's repeated asks (enemies, bullets to the sky, walking through bots, knock-back, police). BLOCKED with options: Q-3331 (the shell chain behind an edited playerBody.ts), Q-3334 (why Surplus 404s every model — the provider), Q-3336/3339/3340/3343 (need project files or fuller records), Q-3338 (weak model tier, follows Q-3334), Q-3341 (report storage cap), Q-3342 (charging an unplayed game — a policy decision).
+- **Q-3331 (admin "continue next" → the recommended option):** a held-back kit update is finished by the builder, safely — `kitHeldBackHandoff` names the exports the edited file must add; the growth guard's `restoresKitExports` lets through only an edit that keeps every line and adds only exports the kit's own version has. Test on the real playerBody.ts (8).
+- **Q-3344 (admin, 2026-11-25):** the admin analytics 500 — seven independent reads in one Promise.all; one failure sank the page. Each read is settled and named now (`adminAnalyticsReads.ts`, `analyticsUnread.ts`); the failing read itself is named on the page after deploy (it is in Cloud Run logs this session cannot read).
+## 2026-11-25 — failedbr #2499: places stand close, with a road between (Q-3350–Q-3352, claude/places-close-road)
+
+- Admin: "maine kaha map me 4 village/city add karo, to add huye hi nahi" — then "maps thode pas pas rahe, aur beech me road ho".
+- Measured headless on the real kit (on main): the 4 new cities WERE in world.ts, 2.5–3.2 km out. The n-th place sat about sqrt(n) spacings from the first on a golden-angle spiral. A city is built within reach + BUILD_AHEAD (1500 m), so nothing new showed from the start.
+- Class (Q-3350): a place's distance came from WHEN it was added, not from where there was room. Fix: every place, land, user map and venue takes the nearest free spot to the first place.
+  - The search is a box-exact ray search. It keeps `PLACE_GAP` (150–300 m by size) edge to edge, on dry ground off roads, and gives the same map every time.
+  - A place with no usable ground on any ray goes to the existing rescue (#3add3f10), so it is never put in the sea or on a highway.
+  - Kept as before: toward, distance, spreadMeters, joined lands and joined venues.
+  - The tiles of a grown city are worked out first, from the same cells and the same seeded draws, so nothing is laid where a city will grow.
+  - Results with 25 regions: the farthest place went from 3151 m to 1489 m, and the farthest land from 5814 m to 1781 m. 1000 villages now plan in 4.2 s; they took 42 s before.
+- Sibling (Q-3352): `world.addRoad`'s grade passes moved the end heights, so a road cut into or lifted a city's ground at the gate. An end on levelled ground is now pinned.
+- Sibling (Q-3351): once the ends are pinned, two places on very different levels would get a road too steep to climb. In that case the highway tree is rebuilt with the steep pairs last. A map with no steep pair keeps exactly the same tree.
+- Test: `tests/placesStandCloseWithARoadBetween.test.ts` (9). It drives the road graph from the spawn to every place (25 and 100 regions) and checks:
+  - no road crosses a block, and no city's ground moves at a gate;
+  - gaps are at least PLACE_GAP.min;
+  - the map comes out the same every time;
+  - toward, distance and spread are kept;
+  - tiles keep room, and a land listed first leaves the start free;
+  - the full map gets every place and road, and nothing is built twice.
+- Proven by reversion:
+  - spiral back → 5 tests fail;
+  - end pin off → 2 fail;
+  - climb-aware tree off → 1 fails;
+  - start reserve off → 1 fails.
+- Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
+- Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.

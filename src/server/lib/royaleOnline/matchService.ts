@@ -327,6 +327,23 @@ export class RoyaleMatchService {
   private stopTimer(): void { if (this.timer) { clearInterval(this.timer); this.timer = null; } }
   shutdown(): void { this.stopTimer(); }
 
+  /**
+   * The instance is going away (a deploy's SIGTERM). Rooms live in this process, so a live match cannot survive it:
+   * every player is TOLD so, and no result is invented for a match nobody finished. Returns how many were told.
+   */
+  drain(): number {
+    let told = 0;
+    for (const s of this.sessions.values()) {
+      if (!s.conn) continue;
+      s.conn.send({ t: 'unavailable', reason: 'The match server is restarting for an update, so this match ended without a result. Reopen Online in a minute.' });
+      s.conn.close(4503, 'restarting');
+      told++;
+    }
+    this.sessions.clear(); this.queues.clear(); this.rooms.clear();
+    this.stopTimer();
+    return told;
+  }
+
   /** For tests and the admin's eyes: what is live right now. */
   stats() {
     let queued = 0; for (const q of this.queues.values()) queued += q.length;

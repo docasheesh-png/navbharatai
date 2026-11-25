@@ -1382,6 +1382,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             flushAnalytics(), new Promise<void>((r) => setTimeout(r, 2500).unref()),
           ])),
         ].map((p) => p.catch(() => { /* telemetry never blocks shutdown */ }))).then(() => undefined);
+        // Live online Royale matches cannot outlive this process: tell their players now, honestly (matchService.drain).
+        void import('./src/server/lib/royaleOnline/royaleWs').then(({ royaleMatchService }) => royaleMatchService.drain()).catch(() => { /* never blocks shutdown */ });
         const exitNow = () => { try { server.close(); } catch { /* already closing */ } process.exit(0); };
         void import('./src/server/routes/agentv3')
           .then(({ drainRunningBuilds, shutdownGraceMs }) => {

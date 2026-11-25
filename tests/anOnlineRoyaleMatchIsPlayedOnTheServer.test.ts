@@ -288,6 +288,23 @@ describe('reconnect and the single result', () => {
   });
 });
 
+describe('a deploy does not leave players staring at a frozen match', () => {
+  it('drain tells every connected player the match ended without a result, and records none', async () => {
+    const h = await harness({ service: { botsAllowed: false } });
+    const [a, b] = [await h.join(), await h.join()];
+    for (const x of [a, b]) { x.send({ t: 'queue' }); await x.sync(); }
+    h.run(QUEUE_FILL_MS);
+    await a.next('start');
+    expect(h.service.drain()).toBe(2);
+    for (const x of [a, b]) {
+      expect((await x.next('unavailable')).reason).toMatch(/restarting/);
+      expect((await x.waitClosed())?.code).toBe(4503);
+    }
+    expect(h.service.counters.resultsRecorded).toBe(0);
+    expect(h.service.stats()).toMatchObject({ sessions: 0, rooms: 0, queued: 0 });
+  });
+});
+
 describe('quotas, limits and the kill switch', () => {
   it('kill switch off: the socket is told the truth and closed — no session, no room', async () => {
     const h = await harness({ enabled: false });

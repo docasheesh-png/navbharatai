@@ -113,7 +113,9 @@ import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
 import { AppMemoryCard } from './AppMemoryCard';
-import { AppAiSettingsCard, fetchAppAiSettings } from './AppAiSettingsCard';
+import { AppAiSettingsCard, fetchAppAiSettings, type AppAiSettingsView } from './AppAiSettingsCard';
+import { FreeAiSetupCard } from './FreeAiSetupCard';
+import { offerFreeAi } from '../../lib/freeAiSetup';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import SheetFileCard from './SheetFileCard';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
@@ -3543,11 +3545,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // "AI in this app" notice (admin 2026-10-04): a red dot on Keys & Secrets until the owner has SEEN that
   // their app's assistant runs on NavBharatAI and is charged to their balance. Remembered per app on this
   // device only — a convenience, never the source of truth for anything about money.
+  // Bumped the moment a free-AI key is saved, so the read below runs again and the offer disappears
+  // without waiting for the next build to finish.
+  const [freeAiSavedAt, setFreeAiSavedAt] = useState(0);
   const aiNoticeKey = state.workspaceId ? `nbai.aiNoticeSeen.${state.workspaceId}` : '';
   const [aiNoticeUnseen, setAiNoticeUnseen] = useState<boolean | undefined>(undefined);
+  // The same ONE read also decides whether the ❗ tray offers "Turn on free AI" (admin 2026-11-25): both
+  // questions are about this app's assistant, and a second fetch of the same route would be two answers
+  // that can disagree.
+  const [appAiView, setAppAiView] = useState<AppAiSettingsView | null>(null);
   useEffect(() => {
     // Cleared first, so app A's dot can never show under app B while B's answer is on its way.
     setAiNoticeUnseen(undefined);
+    setAppAiView(null);
     if (!state.workspaceId || running) return;
     let cancelled = false;
     void fetchAppAiSettings(state.workspaceId).then((v) => {
@@ -3555,13 +3565,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       let seen = false;
       try { seen = !!aiNoticeKey && localStorage.getItem(aiNoticeKey) === '1'; } catch { /* storage blocked */ }
       setAiNoticeUnseen(!!v && v.available && v.usesAi && !v.ownKey && !seen);
+      setAppAiView(v);
     });
     return () => { cancelled = true; };
-  }, [state.workspaceId, running, aiNoticeKey]);
+  }, [state.workspaceId, running, aiNoticeKey, freeAiSavedAt]);
   const markAiNoticeSeen = useCallback(() => {
     try { if (aiNoticeKey) localStorage.setItem(aiNoticeKey, '1'); } catch { /* storage blocked */ }
     setAiNoticeUnseen(false);
   }, [aiNoticeKey]);
+  /**
+   * "FREE AI CHALU KAREIN" under the ❗ button (admin 2026-11-25).
+   *
+   * Offered only when this app's assistant is really there and no key of the owner's own is answering
+   * yet (`offerFreeAi` — it is the one that holds that rule, and it holds it because the row's words
+   * are false for an owner who already pays their own provider). Like the credential form, it is
+   * handed to the tray as a SLOT rather than becoming a fourth row kind: the tray's row union is
+   * mirrored on the server and a new kind there is a drift this repo has paid for before.
+   */
+  const freeAiOffered = offerFreeAi(appAiView);
+  const freeAiCardNode = freeAiOffered && state.workspaceId ? (
+    <FreeAiSetupCard workspaceId={state.workspaceId} onDone={() => setFreeAiSavedAt(Date.now())} />
+  ) : null;
   const previewDwellMs = usePreviewDwell(showWorkspace && tab === 'preview' && !!state.previewUrl);
   // Live custom-domain verdict (Firebase Hosting) — feeds both the navigator dot and the NEXT STEP card.
   const liveDomain = useLiveDomain(state.workspaceId, customDomainsEnabled && !running, `${running}|${publishing}`);
@@ -4713,7 +4737,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               id: 'needs-you',
               glyph: '❗️',
               label: 'What you need to do',
-              count: userActions.openCount,
+              // The free-AI offer is a row of the tray's own, so it must light the badge too —
+              // otherwise the one thing the admin asked to put under ❗ would be invisible until
+              // something else happened to open it.
+              count: userActions.openCount + (freeAiOffered ? 1 : 0),
               tone: userActions.actions.some((a) => a.status === 'open' && a.blocking) ? 'urgent' : 'info',
               attention: true,
               onOpen: () => userActions.setTrayOpen(true),
@@ -7065,6 +7092,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           actions={userActions.actions}
           busyId={userActions.busyId}
           secretCard={secretCardNode}
+          freeAiCard={freeAiCardNode}
           onClose={() => userActions.setTrayOpen(false)}
           onDone={(action) => { void userActions.close(action, 'done'); }}
           onNotNeeded={(action) => { void userActions.close(action, 'not_needed'); }}

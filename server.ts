@@ -81,6 +81,7 @@ import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
 import { registerMinifyRoutes } from './src/server/routes/minify';
 import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
 import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
+import { registerMobileBuildRoutes } from './src/server/routes/mobileBuilds';
 import { registerNavStoreRoutes } from './src/server/routes/navStore';
 import { registerHouseAdRoutes } from './src/server/routes/houseAds';
 import { registerAppMartSocialRoutes } from './src/server/routes/appMartSocial';
@@ -371,6 +372,17 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many payment requests. Please slow down.' },
+  });
+
+  // Native Cloud Build: starting a build and importing a key each start a cloud machine, so they are
+  // bounded per account. (Status polling is not limited — it is cheap and drives the build forward.)
+  const mobileBuildLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    keyGenerator: identityKey,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many build requests. Please wait a moment.' },
   });
 
   const adminLimiter = rateLimit({
@@ -709,6 +721,10 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // "Set up my app for the stores" — assembles a user's v5 app into a GitHub repo whose workflows
   // build a genuine signed .aab/.ipa on GitHub's runners. See routes/mobileSetup.ts for who does what.
   registerMobileSetupRoutes(app);
+
+  // Provider-neutral Android builds: the two-provider choice and the Native Cloud Build (a disposable
+  // build machine per build, signing in a separate network-less machine). See routes/mobileBuilds.ts.
+  registerMobileBuildRoutes(app, mobileBuildLimiter);
 
   // Nav App Store — user-published Android apps. Every upload is inspected and malware-scanned, and
   // NOTHING becomes public without an explicit admin approval. See routes/navStore.ts.

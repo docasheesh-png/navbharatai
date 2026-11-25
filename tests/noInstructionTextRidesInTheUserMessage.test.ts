@@ -16,7 +16,10 @@ describe('the chat hook sends the message exactly as typed', () => {
     }
   });
   it('sends the message itself and carries memory as its own field', () => {
-    expect(src).toMatch(/callGeminiFrontend\(turn, message,/);
-    expect(src).toMatch(/\.\.\.\(memorySummary \? \{ memorySummary \} : \{\}\)/);
+    // The one send path posts what the person typed, under its own key, and the session summary
+    // travels as its own field. (This read the deleted blocking helper's call site; the helper is
+    // gone with the slow path — admin 2026-11-25 — and the property asserted is unchanged.)
+    expect(src).toMatch(/message: messageToSend,/);
+    expect(src).toMatch(/memorySummary: memorySummary \|\| undefined,/);
   });
 });

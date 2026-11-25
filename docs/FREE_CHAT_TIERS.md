@@ -165,7 +165,7 @@ All features below are **default ON** and individually killable with `=off`. The
 | Stable prompt prefix (profile, greeting state, date moved last) | `FREE_CHAIN_STABLE_PREFIX_ENABLED` | cached tokens logged as `cachedInputTokens` |
 | Compact ~1k core prompt (safety rules kept) | `FREE_CHAIN_COMPACT_PROMPT_ENABLED` | — |
 | Reply cap (not on reasoning rungs groq/gpt5nano/openrouter; GLM thinking disabled) | `FREE_CHAIN_OUTPUT_CAP_ENABLED` | `FREE_CHAIN_REPLY_MAX_TOKENS=250`, `FREE_CHAIN_FAST_MAX_TOKENS=80` |
-| History trim | `FREE_CHAIN_HISTORY_TRIM_ENABLED` | `FREE_CHAIN_HISTORY_TURNS=6` |
+| Conversation memory, bounded by CHARACTERS (2026-11-25; was a 6-turn cap, which is what made the chat forget the start of a conversation after 10–15 messages) | `FREE_CHAIN_HISTORY_TRIM_ENABLED` | `FREE_CHAIN_HISTORY_CHARS=24000` (`FREE_CHAIN_HISTORY_TURNS` now only switches the bound off at 0) |
 | Response cache / FAQ (exact normalized, no personal or dated text) | `FREE_CHAIN_CACHE_ENABLED`, `FREE_CHAIN_FAQ_CACHE_ENABLED` | `FREE_CHAIN_CACHE_TTL_S` |
 | Monthly paid cap (IST month) | `FREE_CHAIN_MONTHLY_CAP_ENABLED` | `FREE_CHAIN_MONTHLY_CAP_USD=520` (max 520) |
 | Auto-throttle | `FREE_CHAIN_THROTTLE_ENABLED` | `FREE_CHAIN_THROTTLE_PERCENT=80` |

@@ -6,6 +6,7 @@ import { readData, readPaidPolicy, FREE_CHAIN_COLLECTION } from './paidLedger';
  */
 import { FREE_CHAT_LANGUAGE_RULE } from '../../lib/freeChatReplyLanguage';
 import { resolveChatReplyLanguage } from '../../../lib/chatReplyLanguage';
+import { historyForModelRequest } from '../../../lib/chatContextWindow';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../../lib/prompts';
 import { freeChatModeGuide } from '../../lib/freeChatModeGuide';
 import { FREE_ANSWER_ALL_RULES } from '../../lib/freeChatReplies';
@@ -98,23 +99,29 @@ function turnText(row: unknown): string {
   const turn = row as { text?: unknown; content?: unknown };
   return typeof turn.text === 'string' ? turn.text : typeof turn.content === 'string' ? turn.content : '';
 }
-/** Opening user facts stay inside the same turn budget. A flat tail cut dropped a name or place
- * stated before the recent window, including on the provider that answers after a fallback.
- * An explicit reply-language command is not a fact: it is already carried as the system instruction,
- * and the six-turn window must still be able to drop that source turn. */
+/** The free chain's view of one conversation, bounded by CHARACTERS and not by a turn count.
+ *
+ * 🔴 WHY THIS CHANGED (admin 2026-11-25: the chat forgets the opening after 10–15 messages).
+ * This function used to keep `FREE_CHAIN_HISTORY_TURNS` turns — SIX by default: two opening user
+ * turns plus the last four. That is the second of the three independent cuts described at the top of
+ * `lib/chatContextWindow.ts`, and on an ordinary conversation it was the deepest one: whatever the
+ * client had already shortened, this threw most of the rest away before any rung saw it.
+ *
+ * A turn count was the wrong unit. A provider's limit and price are in tokens, so six long turns
+ * cost the same as sixty short ones while remembering ten times less of the conversation. The budget
+ * is now `FREE_CHAIN_HISTORY_CHARS` (24,000 ≈ 6k tokens, the same worst case the six-turn cap
+ * already allowed at its own 4,000-character-per-turn ceiling), spent through the one shared window.
+ * `trimForRung` still trims to each rung's real input window afterwards, so a small-context rung is
+ * no more exposed than before.
+ *
+ * The opening turns are kept by POSITION now, which includes a reply-language command if the user
+ * opened with one. That used to be excluded deliberately, because pinning it inside a six-turn
+ * window could evict a real fact — with six opening slots and thirty recent ones, it cannot.
+ */
 export function trimHistory(cfg: FreeChainConfig, history: unknown[]): unknown[] {
   if (!cfg.features.historyTrim || !Array.isArray(history)) return history;
-  const turns = cfg.features.historyTurns;
-  if (turns <= 0) return [];
-  if (history.length <= turns) return history;
-  const early: unknown[] = [];
-  for (const row of history) {
-    if (!isUserTurn(row) || resolveChatReplyLanguage(turnText(row))) continue;
-    early.push(row);
-    if (early.length >= Math.min(2, Math.max(0, turns - 1))) break;
-  }
-  const recent = history.slice(-Math.max(1, turns - early.length));
-  return [...early.filter(row => !recent.includes(row)), ...recent];
+  if (cfg.features.historyTurns <= 0) return [];
+  return historyForModelRequest(history, { budgetChars: cfg.features.historyChars });
 }
 
 // ── 4. Stable prefix (prompt caching) + compact prompt ──────────────────────────────────────────

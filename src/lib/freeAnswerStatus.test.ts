@@ -36,12 +36,14 @@ describe('authoritative shared Free answer display', () => {
     for (const required of ['onAuthStateChanged', 'visibilitychange', "'focus'", "'storage'", "cache: 'no-store'", 'value.resetsAt - Date.now()', 'reader.invalidate()', 'clearInterval(poll)']) expect(hook).toContain(required);
     expect(hook).toContain('if (!active)');
   });
-  it('reuses one send identity across both Free chat paths and refreshes after every outcome', () => {
+  it('reuses one send identity on the Free chat path and refreshes after every outcome', () => {
     const hook = readFileSync('src/hooks/useChatEngine.ts', 'utf8');
     expect(hook.match(/newFreeAnswerRequestId\(\)/g)).toHaveLength(1);
+    // ONE path, so the identity is set in one place. The second line asserted the deleted blocking
+    // path's own header spread (admin 2026-11-25, the slow-reply report); the property it protected —
+    // that every send of this turn carries the SAME request id — is asserted on the path that remains.
     expect(hook).toContain("headers['x-nb-answer-request'] = answerRequestId");
-    expect(hook).toContain("{ 'x-nb-answer-request': answerRequestId }");
-    expect(hook).toContain('currentAgent, currentMode, answerRequestId');
+    expect(hook.match(/answerRequestId/g)!.length).toBeGreaterThan(3);
     expect(hook).toMatch(/finally \{\s*setIsLoadingForTab\(false\);\s*notifyFreeAnswerChanged\(\)/);
   });
   it('clears unavailable counts rather than inventing allowance', async () => {

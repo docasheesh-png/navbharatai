@@ -92,7 +92,15 @@ describe('explicit conversation reply language, not account preference', () => {
     const preference = resolveChatReplyLanguage('next', checked.history, carried);
     expect(preference).toBe('hi');
     const cfg = freeChainConfig({});
-    expect(trimHistory(cfg, checked.history).length).toBeLessThan(checked.history.length);
+    // 40 ordinary turns now survive whole: the free chain's window is a CHARACTER budget, and this
+    // conversation is nowhere near it (admin 2026-11-25). The enum must be carried either way, which is
+    // what this test is about — so the shortening case is asserted on a history that genuinely overflows.
+    expect(trimHistory(cfg, checked.history)).toHaveLength(checked.history.length);
+    const overflowing = Array.from({ length: 200 }, (_, i) => user(`question ${i} ${'pad '.repeat(100)}`));
+    const shortened = trimHistory(cfg, overflowing);
+    expect(shortened.length).toBeLessThan(overflowing.length);
+    expect(shortened.reduce((total, m) => total + String((m as { text?: unknown }).text ?? '').length, 0))
+      .toBeLessThanOrEqual(cfg.features.historyChars);
     expect(chatReplyLanguageInstruction(preference)).toContain('Hindi using Devanagari script');
   });
   it('preserves the explicit directive through compact prompt replacement', () => {

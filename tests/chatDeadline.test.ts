@@ -12,10 +12,13 @@ describe('ordinary chat deadlines stay coordinated', () => {
     expect(CHAT_FIRST_CONTENT_MS).toBe(15_000);
     expect(CHAT_PROVIDER_ATTEMPT_MS).toBe(90_000);
   });
-  it('uses the same deadline for streaming/nonstream browser requests and chat gateway ingress', () => {
+  it('uses the same deadline for the browser request and chat gateway ingress', () => {
     const client = source('src/hooks/useChatEngine.ts');
-    expect(client).toContain('setTimeout(() => controller.abort(), CHAT_CLIENT_DEADLINE_MS)');
+    // ONE send path, so one deadline. The first line here asserted the blocking `axios` path's own
+    // `setTimeout(… controller.abort())`; that path is deleted (admin 2026-11-25, the slow-reply
+    // report) and the remaining path carries the same constant through `AbortSignal.timeout`.
     expect(client).toContain('AbortSignal.timeout(CHAT_CLIENT_DEADLINE_MS)');
+    expect(client.match(/CHAT_CLIENT_DEADLINE_MS/g)?.length).toBe(2); // the import and the one use
     expect(source('src/server/routes/chat.ts')).toContain('Date.now() + CHAT_SERVER_DEADLINE_MS');
   });
   it('keeps wallet-paid chat ownership longer than its deadline without changing generic locks', () => {

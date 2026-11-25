@@ -58,15 +58,13 @@ import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { failedStage } from '../lib/mobileBuildRepair';
 import { cureFamily, recordRepairOutcome } from '../lib/mobileBuildOutcomeStore';
 import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles, detectRepoLayout, workspacePathForRepoPath, PREBUILT_STAMP_PATH } from '../lib/mobileProjectAssembler';
-import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
+import { apkChargeInr, isChargeableApk, apkChargeRef } from '../lib/apkCharge';
+import { chargeMobileBuild, mobileBuildBillingExempt } from '../lib/mobileBuildCharge';
+import { githubBuildEnabled } from '../lib/mobileBuild/providerRegistry';
 import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
-import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
-import { debitWalletForBuild } from '../lib/walletDebit';
-import { zTestFreeBilling } from '../lib/zTestAccount';
 import { appBuildStore } from '../lib/AppBuildStore';
 import { saveApkFailureReport } from '../lib/AdminApkReportStore';
-import { getServerDb } from '../lib/serverDb';
 
 const githubToken = githubTokenFromRequest;
 
@@ -500,20 +498,14 @@ export function registerMobileShipRoutes(app: Express): void {
           // directly instead of hunting. A PARTIAL update on purpose — writing a whole row here would
           // overwrite the workflow and the user's chosen app name with values this route does not know.
           void appBuildStore.setLatestRun(identity.uid, String(owner), String(repo), String(runId));
-          if (isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))) break;
-          // 🧪 z@gmail.com test account (lib/zTestAccount.ts): app publish/APK free. Remove later.
-          if (zTestFreeBilling(identityGrantEmail(identity), identity.uid)) break;
+          // Free-list and z-test accounts are exempt — ONE rule for both build providers (mobileBuildCharge.ts).
+          if (mobileBuildBillingExempt(identity)) break;
           // The welcome gift cannot pay this ₹1. `paid-only` refuses the charge when the paid
           // part of the wallet cannot cover it, and the gift is left where it is. The file is
           // already on the user's own GitHub — this route cannot unpublish it — so the list below
           // still returns. We do not spend the gift to pretend the file was bought.
-          void debitWalletForBuild(getServerDb() as any, identity.uid, {
-            feature: 'mobile-build',
-            billedInr: apkChargeInr(),
-            buildRef: apkChargeRef(owner, repo, String(a.id)),
-            description: chargeDescription(String(a.name)),
-            spends: 'paid-only',
-          });
+          // The artifact NAME decides chargeability, exactly as before (`isChargeableApk` above).
+          void chargeMobileBuild(identity.uid, apkChargeRef(owner, repo, String(a.id)), String(a.name));
         } catch { /* the charge must never break the build from being shown as ready */ }
         break; // one charge per build, not per file in it
       }
@@ -638,6 +630,11 @@ export function registerMobileShipRoutes(app: Express): void {
    *   • 422     → the workflow exists but has no `workflow_dispatch` trigger on that ref
    */
   app.post('/api/mobile-ship/trigger', async (req: Request, res: Response) => {
+    // The admin's GitHub-provider kill switch (MOBILE_GITHUB_BUILD_ENABLED, default on). Checked where a
+    // build is STARTED, so a switched-off provider cannot be reached by a stale screen either.
+    if (!githubBuildEnabled()) {
+      return res.status(503).json({ error: 'GitHub builds are switched off right now. Use NavBharatAI Native Cloud Build instead.', code: 'provider-disabled' });
+    }
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
 

@@ -29,7 +29,9 @@ const make = () => {
   const car = OBJ.createCar({ detail: 'lite' }); scene.add(car);
   return { ctx, car };
 };
-const regions = [{ id: 'home', kind: 'town', city: tiny }, { id: 'east', kind: 'town', toward: 'east', city: tiny }, { id: 'north', kind: 'town', toward: 'north', city: tiny }];
+// Since failedbr #2499 places stand close together unless a distance is named (PLACE_GAP); a race lays its towns a drive apart,
+// as the race's own default towns do, so the distances are named here (the ones the old spiral gave these towns).
+const regions = [{ id: 'home', kind: 'town', city: tiny }, { id: 'east', kind: 'town', toward: 'east', distance: 600, city: tiny }, { id: 'north', kind: 'town', toward: 'north', distance: 850, city: tiny }];
 
 describe('🏁 a race on the world\'s highways', () => {
   it('the car starts on the route, on the ground; the rivals are on the same route; the finish is finishKm along it', () => {

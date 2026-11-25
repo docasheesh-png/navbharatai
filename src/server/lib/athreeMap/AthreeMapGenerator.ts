@@ -641,8 +641,29 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const ground = line.map((p) => heightAt(p.x, p.z));
     const y = ground.map((_, i) => { let s = 0, c = 0; for (let j = Math.max(0, i - 5); j <= Math.min(ground.length - 1, i + 5); j++) { s += ground[j]; c++; } return Math.max(1.5, s / c); });
     y[0] = Math.max(1.5, ground[0]); y[y.length - 1] = Math.max(1.5, ground[ground.length - 1]);
-    for (let i = 1; i < y.length; i++) y[i] = Math.min(Math.max(y[i], y[i - 1] - 0.8), y[i - 1] + 0.8);
-    for (let i = y.length - 2; i >= 0; i--) y[i] = Math.min(Math.max(y[i], y[i + 1] - 0.8), y[i + 1] + 0.8);
+    // AN END ON LEVELLED GROUND KEEPS ITS LEVEL (failedbr #2499). The grade passes used to move an end too (the average next to
+    // it lower or higher), and a road that ends metres off a place's levelled square cuts into it or leaves it floating, because
+    // the road's height wins near the road. So an end on a pad is pinned: every point first stays within the grade a car can climb
+    // from it (the band), then the grade passes run between the ends without moving them. An end in open land (a mountain, say)
+    // is free and cut to the road, as before. Two pinned ends too far apart in height for the grade: an even climb between them.
+    const onPad = (q: { x: number; z: number }): boolean => {
+      const ids = placeIds(padCells, padsEverywhere, q.x, q.z), count = ids ? ids.length : pads.length;
+      for (let k = 0; k < count; k++) { const d = pads[ids ? ids[k] : k]; if (Math.max(Math.abs(q.x - d.x) - d.hx, Math.abs(q.z - d.z) - d.hz) <= 1) return true; }
+      return false;
+    };
+    const N = y.length - 1, pin0 = onPad(line[0]), pinN = onPad(line[N]), y0 = y[0], yN = y[N];
+    if (pin0 && pinN && Math.abs(y0 - yN) > 0.8 * N) {
+      for (let i = 0; i <= N; i++) y[i] = y0 + ((yN - y0) * i) / N;
+    } else {
+      for (let i = 0; i <= N; i++) {
+        let lo = Number.NEGATIVE_INFINITY, hi = Number.POSITIVE_INFINITY;
+        if (pin0) { lo = Math.max(lo, y0 - 0.8 * i); hi = Math.min(hi, y0 + 0.8 * i); }
+        if (pinN) { lo = Math.max(lo, yN - 0.8 * (N - i)); hi = Math.min(hi, yN + 0.8 * (N - i)); }
+        y[i] = Math.min(Math.max(y[i], lo), hi);
+      }
+      for (let i = 1; i <= (pinN ? N - 1 : N); i++) y[i] = Math.min(Math.max(y[i], y[i - 1] - 0.8), y[i - 1] + 0.8);
+      for (let i = N - 1; i >= (pin0 ? 1 : 0); i--) y[i] = Math.min(Math.max(y[i], y[i + 1] - 0.8), y[i + 1] + 0.8);
+    }
     const pts = line.map((p, i) => ({ x: p.x, y: y[i], z: p.z }));
     const reachOut = Math.max(2, width / 2) + ROAD_SHOULDER;
     let ex0 = Infinity, ez0 = Infinity, ex1 = -Infinity, ez1 = -Infinity;

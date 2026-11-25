@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   checkChatInput, CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_ATTACHMENTS, CHAT_MAX_VISION_ATTACHMENTS, CHAT_MAX_HISTORY_TURNS, CHAT_MAX_HISTORY_TURN_CHARS,
+  CHAT_MAX_HISTORY_CHARS,
 } from '../src/server/lib/chatInputLimits';
 import { filesForAiReview, SCAN_AI_MAX_CHARS } from '../src/server/routes/audit';
 
@@ -32,13 +33,31 @@ describe('free chat input', () => {
     expect(checkChatInput({ message: 'x', fileAttachments: pdfs, history: [] }).ok).toBe(false);
   });
 
-  it('a padded history is trimmed, never refused', () => {
+  it('a padded history is trimmed, never refused, and the worst case is the CHARACTER bound', () => {
     const history = Array.from({ length: 500 }, () => ({ sender: 'user', text: 'y'.repeat(50_000) }));
     const r = checkChatInput({ message: 'x', fileAttachments: [], history });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.history).toHaveLength(CHAT_MAX_HISTORY_TURNS);
+      // Each turn is still clipped, and the whole history is bounded by characters — which is what a
+      // provider charges for. 500 × 50,000 used to arrive as 60 × 4,000 = 240,000 characters; the same
+      // input now arrives as at most 120,000, so the bound this file exists for is twice as tight.
       expect((r.history[0] as { text: string }).text.length).toBe(CHAT_MAX_HISTORY_TURN_CHARS);
+      const chars = r.history.reduce((total, m) => total + String((m as { text?: unknown }).text ?? '').length, 0);
+      expect(chars).toBeLessThanOrEqual(CHAT_MAX_HISTORY_CHARS);
+      expect(r.history.length).toBeLessThanOrEqual(CHAT_MAX_HISTORY_TURNS);
+    }
+  });
+
+  it('a real long conversation of short turns is kept, not cut at its oldest end', () => {
+    // 🔴 THE REPORTED BUG, at the request bound (admin 2026-11-25): 150 ordinary turns cost a fraction
+    // of the bound above, and the old 60-turn cap still threw the first 90 of them away — the opening of
+    // the conversation, which is exactly the part the user expects to be remembered.
+    const history = Array.from({ length: 150 }, (_, i) => ({ sender: i % 2 ? 'ai' : 'user', text: `turn ${i}` }));
+    const r = checkChatInput({ message: 'what did I say first?', fileAttachments: [], history });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.history).toHaveLength(150);
+      expect((r.history[0] as { text: string }).text).toBe('turn 0');
     }
   });
 

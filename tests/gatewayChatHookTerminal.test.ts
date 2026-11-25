@@ -11,6 +11,7 @@ import { useRef, useEffect } from 'react';
 import { useChatEngine, type ChatEngineDeps } from '../src/hooks/useChatEngine';
 import type { Message } from '../src/types';
 import { chatAvailabilityMessage } from '../src/server/lib/chatAvailabilityMessage';
+import { CHAT_MODEL_TURN_CHARS } from '../src/lib/chatContextWindow';
 function fixture() {
   let messages: Message[] = [];
   const deps: ChatEngineDeps = {
@@ -32,15 +33,30 @@ function fixture() {
   } };
 }
 const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+// 🔴 THE 'axios' TRANSPORT IS GONE FROM EVERY CASE BELOW (admin 2026-11-25, the slow-reply report).
+// The hook used to have TWO send paths and these cases covered both: a blocking `axios.post` that the
+// free chat actually took, and the streaming `fetch` it reached only after that one failed. The blocking
+// path is deleted, so there is one transport — but `axios` stays MOCKED on purpose, so every case can
+// still assert that nothing in the hook reached for it. The `%s` parameter is kept so that a future
+// second transport (a websocket, say) is added as a case rather than as a second untested path.
+/** The shapes the axios cases used to set up, on the one transport that remains. */
+const jsonBody = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+/** Every chat request this turn made: its parsed JSON body and the init it was sent with. */
+const sent = () => vi.mocked(fetch).mock.calls.map(call => ({
+  body: JSON.parse(String(call[1]?.body)) as Record<string, any>,
+  init: call[1] as RequestInit & { headers: Record<string, string>; signal: AbortSignal },
+}));
+/** Nothing in the hook may reach for the deleted blocking path, in any case. */
+const noBlockingSend = () => expect(mock.post).not.toHaveBeenCalled();
 describe('real Free chat hook terminal request handling', () => {
   beforeEach(() => { vi.clearAllMocks(); mock.isCancel.mockReturnValue(false); mock.authHeader.mockResolvedValue({}); vi.stubGlobal('fetch', vi.fn()); vi.spyOn(console, 'error').mockImplementation(() => {}); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-  it.each(['axios', 'fetch-json', 'sse'])('preserves selected-language capacity failure without retry or success through %s', async transport => {
+  it.each(['fetch-json', 'sse'])('preserves selected-language capacity failure without retry or success through %s', async transport => {
     const reply = chatAvailabilityMessage('capacity', { message: 'mujhe madad chahiye', replyLanguage: 'hi' });
     const failure = { code: 'CHAT_CAPACITY_EXHAUSTED', reply, error: reply };
     const f = fixture();
-    if (transport === 'axios') mock.post.mockRejectedValue({ response: { status: 503, data: failure }, message: 'synthetic provider detail' });
-    else {
+    {
       f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
       vi.mocked(fetch).mockResolvedValue(new Response(transport === 'sse' ? frame(failure) : JSON.stringify(failure), {
         status: transport === 'sse' ? 200 : 503, headers: { 'Content-Type': transport === 'sse' ? 'text/event-stream' : 'application/json' },
@@ -52,8 +68,8 @@ describe('real Free chat hook terminal request handling', () => {
     expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: reply }));
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
     expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
-    expect(transport === 'axios' ? mock.post : fetch).toHaveBeenCalledOnce();
-    expect(transport === 'axios' ? fetch : mock.post).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mock.post).not.toHaveBeenCalled(); // there is no blocking send path left to fall back to
   });
   it('keeps an unexpected failure neutral while retaining its diagnostic error internally', async () => {
     const f = fixture(); f.deps.incrementDailyUsage = () => { throw new Error('synthetic provider budget failure'); };
@@ -64,7 +80,7 @@ describe('real Free chat hook terminal request handling', () => {
     expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: 'synthetic provider budget failure' }));
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
   });
-  it.each(['axios', 'fetch'])('carries current instruction then history then picker preference through %s without changing settings', async transport => {
+  it.each(['fetch'])('carries current instruction then history then picker preference through %s without changing settings', async transport => {
     const cases = [
       { input: 'mujhe madad chahiye', picker: 'hindi', history: [], expected: 'hi' },
       { input: 'mujhe madad chahiye', picker: 'english', history: [], expected: 'en' },
@@ -76,45 +92,44 @@ describe('real Free chat hook terminal request handling', () => {
     for (const example of cases) {
       const f = fixture(); f.deps.input = example.input; f.deps.preferredLanguage = example.picker;
       f.deps.messages = example.history.map((text, n) => ({ id: `language-${n}`, text, sender: 'user' as const, timestamp: new Date() }));
-      if (transport === 'axios') mock.post.mockResolvedValue({ data: { reply: 'Answer' } });
-      else {
+      {
         f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
         vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ reply: 'Answer' }), { headers: { 'Content-Type': 'application/json' } }));
       }
       await f.engine().handleSendForTab('studio');
-      const body = transport === 'axios' ? mock.post.mock.calls.at(-1)![1] : JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)![1]?.body));
+      const body = JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)![1]?.body));
       expect(body.replyLanguage).toBe(example.expected);
       expect(body.message).toBe(example.input);
       expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
     }
   });
   it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE', 'CHAT_ROUTE_UNAVAILABLE'])('does not turn JSON %s into another backend request', async code => {
-    mock.post.mockRejectedValue({ response: { status: 503, data: { code, reply: 'The selected route is unavailable.' } }, message: 'Request failed' });
+    vi.mocked(fetch).mockResolvedValue(jsonBody({ code, reply: 'The selected route is unavailable.' }, 503));
     const f = fixture(); await f.engine().handleSend();
-    expect(mock.post).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend();
     expect(f.messages().filter(m => m.sender === 'ai')).toHaveLength(1);
     expect(f.messages().at(-1)?.text).toBe('The selected route is unavailable.');
     expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
   });
   it.each([500, 502, 503])('never retries an ambiguous HTTP %s even without gateway markers', async status => {
-    mock.post.mockRejectedValue({ response: { status, data: {} }, message: 'Request failed' });
-    const first = fixture(); await first.engine().handleSend(); expect(mock.post).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled();
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status, headers: { 'Content-Type': 'application/json' } }));
-    const second = fixture(); second.deps.selectedModel = 'openai'; second.deps.keys = { openai: 'test' }; await second.engine().handleSendForTab('studio');
-    expect(fetch).toHaveBeenCalledOnce(); expect(second.deps.setIsLoading).toHaveBeenLastCalledWith(false);
+    const f = fixture(); await f.engine().handleSend();
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend();
+    expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
   });
   it('does not repeat a guest-limit refusal across endpoints or inside streaming retry', async () => {
-    mock.post.mockRejectedValue({ response: { status: 403, data: { code: 'guest_limit_reached', error: 'Sign in to continue.' } }, message: 'Request failed' });
-    const first = fixture(); await first.engine().handleSend(); expect(mock.post).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled();
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ code: 'guest_limit_reached', error: 'Sign in to continue.' }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
-    const second = fixture(); second.deps.selectedModel = 'openai'; second.deps.keys = { openai: 'test' }; await second.engine().handleSendForTab('studio');
-    expect(fetch).toHaveBeenCalledOnce(); expect(second.deps.setIsLoading).toHaveBeenLastCalledWith(false);
-  });
-  it.each(['cancel', 'network'])('does not retry an ambiguous Axios %s outcome', async kind => {
-    mock.isCancel.mockReturnValue(kind === 'cancel'); mock.post.mockRejectedValue({ message: 'Network Error', code: 'ERR_NETWORK' });
+    vi.mocked(fetch).mockResolvedValue(jsonBody({ code: 'guest_limit_reached', error: 'Sign in to continue.' }, 403));
     const f = fixture(); await f.engine().handleSend();
-    expect(mock.post).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
+  });
+  it.each(['abort', 'network'])('does not retry an ambiguous %s outcome on the default path', async kind => {
+    // Was an Axios case. A dispatched request whose outcome is unknown must never become a second
+    // logical request, whichever transport carried it — that is the assertion, and it is unchanged.
+    vi.mocked(fetch).mockRejectedValue(kind === 'abort'
+      ? new DOMException('Stopped', 'AbortError') : new TypeError('Network Error'));
+    const f = fixture(); await f.engine().handleSend();
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
   });
   it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE', 'CHAT_ROUTE_UNAVAILABLE'])('does not retry a non-OK streaming-path JSON %s response', async code => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ code, reply: 'Unavailable' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
@@ -123,12 +138,11 @@ describe('real Free chat hook terminal request handling', () => {
     expect(fetch).toHaveBeenCalledOnce(); expect(mock.post).not.toHaveBeenCalled(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
     expect(f.messages().at(-1)?.text).toBe('Unavailable');
   });
-  it.each(['axios', 'fetch-json', 'sse'])('does not turn an explicit HTTP200 route failure into success through %s', async transport => {
+  it.each(['fetch-json', 'sse'])('does not turn an explicit HTTP200 route failure into success through %s', async transport => {
     const reply = 'The AI service is temporarily unavailable. Please try again later.';
     const failure = { ok: false, code: 'CHAT_ROUTE_UNAVAILABLE', reply };
     const f = fixture();
-    if (transport === 'axios') mock.post.mockResolvedValue({ data: failure });
-    else {
+    {
       f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
       vi.mocked(fetch).mockResolvedValue(new Response(transport === 'sse'
         ? frame({ c: reply }) + frame({ error: reply, code: failure.code, partial: false })
@@ -140,21 +154,22 @@ describe('real Free chat hook terminal request handling', () => {
     expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: reply }));
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
     expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
-    expect(transport === 'axios' ? mock.post : fetch).toHaveBeenCalledOnce();
-    expect(transport === 'axios' ? fetch : mock.post).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mock.post).not.toHaveBeenCalled(); // there is no blocking send path left to fall back to
   });
   it('does not retry an ambiguous fetch outcome before response headers', async () => {
     vi.mocked(fetch).mockRejectedValue(new TypeError('fetch failed'));
     const f = fixture(); f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' }; await f.engine().handleSendForTab('studio');
     expect(fetch).toHaveBeenCalledOnce(); expect(mock.post).not.toHaveBeenCalled(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
   });
-  it('Stop aborts the default Axios request and never appends a late answer or falls back', async () => {
-    let finish!: (value: unknown) => void; let signal: AbortSignal | undefined;
-    mock.post.mockImplementation((_url, _body, options) => { signal = options.signal; return new Promise(resolve => { finish = resolve; }); });
+  it('Stop aborts the default request and never appends a late answer or falls back', async () => {
+    let finish!: (value: Response) => void; let signal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation((_url, options) => { signal = options!.signal!; return new Promise(resolve => { finish = resolve; }); });
     const f = fixture(); const engine = f.engine(); const pending = engine.handleSend();
-    await vi.waitFor(() => expect(mock.post).toHaveBeenCalledOnce()); engine.stop();
-    expect(signal?.aborted).toBe(true); finish({ data: { reply: 'Late generated answer' } }); await pending;
-    expect(fetch).not.toHaveBeenCalled(); expect(f.messages().some(m => m.text.includes('Late generated answer'))).toBe(false);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce()); engine.stop();
+    expect(signal?.aborted).toBe(true); finish(jsonBody({ reply: 'Late generated answer' })); await pending;
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend();
+    expect(f.messages().some(m => m.text.includes('Late generated answer'))).toBe(false);
     expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
   });
   it('Stop before streaming response headers does not start another request', async () => {
@@ -180,108 +195,107 @@ describe('real Free chat hook terminal request handling', () => {
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
   });
   it('answers twenty sequential text turns with fresh identities and live controllers', async () => {
-    mock.post.mockImplementation(async (_url, body) => ({ data: { reply: `Answer to ${body.message}` } }));
+    vi.mocked(fetch).mockImplementation(async (_url, options) => jsonBody({ reply: `Answer to ${JSON.parse(String(options?.body)).message}` }));
     const f = fixture();
     for (let n = 1; n <= 20; n++) {
       await f.engine().handleSend(`Question ${n}`);
       expect(f.deps.isLoading).toBe(false);
       expect(f.messages().at(-1)?.text).toBe(`Answer to Question ${n}`);
     }
-    expect(mock.post).toHaveBeenCalledTimes(20);
-    expect(fetch).not.toHaveBeenCalled();
-    const ids = mock.post.mock.calls.map(([, , options]) => options.headers['x-nb-answer-request']);
+    expect(fetch).toHaveBeenCalledTimes(20);
+    noBlockingSend();
+    const ids = sent().map(call => call.init.headers['x-nb-answer-request']);
     expect(new Set(ids).size).toBe(20);
-    expect(mock.post.mock.calls.every(([, , options]) => !options.signal.aborted)).toBe(true);
-    expect(mock.post.mock.calls[1][1].history).toEqual(expect.arrayContaining([
+    expect(sent().every(call => !call.init.signal.aborted)).toBe(true);
+    expect(sent()[1].body.history).toEqual(expect.arrayContaining([
       expect.objectContaining({ text: 'Question 1', sender: 'user' }),
       expect.objectContaining({ text: 'Answer to Question 1', sender: 'ai' }),
     ]));
   });
-  it.each(['axios', 'fetch'])('carries per-chat language through %s without changing global preference', async transport => {
-    mock.post.mockResolvedValue({ data: { reply: 'A synthetic answer.' } });
+  it.each(['fetch'])('carries per-chat language through %s without changing global preference', async transport => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ reply: 'A synthetic answer.' }), { headers: { 'Content-Type': 'application/json' } }));
     const f = fixture();
-    if (transport === 'fetch') { f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' }; }
+    f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
     const send = async (message: string) => { f.deps.input = message; await f.engine().handleSendForTab('studio'); };
     await send('Tell me about world trade.');
     await send('devnaagri me bataao');
     await send('aur details batao');
-    const payloads = transport === 'axios' ? mock.post.mock.calls.map(call => call[1])
-      : vi.mocked(fetch).mock.calls.map(call => JSON.parse(String(call[1]?.body)));
+    const payloads = vi.mocked(fetch).mock.calls.map(call => JSON.parse(String(call[1]?.body)));
     expect(payloads[1].message).toBe('devnaagri me bataao');
     expect(payloads[2].replyLanguage).toBe('hi');
     expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
     expect(f.deps.preferredLanguage).toBe('english');
     const next = fixture(); await next.engine().handleSend('A new conversation');
-    expect(mock.post.mock.calls.at(-1)![1].replyLanguage).toBe('en'); // Fresh chat uses the unchanged picker, not the previous chat's Hindi.
+    expect(sent().at(-1)!.body.replyLanguage).toBe('en'); // Fresh chat uses the unchanged picker, not the previous chat's Hindi.
   });
   it('keeps a script request after a failed response and before client history text trimming', async () => {
-    mock.post.mockRejectedValueOnce({ response: { status: 503, data: { code: 'CHAT_ROUTE_UNAVAILABLE', reply: 'Unavailable' } } })
-      .mockResolvedValue({ data: { reply: 'A synthetic answer.' } });
+    vi.mocked(fetch).mockResolvedValueOnce(jsonBody({ code: 'CHAT_ROUTE_UNAVAILABLE', reply: 'Unavailable' }, 503))
+      .mockResolvedValue(jsonBody({ reply: 'A synthetic answer.' }));
     const f = fixture(); await f.engine().handleSend('devnaagri me bataao');
     await f.engine().handleSend('Try again');
-    expect(mock.post.mock.calls[1][1].replyLanguage).toBe('hi');
+    expect(sent()[1].body.replyLanguage).toBe('hi');
     expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
-    const longTurn = `Reply in Hindi. ${'background '.repeat(220)}. Reply in English`;
+    // One turn longer than a turn may be transmitted, so the clip still happens. The length is read
+    // from the window's own constant rather than written as 2000: the clip is the server's per-turn
+    // bound now (`CHAT_MAX_HISTORY_TURN_CHARS`), so a turn is never cut twice to two lengths.
+    const longTurn = `Reply in Hindi. ${'background '.repeat(500)}. Reply in English`;
+    expect(longTurn.length).toBeGreaterThan(CHAT_MODEL_TURN_CHARS);
     f.deps.messages = [{ id: 'older', sender: 'user', text: longTurn, timestamp: new Date() }];
-    f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ reply: 'A synthetic answer.' }), { headers: { 'Content-Type': 'application/json' } }));
     f.deps.input = 'next question'; await f.engine().handleSendForTab('studio');
-    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+    const body = sent().at(-1)!.body;
     expect(body.replyLanguage).toBe('en');
     expect(body.history[0].text).not.toContain('Reply in English');
-    expect(body.history[0].text.length).toBe(2000);
+    expect(body.history[0].text.length).toBe(CHAT_MODEL_TURN_CHARS);
   });
   it.each(['CHAT_ROUTE_UNAVAILABLE', 'FREE_ANSWER_UNAVAILABLE', 'FREE_ANSWER_BUSY'])('allows a fresh manual turn after terminal %s without automatic replay', async code => {
-    mock.post.mockResolvedValueOnce({ data: { reply: 'First answer' } })
-      .mockRejectedValueOnce({ response: { status: 503, data: { code, reply: 'Unavailable for this turn' } }, message: 'Request failed' })
-      .mockResolvedValueOnce({ data: { reply: 'Third answer' } });
+    vi.mocked(fetch).mockResolvedValueOnce(jsonBody({ reply: 'First answer' }))
+      .mockResolvedValueOnce(jsonBody({ code, reply: 'Unavailable for this turn' }, 503))
+      .mockResolvedValueOnce(jsonBody({ reply: 'Third answer' }));
     const f = fixture();
     await f.engine().handleSend('First question');
     await f.engine().handleSend('Second question');
-    expect(mock.post).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(f.deps.isLoading).toBe(false);
     await f.engine().handleSend('Manual retry');
-    expect(mock.post).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(f.messages().at(-1)?.text).toBe('Third answer');
-    expect(fetch).not.toHaveBeenCalled();
+    noBlockingSend();
   });
   it.each(['resolve', 'reject'])('an aborted predecessor cannot mutate its successor after late %s', async outcome => {
-    const finish: Array<(value: unknown) => void> = [];
+    const finish: Array<(value: Response) => void> = [];
     const fail: Array<(error: unknown) => void> = [];
-    mock.post.mockImplementation(() => new Promise((resolve, reject) => { finish.push(resolve); fail.push(reject); }));
+    vi.mocked(fetch).mockImplementation(() => new Promise((resolve, reject) => { finish.push(resolve); fail.push(reject); }));
     const f = fixture();
     const firstEngine = f.engine();
     const first = firstEngine.handleSend('First question');
-    await vi.waitFor(() => expect(mock.post).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     firstEngine.stop();
     const second = f.engine().handleSend('Second question');
-    await vi.waitFor(() => expect(mock.post).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     expect(f.deps.isLoading).toBe(true);
     const before = structuredClone(f.messages());
     const logCount = vi.mocked(f.deps.addLog).mock.calls.length;
     const errorCount = vi.mocked(f.deps.setErrorContext).mock.calls.length;
-    if (outcome === 'resolve') finish[0]({ data: { reply: 'Late first answer' } });
-    else fail[0]({ response: { status: 503, data: {} }, message: 'Late failure' });
+    if (outcome === 'resolve') finish[0](jsonBody({ reply: 'Late first answer' }));
+    else fail[0](new TypeError('Late failure'));
     await first;
     expect(f.messages()).toEqual(before);
     expect(vi.mocked(f.deps.addLog).mock.calls).toHaveLength(logCount);
     expect(vi.mocked(f.deps.setErrorContext).mock.calls).toHaveLength(errorCount);
     const predecessorChangedLoading = !f.deps.isLoading;
     const predecessorWroteNotice = f.messages().some(message => message.text === 'The reply was stopped.');
-    finish[1]({ data: { reply: 'Second answer' } });
+    finish[1](jsonBody({ reply: 'Second answer' }));
     await second;
     expect(predecessorChangedLoading).toBe(false);
     expect(predecessorWroteNotice).toBe(false);
     expect(f.messages().at(-1)?.text).toBe('Second answer');
-    expect(fetch).not.toHaveBeenCalled();
+    noBlockingSend();
   });
 
-  it.each(['axios', 'fetch'])('preserves explicit maintenance and does not replay, sign out or log success through %s', async transport => {
+  it.each(['fetch'])('preserves explicit maintenance and does not replay, sign out or log success through %s', async transport => {
     const data = { maintenance: true, reply: 'AI services are paused for maintenance.' };
     const f = fixture();
-    if (transport === 'axios') mock.post.mockRejectedValue({ response: { status: 503, data }, message: 'Request failed' });
-    else {
+    {
       f.deps.keys = { openai: 'test' }; f.deps.selectedModel = 'openai';
       vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(data), { status: 503 }));
     }
@@ -291,28 +305,28 @@ describe('real Free chat hook terminal request handling', () => {
     expect(f.deps.setUser).not.toHaveBeenCalled();
     expect(f.deps.setShowAuth).not.toHaveBeenCalled();
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
-    expect(transport === 'axios' ? mock.post : fetch).toHaveBeenCalledOnce();
-    expect(transport === 'axios' ? fetch : mock.post).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mock.post).not.toHaveBeenCalled(); // there is no blocking send path left to fall back to
   });
   it('locks synchronously before preparation so two same-render sends do not dispatch twice', async () => {
-    mock.post.mockResolvedValue({ data: { reply: 'Only one answer' } });
+    vi.mocked(fetch).mockResolvedValue(jsonBody({ reply: 'Only one answer' }));
     const f = fixture(); const engine = f.engine();
     await Promise.all([engine.handleSend('One'), engine.handleSend('Two')]);
-    expect(mock.post).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend();
     expect(f.messages().filter(message => message.sender === 'user')).toHaveLength(1);
   });
   it('does not dispatch an old request after delayed authentication resumes over its successor', async () => {
     let finishAuth!: (headers: Record<string, string>) => void;
     mock.authHeader.mockImplementationOnce(() => new Promise(resolve => { finishAuth = resolve; }));
-    mock.post.mockResolvedValue({ data: { reply: 'Successor answer' } });
+    vi.mocked(fetch).mockResolvedValue(jsonBody({ reply: 'Successor answer' }));
     const f = fixture(); const firstEngine = f.engine();
     const first = firstEngine.handleSend('First');
     await vi.waitFor(() => expect(mock.authHeader).toHaveBeenCalledOnce());
     firstEngine.stop();
     await f.engine().handleSend('Second');
     finishAuth({}); await first;
-    expect(mock.post).toHaveBeenCalledOnce();
-    expect(mock.post.mock.calls[0][1].message).toBe('Second');
+    expect(fetch).toHaveBeenCalledOnce(); noBlockingSend();
+    expect(sent()[0].body.message).toBe('Second');
     expect(f.messages().at(-1)?.text).toBe('Successor answer');
   });
   it.each([401, 403, 503])('late stopped HTTP %s cannot sign out, append errors or clear the successor', async status => {
@@ -358,14 +372,14 @@ describe('real Free chat hook terminal request handling', () => {
 
   it.each(['network', 'timeout', 'abort'].flatMap(kind => [true, false].flatMap(sse => [true, false].map(partial => ({ kind, sse, partial })))))
     ('finalizes one honest bubble after a reader failure: $kind, SSE=$sse, partial=$partial', async ({ kind, sse, partial }) => {
-      mock.post.mockResolvedValue({ data: { reply: 'First answer' } });
+      vi.mocked(fetch).mockResolvedValueOnce(jsonBody({ reply: 'First answer' }));
       const f = fixture(); await f.engine().handleSend('First question');
       f.deps.keys = { openai: 'test' }; f.deps.selectedModel = 'openai';
       let controller!: ReadableStreamDefaultController<Uint8Array>;
       const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
       vi.mocked(fetch).mockResolvedValueOnce(new Response(body, { headers: { 'Content-Type': sse ? 'text/event-stream' : 'text/plain' } }));
       const pending = f.engine().handleSendForTab('studio', 'Second question');
-      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
       if (partial) {
         controller.enqueue(new TextEncoder().encode(sse ? frame({ c: 'Second partial answer' }) : 'Second partial answer'));
         await vi.waitFor(() => expect(f.messages().at(-1)?.text).toContain('Second partial answer'));
@@ -382,11 +396,11 @@ describe('real Free chat hook terminal request handling', () => {
       expect(body.locked).toBe(false);
       expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('connection ended') }));
       expect(vi.mocked(f.deps.addLog).mock.calls.filter(([message, level]) => message.includes('AI Response received') && level === 'success')).toHaveLength(1);
-      expect(fetch).toHaveBeenCalledOnce(); expect(mock.post).toHaveBeenCalledOnce();
-      vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ reply: 'Manual successor answer' }), { headers: { 'Content-Type': 'application/json' } }));
+      expect(fetch).toHaveBeenCalledTimes(2); noBlockingSend();
+      vi.mocked(fetch).mockResolvedValueOnce(jsonBody({ reply: 'Manual successor answer' }));
       await f.engine().handleSendForTab('studio', 'Manual retry');
       expect(f.messages().at(-1)?.text).toBe('Manual successor answer');
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
     });
 
   it.each([false, true])('a stopped reader cannot overwrite its successor or closed-chat navigation (navigate=%s)', async navigate => {
@@ -430,35 +444,35 @@ describe('bounded pending question integration',()=>{
  afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 it('explicitly queues three questions behind an active turn, preserving ordered fresh history',async()=>{
  vi.stubGlobal('fetch',vi.fn());let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});let active=0,peak=0;
- mock.post.mockImplementation(async(_url,body)=>{peak=Math.max(peak,++active);if(body.message==='First')await hold;active--;return {data:{reply:`Answer to ${body.message}`}};});
- const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());
+ vi.mocked(fetch).mockImplementation(async(_url,options)=>{const body=JSON.parse(String(options?.body));peak=Math.max(peak,++active);if(body.message==='First')await hold;active--;return jsonBody({reply:`Answer to ${body.message}`});});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce());
  for(const text of ['Second','Third','Fourth'])expect(engine.queueQuestion(text)).toBe(true);expect(engine.queueQuestion('Fifth')).toBe(false);
- release();await first;await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledTimes(4));await vi.waitFor(()=>expect(f.messages().filter(m=>m.sender==='ai')).toHaveLength(4));
- expect(mock.post.mock.calls.map(c=>c[1].message)).toEqual(['First','Second','Third','Fourth']);expect(peak).toBe(1);
- expect(mock.post.mock.calls[3][1].history.map((m:Message)=>m.text)).toContain('Answer to Third');
+ release();await first;await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(4));await vi.waitFor(()=>expect(f.messages().filter(m=>m.sender==='ai')).toHaveLength(4));
+ expect(sent().map(c=>c.body.message)).toEqual(['First','Second','Third','Fourth']);expect(peak).toBe(1);
+ expect(sent()[3].body.history.map((m:Message)=>m.text)).toContain('Answer to Third');
  expect(f.messages().filter(m=>m.sender==='user').map(m=>m.text)).toEqual(['First','Second','Third','Fourth']);
 });
 it.each(['stop','session','account'] as const)('does not dispatch queued questions after %s changes',async change=>{
- let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async()=>{await hold;return {data:{reply:'First answer'}};});
- const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());expect(engine.queueQuestion('Second')).toBe(true);
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});vi.mocked(fetch).mockImplementation(async()=>{await hold;return jsonBody({reply:'First answer'});});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce());expect(engine.queueQuestion('Second')).toBe(true);
  if(change==='stop')engine.stop();if(change==='session')f.deps.currentSessionId='new-session';if(change==='account')f.deps.user={uid:'new-user'} as any;
- f.engine();release();await first;await new Promise(r=>setTimeout(r,10));expect(mock.post).toHaveBeenCalledOnce();
+ f.engine();release();await first;await new Promise(r=>setTimeout(r,10));expect(fetch).toHaveBeenCalledOnce();
 });
 it.each(['failure','incomplete'] as const)('clears pending questions after an %s answer',async outcome=>{
- let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async()=>{await hold;if(outcome==='failure')throw {response:{status:503}};return {data:{reply:'Partial answer',stalled:true}};});
- const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());expect(engine.queueQuestion('Second')).toBe(true);
- release();await first;await new Promise(r=>setTimeout(r,10));expect(mock.post).toHaveBeenCalledOnce();
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});vi.mocked(fetch).mockImplementation(async()=>{await hold;if(outcome==='failure')return jsonBody({},503);return jsonBody({reply:'Partial answer',stalled:true});});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce());expect(engine.queueQuestion('Second')).toBe(true);
+ release();await first;await new Promise(r=>setTimeout(r,10));expect(fetch).toHaveBeenCalledOnce();
 });
 it('does not erase a new draft when the queued question starts',async()=>{
- let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async(_url,body)=>{if(body.message==='First')await hold;return {data:{reply:'Answer'}};});
- const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());engine.queueQuestion('Second');f.deps.input='Unsent draft';
- release();await first;await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledTimes(2));expect(f.deps.input).toBe('Unsent draft');
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});vi.mocked(fetch).mockImplementation(async(_url,options)=>{if(JSON.parse(String(options?.body)).message==='First')await hold;return jsonBody({reply:'Answer'});});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce());engine.queueQuestion('Second');f.deps.input='Unsent draft';
+ release();await first;await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(2));expect(f.deps.input).toBe('Unsent draft');
 });
 
 it('cancels queued work when the hook unmounts',async()=>{
- let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async()=>{await hold;return {data:{reply:'Late answer'}};});
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});vi.mocked(fetch).mockImplementation(async()=>{await hold;return jsonBody({reply:'Late answer'});});
  const f=fixture();const engine=f.engine();const cleanup=vi.mocked(useEffect).mock.calls.at(-1)![0]();
- const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());engine.queueQuestion('Second');
- if(typeof cleanup==='function')cleanup();release();await first;await new Promise(r=>setTimeout(r,10));expect(mock.post).toHaveBeenCalledOnce();expect(engine.queueQuestion('Third')).toBe(false);
+ const first=engine.handleSend('First');await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce());engine.queueQuestion('Second');
+ if(typeof cleanup==='function')cleanup();release();await first;await new Promise(r=>setTimeout(r,10));expect(fetch).toHaveBeenCalledOnce();expect(engine.queueQuestion('Third')).toBe(false);
 });
 });

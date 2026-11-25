@@ -6055,3 +6055,30 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Lock:** `tests/aLiveClaimNeedsARealDeploy.test.ts` (26). Claim-audit / route / deployment suites: 1 288 pass.
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
+
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3344…Q-3347)
+
+Admin 2026-11-22, on their GTA-style game: *"mujhe lag raha hai, maps me sabhi city/village ko ek plane me na bana kar vertical
+layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea under a flat slab with lamps, people and cars on it.
+
+- **Reproduced in Chromium (real kit, vite build, swiftshader).** With valid regions, both the kit at build time (acae9e7c, 11
+  places, admin-like world) and main (20 mixed regions: cities, joinTo tiles, desert/jungle/mountain/snow/beach/grassland, a
+  venue) stand every place, the player and the drawn terrain on one ground: terrain off 0 at every place, pending 0, player
+  0.2–0.6 m over heightAt. With ONE region asked toward `'southwest'` (not one of the eight directions) the spot became NaN, its
+  pad was filed under "every point" in the pad index, and heightAt was NaN EVERYWHERE: no terrain was drawn, the player dropped
+  into the sea, and the cities already planned hung at their pad heights (11 m) — exactly the screenshots. The geometry report
+  said `off: 0` (NaN compares false).
+- **Class:** one bad number poisons the whole ground, silently. **Fix (at the entry):** `levelGround` / `setLand` / `addRoad`
+  refuse a non-finite value and say so (`finiteEdit`, AthreeMapGenerator); the open world reads each region's `toward`
+  (aliases such as `northeast`, `NE`, `North East` mapped; anything else left out and said) and `distance` (metres or left out)
+  before laying it (`cleanRegion`).
+- **Honesty (rule 5):** geometry() counts a non-finite sample as off and as `terrain.notNumber`; `geometryFindings` names it
+  first ("The map's ground is NOT A NUMBER…").
+- **Late edits (builds on #4466 — aedfd171, 896c8ba9, 3df5395d):** the open world now redraws late ground edits by default
+  (`lateEdits: false` opts out; a bare Athree map stays off — the rollout page's two follow-ups do not apply to the open world,
+  which keeps no stored heightfield and whose rivers/roads draw their own heights), re-stands `world.place()` objects on the
+  new ground, and counts edits from the FIRST DRAW, so an edit in a feature's `setup()` is reported when the redraw is off.
+- **Lock:** `tests/oneGroundNeverLayers.test.ts` (9) — every fix reverted on its own and watched fail (guard, cleanRegion,
+  notNumber, default redraw, prop re-stand, first-draw count).
+- **🟡 Q-3347 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
+  world.ts / features. Needs those files or one rebuild on the fixed kit (the console then names the refused value).

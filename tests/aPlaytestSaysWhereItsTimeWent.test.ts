@@ -56,3 +56,18 @@ describe.skipIf(!HAS_BROWSER)('🔴 out of time while starting a frozen game: th
     expect(playtestVerdict(run, replayFromCode({})).message).toMatch(/time spent: loading the game/);
   }, 120_000);
 });
+
+import { gameKitSeededMessage } from '../src/server/AgentV3/gameKitSeed';
+describe('🕒 the kit seed says where ITS time went too (BR2514: "94 files, 66.5 s" and nothing more)', () => {
+  it('each recipe with its seconds, slowest first', () => {
+    const m = gameKitSeededMessage([
+      { recipe: 'generate_game_runtime', ok: true, content: '', ms: 3_100 },
+      { recipe: 'generate_athree_map', ok: true, content: '', ms: 41_200 },
+      { recipe: 'generate_game_shell', ok: true, content: '', ms: 9_800 },
+    ], 94, 66_500);
+    expect(m).toContain('(94 files, 66.5 s). Time per recipe: generate_athree_map 41.2 s, generate_game_shell 9.8 s, generate_game_runtime 3.1 s.');
+  });
+  it('no timings measured ⇒ the line is as it was', () => {
+    expect(gameKitSeededMessage([{ recipe: 'generate_game_runtime', ok: true, content: '' }], 30, 5_000)).toBe('Laid down the game kit before the first model call: generate_game_runtime (30 files, 5 s). The builder was told the kit is on disk and to build only the game on it.');
+  });
+});

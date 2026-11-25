@@ -615,7 +615,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "19cd0e366abe7a4880882d7fc7bd321aaeb3723a106322568c615f8d5fab1a3b",
     "b57f24ac1570df3215649053178132943f0db566574bea645e2a0e8f5f6b772e",
     "5a0dd41283a625474b781af045630cc48dfbc5741af2f314490f4b15482c42ab",
-    "a687e1e6ffc7a08082cd1ff6a86461dde0fdef9c9c9f4501d0ed2de726900cce"
+    "a687e1e6ffc7a08082cd1ff6a86461dde0fdef9c9c9f4501d0ed2de726900cce",
+    "b2fa00c4e7db9c78014754291d132454b292a1588616fc91be9c31c62900f019"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"

@@ -168,6 +168,14 @@ describe('a punch and a bullet hit the body, death clears it away', () => {
     expect(behind.health.current).toBe(100);
     expect(far.health.current).toBe(100);
   });
+  it('a wall between the fist and the body stops the blow (the world test bullets use)', () => {
+    const h = host();
+    const npcs = new E.Entities(h);
+    const v = npcs.spawn({ x: 0, z: 1.2, kind: 'villager', patrolRadius: 0 });
+    expect(npcs.melee(new THREE.Vector3(0, 0, 0), 0, 30, { world: () => 0.5 })).toEqual([]);
+    expect(v.health.current).toBe(100);
+    expect(npcs.melee(new THREE.Vector3(0, 0, 0), 0, 30, { world: () => null })).toEqual([v]);
+  });
   it('bullets: targets() + applyHits() damage the body; a dead one is no longer a target, and is removed', () => {
     const h = host(); const died = on('ENTITY_DIED'); const removed = on('ENTITY_REMOVED');
     const npcs = new E.Entities(h, { corpseSeconds: 1 });

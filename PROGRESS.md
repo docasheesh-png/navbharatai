@@ -6056,6 +6056,34 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
+## 2026-11-25 — NavBharatAI's own Indian clothes (library batch 16); library pictures show characters standing
+
+The admin approved building the garments ourselves: "haan, Indian kapde banana shuru karo". The three downloaded Indian-clothing models (dhoti, kurta, saree) still have no verified licence, and **none of them is used**.
+
+- **What was added:** `scripts/library/buildIndianGarments.mts` makes the garments from geometry on the CC0 batch-7 villager bodies. There are 4 packaged models, live-admitted 4/4 and animated in a browser:
+  - `q16-man-kurta-pajama`: cream kurta, white pajama;
+  - `q16-man-pagdi`: white kurta-pajama with a saffron pagdi;
+  - `q16-man-dhoti`: khadi kurta, white dhoti, white pagdi;
+  - `q16-woman-saree`: maroon saree with a gold border and pallu, green blouse.
+  - Each is about 3.4 MB, with 19–22k triangles and all 16 clips.
+- **How the garments are made:**
+  - **Rings fitted to the body:** at each height (or along an arm), the body's cross-section is measured in 24 directions, smoothed, and given ease.
+  - **Tubes:** the rings become tubes for the torso, sleeves, legs, skirts and pagdi wraps.
+  - **Pallu:** a ribbon laid on the body's surface.
+  - **Weights:** taken from the nearest body vertices.
+  - **Hems:** a skirt, a kurta's skirt and a dhoti's wrap follow the pelvis plus the thigh on their own side, the usual game method for a skirt. Following only the nearest leg dragged the saree with each step. Averaging both legs let a thigh show through the hem in the standing pose.
+  - **Pagdi:** follows the head bone only.
+  - **Changeable by name:** each garment is its own node and material — Kurta, Pajama, Pagdi, Dhoti, Blouse, Saree, Pallu, Border.
+- **Found on the way:**
+  - **The villager had only its head's faces.** Only 1,683 of its 7,281 vertices were used. The base pack's full-body mesh has the same vertices in the same order, so its face list is written back. The fantasy outfit, including the knee-high boots that showed through, is detached; feet are bare.
+  - **Library pictures took the wrong pose.** They used the FIRST clip whose name contained "idle". In the animation library that is "Crouch_Idle_Loop", so every such character was pictured crouching. The 60+ kayquer people have their idle named "parado", so they were pictured in a T-pose. `thumbnailPoseClip` now prefers the entry's own idle role. 120 pictures were re-rendered and 77 changed.
+- **Matching:** Hindi and Hinglish aliases were added, as whole phrases ("dhoti wala aadmi", "पगड़ी वाला आदमी"), so the longest-name rule gives one person rather than "a dhoti man AND a man". The knowledge base has a new `game_indian_clothes` entry.
+- **Test:** `tests/indianGarmentsAreOurOwn.test.ts` checks the bytes, admission, garment nodes and materials, the restored body, skin weights, word matching, and the picture pose.
+- **Still open:**
+  - Saree in a full sprint: the forward leg comes through the front of the skirt. Walking and jogging are clean. Real cloth would need a physics simulation, which is not built.
+  - The kurta still shows a little of the base body's muscle shape.
+  - More colours and outfits (a woman's salwar-kameez, a lungi, a sherwani) can come from the same builder when asked.
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3353…Q-3356)
 ## 2026-11-25 — Game proof: a named feature is present only on evidence that ran; four proofs per game build (#4542, Q-3360…Q-3365)
 
 External Game Maker audit, adapted under the external-suggestion rule.
@@ -6204,3 +6232,7 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - Limit, stated on screen: a build whose server was lost before `finish()` is not counted (see Q-3354).
 - Q-3344 root: the revenue index was in firestore.indexes.json but Cloud Build deployed only `firestore:rules`;
   a `deploy-firestore-indexes` step now runs on every merge (optional, no --force).
+- **2026-11-25 update, CI on the merge with #4535:** `libraryBatch14.test.ts` held a 300 MiB snapshot of the library. With #4535's realistic humans, `main` alone was 298.4 MiB.
+  - **Smaller files:** the garment files now drop what nothing references (`pruneGlb`: the detached outfit, its materials and textures, the old head-only face list). Each model went from 3.45 to 2.4 MB, and the four look identical (the same changed-pixel proof at admission).
+  - **Size now:** the catalogue is 307.6 MiB, inside the admin's 320 MiB budget, which stays the only limit. The snapshot line was replaced by a note.
+  - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.

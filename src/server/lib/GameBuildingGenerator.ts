@@ -23,9 +23,11 @@ export interface EnterableHouseOptions {
   layout?: HouseLayout;
   /** Wall colour for a variant. Omit it and the house keeps the shared plaster. */
   wallColor?: number;
+  roofColor?: number;
+  sideDoor?: 'left' | 'right';
 }
-const doors = new WeakMap<THREE.Object3D, HouseDoor>();
-export function houseDoor(root: THREE.Object3D): HouseDoor | undefined { return doors.get(root); }
+const doors = new WeakMap<THREE.Object3D, HouseDoor[]>();
+export function houseDoor(root: THREE.Object3D): HouseDoor | undefined { return doors.get(root)?.[0]; }
 const bounded = (n: number | undefined, fallback: number, low: number, high: number) =>
   Number.isFinite(n) ? Math.max(low, Math.min(high, n!)) : fallback;
 
@@ -48,15 +50,25 @@ export function createEnterableHouse(options: EnterableHouseOptions = {}): THREE
     root.add(markWorldCollider(mesh, kind)); return mesh;
   };
   box(width, floorY, depth, 0, floorY / 2, 0, floor, 'ground');
-  box(thickness, height, depth, -width / 2 + thickness / 2, height / 2 + floorY, 0);
-  box(thickness, height, depth, width / 2 - thickness / 2, height / 2 + floorY, 0);
+  const sideDoor = options.sideDoor === 'left' || options.sideDoor === 'right' ? options.sideDoor : undefined;
+  // Put the side entrance toward the front, clear of the furniture and stairs.
+  const sideCentre = depth / 2 - 1;
+  const openingWall = (length: number, centre: number, place: (length: number, h: number, along: number, y: number) => void) => {
+    const start = centre - 0.75, end = centre + 0.75;
+    place(start + length / 2, height, (start - length / 2) / 2, floorY + height / 2);
+    place(length / 2 - end, height, (end + length / 2) / 2, floorY + height / 2);
+    place(1.5, height - 2.4, centre, floorY + (height + 2.4) / 2);
+  };
+  for (const [side, sign] of [['left', -1], ['right', 1]] as const) {
+    const x = sign * (width / 2 - thickness / 2);
+    if (sideDoor === side) openingWall(depth, sideCentre, (length, h, z, y) => box(thickness, h, length, x, y, z));
+    else box(thickness, height, depth, x, height / 2 + floorY, 0);
+  }
   box(width, height, thickness, 0, height / 2 + floorY, -depth / 2 + thickness / 2);
-  const sideWidth = (width - 1.5) / 2;
-  for (const sign of [-1, 1]) box(sideWidth, height, thickness,
-    sign * (0.75 + sideWidth / 2), height / 2 + floorY, depth / 2 - thickness / 2);
-  box(1.5, height - 2.4, thickness, 0, floorY + 2.4 + (height - 2.4) / 2, depth / 2 - thickness / 2);
+  openingWall(width, 0, (length, h, x, y) => box(length, h, thickness, x, y, depth / 2 - thickness / 2));
   const roof = box(width, thickness, depth, 0, floorY + height + thickness / 2, 0, floor, 'ground');
   roof.material = (Array.isArray(roof.material) ? roof.material[0] : roof.material).clone();
+  if (options.roofColor != null && roof.material instanceof THREE.MeshStandardMaterial) roof.material.color.setHex(options.roofColor);
   roof.userData.indoorRoof = true;
   root.userData.indoorRoof = roof;
   const layout: HouseLayout = options.layout ?? (['living', 'bedroom', 'kitchen', 'bathroom'] as const)[Math.abs(Math.round(width)) % 4];
@@ -78,59 +90,70 @@ export function createEnterableHouse(options: EnterableHouseOptions = {}): THREE
     if (frontDepth > 0) box(width / 2 - leftEdge, floorY, frontDepth, (leftEdge + width / 2) / 2, 3 + floorY / 2, front + frontDepth / 2, floor, 'ground');
     box(0.08, 0.9, run, leftEdge - 0.04, 3.6, (front + back) / 2);
   }
-  const hinge = new THREE.Group();
-  hinge.position.set(-0.73, floorY, depth / 2 + 0.01);
-  const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.46, 2.37, 0.08), wood);
-  leaf.position.set(0.73, 1.185, 0); leaf.castShadow = true;
-  hinge.add(markWorldCollider(leaf)); root.add(hinge);
-  // 🚪 THE DOOR OPENS AWAY FROM WHOEVER OPENS IT (master audit 2026-11-25, Part K). It always swung OUT (−π/2), into the
-  // player standing at it who had just pressed Use: the "never swing through a body" guard then stopped it half open
-  // (measured: −0.54 rad) and the half-open leaf blocked the doorway — the house could not be entered. +1 swings in.
-  let targetOpen = false, blocked = false, swing = 1;
-  const awayFrom = (from: THREE.Vector3 | undefined) => {
-    if (!from || ![from.x, from.y, from.z].every(Number.isFinite)) return;
-    root.updateWorldMatrix(true, false);
-    const local = root.worldToLocal(from.clone());
-    swing = local.z > depth / 2 ? 1 : -1; // outside the front wall ⇒ swing in; inside ⇒ swing out
-  };
-  const occupied = (occupants: readonly DoorOccupant[]) => {
-    const bounds = new THREE.Box3().setFromObject(leaf);
-    return occupants.some(actor => {
-      if (!Number.isFinite(actor.radius) || !Number.isFinite(actor.height) || actor.radius < 0 || actor.height <= 0) return true;
-      const p = actor.feet;
-      if (![p.x, p.y, p.z].every(Number.isFinite)) return true;
-      return bounds.intersectsBox(new THREE.Box3(
-        new THREE.Vector3(p.x - actor.radius, p.y, p.z - actor.radius),
-        new THREE.Vector3(p.x + actor.radius, p.y + actor.height, p.z + actor.radius)));
-    });
-  };
-  const door: HouseDoor = {
-    hinge, leaf,
-    get isOpen() { return Math.abs(Math.abs(hinge.rotation.y) - Math.PI / 2) < 1e-8; },
-    get targetOpen() { return targetOpen; }, get blocked() { return blocked; },
-    // The swing is chosen only while the door is shut — a moving door never reverses through the doorway.
-    setOpen(open, from) { if (open && !targetOpen && Math.abs(hinge.rotation.y) < 1e-6) awayFrom(from); targetOpen = open; },
-    toggle(from) { door.setOpen(!targetOpen, from); },
-    update(dt, occupants = []) {
-      if (!Number.isFinite(dt) || dt <= 0) return;
-      const target = targetOpen ? swing * Math.PI / 2 : 0;
-      const difference = target - hinge.rotation.y;
-      blocked = false;
-      if (difference === 0) return;
-      const advance = Math.sign(difference) * Math.min(Math.abs(difference), 2.5 * Math.min(dt, 0.1));
-      const steps = Math.max(1, Math.ceil(Math.abs(advance) / 0.01));
-      for (let i = 0; i < steps; i++) {
-        const previous = hinge.rotation.y;
-        hinge.rotation.y += advance / steps; root.updateWorldMatrix(true, true);
-        if (occupied(occupants)) {
-          hinge.rotation.y = previous; root.updateWorldMatrix(true, true); blocked = true; return;
+  function createDoor(x: number, z: number, yaw: number): HouseDoor {
+    const frame = new THREE.Group();
+    frame.position.set(x, floorY, z);
+    frame.rotation.y = yaw;
+    root.add(frame);
+    const hinge = new THREE.Group();
+    hinge.position.set(-0.73, 0, 0);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.46, 2.37, 0.08), wood);
+    leaf.position.set(0.73, 1.185, 0); leaf.castShadow = true;
+    hinge.add(markWorldCollider(leaf)); frame.add(hinge);
+    // 🚪 THE DOOR OPENS AWAY FROM WHOEVER OPENS IT (master audit 2026-11-25, Part K). It always swung OUT (−π/2), into the
+    // player standing at it who had just pressed Use: the "never swing through a body" guard then stopped it half open
+    // (measured: −0.54 rad) and the half-open leaf blocked the doorway — the house could not be entered. +1 swings in.
+    let targetOpen = false, blocked = false, swing = 1;
+    const awayFrom = (from: THREE.Vector3 | undefined) => {
+      if (!from || ![from.x, from.y, from.z].every(Number.isFinite)) return;
+      frame.updateWorldMatrix(true, false);
+      swing = frame.worldToLocal(from.clone()).z > -0.01 ? 1 : -1;
+    };
+    const occupied = (occupants: readonly DoorOccupant[]) => {
+      const bounds = new THREE.Box3().setFromObject(leaf);
+      return occupants.some(actor => {
+        if (!Number.isFinite(actor.radius) || !Number.isFinite(actor.height) || actor.radius < 0 || actor.height <= 0) return true;
+        const p = actor.feet;
+        if (![p.x, p.y, p.z].every(Number.isFinite)) return true;
+        return bounds.intersectsBox(new THREE.Box3(
+          new THREE.Vector3(p.x - actor.radius, p.y, p.z - actor.radius),
+          new THREE.Vector3(p.x + actor.radius, p.y + actor.height, p.z + actor.radius)));
+      });
+    };
+    const door: HouseDoor = {
+      hinge, leaf,
+      get isOpen() { return Math.abs(Math.abs(hinge.rotation.y) - Math.PI / 2) < 1e-8; },
+      get targetOpen() { return targetOpen; }, get blocked() { return blocked; },
+      // The swing is chosen only while the door is shut — a moving door never reverses through the doorway.
+      setOpen(open, from) { if (open && !targetOpen && Math.abs(hinge.rotation.y) < 1e-6) awayFrom(from); targetOpen = open; },
+      toggle(from) { door.setOpen(!targetOpen, from); },
+      update(dt, occupants = []) {
+        if (!Number.isFinite(dt) || dt <= 0) return;
+        const target = targetOpen ? swing * Math.PI / 2 : 0;
+        const difference = target - hinge.rotation.y;
+        blocked = false;
+        if (difference === 0) return;
+        const advance = Math.sign(difference) * Math.min(Math.abs(difference), 2.5 * Math.min(dt, 0.1));
+        const steps = Math.max(1, Math.ceil(Math.abs(advance) / 0.01));
+        for (let i = 0; i < steps; i++) {
+          const previous = hinge.rotation.y;
+          hinge.rotation.y += advance / steps; root.updateWorldMatrix(true, true);
+          if (occupied(occupants)) {
+            hinge.rotation.y = previous; root.updateWorldMatrix(true, true); blocked = true; return;
+          }
         }
-      }
-      if (Math.abs(target - hinge.rotation.y) < 1e-8) hinge.rotation.y = target;
-      root.updateWorldMatrix(true, true);
-    },
-  };
-  doors.set(root, door);
+        if (Math.abs(target - hinge.rotation.y) < 1e-8) hinge.rotation.y = target;
+        root.updateWorldMatrix(true, true);
+      },
+    };
+    return door;
+  }
+  const entrances = [createDoor(0, depth / 2 + 0.01, 0)];
+  if (sideDoor) {
+    const sign = sideDoor === 'left' ? -1 : 1;
+    entrances.push(createDoor(sign * (width / 2 + 0.01), sideCentre, sign * Math.PI / 2));
+  }
+  doors.set(root, entrances);
   root.userData.enterableHouse = { version: 1, width, depth, storeys, layout, entrance: [0, floorY, depth / 2] };
   return root;
 }
@@ -163,7 +186,7 @@ function furnishHouse(root: THREE.Group, width: number, depth: number, floorY: n
 
 /** Occupants are world-space bodies. Supply NPC/remote bodies as well as the player. */
 export function updateHouseDoors(scene: THREE.Object3D, dt: number, occupants: readonly DoorOccupant[] = []): void {
-  scene.traverse(root => doors.get(root)?.update(dt, occupants));
+  scene.traverse(root => doors.get(root)?.forEach(door => door.update(dt, occupants)));
 }
 export function interactHouseDoor(scene: THREE.Object3D, actor: DoorOccupant, range = 2.2): boolean {
   if (!Number.isFinite(range) || range <= 0) return false;
@@ -172,14 +195,15 @@ export function interactHouseDoor(scene: THREE.Object3D, actor: DoorOccupant, ra
   const candidates: { door: HouseDoor; distance: number }[] = [];
   const blockers = worldColliders(scene);
   scene.traverse(root => {
-    const door = doors.get(root); if (!door) return;
-    const target = door.leaf.getWorldPosition(new THREE.Vector3());
-    const direction = target.clone().sub(eye), distance = direction.length();
-    if (distance > range || distance === 0) return;
-    const ray = new THREE.Raycaster(eye, direction.normalize(), 0, distance);
-    const hit = ray.intersectObjects(blockers, false)[0];
-    if (hit && hit.object !== door.leaf && hit.distance < distance - 0.05) return;
-    candidates.push({ door, distance });
+    for (const door of doors.get(root) ?? []) {
+      const target = door.leaf.getWorldPosition(new THREE.Vector3());
+      const direction = target.clone().sub(eye), distance = direction.length();
+      if (distance > range || distance === 0) continue;
+      const ray = new THREE.Raycaster(eye, direction.normalize(), 0, distance);
+      const hit = ray.intersectObjects(blockers, false)[0];
+      if (hit && hit.object !== door.leaf && hit.distance < distance - 0.05) continue;
+      candidates.push({ door, distance });
+    }
   });
   candidates.sort((a, b) => a.distance - b.distance);
   if (!candidates.length) return false;

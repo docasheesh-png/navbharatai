@@ -19649,7 +19649,7 @@ async function noteBuildOutcome(
                   // Source/provider failures leave the successful L1/L2 kit intact.
                   const assetsStartedAt = Date.now();
                   try {
-                    const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid });
+                    const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid, starterPlayerSource: writtenBeforeKit.has('src/game/player.ts') ? undefined : writtenFiles.get('src/game/player.ts') });
                     kitAssetsMs = Date.now() - assetsStartedAt;
                     kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);

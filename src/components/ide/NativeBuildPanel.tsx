@@ -341,7 +341,8 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
         )}
 
         {/* ── Start ── */}
-        {!active && build?.state !== 'completed' && (
+        {/* The start button only when no build is on screen — a finished one carries its own Build again / Try again. */}
+        {!build && (
           <>
             <button
               onClick={() => void start()}
@@ -349,12 +350,13 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
               className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-accent text-on-accent disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {starting ? <Loader2 size={17} className="animate-spin" /> : <Cloud size={17} />}
-              {starting ? 'Preparing your app…' : build && FINISHED.has(build.state) ? 'Build again' : `Build my ${label}`}
+              {starting ? 'Preparing your app…' : `Build my ${label}`}
             </button>
             {chargeHint(priceInr) && <p className="text-[11px] text-muted text-center">{chargeHint(priceInr)} A build that fails costs nothing.</p>}
-            {starting && <p className="text-xs text-muted text-center">Checking and preparing your app before the build machine starts. This can take a few minutes.</p>}
           </>
         )}
+
+        {starting && <p className="text-xs text-muted text-center flex items-center justify-center gap-2"><Loader2 size={13} className="animate-spin" /> Checking and preparing your app before the build machine starts. This can take a few minutes.</p>}
 
         {/* ── Running ── */}
         {build && active && (
@@ -384,7 +386,7 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
         {build && build.state === 'completed' && build.artifact && (
           <div className="px-3 py-3 rounded-lg border border-line bg-raised space-y-2 text-xs text-body">
             <p className="font-bold text-success flex items-center gap-1.5"><CheckCircle2 size={14} /> Your {build.kind === 'apk' ? '.apk' : '.aab'} is ready</p>
-            <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-[11px]">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
               <dt className="text-muted">File</dt><dd className="break-all">{build.artifact.fileName} · {fmtSize(build.artifact.sizeBytes)}</dd>
               <dt className="text-muted">Package</dt><dd className="break-all">{build.artifact.inspection.applicationId}</dd>
               <dt className="text-muted">Version</dt><dd>{build.artifact.inspection.versionName ?? '—'} (code {build.artifact.inspection.versionCode ?? '—'})</dd>

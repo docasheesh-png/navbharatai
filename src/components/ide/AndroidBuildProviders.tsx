@@ -67,6 +67,16 @@ export const AndroidBuildProviders: React.FC<StoreBuildPanelProps> = (props) => 
 
   useEffect(() => { if (sheetOpen && !caps) void loadCaps(); }, [sheetOpen, caps, loadCaps]);
 
+  // A remembered (or default) choice that cannot run right now is not left selected behind a dead Continue
+  // button: the selection moves to a provider that CAN run. Only the pre-selection moves — the user still confirms.
+  useEffect(() => {
+    if (!caps) return;
+    const current = caps.providers.find((p) => p.id === pick);
+    if (current?.available) return;
+    const usable = caps.providers.find((p) => p.available);
+    if (usable) setPick(usable.id);
+  }, [caps, pick]);
+
   const info = (id: ProviderId) => caps?.providers.find((p) => p.id === id) ?? null;
   const pickInfo = info(pick);
   const canContinue = !!pickInfo && pickInfo.available && (pick === 'github_actions' || pickInfo.artifacts.includes(kind));

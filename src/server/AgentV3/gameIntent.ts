@@ -18,6 +18,7 @@ import { withoutNonObjectSenses } from '../lib/heroObjectSpec';
 import { largeWorldIntent } from './largeWorldIntent';
 import { findGameTitles, mentionsBattleRoyale, ROYALE_GENRE_PHRASE, unrecognisedGameReference, type GameTitleKind } from '../lib/wellKnownGameTitles';
 import { withoutComments } from '../lib/codeOnly';
+import { reachableGameFiles } from './gameCodeReach';
 import { gameCombatFrom, gameCombatLines, gameRulesFrom, gameRulesBlock, type GameCombatData, type GameRule } from './gameRules';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
@@ -410,7 +411,11 @@ export function gameContractBlock(c: GameScopeContract): string {
   return lines.filter(Boolean).join('\n');
 }
 
-/** What the built code shows for each feature. Conservative: a feature counts as present on a code signal. */
+/**
+ * What the built code NAMES for each feature — the code SIGNAL. It decides "missing" (no sign at all) and nothing more:
+ * since the external Game Maker audit (2026-11-25) a signal alone is "not verified", never "present" (see KIT_CALL and
+ * scopeMatch; a played action is the other proof, gamePlaytest.ts `gameFeatureEvidence`).
+ */
 const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   // Plurals count: `levels`, `enemies`, `coins` are the same feature (the code is also read with camelCase split,
   // so `currentLevel` and `nextLevel()` reach `level` — see scopeMatch).
@@ -430,8 +435,8 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   braking: /\b(brak\w*|decelerat\w*|driveVehicle)\b/i,
   crashDamage: /\b(enableVehicleDents|dentVehicle)\b/,
   // Only the REAL system counts (systems/dispatch.ts): a line of text saying "police arrived" is not police (audit Part I).
-  // Part J: each counts only when the game calls the kit system that really does it (in a game that has the kit — a
-  // hand-written 2D game has no kit APIs, so for it the plain word still decides: see KIT_ONLY / scopeMatch).
+  // Part J: in a game that has the kit, a word is not even a signal — only the kit system's name is (a hand-written game has
+  // no kit APIs, so for it the plain word is the signal: WORD_WITHOUT_KIT — and a signal is only ever "not verified").
   swimming: /\b(setWater|addWater|stepSwim|createRiverWater)\b/,
   enterableHouses: /\b(createEnterableHouse|enterableShellFor)\b/,
   destructible: /\b(makeBreakable|hitBreakables|damageBreakable|breakNow)\b/,
@@ -444,7 +449,9 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
 const KIT_MARKER = /(^|\/)src\/game\/three\/surfaces\.ts$/;
 /**
  * Without the kit (a 2D game, a hand-written one) there is no kit API to call, so reporting these "missing" would be the
- * checker lying. There the old word-level signal decides, as it always did.
+ * checker lying. There the word is the SIGNAL — and since the external Game Maker audit (2026-11-25) a word only ever makes
+ * a feature "not verified", never present: "traffic", "swimming" or "door" in the source is not traffic, swimming or a
+ * house the player can enter. Only a played action whose state change was observed proves it (gameFeatureEvidence).
  */
 const WORD_WITHOUT_KIT: Partial<Record<GameFeature, RegExp>> = {
   swimming: /\b(swim\w*|water)\b/i,
@@ -463,27 +470,76 @@ export function codeMentionsFeature(feature: GameFeature, files: Record<string, 
 }
 
 export interface ScopeMatch {
+  /**
+   * Proven by EXECUTABLE evidence only (external Game Maker audit, 2026-11-25): the kit system that does it is CALLED in a
+   * file the running game reaches from its entry. A word in the source is never this. A played action whose state change
+   * was observed also proves a feature — that half is the playtest's (`gameFeatureEvidence`, gamePlaytest.ts).
+   */
   present: GameFeature[];
+  /** No sign of it in the game's code at all. Unchanged by the audit: the done signal and the repair read this. */
   missing: GameFeature[];
+  /**
+   * 🔴 The code NAMES it (a word, a variable, an uncalled import, a kit call in a file nothing loads) and nothing proves it
+   * runs. Before the audit these were counted present: a hand-written game that said "traffic" or "swim" passed. Reported
+   * as "not verified", never as present, and never as missing either (a name is not proof it is absent). Absent when none.
+   */
+  notVerified?: GameFeature[];
+  /** For each present feature, the evidence that proved it (`kit call createCityTraffic( in src/game/World.ts`). */
+  evidence?: Partial<Record<GameFeature, string>>;
   /** Code tokens cannot prove movement, separate balances, affordable unlocks or character count. */
   unverified?: string[];
 }
 
+/**
+ * The kit calls that DO a feature — call syntax, so an import list or a type never counts. Only in a project that has the
+ * kit (KIT_MARKER) and only in a file the game reaches (gameCodeReach.ts). A hand-written game has no kit to call, so no
+ * feature of it is proven by its source; the playtest's played actions are its only proof.
+ */
+const KIT_CALL: Partial<Record<GameFeature, RegExp>> = {
+  throttle: /\bdriveVehicle\s*\(/,
+  braking: /\bdriveVehicle\s*\(/,
+  crashDamage: /\b(enableVehicleDents|dentVehicle)\s*\(/,
+  swimming: /\b(setWater|addWater|stepSwim|createRiverWater)\s*\(/,
+  enterableHouses: /\b(createEnterableHouse|enterableShellFor)\s*\(/,
+  destructible: /\b(makeBreakable|hitBreakables|damageBreakable|breakNow)\s*\(/,
+  traffic: /\b(createCityTraffic|createTraffic)\s*\(/,
+  npcs: /\bnew\s+Entities\s*\(|\b(createCityPeople|createHumanoid)\s*\(/,
+  police: /\bnew\s+(Wanted|Dispatch)\s*\(|\.call\(\s*['"](police|ambulance|fire|security|military)['"]/,
+};
+
+/** A file of the game itself: code, not a package, not the kit's own engine files. PURE. */
+function isOwnGameCode(path: string, v: unknown): v is string {
+  return typeof v === 'string' && /\.(t|j)sx?$/.test(path) && !/(^|\/)node_modules\//.test(path)
+    && !/(^|\/)src\/(game\/(core|fx|three)|audio)\//.test(path);
+}
+
 /** Compare the contract with the game's own files (kit engine files excluded — they are not the game). PURE. */
 export function scopeMatch(c: GameScopeContract, files: Record<string, string>): ScopeMatch {
-  const written = Object.entries(files || {})
-    .filter(([p, v]) => typeof v === 'string' && /\.(t|j)sx?$/.test(p) && !/(^|\/)node_modules\//.test(p) && !/(^|\/)src\/(game\/(core|fx|three)|audio)\//.test(p))
-    // A comment is not a feature (`// TODO: levels` used to satisfy "levels"); see codeOnly.ts.
-    .map(([, v]) => withoutComments(v)).join('\n');
+  // A comment is not a feature (`// TODO: levels` used to satisfy "levels"); see codeOnly.ts.
+  const own: Array<[string, string]> = [];
+  for (const [p, v] of Object.entries(files || {})) if (isOwnGameCode(p, v)) own.push([p, withoutComments(v)]);
+  const written = own.map(([, v]) => v).join('\n');
   // Read twice: as written (`playTone`, `driveVehicle`), and with camelCase split, so `currentLevel`, `spawnEnemy`
   // and `addScore` reach their word. A real feature named the way code is written used to be reported missing.
   const code = `${written}\n${written.replace(/([a-z0-9])([A-Z])/g, '$1 $2')}`;
   const present: GameFeature[] = [];
   const missing: GameFeature[] = [];
+  const notVerified: GameFeature[] = [];
+  const evidence: Partial<Record<GameFeature, string>> = {};
   const hasKit = Object.keys(files || {}).some((p) => KIT_MARKER.test(p));
+  // null: no entry found, so what runs is not known — then no kit call is proven by reach (said as not verified).
+  const reach = hasKit ? reachableGameFiles(files || {}) : null;
   for (const f of c.requiredFeatures) {
+    // The code SIGNAL decides missing exactly as it always did (the done signal, the repair and the gate read it).
     const test = !hasKit && WORD_WITHOUT_KIT[f] ? WORD_WITHOUT_KIT[f]! : PRESENT[f];
-    (test.test(code) ? present : missing).push(f);
+    if (!test.test(code)) { missing.push(f); continue; }
+    // Present only on executable evidence: the kit call, in a file the running game reaches.
+    const call = reach ? KIT_CALL[f] : undefined;
+    const site = call ? own.find(([p, v]) => reach!.has(p) && call.test(v)) : undefined;
+    if (call && site) {
+      present.push(f);
+      evidence[f] = `kit call ${(call.exec(site[1])?.[0] ?? '').replace(/\s+/g, ' ').trim()} in ${site[0]}`;
+    } else notVerified.push(f);
   }
   const unverified = [
     ...(c.runnerMechanics ?? []),
@@ -492,5 +548,5 @@ export function scopeMatch(c: GameScopeContract, files: Record<string, string>):
     // A rule is a fact about PLAY, which no code scan can prove (plan item: runtime rule assertions).
     ...(c.rules ?? []).map((r) => `rule: ${r.said}`),
   ];
-  return { present, missing, ...(unverified.length ? { unverified } : {}) };
+  return { present, missing, ...(notVerified.length ? { notVerified } : {}), ...(present.length ? { evidence } : {}), ...(unverified.length ? { unverified } : {}) };
 }

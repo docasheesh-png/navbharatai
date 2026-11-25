@@ -24876,6 +24876,7 @@ async function noteBuildOutcome(
         if (played) {
           gameProof = played.proof;
           gateEvidence.game = played.gate; // the release gate reads the same answer (autopsy 61279465)
+          if (played.featuresUnverified) gateEvidence.gameFeaturesUnverified = played.featuresUnverified; // named, never proven (gameProof.ts)
           if (played.played) gamePlayedRef.cur = played.played;
         }
       };

@@ -404,13 +404,18 @@ export class Game {
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
     this.playerChoice = resolvePlayerChoice(options.player);
-    const customBody = options.playerBody && typeof options.playerBody === 'object' ? options.playerBody : null;
-    const kitBody = !customBody && options.playerBody !== false && !firstPerson;
     const look = { height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) };
+    // The kit's own body sizes the walking capsule from its proportions; a game's own body keeps the default capsule.
+    const kitBody = !(options.playerBody && typeof options.playerBody === 'object') && options.playerBody !== false && !firstPerson;
     this.player = new CharacterController(kitBody ? humanoidCollider(look) : undefined);
     this.scene.add(this.player.object);
-    if (customBody) this.player.object.add(customBody);
-    else if (kitBody) {
+    // 🔴 THE PLAYER HAS A BODY. The controller is an empty Object3D, and nothing gave it one — so in every
+    // third-person game the hero was invisible unless the model happened to add a mesh, and the player
+    // saw a camera drifting over the ground. (Found by PLAYING the shell: gamePlaytest.ts.)
+    // true means "the default body", the same as leaving it out (failedbr #1334: a boolean was passed and failed to compile).
+    if (options.playerBody && typeof options.playerBody === 'object') {
+      this.player.object.add(options.playerBody);
+    } else if (options.playerBody !== false && !firstPerson) {
       this.hero = createHumanoid(look);
       this.player.object.add(this.hero.root);
     }

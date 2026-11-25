@@ -6056,7 +6056,7 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
-## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3353…Q-3356)
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3357…Q-3360)
 
 Admin 2026-11-22, on their GTA-style game: *"mujhe lag raha hai, maps me sabhi city/village ko ek plane me na bana kar vertical
 layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea under a flat slab with lamps, people and cars on it.
@@ -6080,7 +6080,7 @@ layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea 
   new ground, and counts edits from the FIRST DRAW, so an edit in a feature's `setup()` is reported when the redraw is off.
 - **Lock:** `tests/oneGroundNeverLayers.test.ts` (9) — every fix reverted on its own and watched fail (guard, cleanRegion,
   notNumber, default redraw, prop re-stand, first-draw count).
-- **🟡 Q-3356 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
+- **🟡 Q-3360 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
   world.ts / features. Needs those files or one rebuild on the fixed kit (the console then names the refused value).
 ## 2026-11-25 — Autopsy of BR2514–BR2519 (last six builds; all "succeeded", none played)
 

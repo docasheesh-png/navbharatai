@@ -1,6 +1,7 @@
 // ATHREE MAP phase 1 — these tests RUN the emitted code (tests/helpers/loadAthree.ts), so every claim is a measurement:
 // determinism, an exactly seamless loop, chunk-border continuity, collider-vs-render agreement, spawn safety, the shared wind, the
 // triangle budget per tier, and the streaming/floating-origin behaviour with the real three.js.
+import { gameWorldFileSource } from '../GameOpenWorldGenerator';
 import { describe, it, expect, vi } from 'vitest';
 import ts from 'typescript';
 import { readFileSync } from 'node:fs';
@@ -64,6 +65,18 @@ describe('determinism', () => {
       if (Math.abs(a.heightAt(x, z) - c.heightAt(x, z)) > 1) differs++;
     }
     expect(differs).toBeGreaterThan(200);
+  });
+  it('starts six fresh open-world projects at distinct dry locations', () => {
+    const spawns = Array.from({length: 6}, (_, i) => {
+      const source = gameWorldFileSource({workspaceId: 'project-' + i});
+      const seed = Number(source.match(/seed: (\d+)/)?.[1]);
+      const world = A.createAthreeWorld({seed, profile: 'open-world'});
+      const [spawn] = world.spawnPoints('player', 1);
+      expect(spawn.y).toBeCloseTo(world.heightAt(spawn.x, spawn.z));
+      expect(world.waterAt(spawn.x, spawn.z)).toBeFalsy();
+      return [spawn.x, spawn.z].join(',');
+    });
+    expect(new Set(spawns).size).toBe(6);
   });
   it('spawn points and wind are deterministic too', () => {
     const a = A.createAthreeWorld({ seed: 4 });

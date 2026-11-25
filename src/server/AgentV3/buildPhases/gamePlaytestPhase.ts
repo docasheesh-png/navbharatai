@@ -17,6 +17,7 @@ import {
 import { scopeMatch, type GameScopeContract } from '../gameIntent';
 import { gameGotWorse, gameMeasureFromIssues, gameUndoMessage, versionBeforeTurn } from '../gameRegression';
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage } from '../gameGeometryProbe';
+import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage } from '../gamePlaceholderProbe';
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from './gameFixVerdict';
 import { reportRuleProbes } from './gameRuleProbes';
 import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
@@ -60,6 +61,8 @@ export interface GamePlaytestPorts {
   /** Runs the playtest script in the sandbox (the route wraps the timeout); its stdout is parsed. */
   play: () => Promise<{ stdout: string }>;
   readFile: (path: string) => Promise<string | null | undefined>;
+  /** Every file in the workspace (binary models included), for the placeholder look's missing-model check. Optional. */
+  listFiles?: () => Promise<string[]>;
   record: (issue: PlaytestIssue) => void;
   /** The issues of the report from before this turn (for "did this turn make the game worse?"). */
   previousIssues: () => Promise<Parameters<typeof gameMeasureFromIssues>[0]>;
@@ -67,6 +70,14 @@ export interface GamePlaytestPorts {
   versions: () => Promise<Parameters<typeof versionBeforeTurn>[0]>;
   turnStartedAt: number;
   fix: GameFixPorts;
+}
+
+/** The workspace's file list, or [] when it fails or takes longer than `ms` (the timer is always cleared). */
+async function listWithin(list: () => Promise<string[]>, ms: number): Promise<string[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([list(), new Promise<string[]>((r) => { timer = setTimeout(() => r([]), ms); })]);
+  } catch { return []; } finally { if (timer) clearTimeout(timer); }
 }
 
 function playable(f: PlaytestFacts): boolean {
@@ -106,6 +117,17 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
       if (gameGeometryProbeEnabled()) {
         const geometryMsg = geometryFindingsMessage(geometryFindings(playRun.geometry, playRun.models, playRun.heap));
         if (geometryMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_GEOMETRY_CODE, message: geometryMsg, autoResolved: true });
+      }
+      // 🧸 The placeholder look (gamePlaceholderProbe.ts): a stand-in where the real thing should be — a model that is not
+      // there, a texture that failed, a frozen character, a player under water, a blank map, controls nobody can see. One
+      // info line for the admin; the next game turn hands it to the builder to repair, and that turn's playtest looks again.
+      if (gamePlaceholderProbeEnabled()) {
+        // Bounded: a slow listing must never hold the build — after 5 s the file check says nothing.
+        const present = p.listFiles ? await listWithin(p.listFiles, 5000) : [];
+        const fromFiles = missingModelFindings(playedFiles, present);
+        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff);
+        const placeholderMsg = placeholderFindingsMessage(combinePlaceholderFindings(fromFiles, fromPage));
+        if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }
       // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
       const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');

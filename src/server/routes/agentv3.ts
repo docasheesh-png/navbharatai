@@ -747,6 +747,7 @@ import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, 
 import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { gameGeometryProbeEnabled, geometryRepairNote } from '../AgentV3/gameGeometryProbe';
+import { gamePlaceholderProbeEnabled, placeholderRepairNote } from '../AgentV3/gamePlaceholderProbe';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, removeWorkspaceFilesResult, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
@@ -19648,7 +19649,7 @@ async function noteBuildOutcome(
                   // Source/provider failures leave the successful L1/L2 kit intact.
                   const assetsStartedAt = Date.now();
                   try {
-                    const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid });
+                    const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid, starterPlayerSource: writtenBeforeKit.has('src/game/player.ts') ? undefined : writtenFiles.get('src/game/player.ts') });
                     kitAssetsMs = Date.now() - assetsStartedAt;
                     kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
@@ -19750,6 +19751,11 @@ async function noteBuildOutcome(
           // Bounded (re-review 2026-11-23): a slow or hung report read must never hold the turn's start — after 1.5 s no note.
           const geometryNote = geometryRepairNote((await raceTimeout(previousReportAtStart, 1500, 'geometryNote').catch(() => null))?.issues);
           if (geometryNote) buildPrompt = `${geometryNote}\n\n---\n\n${buildPrompt}`;
+        }
+        // The last playtest's placeholder look, for the builder only (gamePlaceholderProbe.ts) — repaired this turn, played again after it.
+        if (gameHandoff.block && gamePlaceholderProbeEnabled()) {
+          const placeholderNote = placeholderRepairNote((await raceTimeout(previousReportAtStart, 1500, 'placeholderNote').catch(() => null))?.issues);
+          if (placeholderNote) buildPrompt = `${placeholderNote}\n\n---\n\n${buildPrompt}`;
         }
         if (gameContract) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true,
           message: `Game scope contract: ${JSON.stringify(gameContract)}` });
@@ -24881,6 +24887,7 @@ async function noteBuildOutcome(
           contract: gameContract ?? null,
           play: () => withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(lastPreviewUrl!, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest'),
           readFile: (p) => actuator.readFile(workspaceId, p),
+          listFiles: () => actuator.listFiles(workspaceId),
           record: (issue) => buildDiag.record(issue),
           previousIssues: async () => (await previousReportAtStart)?.issues,
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),

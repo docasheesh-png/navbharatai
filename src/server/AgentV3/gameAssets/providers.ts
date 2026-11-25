@@ -1,3 +1,4 @@
+import { REALISTIC_HUMANS } from './realisticHumans';
 import type { ObjectCategory } from '../../lib/objectCatalogTypes';
 import { ASSET_LIMITS, candidateMatches, type AssetCandidate, type AssetRequirement } from './assetPolicy';
 import type { AssetProvider } from './assetEngine';
@@ -55,7 +56,7 @@ export interface ReviewedAsset extends AssetCandidate {
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8, ...REVIEWED_LIBRARY_BATCH_9, ...REVIEWED_LIBRARY_BATCH_10, ...REVIEWED_LIBRARY_BATCH_11, ...REVIEWED_LIBRARY_BATCH_12, ...REVIEWED_LIBRARY_BATCH_13, ...REVIEWED_LIBRARY_BATCH_14, ...REVIEWED_LIBRARY_BATCH_15];
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8, ...REVIEWED_LIBRARY_BATCH_9, ...REVIEWED_LIBRARY_BATCH_10, ...REVIEWED_LIBRARY_BATCH_11, ...REVIEWED_LIBRARY_BATCH_12, ...REVIEWED_LIBRARY_BATCH_13, ...REVIEWED_LIBRARY_BATCH_14, ...REVIEWED_LIBRARY_BATCH_15, ...REALISTIC_HUMANS];
 
 /**
  * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // 🧍 THE PLAYER'S BODY, FOR EVERY GAME ON THE KIT (admin 2026-11-22: "Use as my character" — the user's own model, or one
 // from the game library — must work in ALL games, not only the open world).
 //
@@ -31,7 +33,7 @@ import type { GameContext } from '../Game';
 import type { HumanoidOptions } from '../three/humanoid';
 import { events } from '../core/events';
 
-export type PlayerMove = 'idle' | 'walk' | 'run' | 'jump' | 'land' | 'punch' | 'kick' | 'block' | 'hit' | 'die' | 'fire' | 'swing' | 'throw' | 'use' | 'slide';
+export type PlayerMove = 'idle' | 'walk' | 'run' | 'jump' | 'land' | 'swim' | 'dive' | 'punch' | 'kick' | 'block' | 'hit' | 'die' | 'fire' | 'swing' | 'throw' | 'use' | 'slide';
 
 export interface PlayerChoice {
   /** The kit person's look: { height, build, skin, hair, shirt, trousers, shoes } (colours as 0xRRGGBB). */
@@ -102,8 +104,17 @@ export function playerFileUrl(file: string | null | undefined): string | null {
   return (base.endsWith('/') ? base : base + '/') + path;
 }
 
+/** Keep the visible kit person and the collision capsule on the same scale. */
+export function humanoidCollider(look: HumanoidOptions = {}): { height: number; radius: number } {
+  const height = look.height != null && Number.isFinite(look.height) && look.height > 0 ? look.height : 1.75;
+  const build = look.build != null && Number.isFinite(look.build) && look.build > 0 ? look.build : 1;
+  const scale = height / 1.75;
+  return { height: 1.8 * scale, radius: 0.4 * scale * Math.min(build, 2) };
+}
+
 /** Which clip a moving body plays. */
-export function locomotionRole(speed: number, grounded: boolean): 'idle' | 'walk' | 'run' | 'jump' {
+export function locomotionRole(speed: number, grounded: boolean, swimming = false, underwater = false): 'idle' | 'walk' | 'run' | 'jump' | 'swim' | 'dive' {
+  if (swimming) return underwater ? 'dive' : 'swim';
   if (!grounded) return 'jump';
   return speed > 4.2 ? 'run' : speed > 0.25 ? 'walk' : 'idle';
 }
@@ -111,7 +122,7 @@ export function locomotionRole(speed: number, grounded: boolean): 'idle' | 'walk
 // The words a clip name carries for each move — the SAME table the server reads (src/server/lib/playerMoves.ts).
 const MOVE_WORDS: Record<PlayerMove, readonly string[]> = ` + JSON.stringify(PLAYER_MOVE_WORDS) + String.raw`;
 /** A real clip of the same model that may stand in for a missing one (said on screen); every other move has none. */
-const STAND_IN: Partial<Record<PlayerMove, PlayerMove>> = { run: 'walk', walk: 'run' };
+const STAND_IN: Partial<Record<PlayerMove, PlayerMove>> = { run: 'walk', walk: 'run', dive: 'swim' };
 
 function clipWords(name: string): string[] {
   return String(name ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z]+/).filter(Boolean);
@@ -494,7 +505,7 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
       if (!root) return;
       root.rotation.y = hero.root.rotation.y;
       root.visible = hero.root.visible;
-      character.move(locomotionRole(ctx.player.speed, ctx.player.isGrounded));
+      character.move(locomotionRole(ctx.player.speed, ctx.player.isGrounded, ctx.player.swimming, ctx.player.underwater));
       character.update(delta);
     },
     dispose() {
@@ -592,3 +603,25 @@ export const GAME_PLAYER_FILE = [
   '};',
   '',
 ].join('\n');
+
+/** Distinct looks for the kit rig. All seven keep the same controls and animation bindings. */
+const STARTER_LOOKS = [
+  { height: 1.75, build: 0.94, skin: 0xad795c, hair: 0x241912, shirt: 0x2e5a87, trousers: 0x27313c, shoes: 0x221d1a },
+  { height: 1.82, build: 1.12, skin: 0x774c3b, hair: 0x171414, shirt: 0x52624a, trousers: 0x30352d, shoes: 0x302621 },
+  { height: 1.68, build: 0.88, skin: 0xdea980, hair: 0x563a26, shirt: 0x9b453c, trousers: 0x393445, shoes: 0x232226 },
+  { height: 1.91, build: 1.04, skin: 0x986347, hair: 0x211610, shirt: 0xc3a16f, trousers: 0x4b4138, shoes: 0x3a302a },
+  { height: 1.71, build: 1.08, skin: 0xc49375, hair: 0x301f17, shirt: 0x43706a, trousers: 0x414346, shoes: 0x222321 },
+  { height: 1.85, build: 0.9, skin: 0x594031, hair: 0x151515, shirt: 0x755b78, trousers: 0x252e36, shoes: 0x3a3330 },
+  { height: 1.77, build: 1.02, skin: 0xe1b89b, hair: 0x805331, shirt: 0x616b78, trousers: 0x51483d, shoes: 0x2b2926 },
+] as const;
+
+export const GAME_PLAYER_FILE_VARIANTS = STARTER_LOOKS.map(look => {
+  const fields = Object.entries(look).map(([key, value]) =>
+    key === 'height' || key === 'build' ? key + ': ' + value : key + ': 0x' + value.toString(16).padStart(6, '0'));
+  return GAME_PLAYER_FILE.replace('look: { shirt: 0x2e5a87 }', 'look: { ' + fields.join(', ') + ' }');
+});
+
+export function gamePlayerFileSource(workspaceId: string): string {
+  const choice = createHash('sha256').update('player:' + workspaceId).digest().readUInt32BE(0);
+  return GAME_PLAYER_FILE_VARIANTS[choice % GAME_PLAYER_FILE_VARIANTS.length];
+}

@@ -29,6 +29,7 @@
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerator';
 import { GAME_ACTIONS, GAME_ACTIONS_PATH } from './GameActionsGenerator';
+import { GAME_AIM, GAME_AIM_PATH } from './GameAimGenerator';
 import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
@@ -62,8 +63,9 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
-import { applyPlayerChoice, resolvePlayerChoice, type PlayerBody, type PlayerChoice } from './play/playerBody';
+import { applyPlayerChoice, resolvePlayerChoice, findBones, playerModelRoot, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateActions } from './play/actions';
+import { aimFrom, type AimResult } from './play/aim';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
@@ -243,6 +245,14 @@ export interface GameContext {
    * only followed when you say so — and once you call this, your choice wins, null included.
    */
   follow: (object: THREE.Object3D | null) => void;
+  /**
+   * WHERE THE PLAYER AIMS (play/aim.ts) — the one way every gun finds its direction; never write one by hand. A ray from
+   * the camera through the crosshair, the first thing it meets (never the player or its vehicle), the muzzle where the gun
+   * really is (the tip of what the hand holds — the player's chosen model or the kit person), and the shot from the muzzle
+   * to that point. gun.update(dt, fireHeld, a.muzzle, a.shot, bullets). In a top-down game the shot is the way the player
+   * faces. holder overrides the hand; range is how far the crosshair reaches (default 300 m).
+   */
+  aim: (options?: { holder?: THREE.Object3D | null; range?: number }) => AimResult;
   /**
    * The default player body (createHumanoid), or null when the game brought its own or is first-person. It already
    * plays the action poses for the buttons (see actionPoses); call ctx.hero.act('kick') yourself for anything else
@@ -624,6 +634,14 @@ export class Game {
       get input() { return game.input; },
       get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
+      aim: (o = {}) => {
+        const model = playerModelRoot(game.context);
+        const hand = o.holder !== undefined ? o.holder : model ? (findBones(model).rightHand ?? null) : (game.hero?.joints.rightHand ?? null);
+        return aimFrom(game.rig.camera, game.scene, {
+          range: o.range, own: [game.player.object, game.chased], holder: hand, body: game.player.object,
+          topDownFacing: game.options.camera === 'top-down' ? (game.hero?.root.rotation.y ?? game.player.object.rotation.y) : null,
+        });
+      },
       get hero() { return game.hero; },
       get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
       splitScreen: (camera) => { this.secondCamera = camera; },
@@ -4810,9 +4828,10 @@ const FILES: Record<string, string> = {
   // Who the player is, for every game on the shell: src/game/player.ts swaps the character (2026-11-22).
   [GAME_PLAYER_BODY_PATH]: GAME_PLAYER_BODY,
   [GAME_ACTIONS_PATH]: GAME_ACTIONS,
+  [GAME_AIM_PATH]: GAME_AIM,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'racingroadgame', 'racecustom', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'aim', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -4910,6 +4929,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     // Game reads who the player is (src/game/player.ts) through it, so the two always ship together.
     if (files['src/game/Game.ts']) files[GAME_PLAYER_BODY_PATH] = FILES[GAME_PLAYER_BODY_PATH];
     if (files['src/game/Game.ts']) files[GAME_ACTIONS_PATH] = FILES[GAME_ACTIONS_PATH];
+    if (files['src/game/Game.ts']) files[GAME_AIM_PATH] = FILES[GAME_AIM_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -4926,6 +4946,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
+      (files[GAME_AIM_PATH] ? 'EVERY GUN AIMS WITH ctx.aim(): const a = ctx.aim(); gun.update(dt, fire, a.muzzle, a.shot, bullets) — the crosshair point from the real muzzle; never a hand-written direction (a constant one fires the same way whatever the aim).\n' : '') +
       (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +

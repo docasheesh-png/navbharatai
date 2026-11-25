@@ -102,7 +102,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "66d89dc2ece435f4e8ca3aeb4ed74dd6ecc8b15650c5a553e01e4c05cb83cb41",
     "b1e8325ed84ef3627b7154824edce27be9657f42dcbbf2a96d36dc081ca0f8fe",
     "f039244202b5aeae8aed796cf8214b96c21bd8b79922b07d45b1474e698b74fb",
-    "af607d6b3def017de39465aa5958d22887123e101a8e94a31a2ee76f3e8e2df4"
+    "af607d6b3def017de39465aa5958d22887123e101a8e94a31a2ee76f3e8e2df4",
+    "5183ee30ae01a24c2583f4d811c468ccd6c79578b65ebefceafcc6d558ebe466"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -495,6 +496,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/play/actions.ts": [
     "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3"
+  ],
+  "src/game/play/aim.ts": [
+    "f9803ff82045872507a1e60657b343fc203c4fa00528561f00636f8875913ebf"
   ],
   "src/game/play/character.ts": [
     "12479394af24b858d409c9a24bc4cd4ffbb34655ed27f08fb46f58f2629c4b17",

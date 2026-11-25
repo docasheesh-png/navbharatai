@@ -1548,10 +1548,13 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       '// A GUN is a Weapon, not one projectile per click (weapon.ts):\n' +
       "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
       '// isDown OR wasPressed: a quick tap that goes down and up inside one step must still fire.\n' +
-      'gun.update(dt, input.isDown("attack") || input.wasPressed("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
+      '// THE DIRECTION COMES FROM ctx.aim() (play/aim.ts) — the crosshair\'s point, from the real muzzle. Never a hand-written\n' +
+      '// direction (a constant (0,0,1) fires "always north"; the hero\'s rotation fires the way it last walked):\n' +
+      'const a = ctx.aim(); gun.update(dt, input.isDown("attack") || input.wasPressed("attack"), a.muzzle, a.shot, bullets); // camera.pitch += gun.kick\n' +
       'const sword = new MeleeWeapon(30); if (input.wasPressed("attack")) sword.swing();\n' +
       '// An ENEMY\'s gun or sword passes its id, so only the player\'s own shot poses the player\'s body:\n' +
-      '// enemyGun.update(dt, wantsShot, enemyMuzzle, enemyAim, bullets, enemy.id); enemySword.swing(enemy.id);\n' +
+      '// enemyGun.update(dt, wantsShot, enemyMuzzle, shotFrom(enemyMuzzle, playerChest, toPlayer), bullets, enemy.id); enemySword.swing(enemy.id);\n' +
+      '// (shotFrom from play/aim.ts: the unit vector from the enemy\'s muzzle to the player\'s chest — never a fixed axis)\n' +
       'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +      '// The RHYTHM and the FLOW (director.ts): build → peak → breather, and difficulty that follows the player.\n' +
       "const director = new Director({ gameId: 'my-game' });   // adapt: false when scores are compared\n" +
       'const offDirector = director.bind();                   // listens to PLAYER_DAMAGED / DIED / ENEMY_DIED\n' +

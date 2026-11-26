@@ -59,6 +59,7 @@ import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
+import { wantsSwimming } from '../lib/GameOpenWorldGenerator';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
 import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
@@ -303,7 +304,7 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
   // city when the game's world has one.
-  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request) };
+  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request), ...(wantsSwimming(request) ? { swim: true } : {}) };
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
   // a weak builder toward the wrong genre. Without a request (a caller that cannot say), the whole shell, as before.

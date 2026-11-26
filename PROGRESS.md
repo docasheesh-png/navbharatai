@@ -6349,3 +6349,12 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+## 2026-11-26 — PR A of the admin's 18-point game list: restart, a gun that fires, drowning, the map's edge, library ids
+
+- Q-3500 Restart / Menu stand the player at the start (ctx.setRespawn; open world sets its own), out of any car.
+- Q-3501 A held gun fires: Attack becomes Fire, shots along ctx.aim, SHOT_HIT hurts Entities characters.
+- Q-3502 Water drowns by default (WORLD.water), swimming only when asked.
+- Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
+- Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
+- KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.

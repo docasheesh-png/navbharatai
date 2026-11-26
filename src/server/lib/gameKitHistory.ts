@@ -110,7 +110,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "52a0b7dcdbf65860a9081c975fd6e6d903b1f3609a9b40145627e17b58c82159",
     "db50858ac49f95fd4bbfc70cb874b2a45a0cc7b2a5c69201969c9486913f852a",
     "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad",
-    "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d"
+    "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d",
+    "2273a3a237b8eccfde08365a9429bbdc5d8a7711880de150b1598bcb371f6fa0",
+    "4439b2801ec915f5a79a1a5e7c639119a6ffe50b32bc0f8ee8288fb00065f43a"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -582,7 +584,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "f3a713a9f3c4b93f25190f8c65af7222d607bf8af7ce91edd998a23ea232846e",
     "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6",
     "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc",
-    "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54"
+    "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54",
+    "0c8f527cce14b205728064bb9b7926fee9efb2563a0cf192a23eeb507fb05e9d",
+    "d7e9a115fe704a9d1103d0439f3c1a5d683b3788aa1b5f2f353711e2bc394bb9",
+    "4f4fd465b581e330ec61b666668a3f6c077d66b2423ba3438d2c65e2f6235c30"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -600,7 +605,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/play/worldLayer.ts": [
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
-    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8"
+    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8",
+    "512ecf0defea0ea57ee1796d3c4c1714246aaa57e239abc4e77dcc2329bc8c3d"
   ],
   "src/game/royale/onlineClient.ts": [
     "34daf1faeaa0be26e95667fc095b16a40d4b0b62c53220ae2961d8a3a66e8f2b"
@@ -644,7 +650,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "5a0dd41283a625474b781af045630cc48dfbc5741af2f314490f4b15482c42ab",
     "a687e1e6ffc7a08082cd1ff6a86461dde0fdef9c9c9f4501d0ed2de726900cce",
     "b2fa00c4e7db9c78014754291d132454b292a1588616fc91be9c31c62900f019",
-    "bb36f7ea5190149b52e78ed63fea8e8c516fa57c4252ff261c5582aa40104359"
+    "bb36f7ea5190149b52e78ed63fea8e8c516fa57c4252ff261c5582aa40104359",
+    "3d4f567f14d96b5f73b20a45ecb93ee5d7680c4399e1456a04cd4e3c6e1113ed"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"

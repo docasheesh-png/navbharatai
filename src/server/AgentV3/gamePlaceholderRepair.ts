@@ -231,7 +231,7 @@ export function placeholderRepairRecord(o: PlaceholderRepairOutcome<unknown>): {
     case 'skipped':
       return { code: GAME_PLACEHOLDER_REPAIR_CODE, severity: 'info', autoResolved: true, message: `In-build placeholder repair not tried (${what}): ${o.reason}. The next game turn's builder gets the finding instead.` };
     case 'kept':
-      return { code: GAME_PLACEHOLDER_REPAIR_CODE, severity: 'info', autoResolved: true, message: `In-build placeholder repair tried and KEPT (${what}, ${caps}): the game was played again and is strictly better — ${o.reason}.${files}${paid}` };
+      return { code: GAME_PLACEHOLDER_REPAIR_CODE, severity: 'info', autoResolved: true, message: `In-build placeholder repair tried and KEPT (${what}, ${caps}): the replay (a second full play of the game) is strictly better — ${o.reason}.${files}${paid}` };
     case 'no-change':
       return { code: GAME_PLACEHOLDER_REPAIR_CODE, severity: 'info', autoResolved: true, message: `In-build placeholder repair tried (${what}, ${caps}) and changed nothing, so there was nothing to keep; the next game turn's builder gets the finding.${paid}` };
     case 'undone':

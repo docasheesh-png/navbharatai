@@ -24872,7 +24872,7 @@ async function noteBuildOutcome(
       type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[]; played: boolean };
       const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
       // The first play's ports and result, kept for the one bounded placeholder repair's replay (Q-3374/Q-3365).
-      const gamePlayKeep: { ports?: GamePlaytestPorts; result?: GamePlaytestResult } = {};
+      const gamePlayKeep: { ports?: GamePlaytestPorts; play?: GamePlaytestResult } = {};
       // ONE place a play's answer reaches the release gate — the first play and a kept repair's replay alike (Q-3365).
       const applyGamePlayed = (played: GamePlaytestResult): void => {
         gameProof = played.proof;
@@ -24905,7 +24905,7 @@ async function noteBuildOutcome(
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
         }, gamePlayKeep);
-        if (played) { gamePlayKeep.result = played; applyGamePlayed(played); }
+        if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }
       };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest
       // first-minute failure — a tab that white-screens, a button whose handler throws, a link to a page
@@ -25063,7 +25063,7 @@ async function noteBuildOutcome(
       // (barrenPhases.add(PHASE_GAME_REPAIR)). A kept replay reaches the gate through applyGamePlayed, so GAME_PROOF and the
       // unverified-feature list describe the game that ships (Q-3365). Gate: a game still unplayable or missing features is RED.
       const gamePlaceholderRepairPorts = (): GamePlaceholderRepairPorts => ({
-        first: gamePlayKeep.ports && gamePlayKeep.result ? { ports: gamePlayKeep.ports, result: gamePlayKeep.result } : null,
+        first: gamePlayKeep.ports && gamePlayKeep.play ? { ports: gamePlayKeep.ports, result: gamePlayKeep.play } : null,
         canRun: result?.ok === true && !!lastPreviewUrl && !!actuator.runCommand && !abort.signal.aborted && !platformDoneRef.cur && !awaitsShellNow(),
         headroomMs: roomLeftMs(),
         userPrompt: prompt,

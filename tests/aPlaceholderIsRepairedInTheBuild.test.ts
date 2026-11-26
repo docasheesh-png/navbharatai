@@ -302,7 +302,7 @@ describe('route wiring (source guard)', () => {
     expect(at).toBeGreaterThan(0);
     expect(route).toContain('const repairedPlay = await runGamePlaceholderRepairPhase(gamePlaceholderRepairPorts());');
     expect(route).toContain('if (repairedPlay) applyGamePlayed(repairedPlay);');
-    expect(route).toContain('if (played) { gamePlayKeep.result = played; applyGamePlayed(played); }');
+    expect(route).toContain('if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }');
     expect(route).toContain('else delete gateEvidence.gameFeaturesUnverified;');
     // The old route-side replay is gone (Q-3365): no playtest script is run for a repair from the route.
     expect(route).not.toContain("'game-repair-replay'");

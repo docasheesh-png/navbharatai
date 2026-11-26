@@ -39,7 +39,7 @@ describe('the street-danger feature is real kit code', () => {
     const ours = ts.getPreEmitDiagnostics(program).filter((d) => d.file && (d.file.fileName.includes('/features/')))
       .map((d) => `${d.file!.fileName.split('/').slice(-2).join('/')}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`);
     expect(ours).toEqual([]);
-  });
+  }, 120_000); // a strict compile of the kit files from disk: seconds locally, past the 20 s default under CI coverage (#4595's red run)
   it('spawns hostile enemies and bystanders, lands the punch, and brings the police on a crime', () => {
     expect(GAME_STREET_DANGER_FEATURE).toContain("kind: 'enemy', hostile: true");
     expect(GAME_STREET_DANGER_FEATURE).toContain("kind: 'villager', hostile: false");

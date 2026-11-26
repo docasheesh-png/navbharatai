@@ -21,6 +21,7 @@
  */
 export const GAME_CITY = String.raw`import * as THREE from 'three';
 import { markWorldCollider, type WorldColliderKind } from './collision';
+import { geometryTier, type GeometryTier } from './surfaces';
 
 export type LotKind = 'apartment' | 'shop' | 'office' | 'house' | 'park';
 export type CityStyle = 'town' | 'mixed' | 'downtown';
@@ -44,6 +45,12 @@ export interface CityOptions {
   seed?: number;
   /** Street lights at block corners (default true). */
   streetLights?: boolean;
+  /**
+   * How much geometry to draw (queue Q-2698): 'full' — a box per window, sills and pilasters; 'light' — the same streets,
+   * buildings and colliders, with each facade's windows painted on one panel and the small details left out, for a device
+   * with no GPU or a weak phone. Left out: geometryTier() — the device decides, and the player's Settings override it.
+   */
+  tier?: GeometryTier;
 }
 
 export interface CityLot {
@@ -322,16 +329,22 @@ class Batch {
   private pos: number[] = [];
   private nor: number[] = [];
   private col: number[] = [];
+  private uv: number[] = [];
   private readonly colour = new THREE.Color();
-  add(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, color: number): void {
+  /** withUv: the batch keeps texture coordinates (the light tier's facade panels, whose windows are a repeated texture). */
+  constructor(private readonly withUv = false) {}
+  /** repeat: how many times the texture repeats across and up the shape (only for a batch made withUv). */
+  add(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, color: number, repeat?: [number, number]): void {
     const flat = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     flat.applyMatrix4(matrix);
-    const p = flat.getAttribute('position'), n = flat.getAttribute('normal');
+    const p = flat.getAttribute('position'), n = flat.getAttribute('normal'), t = flat.getAttribute('uv');
     this.colour.setHex(color);
+    const [ru, rv] = repeat ?? [1, 1];
     for (let i = 0; i < p.count; i++) {
       this.pos.push(p.getX(i), p.getY(i), p.getZ(i));
       this.nor.push(n.getX(i), n.getY(i), n.getZ(i));
       this.col.push(this.colour.r, this.colour.g, this.colour.b);
+      if (this.withUv) this.uv.push(t ? t.getX(i) * ru : 0, t ? t.getY(i) * rv : 0);
     }
     flat.dispose();
     geometry.dispose();
@@ -343,6 +356,7 @@ class Batch {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    if (this.withUv) g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.computeBoundingBox(); g.computeBoundingSphere();
     const mesh = new THREE.Mesh(g, material);
     mesh.name = name;
@@ -352,12 +366,35 @@ class Batch {
   }
 }
 
-interface Batches { ground: Batch; solid: Batch; detail: Batch; glass: Batch; lamp: Batch }
-const batches = (): Batches => ({ ground: new Batch(), solid: new Batch(), detail: new Batch(), glass: new Batch(), lamp: new Batch() });
+interface Batches { ground: Batch; solid: Batch; detail: Batch; glass: Batch; lamp: Batch; facade: Batch }
+const batches = (): Batches => ({ ground: new Batch(), solid: new Batch(), detail: new Batch(), glass: new Batch(), lamp: new Batch(), facade: new Batch(true) });
+
+/**
+ * The light tier's window: one cell of a facade, a dark pane in a white frame. Multiplied by the panel's colour, the frame
+ * is the wall and the pane is the glass, so one panel per facade draws every window of it (two triangles a face, not twelve
+ * a window). Built once per city from data — no image to load.
+ */
+function windowTexture(): THREE.DataTexture {
+  const size = 16, data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const pane = x >= 3 && x <= 12 && y >= 4 && y <= 13;
+    const sheen = pane && x + y > 18 && x + y < 22;
+    const i = (y * size + x) * 4;
+    data[i] = pane ? (sheen ? 120 : 36) : 255; data[i + 1] = pane ? (sheen ? 140 : 48) : 255; data[i + 2] = pane ? (sheen ? 158 : 60) : 255; data[i + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 export interface City {
   root: THREE.Group;
   plan: CityPlan;
+  /** The geometry tier this city was built at ('full' or 'light'). */
+  tier: GeometryTier;
   /** Where to put the player's car or character: on a street, in the left lane, facing spawnHeading. */
   spawn: THREE.Vector3;
   spawnHeading: number;
@@ -378,12 +415,16 @@ export interface City {
 /** Build the city: a grid of streets and blocks, centred on the origin. */
 export function createCity(options: CityOptions = {}): City {
   const plan = planCity(options);
+  const tier: GeometryTier = options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier();
+  const light = tier === 'light';
   const r = rngOf(plan.seed * 7 + 3);
   const root = new THREE.Group();
   root.name = 'City';
   const paint = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
   const glass = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15, metalness: 0.4 });
   const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe8b0 });
+  const windows = light ? windowTexture() : null;
+  const facadeMat = windows ? new THREE.MeshStandardMaterial({ vertexColors: true, map: windows, roughness: 0.55, metalness: 0.1 }) : null;
   const top = CITY_ROAD_Y + CITY_KERB;
   const M = new THREE.Matrix4();
   const at = (x: number, y: number, z: number, rotY = 0) => M.makeRotationY(rotY).setPosition(x, y, z);
@@ -399,13 +440,19 @@ export function createCity(options: CityOptions = {}): City {
     box(streets, len, 0.06, road, (X[i] + X[i + 1]) / 2, CITY_ROAD_Y - 0.03, z, 0x3a3c40);
   }
   const markY = CITY_ROAD_Y + 0.006, white = 0xf2f2f2;
+  // A road marking: in the light tier only its top face (two triangles, not a 1 cm box's twelve) — it is only ever seen from above.
+  const mark = (w: number, d: number, x: number, z: number) => {
+    if (!light) { box(marks, w, 0.012, d, x, markY, z, white); return; }
+    const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2);
+    marks.add(g, at(x, markY + 0.006, z), white);
+  };
   const zebraDepth = CITY_ZEBRA.depth, zebraGap = CITY_ZEBRA.gap;
   // Centre dashes on every stretch between two crossings, stopping short of the zebra crossings.
   const dashes = (a: number, b: number, fixed: number, alongX: boolean) => {
     const start = a + road / 2 + zebraGap + zebraDepth + 1, end = b - road / 2 - zebraGap - zebraDepth - 1;
     for (let s = start; s + 3 <= end; s += 6) {
-      if (alongX) box(marks, 3, 0.012, 0.15, s + 1.5, markY, fixed, white);
-      else box(marks, 0.15, 0.012, 3, fixed, markY, s + 1.5, white);
+      if (alongX) mark(3, 0.15, s + 1.5, fixed);
+      else mark(0.15, 3, fixed, s + 1.5);
     }
   };
   for (const x of X) for (let j = 0; j < Z.length - 1; j++) dashes(Z[j], Z[j + 1], x, false);
@@ -418,8 +465,8 @@ export function createCity(options: CityOptions = {}): City {
       if ((dz === 1 && j === Z.length - 1) || (dz === -1 && j === 0) || (dx === 1 && i === X.length - 1) || (dx === -1 && i === 0)) continue;
       for (let k = 0; k < stripes; k++) {
         const o = k - (stripes - 1) / 2;
-        if (dx === 0) box(marks, 0.5, 0.012, zebraDepth, cx + o, markY, cz + dz * c, white);
-        else box(marks, zebraDepth, 0.012, 0.5, cx + dx * c, markY, cz + o, white);
+        if (dx === 0) mark(0.5, zebraDepth, cx + o, cz + dz * c);
+        else mark(zebraDepth, 0.5, cx + dx * c, cz + o);
       }
     }
   }
@@ -442,7 +489,7 @@ export function createCity(options: CityOptions = {}): City {
     box(batchFor(i, j).ground, x1 - x0, CITY_KERB, z1 - z0, (x0 + x1) / 2, CITY_ROAD_Y + CITY_KERB / 2, (z0 + z1) / 2, 0xb9b4aa);
   }
 
-  for (const lot of plan.lots) buildLot(batchFor(lot.block[0], lot.block[1]), lot, top, r, box);
+  for (const lot of plan.lots) buildLot(batchFor(lot.block[0], lot.block[1]), lot, top, r, box, light);
   for (const [i, j] of plan.parks) buildPark(batchFor(i, j), plan, i, j, top, r, box);
   for (const light of plan.lights) {
     const i = Math.min(plan.blocksX - 1, Math.max(0, X.findIndex((x, k) => k < X.length - 1 && light.x > x && light.x < X[k + 1])));
@@ -464,6 +511,7 @@ export function createCity(options: CityOptions = {}): City {
       b.detail.build(paint, 'none', 'details'),
       b.glass.build(glass, 'none', 'windows'),
       b.lamp.build(lampMat, 'none', 'lamps'),
+      facadeMat ? b.facade.build(facadeMat, 'none', 'facades') : null,
     ];
     for (const m of parts) if (m) g.add(m);
     root.add(g);
@@ -471,7 +519,7 @@ export function createCity(options: CityOptions = {}): City {
 
   const toV = (p: CityPoint) => new THREE.Vector3(p.x, CITY_ROAD_Y, p.z);
   return {
-    root, plan,
+    root, plan, tier,
     spawn: toV(plan.spawn), spawnHeading: plan.spawn.heading,
     route: (from, to, o) => cityRoute(plan, from, to, o).map((p) => new THREE.Vector3(p.x, cityHeightAt(plan, p.x, p.z), p.z)),
     heightAt: (x, z) => cityHeightAt(plan, x, z),
@@ -481,7 +529,7 @@ export function createCity(options: CityOptions = {}): City {
     lotsOf: (kind) => plan.lots.filter((l) => l.kind === kind),
     dispose: () => {
       root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); });
-      paint.dispose(); glass.dispose(); lampMat.dispose();
+      paint.dispose(); glass.dispose(); lampMat.dispose(); facadeMat?.dispose(); windows?.dispose();
       root.removeFromParent();
     },
   };
@@ -495,7 +543,7 @@ function shade(color: number, k: number): number {
 }
 
 /** One building on its lot. Built facing +Z in its own frame, then turned to face its street. */
-function buildLot(b: Batches, lot: CityLot, top: number, r: () => number, box: BoxFn): void {
+function buildLot(b: Batches, lot: CityLot, top: number, r: () => number, box: BoxFn, light = false): void {
   const rot = lot.facing.z > 0 ? 0 : Math.PI;
   const s = Math.cos(rot); // +1 facing +Z, -1 facing -Z: local z maps to world z * s
   const fp = buildingFootprint(lot);
@@ -506,8 +554,25 @@ function buildLot(b: Batches, lot: CityLot, top: number, r: () => number, box: B
   put(b.solid, w, H, d, 0, H / 2, 0, lot.color);
   put(b.solid, w + 0.1, 0.4, d + 0.1, 0, 0.2, 0, shade(lot.color, 0.7));
   const glassTone = () => (r() < 0.25 ? 0x7a8c99 : 0x1f2d38);
+  // 🏙️ LIGHT TIER: each facade's windows are ONE panel whose texture repeats a window per cell (cols across, rows up).
+  const panel = (pw: number, ph: number, pd: number, lx: number, ly: number, lz: number, color: number, cols: number, rows: number) =>
+    b.facade.add(new THREE.BoxGeometry(pw, ph, pd), new THREE.Matrix4().makeRotationY(rot).setPosition(fp.x + lx * s, top + ly, fp.z + lz * s), color, [cols, rows]);
 
-  if (lot.kind === 'office') {
+  if (lot.kind === 'office' && light) {
+    // The same glass bands (one per floor, every 3.6 m) as one panel a facade; the light mullions are the texture's frame.
+    const ph = lot.floors * 3.6, cols = Math.max(1, Math.round((w - 0.8) / 2.4)), colsD = Math.max(1, Math.round((d - 0.8) / 2.4));
+    const tone = shade(lot.color, 1.15);
+    // The full tier draws a random glass tone per pane: the same draws are taken here, so every later choice of the city
+    // (shop colours, park trees — which are colliders) is the same in both tiers.
+    for (let k = 0; k < lot.floors * 4; k++) glassTone();
+    panel(w - 0.8, ph, 0.06, 0, ph / 2, d / 2 + 0.03, tone, cols, lot.floors);
+    panel(w - 0.8, ph, 0.06, 0, ph / 2, -d / 2 - 0.03, tone, cols, lot.floors);
+    panel(0.06, ph, d - 0.8, w / 2 + 0.03, ph / 2, 0, tone, colsD, lot.floors);
+    panel(0.06, ph, d - 0.8, -w / 2 - 0.03, ph / 2, 0, tone, colsD, lot.floors);
+    put(b.detail, 4.5, 0.2, 2, 0, 3.4, d / 2 + 1, 0xd1d5db);
+    put(b.glass, 2.4, 2.4, 0.06, 0, 1.6, d / 2 + 0.07, 0x9bb7c7);
+    put(b.solid, 3, 2.5, 3, w / 4, H + 1.25, -d / 4, shade(lot.color, 0.85));
+  } else if (lot.kind === 'office') {
     for (let f = 0; f < lot.floors; f++) {
       const y = f * 3.6 + 0.6 + 1.1;
       put(b.glass, w - 0.8, 2.2, 0.06, 0, y, d / 2 + 0.03, glassTone());
@@ -521,7 +586,15 @@ function buildLot(b: Batches, lot: CityLot, top: number, r: () => number, box: B
     put(b.solid, 3, 2.5, 3, w / 4, H + 1.25, -d / 4, shade(lot.color, 0.85));
   } else {
     const first = lot.kind === 'shop' ? 1 : 0;
-    for (let f = first; f < lot.floors; f++) {
+    if (light && lot.floors > first) {
+      // One panel a facade over the window floors: a window every w/n metres across, one row a floor (3 m).
+      const n = Math.max(1, Math.floor(w / 3)), base = lot.kind === 'shop' ? 4 : 0, ph = (lot.floors - first) * 3;
+      for (let k = 0; k < (lot.floors - first) * n * 2; k++) glassTone();   // the full tier's draws, kept (see the office above)
+      panel(w, ph, 0.06, 0, base + ph / 2, d / 2 + 0.03, lot.color, n, lot.floors - first);
+      panel(w, ph, 0.06, 0, base + ph / 2, -d / 2 - 0.03, lot.color, n, lot.floors - first);
+      if (lot.kind === 'apartment') for (let f = 1; f < lot.floors; f++) put(b.detail, w - 0.6, 0.15, 1.0, 0, f * 3, d / 2 + 0.5, 0xd6d1c7);
+    }
+    for (let f = first; f < lot.floors && !light; f++) {
       const base = lot.kind === 'shop' ? 4 + (f - 1) * 3 : f * 3;
       const n = Math.max(1, Math.floor(w / 3));
       for (let k = 0; k < n; k++) {

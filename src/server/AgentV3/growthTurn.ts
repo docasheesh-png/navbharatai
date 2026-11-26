@@ -180,7 +180,7 @@ export async function setLibraryCharacterAtTurnStart(io: {
  */
 export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibraryCharacterAtTurnStart>[0]): Promise<string> {
   // …and the car a racer drives (carSwap.ts, 2026-11-22).
-  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io), await setLibraryCarAtTurnStart(io), await addEnemiesAtTurnStart(io)].filter(Boolean);
+  const handoffs = [await addLibraryPlaceAtTurnStart(io), await setLibraryCharacterAtTurnStart(io), await setLibraryCarAtTurnStart(io)].filter(Boolean);
   // 🧭 …and when the turn is not a library pick, what a MAP request means for THIS game (mapGrowthIntent.ts, item 10).
   if (handoffs.length === 0) { const note = mapGrowthNoteAtTurnStart(io); if (note) handoffs.push(note); }
   return handoffs.join('\n\n---\n\n');

@@ -613,6 +613,10 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  * the admin on 2026-10-11 (Q-380, closed): leave it — a crashed build stays free and NavBharatAI absorbs it.
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
+  // housesTurn.ts (2026-11-26): the user asked to walk into the houses, and this game's copy of the engine is too old to make
+  // city houses enterable. The answer is the engine update (the kit refresh), not a prompt — a prompt would only tempt a
+  // painted door that "opens". The message says plainly that the game needs the update.
+  'HOUSES_NOT_ENTERABLE',
   // gameRegression.ts (admin 2026-11-21): this turn made the game worse. Its answer is not a prompt to send but the one-tap
   // "Go back" card (the ❗️ list row, gameUndo.ts) that restores the saved version from just before the turn — a new prompt would build
   // on top of the broken game.

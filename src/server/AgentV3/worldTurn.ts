@@ -26,7 +26,7 @@ const GROW_WORD = String.raw`(?:bada|badi|bade|badaa|badhao|badhaa\w*|badha\w*|b
  * "shehar bada karo", "city ka size badhao", "city ko aur bada karo", "city 4 guna badi karo". Only filler words may stand
  * between the city and the growing word: "city me traffic badhao" is about the traffic (one entry's numbers), not the size.
  */
-const FILLER = String.raw`(?:ka|ki|ke|ko|size|area|aur|bhi|thoda|thodi|bahut|bohot|bahot|zyada|jyada|much|more|even|ab|abhi|isko|is|very|\d+|guna|gunaa|times|x|two|teen|char|chaar|paanch)`;
+const FILLER = String.raw`(?:ka|ki|ke|ko|size|area|aur|bhi|thoda|thodi|bahut|bohot|bahot|zyada|jyada|much|more|even|ab|abhi|isko|is|very|\d+x?|guna|gunaa|times|x|two|teen|char|chaar|paanch)`;
 const CITY_THEN_GROW = new RegExp(String.raw`\b${CITY_WORD}\b(?:\s+${FILLER}){0,4}\s+${GROW_WORD}`, 'iu');
 /** "expand the city", "grow my city", "make the city bigger" — never "make a city" (a new one). */
 const GROW_THEN_CITY = /\b(?:expand|grow|enlarge|extend|increase(?:\s+the\s+size\s+of)?)\s+(?:the\s+|my\s+|this\s+|our\s+)?(?:\w+\s+)?city\b|\bmake\s+(?:the|my|this|our)\s+(?:\w+\s+)?city\s+(?:much\s+|a\s+lot\s+|even\s+)?(?:bigger|larger|huge|giant)\b/i;
@@ -38,10 +38,75 @@ const cityCloneJoin = (r: string): boolean => [...r.matchAll(CITY_THEN)].some((m
 /** A SEPARATE city asked for: a new / another / second city, or a number of cities ("4 city ho", "do shehar"). */
 const SEPARATE_CITY = new RegExp(String.raw`\b(?:ek\s+aur|aur\s+ek|nay[aie]|new|another|alag|dusr[aie]|doosr[aie]|second|extra)\s+(?:[\p{L}]+\s+)?${CITY_WORD}\b|\b(?:\d+|teen|char|chaar|paanch|two|three|four|five|six|many|kai)\s+${CITY_WORD}\b|\b${CITY_WORD}\s+(?:aur|and)\s+(?:\w+\s+)?(?:village|gaon|gaanv|town)\s+(?:aur\s+)?(?:jod|add)\w*`, 'iu');
 
+/**
+ * 🧠 THE WISH, NOT THE WORDS (admin 2026-11-25: "user ke words par nahi intention par kam ho"). The two patterns above caught
+ * "city badi karo" but not "bigger city", "10x bigger", "badi city banao", "city bahut chhoti hai" or "make it bigger" — the
+ * same wish in other words, so most requests were left to the model and the city never grew. On a game that HAS a map (this
+ * is only asked of one), the wish is: something bigger, about the map (a city, the map, the world, the area) or about
+ * nothing named — never a wish about another thing (the car, the text, a button, the hero). Read as concepts, not phrases.
+ */
+const GROW_WORDS = new Set(['bigger', 'larger', 'huge', 'giant', 'vast', 'massive', 'bada', 'badi', 'bade', 'badaa', 'vishal', 'double', 'triple', 'big', 'large']);
+const GROW_VERB = /^(?:expand\w*|extend\w*|enlarg\w*|grow\w*|increase\w*|vistar\w*|badhao|badha\w*|badh\w*)$/;
+const TIMES = /^(?:\d+x|x\d+|\d+(?:guna|gunaa|times))$/;
+const SMALL = new Set(['chhota', 'chhoti', 'chhote', 'chota', 'choti', 'chote', 'small', 'tiny']);
+/** The CITY's words. "map bada karo" is a bigger MAP (WORLD.spreadMeters), a different wish (theCityReallyGrows.test.ts). */
+const MAP_WORDS = new Set(['city', 'cities', 'citys', 'citiyon', 'shehar', 'sheher', 'shahar', 'shahr', 'shehron', 'nagar', 'town', 'towns', 'kasba', 'metro']);
+/** The map itself: a size word about these is not a wish for a bigger CITY. */
+const WHOLE_MAP = new Set(['map', 'maps', 'world', 'duniya', 'naksha', 'area', 'zameen', 'jameen']);
+/** Words after which a grow word is the sentence's predicate ("bada karo", "badi kar do", "bigger please") — not an adjective. */
+const PREDICATE_END = new Set(['karo', 'kar', 'kardo', 'karde', 'karein', 'kare', 'karna', 'kijiye', 'kro', 'do', 'de', 'hai', 'h', 'he', 'ho', 'hona',
+  'chahiye', 'please', 'pls', 'plz', 'now', 'abhi', 'aur', 'and', 'still', 'too', 'banao', 'bana', 'banado', 'sa', 'si', 'se', 'than', 'lag', 'lagta', 'lagti']);
+const OTHER_THINGS = new Set(['car', 'cars', 'gaadi', 'gadi', 'bike', 'truck', 'vehicle', 'character', 'charecter', 'hero', 'player', 'banda', 'admi', 'aadmi',
+  'button', 'buttons', 'text', 'font', 'title', 'logo', 'icon', 'joystick', 'screen', 'hud', 'minimap', 'gun', 'bandook', 'health', 'speed', 'raftaar',
+  'jump', 'house', 'houses', 'ghar', 'makaan', 'building', 'buildings', 'road', 'roads', 'sadak', 'tree', 'trees', 'ped', 'traffic', 'people', 'log',
+  'enemy', 'enemies', 'dushman', 'police', 'score', 'coin', 'menu', 'image', 'photo', 'camera', 'sound', 'music', 'volume', 'mall', 'market',
+  'bridge', 'pul', 'park', 'lake', 'river', 'nadi', 'mountain', 'pahad', 'stadium', 'tower', 'airport', 'station', 'shop', 'dukaan', 'hotel']);
+
+/**
+ * 🧠 THE WISH, NOT THE WORDS (admin 2026-11-25: "user ke words par nahi intention par kam ho"). The patterns above caught "city badi
+ * karo" but not "bigger city", "10x bigger", "badi city banao", "city bahut chhoti hai" or "make it bigger" — the same wish in other
+ * words, so most requests were left to the model and the city never grew. This is asked only of a game that HAS a map. Each word of
+ * size is read for WHAT it describes:
+ *   · followed by a place of the map ("bigger city", "badi city", "10x bigger map") → the map;
+ *   · ending the sentence or followed by a verb ("bada karo", "bigger please", "chhoti hai") → whatever was named before it — the map
+ *     if a place of the map was, NOT when another thing was ("car ko bada karo"), and the map when nothing was ("make it bigger");
+ *   · followed by any other thing ("ek bada mall banao", "city me badi sadak") → that thing, never the map.
+ */
+function growthWish(request: string): boolean {
+  const w = String(request ?? '').toLowerCase().split(/[^\p{L}\p{N}×]+/u).filter(Boolean);
+  for (let i = 0; i < w.length; i++) {
+    const t = w[i];
+    const small = SMALL.has(t) && ['hai', 'h', 'he', 'lag', 'lagta', 'lagti', 'is', 'feels', 'looks', 'seems'].includes(w[i + 1] ?? '');
+    const size = GROW_WORDS.has(t) || GROW_VERB.test(t) || TIMES.test(t) || small || (t === 'size' && /^(?:badh\w*|increase\w*|bada|double)$/.test(w[i + 1] ?? ''));
+    if (!size) continue;
+    let next = w[i + 1] ?? '';
+    // "10 x bigger", "bahut bada", "aur badi": a number or a filler between the size and its thing.
+    for (let k = i + 2; (TIMES.test(next) || /^(?:\d+|x|times|guna|bahut|bohot|much|even|aur|thoda|zyada|jyada|the|my|this|our|a|an|its|is)$/.test(next)) && k < i + 5; k++) next = w[k] ?? '';
+    if (MAP_WORDS.has(next)) return true;
+    if (next && !PREDICATE_END.has(next) && !GROW_WORDS.has(next) && !GROW_VERB.test(next)) {
+      if (OTHER_THINGS.has(next) || WHOLE_MAP.has(next)) continue;   // "bada mall", "badi sadak", "bada map": not the city
+      if (GROW_VERB.test(t)) { /* "expand the city", "grow my town" — the object follows */
+        const ahead = w.slice(i + 1, i + 5);
+        if (ahead.some((x) => MAP_WORDS.has(x))) return true;
+        if (ahead.some((x) => OTHER_THINGS.has(x))) continue;
+      }
+      continue;
+    }
+    // A predicate: the thing it is about was named before it.
+    const before = w.slice(Math.max(0, i - 5), i);
+    const lastMap = before.map((x) => MAP_WORDS.has(x)).lastIndexOf(true);
+    const lastOther = before.map((x) => OTHER_THINGS.has(x) || WHOLE_MAP.has(x)).lastIndexOf(true);
+    if (lastMap >= 0 && lastMap >= lastOther) return true;
+    if (lastOther >= 0) continue;
+    return true;                                               // "make it bigger", "bada karo" — on a map game, the map
+  }
+  return false;
+}
+
 /** Does the request ask to make a city BIGGER (and not for separate cities)? PURE. */
 export function cityGrowthAsked(request: string): 'grow' | 'mixed' | null {
   const r = String(request ?? '');
-  const grow = CITY_THEN_GROW.test(r) || GROW_THEN_CITY.test(r) || cityCloneJoin(r);
+  const grow = CITY_THEN_GROW.test(r) || GROW_THEN_CITY.test(r) || cityCloneJoin(r) || growthWish(r);
   if (!grow) return null;
   // "bada shehar banao" asks for a big NEW city, not this one bigger — only when the request also asks for one.
   return SEPARATE_CITY.test(r) ? 'mixed' : 'grow';
@@ -107,7 +172,14 @@ export function growCity(worldSource: string, request: string, openWorldSource: 
   const cap = worldCapabilities(openWorldSource);
   if (!cap.joinTo) return { ok: false, reason: 'no-joinTo', cities: names };
   if (cityGrowthAsked(request) === 'mixed') return { ok: false, reason: 'mixed', cities: names };
-  if (cities.length === 0) return { ok: false, reason: 'no-city', cities: names };
+  // A map with no city yet (an open-country start, regions: []) grows by FIRST getting its city (Q-3520): the wish is a bigger
+  // city to play in, and "the map has no city" was a reason the user never sees and cannot act on.
+  if (cities.length === 0) {
+    const seeded = parseRegions(worldSource) ? appendRegionEntries(worldSource, [`{ id: 'main-city', kind: 'city' }`]) : null;
+    if (seeded === null) return { ok: false, reason: 'no-city', cities: names };
+    const grown = growCity(seeded, request, openWorldSource);
+    return grown.ok ? { ...grown, added: ['main-city', ...grown.added] } : grown;
+  }
   const city = cityMeant(request, cities);
   if (!city) return { ok: false, reason: 'which-city', cities: names };
   const regions = parseRegions(worldSource);

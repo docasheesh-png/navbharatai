@@ -1,0 +1,648 @@
+{
+ "_source": "failedbr #2525 (8257366a), scrubbed saved report, trimmed to the issues and commands the liveness and hand-off code read",
+ "startedAt": 1795624617013,
+ "endedAt": 1795625188800,
+ "ok": false,
+ "issues": [
+  {
+   "ts": 1795624617013,
+   "code": "BUILD_STARTED",
+   "message": "Build accepted. This report is saved from here on, including when the connection drops before the build finishes."
+  },
+  {
+   "ts": 1795624634136,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/App.tsx"
+  },
+  {
+   "ts": 1795624637787,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/GameCanvas.tsx"
+  },
+  {
+   "ts": 1795624642207,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/Game.ts"
+  },
+  {
+   "ts": 1795624647887,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/player.ts"
+  },
+  {
+   "ts": 1795624658995,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/core/state.ts"
+  },
+  {
+   "ts": 1795624664248,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/systems/weapon.ts"
+  },
+  {
+   "ts": 1795624668916,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/systems/ai.ts"
+  },
+  {
+   "ts": 1795624673140,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/systems/combat.ts"
+  },
+  {
+   "ts": 1795624676765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 1 \u2014 still working (last: The builder has been inspecting files without changing the project. I\u2019ve asked i)"
+  },
+  {
+   "ts": 1795624678025,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 glob",
+   "detail": "agent=architect \u00b7 src/game/rules/*"
+  },
+  {
+   "ts": 1795624683428,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 glob",
+   "detail": "agent=architect \u00b7 public/game-assets/*"
+  },
+  {
+   "ts": 1795624691975,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 write_file",
+   "detail": "agent=architect \u00b7 src/game/gameRules.ts"
+  },
+  {
+   "ts": 1795624699584,
+   "code": "SANDBOX_CMD",
+   "message": "$ typecheck (tsc --noEmit, run by NavBharatAI) \u2192 4 type errors (read from the output; the pipe hides tsc's own exit code) (6s)"
+  },
+  {
+   "ts": 1795624715723,
+   "code": "HEARTBEAT",
+   "message": "\u23f3 Still working \u2014 1m 50s so far"
+  },
+  {
+   "ts": 1795624719287,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 write_file",
+   "detail": "agent=architect \u00b7 src/game/setup.ts"
+  },
+  {
+   "ts": 1795624731498,
+   "code": "SANDBOX_CMD",
+   "message": "$ typecheck (tsc --noEmit, run by NavBharatAI) \u2192 12 type errors (read from the output; the pipe hides tsc's own exit code) (2s)"
+  },
+  {
+   "ts": 1795624736765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 2 \u2014 still working (last: checkpoint)"
+  },
+  {
+   "ts": 1795624796765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 3 \u2014 still working (last: \u23f3 Still working \u2014 3m 07s so far)"
+  },
+  {
+   "ts": 1795624819645,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/Game.ts"
+  },
+  {
+   "ts": 1795624824561,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624824784,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"setup\\?:\\|update\\?:\\|export interface GameContext\" src/game/Game.ts | head -30 \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624828695,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/Game.ts"
+  },
+  {
+   "ts": 1795624833403,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624833605,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '100,180p' src/game/Game.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624837476,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624837689,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '30,100p' src/game/Game.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624843164,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624843406,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && ls src/game src/game/systems src/game/play src/game/three src/game/core src/game/fx 2>/dev/null \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624848364,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624848771,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"^export \" src/game/systems/entities.ts src/game/systems/projectile.ts src/game/ui/worldMap.ts | head -6 \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624855098,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624856765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 4 \u2014 still working (in-flight: bash)"
+  },
+  {
+   "ts": 1795624861035,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && ./node_modules/.bin/tsc --noEmit 2>&1 | head -30 \u2192 exit 0 from the pipe, but 12 type errors in the output (6s) \u2014 our setup 0.0s \u00b7 sandbox 0.0s \u00b7 comma"
+  },
+  {
+   "ts": 1795624901879,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624902108,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -rn \"setup.ts\\|setupFPSLevel\\|from './setup'\\|from './game/setup'\" src --include=*.ts --include=*.tsx | hea \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624906712,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624906916,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"setup\\|update\" src/game/Game.ts | grep -i \"setup?\\|update?\\|setup:\\|update:\" | head -20 \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624912905,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624913149,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '1,80p' src/game/GameContext_search 2>/dev/null; sed -n '197,300p' src/game/Game.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624916765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 5 \u2014 still working (last: bash)"
+  },
+  {
+   "ts": 1795624919440,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/systems/entities.ts"
+  },
+  {
+   "ts": 1795624924057,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 read_file",
+   "detail": "agent=architect \u00b7 src/game/systems/entities.ts"
+  },
+  {
+   "ts": 1795624932399,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624937969,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && cat package.json; echo \"=== ERRORS ===\"; ./node_modules/.bin/tsc --noEmit 2>&1 | grep -v \"^  \" | grep \"error TS\" \u2192 exit 0 from the pipe, but 4 type er"
+  },
+  {
+   "ts": 1795624942098,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624969482,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && npm install vitest@^3 --save-dev --silent 2>&1 | tail -5; echo \"INSTALLED\" \u2192 exit 0 (27s) \u2014 our setup 0.2s \u00b7 sandbox 0.0s \u00b7 command 27s \u00b7 our checks a"
+  },
+  {
+   "ts": 1795624973964,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624974174,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '465,480p' src/game/play/playerBody.ts; echo \"=== externalAssets 180-190 ===\"; sed -n '180,192p' src/game \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624976765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 6 \u2014 still working (last: bash)"
+  },
+  {
+   "ts": 1795624979266,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624981695,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && python3 - <<'EOF' \u2192 exit 0 (2s)"
+  },
+  {
+   "ts": 1795624985794,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624986026,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && rm -f src/game/setup.ts && echo \"removed guessed setup.ts\"; grep -n \"setWorldMapSource\\|export function\\|export  \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624992744,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624992969,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && echo \"=== surfaces exports ===\"; grep -n \"^export \" src/game/three/surfaces.ts; echo; echo \"=== collision export \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795624996749,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795624996957,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && echo \"=== weapon.ts classes ===\"; grep -n \"export class\\|export type WeaponKind\\|export const WEAPON\" src/game/s \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625001126,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625001977,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '59,190p' src/game/systems/weapon.ts \u2192 exit 0 (1s)"
+  },
+  {
+   "ts": 1795625007187,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625007411,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '1,60p' src/game/systems/combatRules.ts; echo \"=== core/rules.ts ===\"; sed -n '1,60p' src/game/core/rules \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625011499,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625011704,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"export function\\|export interface\\|export class\" src/game/play/aim.ts; echo \"=== damagePlayer ===\"; gre \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625015312,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625015535,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '16,60p' src/game/play/aim.ts; echo \"=== state 60-110 ===\"; sed -n '60,110p' src/game/core/state.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625020466,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625020677,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '95,175p' src/game/systems/weapon.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625025210,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625025431,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '60,175p' src/game/systems/entities.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625031300,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625031547,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && echo \"=== GameContext body ===\"; sed -n '197,200p;205,215p' src/game/Game.ts | head -5; awk 'NR>=197 && NR<=270' \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625035710,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625035928,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"applyHits\\|targets(\\|melee(\" src/game/systems/entities.ts | head; echo \"=== signatures ===\"; sed -n '/a \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625036765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 7 \u2014 still working (last: bash)"
+  },
+  {
+   "ts": 1795625085017,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 write_file",
+   "detail": "agent=architect \u00b7 src/game/fps.ts"
+  },
+  {
+   "ts": 1795625091640,
+   "code": "SANDBOX_CMD",
+   "message": "$ typecheck (tsc --noEmit, run by NavBharatAI) \u2192 4 type errors (read from the output; the pipe hides tsc's own exit code) (6s)"
+  },
+  {
+   "ts": 1795625096026,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625096249,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '10,40p' src/game/ui/worldMap.ts; echo \"=== Health ctor ===\"; grep -n \"constructor\" src/game/systems/comb \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625096765,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 8 \u2014 still working (last: bash)"
+  },
+  {
+   "ts": 1795625101047,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625101272,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"readonly all\\|get all\\|all:\" src/game/systems/entities.ts | head; echo \"=== HealthOptions ===\"; sed -n  \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625107089,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625107341,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"export function standOnGround\\|export function clampOriginY\" src/game/three/surfaces.ts src/game/three/ \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625112275,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625112530,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"export type MaterialKind\\|MaterialKind =\" src/game/three/materials.ts; sed -n '/export type MaterialKin \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625117878,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625125776,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && python3 - <<'EOF' \u2192 exit 0 (8s) \u2014 our setup 0.0s \u00b7 sandbox 0.0s \u00b7 command 5.7s \u00b7 our checks after 2.1s"
+  },
+  {
+   "ts": 1795625131054,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625131284,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"OBJECTIVE_SET\\|WAVE_CHANGED\\|WEAPON_PICKED\\|HEALTH_CHANGED\\|SCORE_CHANGED\\|ENEMY_KILLED\\|ITEM_COLLECTED \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625134797,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625135027,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '10,45p' src/game/core/events.ts \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625141277,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625141486,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '68,100p' src/game/core/state.ts; echo \"=== rules RULES export ===\"; grep -n \"RULES\\|export const RULES\"  \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625145641,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625145873,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && sed -n '50,70p' src/game/core/state.ts; echo \"=== validRules shape ===\"; sed -n '1,40p' src/game/core/rules.ts | \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625153302,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 edit_file",
+   "detail": "agent=architect \u00b7 src/game/gameRules.ts"
+  },
+  {
+   "ts": 1795625155887,
+   "code": "SANDBOX_CMD",
+   "message": "$ typecheck (tsc --noEmit, run by NavBharatAI) \u2192 clean (read from the output; the pipe hides tsc's own exit code) (2s)"
+  },
+  {
+   "ts": 1795625156792,
+   "code": "HEARTBEAT",
+   "message": "\u23f1 minute 9 \u2014 still working (last: checkpoint)"
+  },
+  {
+   "ts": 1795625163017,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625169146,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && python3 - <<'EOF' \u2192 exit 0 (6s) \u2014 our setup 0.0s \u00b7 sandbox 0.0s \u00b7 command 5.5s \u00b7 our checks after 0.7s"
+  },
+  {
+   "ts": 1795625177480,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 bash",
+   "detail": "agent=architect \u00b7 cd"
+  },
+  {
+   "ts": 1795625177697,
+   "code": "SANDBOX_CMD",
+   "message": "$ cd . && grep -n \"KILL_POINTS\\|kindBefore\\|OBJECTIVE_SET\\|WEAPON_PICKED\\|WAVE_CHANGED\\|ENEMY_KILLED\\|HEALTH_CHANGED\" src/ \u2192 exit 0 (0s)"
+  },
+  {
+   "ts": 1795625184761,
+   "code": "TOOL_CALL",
+   "message": "\u25b6 write_file",
+   "detail": "agent=architect \u00b7 src/App.tsx"
+  },
+  {
+   "ts": 1795625188800,
+   "code": "SANDBOX_CMD",
+   "message": "$ typecheck (tsc --noEmit, run by NavBharatAI) \u2192 clean (read from the output; the pipe hides tsc's own exit code) (3s)"
+  },
+  {
+   "ts": 1795625188800,
+   "code": "BUILD_ENDED_UNRECORDED",
+   "message": "This build stopped without recording an end \u2014 the server running it was lost (no work was recorded after 572 s). It was found when the next build for this app s"
+  }
+ ],
+ "commands": [
+  {
+   "ts": 1795625141485,
+   "command": "cd . && sed -n '68,100p' src/game/core/state.ts; echo \"=== rules RULES export ===\"; grep -n \"RULES\\|export const RULES\" src/game/core/rules.ts | head",
+   "stdout": "  if (state.score > state.highScore) state.highScore = state.score;\n  events.emit('SCORE_CHANGED', { score: state.score });\n}\n\nexport function damagePlayer(amount: number): void {\n  if (state.status !== 'playing' || amount <= 0) return;\n  state.health = Math.max(0, state.health - amount);\n  events.emit('PLAYER_DAMAGED', { amount, health: state.health });\n  if (state.health === 0) {\n    state.lives -= 1;\n    events.emit('PLAYER_DIED', { livesLeft: state.lives });\n    if (state.lives <= 0) setStatus('gameover');\n  }\n}\n\nconst SAVE_KEY = 'game-save-v1';\n\n/** Durable progress only. Never throws \u2014 a full or blocked localStorage must not crash the game. */\nexport function save(): boolean {\n  try {\n    const { status, health, ...durable } = state;\n    localStorage.setItem(SAVE_KEY, JSON.stringify(durable));\n    return true;\n  } catch { return false; }\n}\n\nexport function load(): boolean {\n  try {\n    const raw = localStorage.getItem(SAVE_KEY);\n    if (!raw) return false;\n    const parsed = JSON.parse(raw) as Partial<GameState>;\n    // Merge over a FRESH state, so a save written by an older version that lacks newer fields still\n    // loads instead of leaving them undefined and crashing on first read.\n=== rules RULES export ===\n2: * THE GAME'S RULES, AS DATA (NavBharatAI game factory, admin 2026-11-24: \"hame game factory banna hai\").\n68:    const found = import.meta.glob(['../gameRules.ts', '../rules/?*.ts'], { eager: true }) as Record<string, { RULES?: unknown }>; // ?* = any name\n70:\u2026[truncated]",
+   "typecheckProof": {
+    "revision": 111,
+    "project": false
+   }
+  },
+  {
+   "ts": 1795625145873,
+   "command": "cd . && sed -n '50,70p' src/game/core/state.ts; echo \"=== validRules shape ===\"; sed -n '1,40p' src/game/core/rules.ts | grep -n \"when\\|then\\|interface\" ",
+   "stdout": "  if (state.status === status) return;\n  const previous = state.status;\n  state.status = status;\n  // The game's own rules (src/game/gameRules.ts, rules.ts) start with the first round \u2014 a dynamic import, so rules.ts\n  // can read this state without an import cycle. A game without the file starts nothing.\n  if (status === 'playing' && !rulesStarted) { rulesStarted = true; void import('./rules').then((m) => m.autoStartRules()).catch(() => { /* no rules */ }); }\n  // Leaving PAUSE is a resume, not a new game. It used to emit GAME_STARTED, so anything that starts a\n  // round on that event (music, the meta layer's run timer) restarted on every unpause, and\n  // GAME_RESUMED \u2014 declared, and listened to by the HUD \u2014 never fired at all.\n  if (status === 'playing') events.emit(previous === 'paused' ? 'GAME_RESUMED' : 'GAME_STARTED');\n  if (status === 'paused') events.emit('GAME_PAUSED');\n  if (status === 'gameover') events.emit('GAME_OVER');\n  if (status === 'won') events.emit('GAME_WON');\n  if (status === 'menu') events.emit('GAME_MENU');\n}\n\nexport function addScore(points: number): void {\n  state.score += points;\n  if (state.score > state.highScore) state.highScore = state.score;\n  events.emit('SCORE_CHANGED', { score: state.score });\n}\n=== validRules shape ===\n6: * starts when the first round starts (state.ts), so every game on the kit follows its rules the same way:\n7: *   { when: 'ENEMY_DIED', then: { addScore: 10 } }      an enemy's Health (systems/combat.ts) dying raises the s\u2026[truncated]",
+   "typecheckProof": {
+    "revision": 111,
+    "project": false
+   }
+  },
+  {
+   "ts": 1795625155887,
+   "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. \u2026 n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nbai-tsc-ensure.log; }; }; then echo NBAI_WRITE_TSC_NOT_READY:manifest-changed; else node_modules/.bin/tsc --noEmit --incremental --tsBuildInfoFile /tmp/agentv3-bd979023.tsbuildinfo 2>&1 | head -120; fi",
+   "stdout": "",
+   "typecheckProof": {
+    "revision": 112,
+    "project": true
+   }
+  },
+  {
+   "ts": 1795625169146,
+   "command": "cd . && python3 - <<'EOF'\np = 'src/game/fps.ts'\ns = open(p).read()\n\ns = s.replace(\"import { state, damagePlayer } from './core/state';\",\n              \"import { state, damagePlayer, addScore } from '. \u2026 d;\n  ctx.feel.shake(0.16);\"\"\")\ns = s.replace(\"/** Points for one kill. */\\nconst KILL_POINTS = 10;\\n\", \"/** Points for one kill \u2014 the rule in gameRules.ts scores it. */\\n\")\n\nopen(p,'w').write(s)\nprint('patched')\nEOF\n./node_modules/.bin/tsc --noEmit 2>&1 | grep \"error TS\" | head; echo \"---done---\"",
+   "stdout": "patched\n---done---\n",
+   "typecheckProof": {
+    "revision": 112,
+    "project": false
+   }
+  },
+  {
+   "ts": 1795625177697,
+   "command": "cd . && grep -n \"KILL_POINTS\\|kindBefore\\|OBJECTIVE_SET\\|WEAPON_PICKED\\|WAVE_CHANGED\\|ENEMY_KILLED\\|HEALTH_CHANGED\" src/game/fps.ts; echo \"--- none above means clean ---\"; grep -n \"void dead\\|dead:\" src/game/fps.ts",
+   "stdout": "--- none above means clean ---\n267:function onKill(ctx: GameContext, dead: Entity): void {\n272:  void dead;\n",
+   "typecheckProof": {
+    "revision": 112,
+    "project": false
+   }
+  },
+  {
+   "ts": 1795625188799,
+   "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. \u2026 n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nbai-tsc-ensure.log; }; }; then echo NBAI_WRITE_TSC_NOT_READY:manifest-changed; else node_modules/.bin/tsc --noEmit --incremental --tsBuildInfoFile /tmp/agentv3-bd979023.tsbuildinfo 2>&1 | head -120; fi",
+   "stdout": "",
+   "typecheckProof": {
+    "revision": 113,
+    "project": true
+   }
+  }
+ ]
+}

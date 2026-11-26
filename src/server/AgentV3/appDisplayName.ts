@@ -18,10 +18,12 @@
 // PURE — no I/O, no clock. Never throws.
 import { isPastedSource, pastedAppFacts, readablePrompt } from '../lib/pastedSource';
 import { withoutAdFreeWords } from './thirdPartyLimits';
+import { isContinuationMessage } from './ProjectPlan';
 
-/** Titles that name no app: framework and template defaults, and our own preview placeholders. */
+/** Titles that name no app: framework and template defaults, our own preview placeholders, and our own "Continue building"
+ *  card's sentence cut at "where" — shipped as a title by build reports #2526–#2528, so a project that has it is renamed. */
 export const PLACEHOLDER_TITLE =
-  /^(?:app|my app|my real app|react app|vite app|vite \+ react(?: \+ ts)?|vite \+ vue(?: \+ ts)?|vite \+ preact|vite \+ svelte|vite \+ solid|vite \+ lit|document|untitled|home|index|preview|navbharatai preview|loading…?|loading\.\.\.|new app|my vue app|my svelte app|my solid app|my preact app|my lit app|my static site|next\.js app|create next app)$/i;
+  /^(?:app|my app|my real app|react app|vite app|vite \+ react(?: \+ ts)?|vite \+ vue(?: \+ ts)?|vite \+ preact|vite \+ svelte|vite \+ solid|vite \+ lit|document|untitled|home|index|preview|navbharatai preview|loading…?|loading\.\.\.|new app|my vue app|my svelte app|my solid app|my preact app|my lit app|my static site|next\.js app|create next app|continue the build(?: from)?(?: where it left off)?)$/i;
 
 /** An order to the builder rather than a name: "Build a …", "Make me …", "Create …", "banao …". */
 const IMPERATIVE_OPENER =
@@ -129,6 +131,9 @@ export function nameFromPrompt(prompt: string | null | undefined): string | null
   }
   const one = String(prompt ?? '').replace(/\s+/g, ' ').trim();
   if (!one) return null;
+  // 🔴 "Continue the build from where it left off…" names no app (build reports #2526–#2528, 2026-11-25): it was cut at
+  // "where" and shipped as the app's <title> and description. A continuation is an order to us about the build, never a name.
+  if (isContinuationMessage(one)) return null;
   let rest = withoutOrder(one).rest;
   const end = rest.search(CLAUSE_END);
   if (end > 0) rest = rest.slice(0, end);
@@ -155,6 +160,7 @@ export function descriptionFromPrompt(prompt: string | null | undefined, fallbac
     return words ? descriptionFromPrompt(words, fallbackName) : fallbackName;
   }
   const one = String(prompt ?? '').replace(/\s+/g, ' ').trim();
+  if (isContinuationMessage(one)) return fallbackName;          // an order about the build describes no app
   const firstSentence = one.split(/(?<=[.!?])\s/)[0] ?? one;
   const { rest, hadOpener: opener } = withoutOrder(firstSentence);
   let body = rest

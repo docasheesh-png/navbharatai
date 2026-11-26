@@ -53,9 +53,10 @@ describe('composition dispatcher safeguards',()=>{
  });
  it('retains the native request-driven module selector when include is omitted',async()=>{
   vi.stubEnv('AGENTV3_ATHREE_MAP','on');const x=setup(undefined,'Build an Athree 3D open world game with roads and a dog'),r=await x.run();
+  // 2026-11-25 (admin: "intention, not words"): a named feature adds to the world; nothing named is stripped.
   expect(r.is_error).not.toBe(true);expect(x.act.files.has('src/game/athree/roadmesh.ts')).toBe(true);
-  expect(x.act.files.has('src/game/athree/ocean.ts')).toBe(false);
-  expect(x.act.files.has('src/game/athree/vehicles.ts')).toBe(false);
+  expect(x.act.files.has('src/game/athree/ocean.ts')).toBe(true);
+  expect(x.act.files.has('src/game/athree/plants.ts')).toBe(true);
  });
  it.each([
   {prompt:'Build an Athree 3D open world game with a river and no trees',include:undefined},
@@ -88,9 +89,9 @@ describe('composition dispatcher safeguards',()=>{
   expect(r.is_error).not.toBe(true);
   expect(x.act.files.has('src/game/athree/plants.ts')).toBe(plants);
   expect(x.act.files.has('src/game/athree/riverwater.ts')).toBe(rivers);
-  expect(x.act.files.has('src/game/athree/ocean.ts')).toBe(false);
-  expect(x.act.files.has('src/game/athree/sky.ts')).toBe(false);
-  expect(x.act.files.has('src/game/athree/vehicles.ts')).toBe(false);
+  // 2026-11-25: what was not named is not stripped (only an exclusion removes a module).
+  expect(x.act.files.has('src/game/athree/ocean.ts')).toBe(true);
+  expect(x.act.files.has('src/game/athree/sky.ts')).toBe(true);
  });
  it('does not activate the disabled feature',async()=>{
   vi.stubEnv('AGENTV3_ATHREE_MAP','off');const x=setup(),r=await x.run();

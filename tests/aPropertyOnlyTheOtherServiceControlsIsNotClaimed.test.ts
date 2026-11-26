@@ -375,6 +375,7 @@ describe('🔒 the wiring (agentv3.ts)', () => {
   });
 
   it('the published name is told when the app embeds such a player', () => {
-    expect(route).toContain('resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer })');
+    // prompt: checksRequest — the request a "continue" turn continues (build reports #2526–#2528), never the word itself.
+    expect(route).toContain('resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt: checksRequest, appSource, adServingPlayer })');
   });
 });

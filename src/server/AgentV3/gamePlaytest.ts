@@ -297,7 +297,7 @@ export interface RuleProbe { id: string; verdict: 'held' | 'not-held' | 'not-che
 export function ruleProbeMessage(probes: readonly RuleProbe[] | null | undefined): string {
   const list = Array.isArray(probes) ? probes : [];
   if (!list.length) return '';
-  const words: Record<string, string> = { 'enemy-dies-score-up': 'killing an enemy raises the score', 'no-health-game-over': 'running out of health ends the game' };
+  const words: Record<string, string> = { 'enemy-dies-score-up': 'killing an enemy raises the score', 'no-health-game-over': 'running out of health ends the game', 'player-can-fire': 'the player\'s gun fires' };
   return 'Rules checked while playing: ' + list.map((p) => `${words[p.id] ?? p.id} — ${p.verdict === 'held' ? 'works' : p.verdict === 'not-held' ? 'does NOT work' : 'could not be checked'} (${p.why})`).join('; ') + '.';
 }
 
@@ -894,6 +894,24 @@ function watch(page) {
   });
 }
 
+// THE FIRE PROBE (build reports #2526–#2530): one probe result for a game that made a gun, or null when it made none.
+async function fireProbe(page) {
+  const fire = await page.evaluate(() => ({ guns: window.__nbWeapons || 0, kit: !!(window.__nbKit && window.__nbKit.attacks), status: window.__nbKit ? window.__nbKit.status() : null })).catch(() => null);
+  if (!fire || !(fire.guns > 0)) return null;
+  if (!fire.kit) return { id: 'player-can-fire', verdict: 'not-checkable', why: 'the game does not use the kit shell' };
+  if (fire.status !== 'playing') return { id: 'player-can-fire', verdict: 'not-checkable', why: 'the round was not in play (status ' + fire.status + ')' };
+  const a0 = await page.evaluate(() => window.__nbKit.attacks()).catch(() => null);
+  for (const k of ['KeyF', 'KeyJ', 'KeyF']) { await page.keyboard.down(k).catch(() => {}); await page.waitForTimeout(220); await page.keyboard.up(k).catch(() => {}); await page.waitForTimeout(180); }
+  const vp = page.viewportSize() || { width: 800, height: 600 };
+  await page.mouse.click(vp.width / 2, vp.height / 2, { delay: 200 }).catch(() => {});
+  await page.waitForTimeout(400);
+  const a1 = await page.evaluate(() => window.__nbKit.attacks()).catch(() => null);
+  const shots = a0 && a1 ? a1.fired - a0.fired : 0;
+  const swings = a0 && a1 ? a1.swung - a0.swung : 0;
+  return { id: 'player-can-fire', verdict: shots > 0 ? 'held' : 'not-held',
+    why: shots > 0 ? shots + ' shot(s) from F, J and a click' : 'F, J and a click fired no shot' + (swings > 0 ? ' (' + swings + ' melee swing(s) instead)' : '') + ' though the game has ' + fire.guns + ' gun(s)' };
+}
+// FIRE_PROBE_END
 async function hold(page, keys, ms) {
   for (const k of keys) await page.keyboard.down(k).catch(() => {});
   await page.waitForTimeout(ms);
@@ -1270,9 +1288,19 @@ try {
       const after = await page.evaluate(() => window.__nbKit.status());
       out.restartCheck = { ended, pressed, after };
     }
+    // THE FIRE PROBE (build reports #2526–#2530: a gun was placed, rewritten three times, and never once fired — the
+    // playtest only ever pressed the arrows, WASD and Space). A game that made a gun (window.__nbWeapons, counted by the
+    // kit's Weapon) is played with the attack keys a person uses — F, J and a click — and the player's own shots are
+    // read back from the kit (window.__nbKit.attacks). Before the rules, which may end the round.
+    const fired = await fireProbe(page);
+    if (fired) { out.rules = out.rules || []; out.rules.push(fired); }
+    // The game's features that are SWITCHED OFF, and why (a feature that throws, or an async setup that failed) — the kit's
+    // feature host lists them on window.__nbFeatureHosts; before this a crashed enemies feature left no reason anywhere.
+    out.featuresOff = await page.evaluate(() => (window.__nbFeatureHosts || []).flatMap((f) => { try { return f(); } catch (e) { return []; } })
+      .filter((x) => x && x.state === 'off').slice(0, 10).map((x) => ({ id: String(x.id).slice(0, 60), reason: String(x.reason || '').slice(0, 200) }))).catch(() => null);
     // The rules the user named, proved by playing (see PROBED_RULES): last, so no other measure sees what they change.
     if (Array.isArray(cfg.rules) && cfg.rules.length) {
-      out.rules = [];
+      out.rules = out.rules || [];
       for (const id of cfg.rules) {
         const r = await page.evaluate(async ([id, ev]) => {
           const h = window.__nbRules;
@@ -1552,6 +1580,8 @@ export interface PlaytestRun {
   kitScoreStart?: number | null;
   /** The rules the user named, proved by playing (PROBED_RULES). */
   rules?: RuleProbe[];
+  /** The game's features switched off while it was played (the kit's feature host), with the reason. */
+  featuresOff?: Array<{ id: string; reason: string }> | null;
   kitScoreEnd?: number | null;
   /** What the kit game's last frame asked of the GPU (window.__nbKit.load) — null for a game that does not report it. */
   load?: { calls: number; triangles: number; geometries: number; textures: number } | null;

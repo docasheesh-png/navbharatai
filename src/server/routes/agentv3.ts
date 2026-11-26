@@ -26118,6 +26118,7 @@ async function noteBuildOutcome(
           // claim a typecheck happened when it did not.
           // …or a write-time compile that really looked at the project (Q-3249: "no typecheck ran" beside 5 write-time runs).
           typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
+          prodBuildFailed: prodBuildOutcome === 'failed', // "game build clean hai" over a failed production build (#2526)
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
           // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3305).

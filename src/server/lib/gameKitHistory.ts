@@ -115,7 +115,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "7b29dcf0bb4456d95b95e0e53764c86750df37cde399a1951b6bd45fc1a252af",
     "d23194e162c5fb8cd62341beda356c560f9fe8cd841916e082b2017b87f1fb7a",
     "3effb0aa84a5eca20cb6222207e6b0d5ed4ebdb5a17bf9e6fec14bae78c6bc15",
-    "a23181159ca5a38acbf994c54e3f9a6c788af74629175eae8dbbeaf3613f1037"
+    "a23181159ca5a38acbf994c54e3f9a6c788af74629175eae8dbbeaf3613f1037",
+    "fc19db0ac9aaec09d50817a2f4fd99b396d531dbfa8b8feed005974f9b32ec31"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -531,7 +532,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6fc5ad77463c27b2c76f5e7fa87c707847a11e1623fda8f1f0724eb3def482b2"
   ],
   "src/game/play/actions.ts": [
-    "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3"
+    "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3",
+    "91e33f58029996a590cc262212f9df9e0f18d6fee04f5dee4e485407cf0faf8a"
   ],
   "src/game/play/aim.ts": [
     "f9803ff82045872507a1e60657b343fc203c4fa00528561f00636f8875913ebf",
@@ -667,7 +669,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b2fa00c4e7db9c78014754291d132454b292a1588616fc91be9c31c62900f019",
     "bb36f7ea5190149b52e78ed63fea8e8c516fa57c4252ff261c5582aa40104359",
     "3d4f567f14d96b5f73b20a45ecb93ee5d7680c4399e1456a04cd4e3c6e1113ed",
-    "d9d7c6a5b123dcd5cd7de1109608babc416ac8a39ee0dbdb76a0e1214e4adda6"
+    "d9d7c6a5b123dcd5cd7de1109608babc416ac8a39ee0dbdb76a0e1214e4adda6",
+    "613854c5532ea2fdcc9cd3b1658bf33802e9def49737d5bd2584200c3ce58968"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"
@@ -815,7 +818,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/three/physics.ts": [
     "a4bb8d49546dfe95b0308c25f10149391ef288e9f1a7757555c2732c86c9cfb1",
-    "d59222edc786c874307f47cb7f13e1cb71b1d004efe8ea47d2e2d4ced1843c43"
+    "d59222edc786c874307f47cb7f13e1cb71b1d004efe8ea47d2e2d4ced1843c43",
+    "e960c6f68bbd4680ba88e3bcd94b05c138e9dec169660257d868af1cedbd481e"
   ],
   "src/game/three/race.ts": [
     "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548",

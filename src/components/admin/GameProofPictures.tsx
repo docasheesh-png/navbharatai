@@ -23,7 +23,7 @@ export function proofPicturesFromIssues(issues: unknown): ProofPictureRef[] {
     if (!Array.isArray(taken)) return [];
     return taken
       .filter((t): t is { view: string; stored: string } => !!t && typeof t === 'object' && typeof (t as { view?: unknown }).view === 'string'
-        && typeof (t as { stored?: unknown }).stored === 'string' && /^game-proof-v1\//.test((t as { stored: string }).stored))
+        && typeof (t as { stored?: unknown }).stored === 'string' && /^game-proof-v[12]\//.test((t as { stored: string }).stored)) // v2 = filed by owner (Q-3410), v1 = the first layout
       .slice(0, 3)
       .map((t) => ({ view: t.view, key: t.stored }));
   } catch { return []; }

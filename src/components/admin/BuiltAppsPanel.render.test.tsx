@@ -40,8 +40,13 @@ describe('BuiltAppsPanel renders', () => {
 
   it('offers the search and the state filter from the first frame', () => {
     expect(html).toContain('App id, owner uid or link');
-    expect(html).toContain('All built apps');
-    expect(html).toContain('Live only');
+    // 2026-11-26: order, last build, paid / free and live-or-not, from the first frame.
+    expect(html).toContain('Newest first');
+    expect(html).toContain('Oldest first');
+    expect(html).toContain('Build failed');
+    expect(html).toContain('Build passed');
+    expect(html).toContain('Paid');
+    expect(html).toContain('Live now');
     expect(html).toContain('Banned');
   });
 });

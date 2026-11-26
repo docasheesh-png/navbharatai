@@ -33,6 +33,7 @@ import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
 import { raceWorldYes } from '../src/server/AgentV3/mapGrowthIntent';
 import { enemyRequestFrom } from '../src/server/lib/GameEnemiesFeature';
+import { cinematicsWanted } from '../src/server/lib/GameOpenWorldGenerator';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
 import { reviewNotReadyUserLine, formatPartialReview, salvageReview } from '../src/server/AgentV3/partialReview';
 import { PLATFORM_SUGGESTED_REPLIES, platformSuggestedReply } from '../src/server/AgentV3/platformSuggestedReplies';
@@ -178,6 +179,12 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  // Camera shots (admin 2026-11-26 #9, Q-3509): the knowledge base tells the user to ask for a death cam in these words.
+  'hero marne ke baad cinematic camera aur game over animation add karo': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/gameKitSeed.ts (cinematicsWanted → GameOptions.cinematics); src/server/lib/GameCinematicsGenerator.ts (DEATH_CAM)`,
+    why: 'a build order: the first open-world build turns it into GameOptions.cinematics.death, and on a later turn the builder is told to set it (the shell plays the shot)',
+    proof: () => reachesWork('hero marne ke baad cinematic camera aur game over animation add karo') && cinematicsWanted('hero marne ke baad cinematic camera aur game over animation add karo').death === true && read('src/server/lib/GameShellGenerator.ts').includes("if (this.options.cinematics?.death) void this.director.play(this.shotsFor('death'))"),
+  },
   // Enemies in one step (admin 2026-11-26 #4, Q-3505): the knowledge base tells the user to say "enemy banao" in an open-world game.
   'enemy banao': {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/platformDoneTurn.ts → growthTurn.ts (addEnemiesAtTurnStart); src/server/lib/GameEnemiesFeature.ts (enemyFeatureSource)`,

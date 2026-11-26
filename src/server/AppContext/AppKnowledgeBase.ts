@@ -912,7 +912,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     name: 'Cinematic camera shots in a game: death cam, intro drone shot, any shot you describe',
     path: 'NavBharatAI Pro → chat → describe the shot in a 3D game request or a later message',
     description: 'Describe a camera shot and the game plays it: after the hero dies, the camera closes in around the body from wide to near and holds a big GAME OVER before the end card; before the first round, a drone shot flies high over the map and circles down to the hero (once per session); or any sequence you describe — how far, how high, which way round, how wide, for how long, with what title. Black bars frame each shot, and a tap or a key skips it.',
-    howToUse: 'Say "hero marne ke baad cinematic camera aur game over animation", "game start hone se pahle pura map ka drone shot", or describe your own shot ("camera hero ke chaaron taraf ghoome, phir upar se dikhe").',
+    howToUse: 'Say "hero marne ke baad cinematic camera aur game over animation add karo" or "game start hone se pahle pura map ka drone shot add karo", or describe your own shot and ask for it ("camera hero ke chaaron taraf ghume aisa shot add karo").',
     relatedFeatures: ['game_play_basics', 'game_enemies_and_crowd'],
     keywords: ['cinematic', 'camera', 'death cam', 'game over animation', 'drone shot', 'intro', 'zoom in', 'zoom out', 'cutscene', 'video', 'slow motion', 'hero marne ke baad', 'pura map', 'camera ghoome'],
   },

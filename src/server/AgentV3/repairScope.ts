@@ -55,6 +55,18 @@ export function withoutPlatformCheckTools<T extends { name: string }>(tools: rea
  */
 export const REPAIR_WITHHELD_TOOLS: ReadonlySet<string> = new Set([...PLATFORM_CHECK_TOOLS, ...DELEGATION_TOOLS]);
 
+/**
+ * A withheld set that holds EVERY tool name except `allowed` (Q-3374, the placeholder repair: file tools only). Passed as
+ * `withheldTools` with a tool list filtered to `allowed`, so a name the model invents or loads — `bash`, a recipe, an
+ * installer — is refused by the runner, not merely missing from the list. PURE.
+ */
+export function onlyTheseTools(allowed: ReadonlySet<string>): ReadonlySet<string> {
+  const keep = new Set(allowed);
+  return new (class extends Set<string> {
+    override has(name: string): boolean { return !keep.has(name); }
+  })();
+}
+
 /** Was this tool withheld BY CONSTRUCTION from this runner (declared, and not offered)? PURE. */
 export function isWithheldTool(name: string, withheld: ReadonlySet<string> | null | undefined, offered: ReadonlySet<string>): boolean {
   return !!withheld && withheld.has(name) && !offered.has(name);

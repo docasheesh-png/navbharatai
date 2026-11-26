@@ -6652,3 +6652,14 @@ Fix: one DOWN_SECONDS (6, every blow); GAME_FEATURES_INDEX_WITH_DANGER is derive
 - **Honesty:** false blocks had been written to `safety_flags` (admin queue, 180 days; no strike system reads it). The admin safety queue now labels a row "False alarm: the current rules allow this message" when its own excerpt proves it (`flagWasOnlyAmbiguousWords`), and leaves it out of the per-account count. Records are not altered or deleted.
 - **Lock:** `tests/anInnocentPromptIsNotRefused.test.ts`; reversion (restore `rule.subject.test(body)` / `rule.context.test(body)`) failed 7 tests.
 - **Q-3560 closed:** #4586 merged (42f76c87); row deleted, ID added to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.
+## 2026-11-26 — failedbr #2549: police the user asks for are the kit's real police, put in by the platform
+
+The kit's Dispatch (a police car with its siren drives in, officers get out) existed and no game used it; the builder hand-wrote
+police five times in #2549's project. GamePoliceFeature.ts + addPoliceAtTurnStart write src/game/features/policeDispatch.ts on
+the kit and list it (and on the first build); missing kit files are added. tests/policeComeWhenAsked.test.ts runs it on the real kit.
+
+## 2026-11-26 — a car picked in the Game Library arrives in an open-world game (admin)
+
+"Use as my car" refused in every game but the racing starter. carSwap.setLibraryCarAtTurnStart now writes
+src/game/features/myCar.ts (GameMyCarFeature.ts) in a game on the kit's features list: the model added, drivable in front of the
+player. tests/aLibraryCarArrivesInAnOpenWorld.test.ts.

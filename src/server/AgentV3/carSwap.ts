@@ -10,6 +10,8 @@
 // PURE except setLibraryCarAtTurnStart, which acts only through the ports it is given.
 import { librarySubjectOf, modelWasAdded, type SetModelResult } from './characterSwap';
 import { libraryDisplayName, MAP_PLACE_PREFIX } from './gameAssets/libraryThumbnails';
+import { MY_CAR_FEATURE_PATH, myCarFeatureSource, setMyCarModel, myCarAddedHandoff } from '../lib/GameMyCarFeature';
+import { featuresIndexWith, FEATURES_INDEX_PATH } from '../lib/GameEnemiesFeature';
 
 export const CAR_FILE_PATH = 'src/game/car.ts';
 export const TRACK_FILE_PATH = 'src/game/track.ts';
@@ -98,9 +100,25 @@ export async function setLibraryCarAtTurnStart(io: {
     return carNotSetHandoff(name, why);
   };
   try {
-    if (!racesOnTheStarter(io.filesAtTurnStart)) return refuse('this game is not a race on NavBharatAI\'s racing starter (src/App.tsx does not render <RacingRoadGame>), so it has no car file the platform can set');
     const subject = librarySubjectOf(id);
     if (!subject) return refuse('it is not a model in the NavBharatAI library');
+    if (!racesOnTheStarter(io.filesAtTurnStart)) {
+      // 🚗 NOT A RACE IS NOT A REFUSAL (admin 2026-11-26: "police car choose ki par woh bhi nahi ayi … yah car available nahi hai").
+      // A game on the kit's features list (the open world) gets the car as a feature: drivable, in front of the player.
+      if (typeof io.filesAtTurnStart[FEATURES_INDEX_PATH] !== 'string') return refuse('this game is neither a race on NavBharatAI\'s racing starter nor an open-world game on the kit\'s features list, so it has no car the platform can set');
+      const got = await io.addModel(id).catch((error) => `failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (!modelWasAdded(got, subject)) return refuse(`the model could not be added to the game (${got.replace(/\s+/g, ' ').slice(0, 220)})`);
+      const had = io.filesAtTurnStart[MY_CAR_FEATURE_PATH];
+      const next = typeof had === 'string' ? setMyCarModel(await io.read(MY_CAR_FEATURE_PATH), subject) : myCarFeatureSource(subject);
+      if (next === null) return refuse(`the model is in the game now (subject '${subject}'), but ${MY_CAR_FEATURE_PATH} is no longer in the shape the platform can set safely`);
+      await io.write(MY_CAR_FEATURE_PATH, next);
+      if (typeof had !== 'string') {
+        const listed = featuresIndexWith(await io.read(FEATURES_INDEX_PATH), 'myCar');
+        if (listed !== null) await io.write(FEATURES_INDEX_PATH, listed);
+      }
+      io.record({ phase: 'build', severity: 'info', code: 'MY_CAR_ADDED', autoResolved: true, message: `The platform put the library car "${name}" the user picked in the open-world game as a drivable car (${MY_CAR_FEATURE_PATH}, MY_CAR.model = '${subject}').` });
+      return myCarAddedHandoff(name, subject);
+    }
     const receipt = await io.addModel(id).catch((error) => `failed: ${error instanceof Error ? error.message : String(error)}`);
     if (!modelWasAdded(receipt, subject)) return refuse(`the model could not be added to the game (${receipt.replace(/\s+/g, ' ').slice(0, 220)})`);
     // A missing file is a fresh car file; a read that FAILS for another reason is not "missing" — nothing is written over it.

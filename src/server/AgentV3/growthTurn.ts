@@ -11,6 +11,7 @@ import { setLibraryCarAtTurnStart } from './carSwap';
 import { mapGrowthNote } from './mapGrowthIntent';
 import { enemyRequestFrom, enemyFeatureSource, featuresIndexWith, enemiesAddedHandoff, ENEMIES_FEATURE_PATH, FEATURES_INDEX_PATH } from '../lib/GameEnemiesFeature';
 import { missingLayerFiles } from '../lib/gameRecipeLayers';
+import { policeRequestFrom, policeFeatureSource, featuresIndexWithPolice, policeAddedHandoff, POLICE_FEATURE_PATH } from '../lib/GamePoliceFeature';
 import { editedBridgeNote, bridgeState, worldUpgradeEnabled, BRIDGE_PATH } from './worldUpgrade';
 
 /** The game's own open-world bridge (GameOpenWorldGenerator OPEN_WORLD_BRIDGE_PATH — a test keeps the two equal). */
@@ -217,6 +218,34 @@ export async function addEnemiesAtTurnStart(io: {
     await io.write(FEATURES_INDEX_PATH, listed);
     io.record({ phase: 'build', severity: 'info', code: 'ENEMIES_ADDED', autoResolved: true, message: `The platform put ${req.count} ${req.kind} enemies (${req.ai}) in the game: ${ENEMIES_FEATURE_PATH}${layers.size ? `, with ${layers.size} kit file(s) it imports` : ''}.` });
     return enemiesAddedHandoff(req, [...layers.keys()]);
+  } catch { return ''; }
+}
+
+/**
+ * 🚓 "POLICE AAYE" PUTS REAL POLICE IN THE GAME (admin 2026-11-26, failedbr #2549: "police ki gadi aye usse police utre, bolne par
+ * bhi na police aa rahi hai, na gadi"). In a game whose features list is the kit's, the platform writes
+ * src/game/features/policeDispatch.ts on the kit's systems/dispatch.ts (a car with its siren drives in, officers get out),
+ * lists it, adds every kit file it imports that the project lacks, and tells the builder they are in. A game that already has
+ * the file is never overwritten. '' when the turn asks for no police or the game has no kit features list. Never throws.
+ */
+export async function addPoliceAtTurnStart(io: Parameters<typeof addEnemiesAtTurnStart>[0]): Promise<string> {
+  try {
+    const req = policeRequestFrom(io.prompt);
+    const files = io.filesAtTurnStart;
+    if (!req || !files || typeof files[FEATURES_INDEX_PATH] !== 'string') return '';
+    if (typeof files[POLICE_FEATURE_PATH] === 'string') {
+      return `🚓 THIS GAME ALREADY HAS THE KIT'S POLICE: ${POLICE_FEATURE_PATH}. Make the change the user asks for in its POLICE numbers (cars, crew, again, chase) — never a second police system.`;
+    }
+    const index = await io.read(FEATURES_INDEX_PATH).then((c) => (typeof c === 'string' ? c : null), () => null);
+    const listed = index === null ? null : featuresIndexWithPolice(index);
+    if (listed === null) return '';
+    const source = policeFeatureSource(req);
+    const layers = missingLayerFiles({ [POLICE_FEATURE_PATH]: source }, new Set(Object.keys(files)));
+    for (const [path, layer] of layers) await io.write(path, layer.content);
+    await io.write(POLICE_FEATURE_PATH, source);
+    await io.write(FEATURES_INDEX_PATH, listed);
+    io.record({ phase: 'build', severity: 'info', code: 'POLICE_ADDED', autoResolved: true, message: `The platform put the kit's police in the game: ${POLICE_FEATURE_PATH} (${req.cars} car(s), ${req.crew} officers each${req.chase ? ', after the player' : ''})${layers.size ? `, with ${layers.size} kit file(s) it imports` : ''}.` });
+    return policeAddedHandoff(req, [...layers.keys()]);
   } catch { return ''; }
 }
 

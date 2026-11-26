@@ -23947,7 +23947,7 @@ async function noteBuildOutcome(
             try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
           }
           const adServingPlayer = (await adFactsNow()).players.length > 0;
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer });
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt: checksRequest, appSource, adServingPlayer });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's

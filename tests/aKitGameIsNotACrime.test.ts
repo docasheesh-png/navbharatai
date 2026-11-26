@@ -1,4 +1,4 @@
-// A CRICKET GAME IS NOT CSAM — AND A FLAGGED APP IS HELD FOR A PERSON, NOT REFUSED (Q-3521).
+// A CRICKET GAME IS NOT CSAM — AND A FLAGGED APP IS HELD FOR A PERSON, NOT REFUSED (Q-3560).
 //
 // Admin report 2026-11-26: publishing a plain cricket game to App Mart was refused with "This app was
 // not published: it pairs words describing a child with explicitly sexual words." The cause: the
@@ -82,7 +82,7 @@ describe('🔒 census: every kit-built game classifies as an ordinary app', () =
 });
 
 describe('🔒 words that are ambiguous ALONE are not half a pair on the publish path', () => {
-  // Each of these classified CSAM_SIGNAL or ADULT_CONTENT before Q-3521 (measured).
+  // Each of these classified CSAM_SIGNAL or ADULT_CONTENT before Q-3560 (measured).
   for (const page of [
     'A cricket game for kids with a hardcore mode',
     'Hardcore mode: watch the timer',

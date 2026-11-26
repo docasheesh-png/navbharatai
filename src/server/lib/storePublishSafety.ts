@@ -74,7 +74,7 @@ export interface PublishSafetyDecision {
    * is never served to anyone except its owner and a store admin until an admin lists it, and the
    * matched phrases travel on the record for the admin's review screen. Before 2026-11-26 the illegal
    * tier refused outright — which, while the classifier paired words across a whole bundle, refused
-   * every kit-built 3D game as CSAM (Q-3521). The malware / phishing rules are NOT part of this: they
+   * every kit-built 3D game as CSAM (Q-3560). The malware / phishing rules are NOT part of this: they
    * keep their own refuse-in-block-mode behaviour.
    */
   holdForReview: boolean;

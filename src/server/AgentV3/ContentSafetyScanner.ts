@@ -80,7 +80,7 @@ export function scannableText(files: Map<string, Buffer> | null | undefined): st
 }
 
 /**
- * The same scannable text, kept PER FILE (2026-11-26, Q-3521). The illegal-category rules pair their
+ * The same scannable text, kept PER FILE (2026-11-26, Q-3560). The illegal-category rules pair their
  * two halves inside one file only — a word in one kit file and another word in a different file are
  * not a phrase anyone reads — and the admin's review screen names the file a finding came from. One
  * definition of "which files, and how much of each" serves both shapes, so they cannot disagree.

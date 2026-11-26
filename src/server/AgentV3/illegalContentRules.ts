@@ -21,7 +21,7 @@
 // So each rule needs TWO independent signals — a subject AND a context — which is what an actual
 // offending page has and an innocent mention does not.
 //
-// ── 🔴 AND "IN THE SAME APP" WAS THE BUG: THE HALVES MUST SIT TOGETHER IN A PHRASE (Q-3521) ───────
+// ── 🔴 AND "IN THE SAME APP" WAS THE BUG: THE HALVES MUST SIT TOGETHER IN A PHRASE (Q-3560) ───────
 // Admin report 2026-11-26: a plain cricket game was refused from App Mart as CSAM. The publish text is
 // EVERY source file, and the pairing used to be "subject anywhere AND context anywhere" — so three.js's
 // `object.children` in one kit file and the word "hardcore" in a code comment of another, hundreds of
@@ -480,7 +480,7 @@ const SEX_AS_FIELD_AFTER = /^\s*(?:[:=/|(,]|\s+(?:ratio|m\/f|male|female|of\s+th
  * A game has a "hardcore mode", a codebase says "explicit dispose of child meshes", a school form asks
  * "Child sex: M/F". Each word is sexual only next to a sexual noun, so on its own it is not one half of
  * a pair. Measured, not guessed: "a cricket game for kids with a hardcore mode" paired CSAM_SIGNAL and
- * "Hardcore mode: watch the timer" paired ADULT_CONTENT before this (Q-3521). ⚠️ `triagePrompt` shares
+ * "Hardcore mode: watch the timer" paired ADULT_CONTENT before this (Q-3560). ⚠️ `triagePrompt` shares
  * the same rule lists and still has these false blocks — recorded as an open, admin-decision item,
  * because prompt triage is a separate policy that this change was told not to touch.
  */
@@ -561,7 +561,7 @@ function excerptOf(body: string, [s, e]: Span): string {
 /**
  * Classify an app's own files — the PUBLISH path. PURE.
  *
- * A rule fires only on a phrase-level pair inside one file (see the Q-3521 note at the top). The
+ * A rule fires only on a phrase-level pair inside one file (see the Q-3560 note at the top). The
  * protective stand-down reads the whole app, exactly as it always did. The total text read is capped
  * at `SCAN_TEXT_CAP`, in file order, so a giant bundle cannot stall a publish.
  *

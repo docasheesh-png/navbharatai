@@ -1122,6 +1122,31 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
   }
 }
 
+/** The last build's result for one workspace: passed (ok), failed, or unknown (cut off, still running, or no report). */
+export type BuildOutcome = 'passed' | 'failed' | 'unknown';
+
+/**
+ * The LAST build's result for a set of workspaces, in ONE read (admin 2026-11-26: the built-apps list sorted and filtered
+ * by "fail / pass"). The stored report is up to 900 KB, so only `report.ok` is fetched (a field mask). The SAME reading
+ * the All-builds chips use (`statusCounts`): `ok === true` passed, `ok === false` failed, anything else unknown — never
+ * folded into either. A workspace with no report is absent from the map (unknown). Never throws.
+ */
+export async function getBuildOutcomesMany(workspaceIds: string[]): Promise<Map<string, BuildOutcome>> {
+  const out = new Map<string, BuildOutcome>();
+  const db = getDb();
+  const ids = [...new Set(workspaceIds.filter((id) => typeof id === 'string' && id.length > 0 && !id.includes('/')))].slice(0, 100);
+  if (!db || ids.length === 0) return out;
+  try {
+    const snaps = await db.getAll(...ids.map((id) => db.collection(COLLECTION).doc(id)), { fieldMask: ['report.ok'] });
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const ok = (s.data()?.report as { ok?: unknown } | undefined)?.ok;
+      out.set(s.id, ok === true ? 'passed' : ok === false ? 'failed' : 'unknown');
+    }
+  } catch { /* the list degrades to "unknown" outcomes, never to no list */ }
+  return out;
+}
+
 /** One page of `listAllDiagnostics` at a time. */
 const LIST_PAGE = 50;
 

@@ -151,9 +151,11 @@ describe('composite-index queries cannot be reintroduced', () => {
     try { indexes = readFileSync(join(repoRoot, 'firestore.indexes.json'), 'utf8'); } catch { /* absent: good */ }
     if (!indexes) return;
     const firebaseJson = JSON.parse(readFileSync(join(repoRoot, 'firebase.json'), 'utf8')) as
-      { firestore?: { indexes?: string } };
+      { firestore?: { indexes?: string } | Array<{ indexes?: string }> };
+    const fs = firebaseJson.firestore;
+    const entries = Array.isArray(fs) ? fs : fs ? [fs] : [];
     expect(
-      firebaseJson.firestore?.indexes,
+      entries.length > 0 && entries.every((e) => e.indexes === 'firestore.indexes.json'),
       'firestore.indexes.json exists but firebase.json does not reference it, so it is never applied. ' +
       'Either wire it up (and read the project-mismatch warning in firestoreIndexSafe.ts first) or delete it.',
     ).toBeTruthy();

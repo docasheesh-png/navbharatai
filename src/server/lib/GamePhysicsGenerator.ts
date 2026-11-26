@@ -71,6 +71,7 @@ export function createPhysics(scene: THREE.Object3D, options: PhysicsOptions = {
   world.defaultContactMaterial.friction = 0.4;
   world.defaultContactMaterial.restitution = 0.2;
   const meshes = new Map<THREE.Object3D, CANNON.Body>();
+  const ownStruck = new WeakMap<THREE.Object3D, (impulse: THREE.Vector3) => void>();
   const fixed: CANNON.Body[] = [];
   if (options.ground !== false) {
     const ground = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
@@ -119,12 +120,24 @@ export function createPhysics(scene: THREE.Object3D, options: PhysicsOptions = {
     material.friction = o.friction ?? 0.4; material.restitution = o.restitution ?? 0.2;
     world.addBody(body);
     meshes.set(mesh, body);
+    // A character's kick, punch or shove (play/actions.ts) lands on this body as a real impulse. A function, so cloning the
+    // mesh never copies the body; a game's own onStruck wins.
+    if (typeof mesh.userData.onStruck !== 'function') {
+      const struck = (impulse: THREE.Vector3) => { body.wakeUp(); body.applyImpulse(v3(impulse.clone().multiplyScalar(Math.max(1, body.mass) / 4))); };
+      mesh.userData.onStruck = struck;
+      ownStruck.set(mesh, struck);
+    }
     return body;
   };
 
   const remove = (mesh: THREE.Object3D) => {
     const b = meshes.get(mesh);
-    if (b) { world.removeBody(b); meshes.delete(mesh); }
+    if (b) {
+      world.removeBody(b); meshes.delete(mesh);
+      // Only the hook this world installed goes with the body — never a game's own.
+      if (ownStruck.get(mesh) === mesh.userData.onStruck) delete mesh.userData.onStruck;
+      ownStruck.delete(mesh);
+    }
   };
 
   const explode = (at: THREE.Vector3, strength: number, radius: number): number => {

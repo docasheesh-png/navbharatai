@@ -6,7 +6,7 @@ import { composeRule } from './gameAssets/composeRule';
 import { composeEffect } from './gameAssets/composeEffect';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { CAR_FILE_PATH, raceCarFile } from './carSwap';
-import { starterCarPaint } from '../lib/projectVariety';
+import { GAME_SEED_FILE_PATH, gameSeedFileSource, starterCarPaint, withGameSeedFacets, type GameSeedFacet } from '../lib/projectVariety';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
@@ -119,6 +119,8 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 
 /** A recipe's files in flight at once: enough to end the one-by-one wait, few enough for any sandbox. */
 const RECIPE_WRITE_CONCURRENCY = 6;
+/** The kit files whose creation gives a game its own seed (src/game/gameSeed.ts, Q-3373): the action town and the race starter. */
+const ACTION_TOWN_PATH = 'src/game/three/buildings.ts', RACE_STARTER_PATH = 'src/game/RacingRoadGame.tsx';
 import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
@@ -166,7 +168,8 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
-  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote,
+  isTestOnlyFile, releaseBuildExcludesTests, releaseConsequence } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { hollowFeatureWriteNote } from './hollowFeature';
@@ -3878,6 +3881,21 @@ export class ToolDispatcher {
    */
   private _tsProject: TsProjectVerdict = 'unknown';
   private _tsProbeAttempts = 0;
+  /**
+   * Does the release build leave test files out (Q-3462)? Read once, and only when a typecheck has an error in a test
+   * file — the only time the answer changes a note. A read that fails stays unknown and is asked again next time.
+   */
+  private _releaseExcludesTests: boolean | null = null;
+  private async releaseExcludesTests(errors: ReadonlyArray<{ file: string }>): Promise<boolean | null> {
+    if (this._releaseExcludesTests !== null || !errors.some((e) => isTestOnlyFile(e.file))) return this._releaseExcludesTests;
+    try {
+      const pkg = await this.actuator.readFile(this.workspaceId, 'package.json');
+      const config = /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(String(pkg ?? ''))?.[1]?.replace(/^\.\//, '').replace(/["']/g, '');
+      const tsconfig = config ? await this.actuator.readFile(this.workspaceId, config).catch(() => null) : null;
+      this._releaseExcludesTests = releaseBuildExcludesTests(typeof pkg === 'string' ? pkg : null, typeof tsconfig === 'string' ? tsconfig : null);
+    } catch { /* unknown stays unknown — the note keeps its cautious wording */ }
+    return this._releaseExcludesTests;
+  }
 
   /** The write-time typecheck's own numbers, for the build report (`WRITE_TIME_TYPECHECK`). */
   writeTypecheckStats(): WriteTypecheckStats {
@@ -4158,6 +4176,25 @@ export class ToolDispatcher {
     return true;
   }
 
+  /**
+   * 🎲 This game's own seeds (src/game/gameSeed.ts, projectVariety.ts — Q-3373): the facets whose kit file this recipe call has
+   * just CREATED are written, the file created or only the missing lines added. A facet already there, or a file no longer in a
+   * shape the platform can add to, is left exactly as it is; a game whose kit file already existed gets nothing, so an edit never
+   * moves its town or its road. True when it was written now.
+   */
+  private async ensureGameSeedFile(agent: AgentRole, facets: readonly GameSeedFacet[], source: string): Promise<boolean> {
+    if (!facets.length) return false;
+    let current: string | null = null;
+    try { current = await this.actuator.readFile(this.workspaceId, GAME_SEED_FILE_PATH); }
+    catch (error) { if (!isNotFoundError(error)) throw error; }
+    const next = current === null ? gameSeedFileSource(this.workspaceId, facets) : withGameSeedFacets(current, this.workspaceId, facets);
+    if (next === null) return false;
+    const written = await this.guardedWrite(GAME_SEED_FILE_PATH, next, { agent, source });
+    this.state?.recordFileChange({ path: GAME_SEED_FILE_PATH, kind: written.kind }, agent);
+    getWorkspaceMemory(this.workspaceId).indexFile(GAME_SEED_FILE_PATH, written.content);
+    return true;
+  }
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
@@ -4216,6 +4253,7 @@ export class ToolDispatcher {
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
+      if (wrote.kind === 'create') this.recipeCreated.add(path);
       return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`;
     };
     lines.push(...await mapWithConcurrency(Object.entries(files), additiveOnly ? 1 : RECIPE_WRITE_CONCURRENCY, one));
@@ -4236,6 +4274,8 @@ export class ToolDispatcher {
    * replaced only after it is READ and found to be an older kit version, never on the strength of this set.
    */
   private readonly kitCurrentPaths = new Set<string>();
+  /** Kit files a recipe (or the layers it brought) CREATED in this dispatcher — read from the writes themselves, no sandbox read. */
+  private readonly recipeCreated = new Set<string>();
 
   private noteKitCurrent(path: string, content: string): void {
     if (recipeFilePool().get(path)?.content === content) this.kitCurrentPaths.add(path);
@@ -4333,6 +4373,7 @@ export class ToolDispatcher {
         this.noteKitCurrent(path, f.content);
         all[path] = f.content;
         added.set(path, f);
+        this.recipeCreated.add(path);
       }
       const refreshed: string[] = [];
       for (const [path, f] of plan.refresh) {
@@ -4633,8 +4674,10 @@ export class ToolDispatcher {
       }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
-      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);
+      // Q-3462: a test file's error is said as a release blocker only when the release build compiles test files.
+      const releaseExcludesTests = await this.releaseExcludesTests(errors);
+      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, { releaseExcludesTests }) + members;
+      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, { releaseExcludesTests });
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
@@ -8532,7 +8575,11 @@ export class ToolDispatcher {
               // this tool holds no file content, and reading one back would put I/O in a hot path for a
               // sharper wording. The sourceless form still names both causes in order and still says not
               // to rewrite the file, which is the loop that had to break.
-              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
+              // Q-3462 sibling: errors only in test files the release build leaves out are not a failed production build.
+              const release = releaseConsequence(tscErrs, await this.releaseExcludesTests(tscErrs));
+              tscHeader = release.blocksRelease
+                ? `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`
+                : `TYPE ERROR(S) in test files only — ${release.text}. Fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscStatus = 'clean';
             }
@@ -10419,11 +10466,11 @@ export class ToolDispatcher {
         const made = await composeAction(name, description, askStandIn, supplied);
         if (made.kind === 'refused') refuse(made.reason);
         if (made.kind === 'library') {
-          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger). It plays on the character the user chose. Nothing was written.`;
+          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger) — on the player; add a third argument for other characters: 'police' (every police character), 'villager', 'all', or one entity's object. It plays on any body. Nothing was written.`;
         }
         const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
         this.scheduleCheckpoint('character action');
-        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it; it plays on the character the user chose, whatever model it is. Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
+        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it — on the player, or with a third argument on other characters ('police', 'villager', 'all', or one entity's object); it plays on any body, whatever model it is.${made.def.loop || made.def.hold ? ` It ${made.def.loop ? 'loops' : 'holds its last pose'} until stopAction(ctx, who).` : ''} Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
       }
 
       case 'compose_rule': {
@@ -10790,6 +10837,9 @@ export class ToolDispatcher {
           ? gshRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gsh = generateGameShell(gshInclude);
+        // 🎲 A race starter (or an action town) this call CREATES gets this project's own seed (src/game/gameSeed.ts); one that
+        // already existed keeps the road and the town it had. "Created" is read from the writes themselves (recipeCreated).
+        this.recipeCreated.delete(RACE_STARTER_PATH); this.recipeCreated.delete(ACTION_TOWN_PATH);
         const gshWritten = await this.writeRecipeFiles(gsh.files, agent);
         const gshLayers = await this.addMissingRecipeLayers(gsh.files, agent);
         // 🧍 Every game on the shell swaps its character in src/game/player.ts, which the shell reads by itself (2026-11-22:
@@ -10798,8 +10848,13 @@ export class ToolDispatcher {
         // 🎲 A race the seed KNOWS is a race (its include names the race starter) gets its own car file with a paint fixed by
         // this project (projectVariety.ts): six new races are not six red cars, and an edit never repaints it.
         const gshCar = gshInclude?.includes('racingroadgame') && gsh.files['src/game/RacingRoadGame.tsx'] ? await this.ensureRaceCarFile(agent) : false;
+        const gshFacets: GameSeedFacet[] = [
+          ...(this.recipeCreated.has(ACTION_TOWN_PATH) ? ['town' as const] : []),
+          ...(this.recipeCreated.has(RACE_STARTER_PATH) ? ['road' as const] : []),
+        ];
+        const gshSeed = await this.ensureGameSeedFile(agent, gshFacets, 'generate_game_shell');
         this.scheduleCheckpoint('game shell');
-        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}${gshCar ? `\ncreated ${CAR_FILE_PATH} (the car the player drives — RacingRoadGame reads it by itself)` : ''}\n\n${gsh.instructions}${gshLayers}`;
+        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}${gshCar ? `\ncreated ${CAR_FILE_PATH} (the car the player drives — RacingRoadGame reads it by itself)` : ''}${gshSeed ? `\nwrote ${GAME_SEED_FILE_PATH} (this game's own ${gshFacets.join(' and ')} — the kit reads it by itself; never pass a fixed seed)` : ''}\n\n${gsh.instructions}${gshLayers}`;
       }
 
       case 'generate_melody': {
@@ -10902,14 +10957,17 @@ export class ToolDispatcher {
           ? g3Rec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const g3 = generateGame3D(g3Include);
+        // 🎲 The action town file this call CREATES gets this project's own town seed (src/game/gameSeed.ts, Q-3373).
+        this.recipeCreated.delete(ACTION_TOWN_PATH);
         const g3Written = await this.writeRecipeFiles(g3.files, agent);
         const g3Layers = await this.addMissingRecipeLayers(g3.files, agent);
+        const g3Seed = this.recipeCreated.has(ACTION_TOWN_PATH) ? await this.ensureGameSeedFile(agent, ['town'], 'generate_game_3d') : false;
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.
         // Since 2026-10-04 the dependency is INSTALLED, not named (installRecipeDependencies, called by
         // addMissingRecipeLayers): `g3Layers` says what happened, including when it could not be done.
-        return `Wired the 3D layer:\n${g3Written.join('\n')}\n\n${g3.instructions}${g3Layers}`;
+        return `Wired the 3D layer:\n${g3Written.join('\n')}${g3Seed ? `\nwrote ${GAME_SEED_FILE_PATH} (this game's own town — createActionTown() reads it by itself; never pass a fixed seed)` : ''}\n\n${g3.instructions}${g3Layers}`;
       }
 
       case 'generate_game_runtime': {

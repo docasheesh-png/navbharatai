@@ -52,6 +52,46 @@ export function startBandLabel(tier: StartTier | string | null | undefined): str
   }
 }
 
+/**
+ * THE SCORE'S BAND AND THE ROUTING VERDICT, SAID TOGETHER (failedbr #2523 / #2525, Q-3466, 2026-11-26).
+ *
+ * Both reports printed `COMPLEXITY_ROUTING: COMPLEX (score 15, model)` and `requestAnalysis.complexityBand: "cheapest
+ * band"`. Each was true of its own reader: the score sits in the cheapest band, and a second opinion (the Weak preflight)
+ * read the request as complex, which is what opened the build past the cheap rung. Printed apart, they read as one score
+ * judged two ways. This is the ONE answer both lines use: the band the score alone gives, the verdict that decides the
+ * routing and who gave it, and — only when the two point different ways — the sentence that says which one decided.
+ * A deterministic verdict never disagrees with its own band (complex is the score ≥ 40 line), so this speaks only when
+ * a model, a template, a workspace size or the user overrode the score. PURE.
+ */
+export interface ScoreBandVersusRouting {
+  scoreBand: string;
+  routedAs?: 'complex' | 'simple';
+  routedBy?: string;
+  /** The verdict points the other way from the score's band. */
+  overridden: boolean;
+  /** One admin-readable sentence when `overridden`, else ''. Names no vendor. */
+  note: string;
+}
+
+export function scoreBandVersusRouting(
+  tier: StartTier | string | null | undefined,
+  routing: { verdict?: string; source?: string } | null | undefined,
+): ScoreBandVersusRouting {
+  const scoreBand = startBandLabel(tier);
+  const verdict = routing?.verdict === 'complex' || routing?.verdict === 'simple' ? routing.verdict : undefined;
+  if (!verdict) return { scoreBand, overridden: false, note: '' };
+  const routedBy = typeof routing?.source === 'string' && routing.source.trim() ? routing.source.trim() : 'unknown';
+  const key = startTierFromBandLabel(scoreBand);
+  const bandSaysComplex = key === 'sonnet' || key === 'opus';
+  // A deterministic verdict IS the score read against the 40 line, so it cannot override the score; a band it disagrees
+  // with was set by something else (a pinned power mode), which is not this sentence's claim to make.
+  const overridden = key !== null && routedBy !== 'deterministic' && (verdict === 'complex') !== bandSaysComplex;
+  const note = overridden
+    ? `The score alone places this request in the ${scoreBand}; the ${routedBy} verdict (${verdict}) overrode it, and that verdict decides which rung opens the build.`
+    : '';
+  return { scoreBand, routedAs: verdict, routedBy, overridden, note };
+}
+
 /** The band's key back from its report label (Q-2748): reports carry the label only; telemetry still groups by key. */
 export function startTierFromBandLabel(label: string | null | undefined): StartTier | null {
   switch (String(label ?? '').trim()) {

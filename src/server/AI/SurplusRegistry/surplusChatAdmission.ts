@@ -133,7 +133,8 @@ export function recordSurplusAdmissionDiag(
       severity: 'warning',
       code: 'SURPLUS_FALLBACK',
       autoResolved: true,
-      message: `Surplus unavailable — continuing on Weak ladder (reason: ${diag.reason ?? 'other_safe'}).`,
+      // Q-3467 sibling: the build runs the Weak CHAIN, whose lead engines sit in front of the ladder TIER_LADDER prints.
+      message: `Surplus unavailable — continuing on the Weak chain without Surplus; its order is in providerChain (reason: ${diag.reason ?? 'other_safe'}).`,
       detail: String(diag.reason ?? 'other_safe'),
     });
   } catch { /* diagnostics are best-effort */ }

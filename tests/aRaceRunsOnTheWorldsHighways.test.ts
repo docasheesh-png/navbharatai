@@ -54,7 +54,7 @@ describe('🏁 a race on the world\'s highways', () => {
     let last = 0, standing: any = null;
     for (let d = 0; d <= 1010; d += 10) {
       const p = r.course.poseAt(Math.min(d, r.course.length));
-      car.position.set(p.x, p.y, p.z);
+      car.position.set(p.x, p.y, p.z); car.rotation.y = p.heading;                    // a car on the road faces along it
       const s = r.update(ctx, 1 / 60); standing = s.standing;
       expect(s.distance).toBeGreaterThanOrEqual(last - 0.5); last = s.distance;
     }

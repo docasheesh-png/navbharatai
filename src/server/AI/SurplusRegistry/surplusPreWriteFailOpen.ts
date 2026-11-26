@@ -21,6 +21,7 @@
  * Messaging honesty (#3959) and user-facing "high demand" copy (#3956) are separate;
  * this module recovers the build.
  */
+import { addFallbackMs } from '../../AgentV3/fallbackTime';
 import {
   PublicBuildEngineError,
   PUBLIC_BUILD_ENGINE_UNAVAILABLE,
@@ -58,7 +59,7 @@ export type SurplusPreWriteFailOpenHooks = {
   userFilesWritten: () => number;
   /** `diag` (BR2388): the supplier-free `[engine-diag: stage=… reason=… safe=… status=…]` marker, for the
    *  admin report only; '' when the failure carried none. */
-  onFailOpen?: (reason: SurplusPreWriteFailOpenReason, diag?: string) => void;
+  onFailOpen?: (reason: SurplusPreWriteFailOpenReason, diag?: string, nextRung?: string) => void;
   /**
    * How long a failed Surplus turn ran before it failed — when the failure was the ENGINE's, not our clock's (the
    * signal was not aborted). 🔴 failedbr #2408 / #2428 (2026-11-17): Surplus held the fast lane's plan call for 90 s and
@@ -151,7 +152,11 @@ export function shouldFailOpenSurplusPreWrite(opts: {
 export function tryConsumeSurplusPreWriteFailOpen(
   hooks: SurplusPreWriteFailOpenHooks,
   error: unknown,
-  opts: { allowAfterWrite?: boolean } = {},
+  /**
+   * `nextRung` (failedbr #2525, Q-3467): the engine that takes the turn next, read only once Surplus is dropped — the
+   * report line names it instead of "the Weak ladder", which on that build named a ladder the next engine was not on.
+   */
+  opts: { allowAfterWrite?: boolean; nextRung?: () => string | undefined } = {},
 ): SurplusPreWriteFailOpenReason | null {
   if (hooks.noFallback) return null;
   let files: number;
@@ -165,7 +170,14 @@ export function tryConsumeSurplusPreWriteFailOpen(
   // An outright refusal (the engine's own HTTP 4xx) parks Surplus far longer than a spike (surplusAdmitCircuit.ts).
   try { const httpStatus = readEngineSafeDiag(error)?.status; if (typeof httpStatus === 'number') recordSurplusMidBuildDeath(reason, Date.now(), { httpStatus }); else recordSurplusMidBuildDeath(reason); } catch { /* never block fail-open */ }
   // The diag argument is passed only when the failure carried one, so untagged callers see the old call.
-  try { const diag = formatEngineSafeDiag(error); if (diag) hooks.onFailOpen?.(reason, diag); else hooks.onFailOpen?.(reason); } catch { /* audit must never block fail-open */ }
+  let next: string | undefined;
+  try { const n = opts.nextRung?.(); next = typeof n === 'string' && n.trim() ? n.trim() : undefined; } catch { next = undefined; }
+  try {
+    const diag = formatEngineSafeDiag(error);
+    if (next) hooks.onFailOpen?.(reason, diag || undefined, next);
+    else if (diag) hooks.onFailOpen?.(reason, diag);
+    else hooks.onFailOpen?.(reason);
+  } catch { /* audit must never block fail-open */ }
   return reason;
 }
 
@@ -199,8 +211,12 @@ export function wrapSurplusRunnerPreWriteFailOpen(
       } catch (error) {
         try { hooks.onSurplusError?.(error); } catch { /* observer must never alter the turn */ }
         if (!params.signal?.aborted) { try { hooks.onSurplusAttemptWasted?.(Date.now() - startedAt); } catch { /* telemetry only */ } }
-        if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error, { allowAfterWrite: true })) throw error;
-        return getWeak().runTurn(params);
+        if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error, { allowAfterWrite: true, nextRung: () => getWeak().plannedModel })) throw error;
+        // 🔴 failedbr #2525 (Q-3465): the answered call recorded latencyMs 83888, answerMs 4378 and fallbackMs 0 — the 79 s
+        // Surplus spent refusing before this retry were part of the call and were reported as no fallback time at all.
+        // The seconds before the hand-over are fallback time of THIS turn, added to whatever the Weak chain measured.
+        const lostMs = Date.now() - startedAt;
+        return addFallbackMs(await getWeak().runTurn(params), lostMs);
       }
     },
   };
@@ -210,9 +226,13 @@ export function wrapSurplusRunnerPreWriteFailOpen(
  * The report line for a mid-build fail-open, true to WHEN it fired. PURE. The line used to say "before any user
  * file" for every reason, including `mid_build_after_write` — false on exactly the builds #4050 rescued.
  */
-export function surplusFallbackMessage(reason: SurplusPreWriteFailOpenReason): string {
+export function surplusFallbackMessage(reason: SurplusPreWriteFailOpenReason, nextRung?: string): string {
   const when = reason === 'mid_build_after_write' ? 'after the builder had written files' : 'before any user file';
-  return `Surplus unavailable mid-build ${when} — continuing the same turn on the Weak ladder (reason: ${reason}).`;
+  // 🔴 failedbr #2525 (Q-3467): the line said "on the Weak ladder" while the turn continued on an engine the chain puts in
+  // FRONT of that ladder (TIER_LADDER prints the ladder alone). It names the engine that runs next when that is known,
+  // and otherwise the chain, never a ladder the next call may not be on.
+  const where = nextRung ? `on ${nextRung}, the first engine of the Weak chain without Surplus` : 'on the Weak chain without Surplus (its order is in providerChain)';
+  return `Surplus unavailable mid-build ${when} — continuing the same turn ${where} (reason: ${reason}).`;
 }
 
 /** Narrow a mid-build reason to the admission SafeSurplusAdmissionReason union when recording diags. */

@@ -98,6 +98,6 @@ describe('the boundaries of the stand-down', () => {
     const triage = readFileSync(join(__dirname, '../src/server/lib/promptSafety.ts'), 'utf8');
     const rules = readFileSync(join(__dirname, '../src/server/AgentV3/illegalContentRules.ts'), 'utf8');
     expect(triage).toMatch(/if \(protectiveStandDown\(rule, body\)\) continue;/);
-    expect(rules).toMatch(/rule\.context\.test\(body\) && !protectiveStandDown\(rule, body\)/);
+    expect(rules).toMatch(/evidence\.length > 0 && !protectiveStandDown\(rule, wholeApp\(\)\)/);
   });
 });

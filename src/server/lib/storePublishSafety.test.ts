@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  assessPublishSafety, decideFromScan, filesForScan, refusalFor, MAX_RECORDED_FINDINGS,
+  assessPublishSafety, decideFromScan, filesForScan, refusalFor, MAX_RECORDED_FINDINGS, HELD_FOR_REVIEW_MESSAGE,
 } from './storePublishSafety';
 import type { ContentScanResult } from '../AgentV3/ContentSafetyScanner';
 import { classifyPublishedText } from '../AgentV3/illegalContentRules';
@@ -160,45 +160,61 @@ describe('⚡ opening an app waits for one round trip, not two', () => {
   });
 });
 
-describe('🔒 the illegal tier refuses UNCONDITIONALLY — no switch reaches it', () => {
+describe('🔁 the sexual/illegal text check HOLDS, it no longer refuses (admin 2026-11-26)', () => {
   const illegal = classifyPublishedText('underage porn gallery');
 
-  it('blocks even in WARN mode, which is what "saaf-saaf wale cases par block" means', () => {
-    // The older judgement-call rules stay behind AGENTV3_PUBLISH_SCAN because a false positive there
-    // costs an honest creator their app. A category that is unlawful for everyone must not be
-    // reachable by flipping an operations switch.
+  it('an illegal finding is accepted into review, held, unlisted — never refused', () => {
     const d = decideFromScan({ safe: true, findings: [] }, false, illegal);
-    expect(d.refuse).toBe(true);
+    expect(d.refuse).toBe(false);
+    expect(d.holdForReview).toBe(true);
     expect(d.forceUnlisted).toBe(true);
+    expect(d.refusalMessage).toBe('');
     expect(d.contentClass).toBe('illegal');
   });
 
-  it('and the +18 setting cannot unlock it either', () => {
-    const d = decideFromScan({ safe: true, findings: [] }, false, illegal, { adultOptIn: true });
-    expect(d.refuse).toBe(true);
+  it('no switch releases the hold: not block mode, not the +18 setting', () => {
+    expect(decideFromScan({ safe: true, findings: [] }, true, illegal).holdForReview).toBe(true);
+    expect(decideFromScan({ safe: true, findings: [] }, false, illegal, { adultOptIn: true }).holdForReview).toBe(true);
   });
 
-  it('the illegal check comes FIRST, so no later branch can undo it', () => {
-    const src = readFileSync(join(__dirname, 'storePublishSafety.ts'), 'utf8');
-    const fn = src.slice(src.indexOf('export function decideFromScan'));
-    expect(fn.indexOf('if (illegal.length > 0)')).toBeLessThan(fn.indexOf('refuse: !scan.safe && blockMode'));
-  });
-
-  it('the refusal names the category and the way to appeal, never the matched text', () => {
+  it('the creator is told plainly, with no rule name and no matched text', () => {
     const d = decideFromScan({ safe: true, findings: [] }, false, illegal);
-    expect(d.refusalMessage).toContain('Grievance');
-    expect(d.refusalMessage).not.toContain('underage');
+    expect(d.heldMessage).toBe(HELD_FOR_REVIEW_MESSAGE);
+    expect(d.heldMessage).not.toMatch(/underage|porn|child|CSAM/i);
+    expect(d.heldMessage.toLowerCase()).toContain('review');
+  });
+
+  it('the admin record carries the file and the exact phrase that matched', () => {
+    const d = assessPublishSafety({ 'src/App.tsx': 'export default () => <h1>underage porn gallery</h1>;' }, false);
+    expect(d.holdForReview).toBe(true);
+    expect(d.findings[0]).toMatchObject({ severity: 'critical', rule: 'CSAM_SIGNAL' });
+    expect(d.findings[0].matchSnippet).toContain('src/App.tsx');
+    expect(d.findings[0].matchSnippet).toContain('underage porn gallery');
+  });
+
+  it('🔒 malware / phishing still REFUSES in block mode — this change does not touch it', () => {
+    const d = assessPublishSafety({ 'index.html': '<p>Enter your 12-word recovery phrase to continue</p>' }, true);
+    expect(d.refuse).toBe(true);
+    expect(d.holdForReview).toBe(false);
+    expect(d.refusalMessage).toContain('not published');
+  });
+
+  it('a phishing refusal wins over a hold — nothing is saved, so nothing is held', () => {
+    const d = assessPublishSafety({ 'index.html': '<p>Enter your 12-word recovery phrase</p><h1>underage porn gallery</h1>' }, true);
+    expect(d.refuse).toBe(true);
+    expect(d.holdForReview).toBe(false);
   });
 });
 
 describe('the adult tier rides the creator’s own +18 setting', () => {
   const adult = classifyPublishedText('Adult videos — browse categories, 18+ only');
 
-  it('a creator WITH the setting on publishes normally, marked 18+', () => {
+  it('a creator WITH the setting on is not refused, marked 18+ — and still held for a person (2026-11-26)', () => {
     const d = decideFromScan({ safe: true, findings: [] }, false, adult, { adultOptIn: true });
     expect(d.refuse).toBe(false);
     expect(d.contentClass).toBe('adult');
     expect(d.adultWithoutOptIn).toBe(false);
+    expect(d.holdForReview).toBe(true);
   });
 
   it('a creator WITHOUT it is not refused — it waits for review, and they are told which switch', () => {
@@ -211,7 +227,7 @@ describe('the adult tier rides the creator’s own +18 setting', () => {
 
   it('an ordinary app is untouched by any of this', () => {
     const d = decideFromScan({ safe: true, findings: [] }, false, classifyPublishedText('<h1>Chai</h1>'), { adultOptIn: false });
-    expect(d).toMatchObject({ refuse: false, flagged: false, forceUnlisted: false, contentClass: 'general', adultWithoutOptIn: false });
+    expect(d).toMatchObject({ refuse: false, flagged: false, forceUnlisted: false, contentClass: 'general', adultWithoutOptIn: false, holdForReview: false, heldMessage: '' });
   });
 });
 
@@ -223,8 +239,8 @@ describe('wiring — Phase 5 reaches the real publish', () => {
   });
 
   it('the app’s class is stored, and `illegal` is narrowed away rather than cast', () => {
-    // An illegal publish never reaches the save; narrowing means a future reorder stores `general`
-    // (harmless, reviewable) instead of silently persisting `illegal`.
+    // A held illegal publish IS saved now (2026-11-26) — narrowed to `general`; the hold and the
+    // findings are what keep it from the public, not the class.
     expect(route).toContain("safety.contentClass === 'adult' ? 'adult' as const : 'general' as const");
   });
 
@@ -236,6 +252,6 @@ describe('wiring — Phase 5 reaches the real publish', () => {
 
   it('both rule sets read the SAME text, so they cannot disagree about scope', () => {
     const safety = readFileSync(join(__dirname, 'storePublishSafety.ts'), 'utf8');
-    expect(safety).toContain('classifyPublishedText(scannableText(scanned))');
+    expect(safety).toContain('classifyPublishedFiles(scannableFiles(scanned))');
   });
 });

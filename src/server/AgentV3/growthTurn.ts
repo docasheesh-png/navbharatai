@@ -9,6 +9,8 @@ import { GAME_PLAYER_FILE } from '../lib/GamePlayerBodyGenerator';
 import { libraryDisplayName } from './gameAssets/libraryThumbnails';
 import { setLibraryCarAtTurnStart } from './carSwap';
 import { mapGrowthNote } from './mapGrowthIntent';
+import { enemyRequestFrom, enemyFeatureSource, featuresIndexWith, enemiesAddedHandoff, ENEMIES_FEATURE_PATH, FEATURES_INDEX_PATH } from '../lib/GameEnemiesFeature';
+import { missingLayerFiles } from '../lib/gameRecipeLayers';
 import { editedBridgeNote, bridgeState, worldUpgradeEnabled, BRIDGE_PATH } from './worldUpgrade';
 
 /** The game's own open-world bridge (GameOpenWorldGenerator OPEN_WORLD_BRIDGE_PATH — a test keeps the two equal). */
@@ -182,6 +184,40 @@ export async function libraryActionsAtTurnStart(io: Parameters<typeof setLibrary
   // 🧭 …and when the turn is not a library pick, what a MAP request means for THIS game (mapGrowthIntent.ts, item 10).
   if (handoffs.length === 0) { const note = mapGrowthNoteAtTurnStart(io); if (note) handoffs.push(note); }
   return handoffs.join('\n\n---\n\n');
+}
+
+/**
+ * 👾 "ENEMY BANAO" PUTS ENEMIES IN THE GAME (admin 2026-11-26: "5-7 bar edit kar chuke bhi game me enemy nahi aa rahe").
+ * In a game whose features list is the kit's (the open world), the platform writes src/game/features/enemies.ts from the
+ * request (GameEnemiesFeature.ts), lists it, adds any kit file it imports that the project lacks, and tells the builder they
+ * are in. A game that already has its own enemies feature is never overwritten: the builder is told to change its numbers.
+ * '' when this turn asks for no enemies or the game has no kit features list (the builder handles it). Never throws.
+ */
+export async function addEnemiesAtTurnStart(io: {
+  prompt: string;
+  filesAtTurnStart: Readonly<Record<string, string>> | null;
+  read: (path: string) => Promise<string>;
+  write: (path: string, content: string) => Promise<void>;
+  record: (issue: Issue) => void;
+}): Promise<string> {
+  try {
+    const req = enemyRequestFrom(io.prompt);
+    const files = io.filesAtTurnStart;
+    if (!req || !files || typeof files[FEATURES_INDEX_PATH] !== 'string') return '';
+    if (typeof files[ENEMIES_FEATURE_PATH] === 'string') {
+      return `👾 THIS GAME ALREADY HAS ENEMIES: ${ENEMIES_FEATURE_PATH}. Make the change the user asks for in its ENEMIES numbers (count, ai, health, damage, waves) — never a second enemy system.`;
+    }
+    const index = await io.read(FEATURES_INDEX_PATH).then((c) => (typeof c === 'string' ? c : null), () => null);
+    const listed = index === null ? null : featuresIndexWith(index, 'enemies');
+    if (listed === null) return '';
+    const source = enemyFeatureSource(req);
+    const layers = missingLayerFiles({ [ENEMIES_FEATURE_PATH]: source }, new Set(Object.keys(files)));
+    for (const [path, layer] of layers) await io.write(path, layer.content);
+    await io.write(ENEMIES_FEATURE_PATH, source);
+    await io.write(FEATURES_INDEX_PATH, listed);
+    io.record({ phase: 'build', severity: 'info', code: 'ENEMIES_ADDED', autoResolved: true, message: `The platform put ${req.count} ${req.kind} enemies (${req.ai}) in the game: ${ENEMIES_FEATURE_PATH}${layers.size ? `, with ${layers.size} kit file(s) it imports` : ''}.` });
+    return enemiesAddedHandoff(req, [...layers.keys()]);
+  } catch { return ''; }
 }
 
 /** Kill switch: AGENTV3_MAP_GROWTH_NOTE=off says no map-request note (the world rule alone, exactly as before). */

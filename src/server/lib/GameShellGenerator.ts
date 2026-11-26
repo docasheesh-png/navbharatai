@@ -31,6 +31,7 @@ import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH } from './GamePlayerBodyGenerat
 import { GAME_ACTIONS, GAME_ACTIONS_PATH } from './GameActionsGenerator';
 import { GAME_AIM, GAME_AIM_PATH } from './GameAimGenerator';
 import { GAME_BOUNDARY, GAME_BOUNDARY_PATH } from './GameBoundaryGenerator';
+import { GAME_CINEMATICS, GAME_CINEMATICS_PATH } from './GameCinematicsGenerator';
 import { RACE_CUSTOM, RACE_CUSTOM_PATH } from './GameRaceCustomGenerator';
 
 export interface GameShellResult {
@@ -67,6 +68,9 @@ import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOption
 import { applyPlayerChoice, resolvePlayerChoice, humanoidCollider, findBones, playerModelRoot, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateActions } from './play/actions';
 import { aimFrom, type AimResult } from './play/aim';
+import { Director, DEATH_CAM, HERO_SHOT, introDrone, type Shot, type CinematicFrame } from './play/cinematics';
+export type { Shot, CinematicFrame } from './play/cinematics';
+import { applyRealism, type Realism } from './three/realism';
 import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
@@ -131,6 +135,17 @@ function automatedBrowser(): boolean {
 }
 
 export interface GameOptions {
+  /**
+   * 🎬 Camera shots the user asked for (play/cinematics.ts): death — after the last life, the camera closes in round the
+   * hero and holds on GAME OVER before the end card; intro — before play, a drone shot over the map down to the hero
+   * (introRadius metres of map, default 150). true for the ready shot, or your own Shot list. Off unless asked.
+   */
+  cinematics?: { death?: boolean | Shot[]; intro?: boolean | Shot[]; introRadius?: number };
+  /**
+   * 🌄 'real' when the user asked for real / realistic / HD graphics (three/realism.ts): image-based lighting and soft
+   * shadows everywhere, ambient occlusion and a subtle bloom on a capable device only. Default 'standard'.
+   */
+  graphics?: 'standard' | 'real';
   /** Additional world-space NPC/remote bodies that must block door swings. */
   doorOccupants?: (ctx: GameContext) => readonly DoorOccupant[];
   container: HTMLElement;
@@ -295,6 +310,11 @@ export interface GameContext {
   /** Where Restart / Menu stand the player again (the open world sets it); default: where setup() left it. */
   setRespawn: (fn: (() => void) | null) => void;
   /**
+   * Play camera shots now (play/cinematics.ts): 'death', 'intro', 'hero', or any Shot list the user describes ("camera hero ke
+   * chaaron taraf ghoome, phir upar se dikhe"). The world keeps running; resolves when it ends or is skipped (a tap or a key).
+   */
+  cinematic: (shots: Shot[] | 'death' | 'intro' | 'hero') => Promise<void>;
+  /**
    * The default player body (createHumanoid), or null when the game brought its own or is first-person. It already
    * plays the action poses for the buttons (see actionPoses); call ctx.hero.act('kick') yourself for anything else
    * the game does — a throw, a reach, a flinch.
@@ -439,6 +459,8 @@ export class Game {
     // walked it in circles (verifier, 2026-10-11).
     this.rig = new CameraRig({ kind: options.camera === 'chase' ? 'third-person' : (options.camera ?? 'third-person') });
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
+    // The real look, only when asked (after the lights exist, so their shadows are set up).
+    if (options.graphics === 'real') { try { this.realism = applyRealism(this.renderer, this.scene, this.rig.camera); } catch (error) { console.error('[game] the real graphics could not start; drawing the standard look', error); } }
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
     this.playerChoice = resolvePlayerChoice(options.player);
     this.handGun = handGunFor(this.playerChoice);
@@ -509,7 +531,7 @@ export class Game {
     if (options.touchControls !== false) {
       // The player's own layout (Settings → Edit controls) is saved per game, under the same id as its leaderboard.
       // A gun in the hand: the Attack button is the Fire button (the layout stays the kit's own).
-      const buttons = this.handGun && this.touchLayoutIsOurs ? DEFAULT_TOUCH_BUTTONS.map((b) => (b.action === 'attack' ? { ...b, label: 'Fire' } : b)) : undefined;
+      const buttons = this.handGun && this.touchLayoutIsOurs ? [...DEFAULT_TOUCH_BUTTONS.map((b) => (b.action === 'attack' ? { ...b, label: 'Fire' } : b)), { action: 'zoom', label: 'Zoom' }] : undefined;
       const touch = new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions, ...(buttons ? { buttons } : {}) });
       this.touch = touch;
       this.disposers.push(() => touch.dispose());
@@ -534,6 +556,14 @@ export class Game {
     // Every finished round goes on this device's leaderboard (core/leaderboard.ts) — recorded here so no game can forget.
     const recordRound = () => { leaderboard.record(this.leaderboardId, state.score); };
     this.disposers.push(events.on('GAME_OVER', recordRound), events.on('GAME_WON', recordRound));
+    // 🎬 The death shot the user asked for (GameOptions.cinematics.death) plays before the end card (the HUD waits for it).
+    this.disposers.push(events.on('GAME_OVER', () => { if (this.options.cinematics?.death) void this.director.play(this.shotsFor('death')); }));
+    // A tap, a click or a key skips any shot playing.
+    const skipShot = () => { if (this.director.active) this.director.skip(); };
+    // Optional calls: a host element or window without listeners (a test double, a worker) must not stop the game starting.
+    options.container.addEventListener?.('pointerdown', skipShot);
+    if (typeof window !== 'undefined') window.addEventListener?.('keydown', skipShot);
+    this.disposers.push(() => { options.container.removeEventListener?.('pointerdown', skipShot); if (typeof window !== 'undefined') window.removeEventListener?.('keydown', skipShot); });
     // 🖱️ POINTER LOCK: a click on the canvas during play captures the mouse; any screen that is not play lets it go. The
     // browser drops the lock itself on Esc and never delivers that Esc to the page — so losing it mid-play IS the pause.
     const onCanvasClick = () => { if (state.status === 'playing') this.capturePointer(); };
@@ -708,6 +738,7 @@ export class Game {
       },
       onStep: (fn) => { game.stepHooks.add(fn); return () => { game.stepHooks.delete(fn); }; },
       setRespawn: (fn) => { game.respawnFn = typeof fn === 'function' ? fn : null; },
+      cinematic: (shots) => game.director.play(game.shotsFor(shots)),
       world: {
         get bounds() { return game.boundary.bounds; },
         setBounds: (area, o) => game.boundary.set(area, o),
@@ -832,7 +863,7 @@ export class Game {
     // press that happened during the freeze is swallowed.
     // While someone is talking the world holds still, and the step after the talk ends is skipped too — the press
     // that closed the dialogue box must not also jump or swing (core/dialogue.ts).
-    const talking = dialogue.active || dialogue.takeJustEnded();
+    const talking = dialogue.active || dialogue.takeJustEnded() || this.introPlaying;
     if (!this.feel.frozen && !talking) {
       const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), ...this.player.capsuleSize };
       // Use gets in or out of a vehicle first (ctx.vehicles); only a press that did neither opens a door.
@@ -881,6 +912,7 @@ export class Game {
         try { this.asGame(() => fn(delta)); } catch (error) { this.stepHooks.delete(fn); console.error('[game] a step hook failed and was stopped', error); }
       }
       this.fireHandGun(delta);
+      this.zoomScope();
       this.poseActionButtons();
       // Any action the game plays (performAction — on the player, an NPC, or every NPC of a kind: jump, kick-car, dance,
       // salute, or one NavBharatAI made) runs LAST, after the player's body, every character's walk (the step hooks above)
@@ -1005,6 +1037,46 @@ export class Game {
     if (a.hit) events.emit('SHOT_HIT', { object: a.hit, point: { x: a.point.x, y: a.point.y, z: a.point.z }, damage: g.damage, byPlayer: true });
   }
 
+  /** The scope's steps (admin 2026-11-26: "zoom button 2x, 4x, 8x"): each Zoom press goes to the next, then back to 1x. */
+  static readonly ZOOM_STEPS: readonly number[] = [1, 2, 4, 8];
+  private zoomLevel = 0;
+  private baseFov = 0;
+
+  /**
+   * 🔭 THE HELD GUN'S SCOPE. With a gun in the hand (handGunFor) the Zoom button (Z on a keyboard) steps the view 1x → 2x →
+   * 4x → 8x → 1x by narrowing the camera's field of view, so a shot lands where the crosshair is at any distance (ctx.aim
+   * reads the same camera). Back to 1x in a seat, outside play, or with no gun. A game that reads 'zoom' itself keeps its own.
+   */
+  private zoomScope(): void {
+    const cam = this.rig.camera;
+    if (!this.baseFov) this.baseFov = cam.fov;
+    const usable = !!this.handGun && !this.seated && state.status === 'playing' && !this.gameReadActions.has('zoom');
+    let level = usable ? this.zoomLevel : 0;
+    if (usable && this.input.wasPressed('zoom')) level = (level + 1) % Game.ZOOM_STEPS.length;
+    if (level === this.zoomLevel && cam.fov === this.baseFov / Game.ZOOM_STEPS[level]) return;
+    this.zoomLevel = level;
+    cam.fov = this.baseFov / Game.ZOOM_STEPS[level];
+    cam.updateProjectionMatrix();
+  }
+
+  /** The scope's zoom now (1, 2, 4 or 8). */
+  get zoom(): number { return Game.ZOOM_STEPS[this.zoomLevel]; }
+
+  /** Kit damage of one bare-fist punch, and how far it reaches (metres). */
+  static readonly PUNCH = { damage: 10, range: 1.6 };
+
+  /**
+   * A punch is a blow, not only a pose (admin 2026-11-26: "hero ke punch se kuch nahi hota"): PLAYER_PUNCHED names where
+   * the fist is and which way it goes, and every character (systems/entities.ts) and a hittable crowd takes it. Not when
+   * the game reads its own attack (it has its own fight), nor from a seat, nor outside play.
+   */
+  private landPunch(): void {
+    if (this.seated || state.status !== 'playing' || this.gameReadActions.has('attack')) return;
+    const p = this.player.object.position;
+    const yaw = this.hero?.root.rotation.y ?? this.player.object.rotation.y;
+    events.emit('PLAYER_PUNCHED', { position: { x: p.x, y: p.y, z: p.z }, yaw, damage: Game.PUNCH.damage, range: Game.PUNCH.range });
+  }
+
   /**
    * Every action button the player pressed this step plays its pose (actionPoses). Runs AFTER the game's update, so
    * an 'auto' attack knows whether that press fired a gun (recoil), swung a sword (sweep) or neither (a punch).
@@ -1015,7 +1087,7 @@ export class Game {
       if (!pose || !this.input.wasPressed(action)) continue;
       if (pose !== 'auto') { this.heroAct(pose); continue; }
       // The event already posed a shot or a swing this step; only a press that did neither is a punch.
-      if (!this.firedThisStep && !this.swungThisStep) this.heroAct('punch');
+      if (!this.firedThisStep && !this.swungThisStep) { this.heroAct('punch'); this.landPunch(); }
     }
     this.firedThisStep = false;
     this.swungThisStep = false;
@@ -1030,9 +1102,11 @@ export class Game {
     // has been (a 'chase' game too: its rig is third-person on foot, see the constructor).
     const chased = this.chased;
     const p = chased ? chased.position : this.player.object.position;
-    if (chased) this.rig.follow(chased, frameDelta);
+    // A camera shot playing (play/cinematics.ts) owns the camera this frame; the rig takes it back when it ends.
+    if (this.director.update(frameDelta, this.rig.camera, p)) { /* the shot placed the camera */ }
+    else if (chased) this.rig.follow(chased, frameDelta);
     else this.rig.update(p, frameDelta);
-    if (!chased) updateIndoorCamera(this.scene, this.rig.camera, p);
+    if (!chased && !this.director.active) updateIndoorCamera(this.scene, this.rig.camera, p);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
     // Reduce motion (Settings, or the device's own setting on a first visit): the camera never shakes.
@@ -1043,6 +1117,11 @@ export class Game {
     updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
     // Two players: each camera in its own half of the screen (three/splitscreen.ts).
     if (this.secondCamera) renderSplit(this.renderer, this.scene, [this.rig.camera, this.secondCamera]);
+    else if (this.realism) {
+      const sz = this.renderer.getSize(this.drawSize);
+      if (sz.x !== this.drawnW || sz.y !== this.drawnH) { this.drawnW = sz.x; this.drawnH = sz.y; this.realism.setSize(sz.x, sz.y); }
+      this.realism.render(this.scene, this.rig.camera);
+    }
     else this.renderer.render(this.scene, this.rig.camera);
   }
 
@@ -1070,6 +1149,39 @@ export class Game {
     this.capturePointer();
     this.loop.setPaused(false);
     setStatus('playing');
+    this.playIntro();
+  }
+
+  /** The real look (GameOptions.graphics 'real'), or null. */
+  realism: Realism | null = null;
+  private readonly drawSize = new THREE.Vector2();
+  private drawnW = 0;
+  private drawnH = 0;
+
+  /** The camera-shot player (play/cinematics.ts). */
+  readonly director = new Director();
+  /** The intro is flying: the world waits (like a talk), and a tap or a key skips it. */
+  private introPlaying = false;
+  private introPlayed = false;
+
+  /** The current shot's title and bars, for the HUD (null when no shot plays). */
+  get cinematicFrame(): CinematicFrame | null { return this.director.frame; }
+
+  /** A named shot or the user's own list. */
+  shotsFor(shots: Shot[] | 'death' | 'intro' | 'hero'): Shot[] {
+    const c = this.options.cinematics ?? {};
+    if (shots === 'death') return Array.isArray(c.death) ? c.death : DEATH_CAM;
+    if (shots === 'intro') return Array.isArray(c.intro) ? c.intro : introDrone(c.introRadius ?? 150, this.startScreenInfo?.title);
+    if (shots === 'hero') return HERO_SHOT;
+    return Array.isArray(shots) ? shots : [];
+  }
+
+  /** Once per session, before the first round: the drone shot, when the game has one. */
+  private playIntro(): void {
+    if (this.introPlayed || !this.options.cinematics?.intro) return;
+    this.introPlayed = true;
+    this.introPlaying = true;
+    void this.director.play(this.shotsFor('intro')).then(() => { this.introPlaying = false; });
   }
 
   /** The game fills the whole screen right now. */
@@ -1251,6 +1363,7 @@ export class Game {
   resume(): void { if (state.status === 'paused') { this.loop.setPaused(false); setStatus('playing'); } }
 
   restart(): void {
+    this.director.skip();
     resetRun();
     this.feel.reset();
     this.putPlayerAtStart();
@@ -1303,6 +1416,7 @@ export class Game {
       if (mesh.geometry) safe(() => mesh.geometry.dispose());
     });
     safe(() => disposeMaterials());
+    if (this.realism) safe(() => this.realism!.dispose());
     if (this.renderer) safe(() => this.renderer.dispose());
     if (this.canvas) safe(() => this.canvas.parentElement?.removeChild(this.canvas));
     // This is the game's bus, not the app's. Remove setup handlers on failed construction too.
@@ -2492,6 +2606,24 @@ function SeatPrompt({ game }: { game: Game }) {
   );
 }
 
+/** The camera shot playing now (bars, title), or null — followed through CINEMATIC_STARTED / ENDED and a light poll for titles. */
+function useCinematic(game: Game): { title?: string; subtitle?: string; bars: boolean } | null {
+  const [frame, setFrame] = useState(game.cinematicFrame);
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const read = () => setFrame((f) => {
+      const n = game.cinematicFrame;
+      return f && n && f.title === n.title && f.subtitle === n.subtitle && f.bars === n.bars ? f : n;
+    });
+    const started = () => { read(); if (!timer) timer = setInterval(read, 150); };
+    const ended = () => { if (timer) clearInterval(timer); timer = null; setFrame(null); };
+    const offs = [events.on('CINEMATIC_STARTED', started), events.on('CINEMATIC_ENDED', ended)];
+    if (game.cinematicFrame) started();
+    return () => { offs.forEach((off) => off()); if (timer) clearInterval(timer); };
+  }, [game]);
+  return frame;
+}
+
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
@@ -2517,7 +2649,9 @@ export function Hud({ game }: { game: Game }) {
   const shop = useShop();
   const again = useRef<HTMLButtonElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
-  const over = s.status === 'gameover' || s.status === 'won';
+  // 🎬 A camera shot playing (play/cinematics.ts): bars and its title, and the end card waits until it is over.
+  const cine = useCinematic(game);
+  const over = (s.status === 'gameover' || s.status === 'won') && !cine;
   const info = game.startScreenInfo;
   const touch = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 
@@ -2671,6 +2805,19 @@ export function Hud({ game }: { game: Game }) {
             {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,
+      ) : null}
+
+      {cine ? (
+        <div data-cinematic="" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {cine.bars ? <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '11%', background: 'rgba(8, 10, 14, 0.92)' }} /> : null}
+          {cine.bars ? <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '11%', background: 'rgba(8, 10, 14, 0.92)' }} /> : null}
+          {cine.title ? (
+            <div style={{ textAlign: 'center', color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.85)' }}>
+              <div style={{ fontSize: 'clamp(32px, 9vw, 84px)', fontWeight: 900, letterSpacing: 6 }}>{cine.title}</div>
+              {cine.subtitle ? <div style={{ fontSize: 'clamp(14px, 3.5vw, 24px)', marginTop: 8 }}>{cine.subtitle}</div> : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {over ? settingsOrScreen(
@@ -5095,9 +5242,10 @@ const FILES: Record<string, string> = {
   [GAME_ACTIONS_PATH]: GAME_ACTIONS,
   [GAME_AIM_PATH]: GAME_AIM,
   [GAME_BOUNDARY_PATH]: GAME_BOUNDARY,
+  [GAME_CINEMATICS_PATH]: GAME_CINEMATICS,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'aim', 'boundary', 'racingroadgame', 'racecustom', 'lanerunnergame'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'worldmap', 'features', 'playerbody', 'actions', 'aim', 'boundary', 'cinematics', 'racingroadgame', 'racecustom', 'lanerunnergame'];
 
 
 /**
@@ -5197,6 +5345,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/Game.ts']) files[GAME_ACTIONS_PATH] = FILES[GAME_ACTIONS_PATH];
     if (files['src/game/Game.ts']) files[GAME_AIM_PATH] = FILES[GAME_AIM_PATH];
     if (files['src/game/Game.ts']) files[GAME_BOUNDARY_PATH] = FILES[GAME_BOUNDARY_PATH];
+    if (files['src/game/Game.ts']) files[GAME_CINEMATICS_PATH] = FILES[GAME_CINEMATICS_PATH];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -5293,6 +5442,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drag on the right, Attack/Jump/Use/Run buttons bottom-right, and a Pause button in the HUD. They\n' +
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
+      "  graphics: 'real' — only when the user asks for realistic / real 3D / HD graphics (three/realism.ts: image lighting, soft shadows; ambient occlusion and a subtle bloom on a capable device). Never add your own EffectComposer.\n" +
+      "  cinematics: { death: true, intro: true } — the user's camera shots (play/cinematics.ts): a death cam that closes in and holds on GAME OVER, a drone shot over the map before play; any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]). Never move the camera yourself.\n" +
       '- WHEN THE USER ASKS WHERE THE CONTROLS GO, set it in touchControls — never move them with your own CSS:\n' +
       "  \"joystick on the right\" / \"buttons on the left\" → joystick: { side: 'right' } (the buttons and camera drag swap\n" +
       "  sides with it); \"bigger joystick\" → joystick: { size: 1.4 } (0.6..2); \"fixed joystick\" → joystick: { mode: 'fixed' }\n" +

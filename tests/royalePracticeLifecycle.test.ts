@@ -55,6 +55,10 @@ function shellHarness(fail:'renderer'|'setup'|null) {
     three:THREE,'./core/loop':{GameLoop:class {stop(){}start(){}setPaused(){}}},'./core/input':{Input},'./core/keybinds':{loadKeyBindings:()=>({})},'./core/feel':{GameFeel:class {}},'./core/events':{events},
     './core/state':{state,setStatus(status:string){state.status=status;},resetRun(){}},'./core/meta':{startMeta(){},mountMetaToasts(){return ()=>{};},combo:{break(){}}},
     './play/aim':{aimFrom:()=>({})},
+    // play/cinematics.ts (camera shots, Q-3509): a director that never plays here.
+    // three/realism.ts (graphics: 'real', Q-3514): never asked for here.
+    './three/realism':{applyRealism:()=>({post:false,passes:[],render(){},setSize(){},dispose(){}})},
+    './play/cinematics':{Director:class {active=false;frame=null;play(){return Promise.resolve();}skip(){}update(){return false;}},DEATH_CAM:[],HERO_SHOT:[],introDrone:()=>[]},
     './play/boundary':{WorldBoundary:class {bounds=null;set(){return true;}inside(){return true;}keep(){return false;}dispose(){}}},
     './play/playerBody':{applyPlayerChoice:()=>({showing:'person',update(){},dispose(){}}),resolvePlayerChoice:()=>undefined},
     // Game.ts ticks the kit's actions every frame now (compose_action). An UNKNOWN module fails loudly here by

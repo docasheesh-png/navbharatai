@@ -36,7 +36,19 @@ export interface CityPeopleOptions {
    * (6-sided, not 8; a 6 x 4 head, not 10 x 8). 'full': up to 150. Left out: geometryTier().
    */
   tier?: GeometryTier;
+  /**
+   * The player cannot walk through people (pushOut keeps it a shoulder's width away). Default false: the crowd is scenery
+   * unless the user asked for it to be solid ("log solid hon", "hero log ke aar paar na jaye").
+   */
+  solid?: boolean;
+  /** A punch, a shot or a car knocks a person down (hitAt); they get up and walk on after DOWN_SECONDS. Default false. */
+  hittable?: boolean;
 }
+
+/** How long a knocked-down person lies before getting up, seconds. */
+export const DOWN_SECONDS = 6;
+/** How far the player is kept from a person's centre when the crowd is solid, metres. */
+export const PERSON_RADIUS = 0.45;
 
 /** The most people a light-tier city walks, whatever count asked (a full-tier city keeps up to 150). */
 export const LIGHT_PEOPLE = 12;
@@ -62,8 +74,9 @@ export interface Walker {
   x: number; z: number; heading: number;
   crossing: Crossing | null;
   waited: number;
-  /** Seconds left lying on the ground after a punch (state 'down'), and the state to return to. */
+  /** Seconds left lying down after a hit (state 'down'); the state to go back to when up. */
   downFor?: number;
+  upTo?: WalkerState;
   /** A stand-in body at the walker's feet — pass these to traffic.update so cars stop for people. */
   body: THREE.Object3D;
 }
@@ -75,15 +88,17 @@ export interface CityPeople {
   /** Advance. avoid: what people must not walk into (the player). */
   update(dt: number, avoid?: THREE.Object3D[]): void;
   /**
-   * 🧍 NOBODY WALKS THROUGH A PERSON (admin 2026-11-25, open-world problem #6: "citizens aar paar ho jate hai"). The people
-   * stepped aside for the player, but the player walked straight through them. Anything inside a person (the player on
-   * foot) is pushed out the shortest way, in the crowd's frame, back to its own parent's frame. True when it was pushed.
+   * Knock down every person within radius of a point in the SCENE's frame (a punch, a shot, a car). Returns how many fell.
+   * Does nothing unless the crowd is hittable.
    */
-  pushOut(object: THREE.Object3D, radius?: number): boolean;
+  hitAt(point: { x: number; y: number; z: number }, radius?: number): number;
   /**
-   * 👊 A PUNCH LANDS ("punch to maar hi nahi sakta"): the nearest standing person in front of origin (WORLD position, facing
-   * yaw, within range metres and arc radians) falls down, lies a few seconds, gets up and walks on. Returns where the person
-   * fell (WORLD metres), or null when nobody was in reach. The open world announces it as CITIZEN_HIT (a crime, a score).
+   * Keep a position, or the player object, out of every standing person. A Vector3 is moved in place (and does nothing unless
+   * the crowd is solid). An Object3D is pushed out in its parent's frame (always — nobody walks through a person).
+   */
+  pushOut(target: THREE.Vector3 | THREE.Object3D, radius?: number): boolean;
+  /**
+   * The nearest standing person in front of origin (WORLD position, facing yaw) falls down. Returns where they fell, or null.
    */
   hit(origin: THREE.Vector3, yaw: number, range?: number, arc?: number): THREE.Vector3 | null;
   dispose(): void;
@@ -219,6 +234,8 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   root.add(bodies, legs, heads);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
   const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  const solid = options.solid === true, hittable = options.hittable === true;
+  const local = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   let clock = 0;
 
@@ -226,9 +243,9 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
     walkers.forEach((w, k) => {
       const moving = w.state === 'walk' || w.state === 'toCrossing' || w.state === 'cross' || w.state === 'leave';
       const bob = moving ? Math.abs(Math.sin(clock * 7 + k)) * 0.04 : 0;
-      const y = (w.state === 'cross' || (w.state === 'down' && w.crossing) ? CITY_ROAD_Y : pave) + bob;
+      const y = (w.state === 'cross' || (w.state === 'down' && (w.upTo === 'cross' || (!w.upTo && w.crossing))) ? CITY_ROAD_Y : pave) + bob;
       q.setFromAxisAngle(up, w.heading);
-      if (w.state === 'down') q.multiply(lying);                       // flat on the ground, head where it fell
+      if (w.state === 'down') q.multiply(lying);           // flat on the ground, along the way they faced
       m.compose(at.set(w.x, y, w.z), q, one);
       bodies.setMatrixAt(k, m); legs.setMatrixAt(k, m); heads.setMatrixAt(k, m);
       w.body.position.set(w.x, y, w.z);
@@ -300,8 +317,13 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
         const step = w.speed * dt;
         if (w.state === 'down') {
           w.downFor = (w.downFor ?? 0) - dt;
-          // Up again: back to the pavement it was on (a person knocked down mid-crossing finishes crossing first).
-          if (w.downFor <= 0) { w.downFor = 0; w.state = w.crossing ? 'cross' : 'leave'; if (!w.crossing) w.s = loopPosition(plan, w.block[0], w.block[1], w.x, w.z); }
+          if (w.downFor <= 0) {
+            w.downFor = 0;
+            const resumeCross = w.upTo ? w.upTo === 'cross' && !!w.crossing : !!w.crossing;
+            const next: WalkerState = resumeCross ? 'cross' : 'leave';
+            w.state = next; w.upTo = undefined;
+            if (next === 'leave') w.s = loopPosition(plan, w.block[0], w.block[1], w.x, w.z);
+          }
           continue;
         }
         if (w.state === 'walk') {
@@ -358,26 +380,55 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       }
       draw();
     },
-    pushOut: (object, radius = 0.4) => {
-      if (!object.parent) return false;
+    hitAt: (point, radius = 0.9) => {
+      if (!hittable) return 0;
       root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
-      inCity(object, tmp);
-      let pushed = false;
+      local.set(point.x, point.y, point.z).applyMatrix4(toCity);
+      let fell = 0;
       for (const w of walkers) {
-        if (w.state === 'down') continue;                               // a person on the ground is stepped over
-        const dx = tmp.x - w.x, dz = tmp.z - w.z, d = Math.hypot(dx, dz), min = radius + 0.25;
-        if (d >= min - 1e-4) continue;                                 // already outside (a hair's tolerance, so a push settles)
-        const ux = d > 1e-6 ? dx / d : Math.sin(w.heading + Math.PI / 2), uz = d > 1e-6 ? dz / d : Math.cos(w.heading + Math.PI / 2);
-        tmp.x = w.x + ux * min; tmp.z = w.z + uz * min;
-        pushed = true;
+        if (w.state === 'down' || Math.hypot(w.x - local.x, w.z - local.z) > radius + PERSON_RADIUS) continue;
+        w.upTo = w.state; w.state = 'down'; w.downFor = DOWN_SECONDS; fell++;
       }
-      if (pushed) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
-      return pushed;
+      if (fell) draw();
+      return fell;
+    },
+    pushOut: (target, radius) => {
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      const object = (target as THREE.Object3D).isObject3D ? target as THREE.Object3D : null;
+      if (object) {
+        if (!object.parent) return false;
+        const reach = radius ?? 0.4;
+        inCity(object, tmp);
+        let pushed = false;
+        for (const w of walkers) {
+          if (w.state === 'down') continue;
+          const dx = tmp.x - w.x, dz = tmp.z - w.z, d = Math.hypot(dx, dz), min = reach + 0.25;
+          if (d >= min - 1e-4) continue;
+          const ux = d > 1e-6 ? dx / d : Math.sin(w.heading + Math.PI / 2), uz = d > 1e-6 ? dz / d : Math.cos(w.heading + Math.PI / 2);
+          tmp.x = w.x + ux * min; tmp.z = w.z + uz * min;
+          pushed = true;
+        }
+        if (pushed) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
+        return pushed;
+      }
+      if (!solid) return false;
+      const position = target as THREE.Vector3;
+      const reach = radius ?? PERSON_RADIUS;
+      local.copy(position).applyMatrix4(toCity);
+      let moved = false;
+      for (const w of walkers) {
+        if (w.state === 'down') continue;
+        const dx = local.x - w.x, dz = local.z - w.z, d = Math.hypot(dx, dz), min = reach + PERSON_RADIUS;
+        if (d >= min) continue;
+        const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
+        local.x = w.x + nx * min; local.z = w.z + nz * min; moved = true;
+      }
+      if (moved) position.copy(local.applyMatrix4(root.matrixWorld));
+      return moved;
     },
     hit: (origin, yaw, range = 1.6, arc = Math.PI * 0.6) => {
       root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
       const o = tmp.copy(origin).applyMatrix4(toCity);
-      // The facing, turned into the crowd's frame too (a city can stand rotated on the map).
       const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).transformDirection(toCity);
       let best: Walker | null = null, bestD = Infinity;
       for (const w of walkers) {
@@ -388,9 +439,10 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
         best = w; bestD = d;
       }
       if (!best) return null;
-      if (best.state !== 'cross') best.crossing = null;                 // only a person already crossing finishes crossing
+      if (best.state !== 'cross') best.crossing = null;
+      best.upTo = best.state === 'cross' ? 'cross' : 'leave';
       best.state = 'down'; best.downFor = DOWN_SECONDS;
-      best.heading = Math.atan2(best.x - o.x, best.z - o.z);           // falls away from the punch
+      best.heading = Math.atan2(best.x - o.x, best.z - o.z);
       draw();
       return root.localToWorld(new THREE.Vector3(best.x, pave, best.z));
     },

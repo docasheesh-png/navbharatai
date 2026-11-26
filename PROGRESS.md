@@ -6300,44 +6300,44 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
-## 2026-11-26 — Open-world problems 4/5/8 and the autopsy of failedbr #2521–#2530 (Q-3440…Q-3455)
+## 2026-11-26 — Open-world problems 4/5/8 and the autopsy of failedbr #2521–#2530 (Q-3520…Q-3535)
 
 Branch `claude/kind-cannon-s3hgxm`. The admin asked for the open-world problems in their order ("user ke words par nahi
 intention par kaam ho"), then for every small and big problem in the last ten build reports to be fixed. Per the admin, the
 PR is opened and NOT merged. Local CI was not run in full (admin); targeted suites, both typechecks and noUnusedImports were.
 
 **Ledger (problem → root cause → class → siblings → lock):**
-- Q-3440 city does not grow → a narrow word list; no-city answered "no-city" → intent read from words, not wishes →
+- Q-3520 city does not grow → a narrow word list; no-city answered "no-city" → intent read from words, not wishes →
   `growthWish` reads what each size word describes; map words (`map bada karo`) stay map growth → `aBiggerCityIsTheWishNotTheWords`.
-- Q-3441 no enemies/police in a GTA world → systems kit never seeded, starter made no entities → a genre's core action
+- Q-3521 no enemies/police in a GTA world → systems kit never seeded, starter made no entities → a genre's core action
   missing from the starter → `streetDanger.ts` written first when the world has a fight, peaceful prompts excluded →
   `anOpenWorldHasStreetDanger` (strict compile of the feature against the real kit; reverted-and-failed).
-- Q-3442 trees dropped → naming one module narrowed the set → "named" read as "only" → only/sirf/keval narrows → four pinned tests updated with the admin's instruction cited.
-- Q-3443 objects sink/float in the open world → `setGround` was never given the map's height → the ground-contact hard
+- Q-3522 trees dropped → naming one module narrowed the set → "named" read as "only" → only/sirf/keval narrows → four pinned tests updated with the admin's instruction cited.
+- Q-3523 objects sink/float in the open world → `setGround` was never given the map's height → the ground-contact hard
   rule unmet in one lane → the bridge sets and clears it → setGround guard.
-- Q-3444 gun never fires (#2526–#2530) → the playtest never pressed fire → an action the game is built around is never
+- Q-3524 gun never fires (#2526–#2530) → the playtest never pressed fire → an action the game is built around is never
   exercised → `fireProbe` (F, J, click) + kit counters, reported through the rule probes → `aGunThatNeverFiresIsCaught`
   (real browser; reverted-and-failed twice).
-- Q-3445 "continue" turns refused (#2524 wrote nothing for 8 min; #2527–#2530) → the guard read the word "continue", and
+- Q-3525 "continue" turns refused (#2524 wrote nothing for 8 min; #2527–#2530) → the guard read the word "continue", and
   locked feature files nothing imports → a guard judging a continuation without what it continues → `growthRequestFor` at
   both locks + `featureInPlay` → `aContinueTurnFinishesTheGunItStarted` (reverted-and-failed).
-- Q-3446 `<title>Continue the build from</title>` → named from this turn's message → an order about the build read as an
+- Q-3526 `<title>Continue the build from</title>` → named from this turn's message → an order about the build read as an
   app description → continued request + continuation names nothing + junk title is a placeholder → `aContinueMessageIsNeverTheAppName`.
-- Q-3447 "game build clean hai" over PROD_BUILD_FAILED → the audit had no production-build fact → build-health claims
+- Q-3527 "game build clean hai" over PROD_BUILD_FAILED → the audit had no production-build fact → build-health claims
   unaudited → `prodBuildFailed` + BUILD_CLEAN → `aBuildCleanClaimOverAFailedBuildIsCorrected` (reverted-and-failed).
-- Q-3448 lost builds carry no memory evidence → nothing recorded it before death → evidence must land before an OOM kill
+- Q-3528 lost builds carry no memory evidence → nothing recorded it before death → evidence must land before an OOM kill
   → SERVER_MEMORY_HIGH per band on the build tick → `aLostBuildShowsItsServersMemory`. Q-3354 stays 🟡 BLOCKED on Cloud Run logs; six more death times added.
-- Q-3449, Q-3450: both proved TRUE by the reports (the "nothing written" line was accurate; the `.env` block was a real
+- Q-3529, Q-3530: both proved TRUE by the reports (the "nothing written" line was accurate; the `.env` block was a real
   `sed … .env`) → 🟡 waiting for the admin's agreement to close as not-a-defect.
 - Owned by other open PRs, deliberately not touched: kit typecheck errors (TS2352/TS2322 in openWorld.ts/worldLayer.ts) and
   kit-file refusals on continue turns (#4554 Q-3420, #4536), the Surplus 404 storm, dead-build sweep, handover (#4554).
 - Queue ID note: this branch first used Q-3355/Q-3356 in code comments; those IDs are taken on main (failedbr #2499), so
-  they were renumbered to Q-3440/Q-3441.
+  they were renumbered to Q-3520/Q-3521.
 
-**Next, in the admin's order:** Q-3451 + Q-3452 (map variety, boundary/water), then Q-3453 (solid citizens, punch), then
-Q-3454 (enterable houses, human citizens), then Q-3455 (library trees and animals).
+**Next, in the admin's order:** Q-3531 + Q-3532 (map variety, boundary/water), then Q-3533 (solid citizens, punch), then
+Q-3534 (enterable houses, human citizens), then Q-3535 (library trees and animals).
 
-### 2026-11-26 (same branch, #4562) — a character makes its own moves (Q-3456)
+### 2026-11-26 (same branch, #4562) — a character makes its own moves (Q-3536)
 Admin, with a screenshot: *"mujhe aisa app maker chahiye jo movement khud bana le"*. Root cause: `findBones` matched exact
 bone names only, so any other rig, and any model with no skeleton, got "It is not animated" instead of a move; a model
 with no walk clip never walked. Class: a capability gated on one naming convention. Fix: `findBonesByShape` (skeleton
@@ -6397,14 +6397,14 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
 
-### 2026-11-26 (same branch, #4562) — enemies in every open world (Q-3480…Q-3484)
+### 2026-11-26 (same branch, #4562) — enemies in every open world (Q-3540…Q-3544)
 Admin: *"kitna bhi prompt de! par open world game me enemy ban hi nahi rahe hai … enemy aye, fire kare, punch kare … sabhi
 possible cause aur root cause dhundo"*. Evidence: the code, plus failedbr #2510–#2532 (9 reports read in full).
-- Kit only on a NEW build; an "enemy banao" edit turn got nothing (#2510, #2514, #2518/#2519) → `enemiesTurn.ts` (Q-3480).
-- `async setup()` → host ran update before the monsters existed (#2531) → the host waits for it (Q-3481).
-- A throwing feature was silent → GAME_FEATURE_OFF from the playtest (Q-3482).
-- Street enemies punch-only, slow to arrive, immune to the hero's gun → fill at once, gunmen fire visibly, the hero's shot hits (Q-3483).
-- Enemy bodies hidden before their model loaded (#2518/#2519) → OPEN (Q-3484).
+- Kit only on a NEW build; an "enemy banao" edit turn got nothing (#2510, #2514, #2518/#2519) → `enemiesTurn.ts` (Q-3540).
+- `async setup()` → host ran update before the monsters existed (#2531) → the host waits for it (Q-3541).
+- A throwing feature was silent → GAME_FEATURE_OFF from the playtest (Q-3542).
+- Street enemies punch-only, slow to arrive, immune to the hero's gun → fill at once, gunmen fire visibly, the hero's shot hits (Q-3543).
+- Enemy bodies hidden before their model loaded (#2518/#2519) → OPEN (Q-3544).
 - Already fixed by #4560 (merged 11:32): enemies far from the hero (`spawnAround`), no on-screen enemy check
   (`window.__nbEntities`, MISSING_ENEMIES), a repair that rewrote a clean `monsters.ts` into a broken one (#2532).
 - Also seen: a server loss before any enemy was written (#2520, Q-3354); a turn spent on an unrelated warning (#2511), now covered by the platform acting itself.

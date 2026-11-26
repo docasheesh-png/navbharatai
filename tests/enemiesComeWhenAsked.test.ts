@@ -130,11 +130,13 @@ describe('#4 a first build that asks for enemies has them', () => {
     expect(enemyRequestOf('enemy')).toBeNull();
     expect(enemyRequestOf(null)).toBeNull();
   });
-  it('the dispatcher writes the feature before the list, and the turn-start action is one of the library actions', async () => {
+  it('the dispatcher writes the feature before the list, and the turn-start action runs every turn, beside the picker actions', async () => {
     const { readFileSync } = await import('node:fs');
     const dispatcher = readFileSync(resolve(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
     expect(dispatcher).toMatch(/const enemyReq = enemyRequestOf\(owRec\.enemies\);[\s\S]{0,400}guardedWrite\(ENEMIES_FEATURE_PATH, enemyFeatureSource\(enemyReq\)/);
-    const growth = readFileSync(resolve(__dirname, '../src/server/AgentV3/growthTurn.ts'), 'utf8');
-    expect(growth).toMatch(/const handoffs = \[[^\]]*await addEnemiesAtTurnStart\(io\)[^\]]*\]/);
+    // Not a picker action (the builder still runs after it), so it runs beside the picker composition, every turn.
+    const turn = readFileSync(resolve(__dirname, '../src/server/AgentV3/platformDoneTurn.ts'), 'utf8');
+    expect(turn).toMatch(/const enemies = await addEnemiesAtTurnStart\(io\);/);
+    expect(turn).toMatch(/const handoff = \[picked, enemies\]\.filter\(Boolean\)/);
   });
 });

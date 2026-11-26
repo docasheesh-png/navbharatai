@@ -6321,6 +6321,24 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
+## 2026-11-26 — Runner titles in 3D; each game its own town and race road; world races keep their length (PR #4561, Q-3314, Q-3373, Q-3450–Q-3455)
+
+The admin approved three items.
+- **Q-3314: "temple run / subway surfers jaisa".**
+  - **Class:** two readers disagreed. The contract's `NAMED_KINDS` said 3D third-person, while the kit seed kept a private FPS-only list and laid the 2D kit.
+  - **Fix:** `gameKitWants3D` reads `gameIntent.namesTitleDrawnIn3D` (one table), so these requests get the 3D kit and the lane-runner starter. A request that says 2D keeps 2D. AppKnowledgeBase was updated, and its claim that every runner starts from the ready game was corrected (Q-3454).
+  - **Lock:** `tests/aRunnerTitleIsBuiltIn3D.test.ts`, with a census over every catalogue spelling. Reverted: 8 fail.
+- **Q-3373: the action town and the race road.**
+  - **Class:** the same as #4541: constants (`seed = 1`; map 1, land seed 11), in calls the builder writes.
+  - **Fix:** the platform writes `src/game/gameSeed.ts` once, from `projectVariety`, only when the recipe call creates the town file or the race starter, and only ever adds to it. `createActionTown()` and `projectRoadPlan()` (start map plus land) read it by themselves. Older games keep the defaults. An untouched seed file counts as platform-seeded.
+  - **Lock:** `tests/aGameStartsInItsOwnTownAndRoad.test.ts`. Four reversions, each fails.
+- **World race length (Q-3450, admin: "keep races as long as before").**
+  - **Measured on the real kit:** compact own-world routes went from 1.9–6.2 km before #4537 to 0.8–2.2 km after.
+  - **Fix:** a route under 2 km (or under the `finishKm` asked) becomes laps of the tour: every highway out and back, so it stays on real roads, capped at 100 km.
+  - **Siblings fixed in the same change:** the off-road straight links in the chain (Q-3451); a tracker that ran backwards on a road driven twice, now resolved by heading and then continuity (Q-3452); a "needs two places" message shown to a world that has two (Q-3453).
+  - **Lock:** `tests/aWorldRaceKeepsItsLength.test.ts`. Reversions: 7, 3 and 2 tests fail.
+- **Open:** Q-3455. Games already racing on their world keep their old `worldRace.ts` / `worldCourse.ts`, because nothing refreshes those two files.
+- **Queue IDs:** started at Q-3450, because Q-3420–Q-3442 are taken by open PRs #4554 and #4555.
 ## 2026-11-26 — One bounded in-build placeholder repair (Q-3374) and the replay moved into the playtest phase (Q-3365)
 
 - **Admin decision:** option (b) for Q-3374, "baaki sab build karo". Repair of measured game DEFECTS stays suspended (`gameRepair.ts` is unchanged in behaviour).
@@ -6446,3 +6464,8 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
+
+## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
+- Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
+- Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.
+- Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.

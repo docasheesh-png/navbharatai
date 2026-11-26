@@ -46,3 +46,61 @@ export const STARTER_CAR_PAINTS: readonly number[] = [0xb42b2b, 0x1d4ed8, 0xf59e
 export function starterCarPaint(projectId: string): number {
   return pickVariant(projectId, 'car-paint', STARTER_CAR_PAINTS);
 }
+
+// 🏘️🏁 THE TOWN AND THE RACE ROAD, TOO (Q-3373, admin-approved 2026-11-26). The action town (createActionTown) and the race
+// road (the kit's twelve-map road) are made by calls the BUILDER writes, so the kit cannot know the project id — the seed has
+// to live in a file of the game, as WORLD.seed does for the open world. src/game/gameSeed.ts is that file: written by the
+// platform from the project's id the first time the kit file that reads a facet is CREATED (a game made before this keeps the
+// kit's defaults — giving it a seed on a later turn would move its town or its road), and from then on only ever added to.
+
+export const GAME_SEED_FILE_PATH = 'src/game/gameSeed.ts';
+/** The facets the file can hold: town (createActionTown) and road (the race road's land and start map). */
+export type GameSeedFacet = 'town' | 'road';
+/** The race road's twelve maps (Game3DGenerator RACING_ROAD_MAPS ids): the one a new race starts on. */
+export const ROAD_START_MAPS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+/** The `key: value` lines one facet adds to GAME_SEED, fixed by the project. PURE. */
+export function gameSeedLines(projectId: string, facet: GameSeedFacet): string[] {
+  if (facet === 'town') return [`  town: ${varietySeed(projectId, 'town')},`];
+  return [`  road: ${varietySeed(projectId, 'road')},`, `  roadStart: ${pickVariant(projectId, 'road-start', ROAD_START_MAPS)},`];
+}
+
+const GAME_SEED_HEAD = [
+  "// THIS GAME'S OWN START, written once by NavBharatAI when the game was made, so it does not open in the same town or on",
+  "// the same race road as every other game. The kit reads it by itself: town is the action town's shuffle (createActionTown",
+  "// in src/game/three/buildings.ts), road and roadStart are the race road's land and the map it starts on (1-12). Change a",
+  "// number for a different town or road; delete a line for the kit's default.",
+  'export const GAME_SEED: { town?: number; road?: number; roadStart?: number } = {',
+];
+const GAME_SEED_LINE = /^ {2}(?:town|road|roadStart): \d+,$/;
+
+/** The whole file for these facets. PURE. */
+export function gameSeedFileSource(projectId: string, facets: readonly GameSeedFacet[]): string {
+  return [...GAME_SEED_HEAD, ...facets.flatMap((f) => gameSeedLines(projectId, f)), '};', ''].join('\n');
+}
+
+/**
+ * Is this, byte for byte, a seed file the platform wrote (its own header, only its own `key: number,` lines, in any order the
+ * platform added them)? A file anyone edited is not. Lets platformAuthored see it as ours, not the builder's code. PURE.
+ */
+export function isUneditedGameSeedFile(content: string | null | undefined): boolean {
+  const lines = String(content ?? '').split('\n');
+  if (lines.length < GAME_SEED_HEAD.length + 2 || lines[lines.length - 1] !== '' || lines[lines.length - 2] !== '};') return false;
+  if (GAME_SEED_HEAD.some((l, i) => lines[i] !== l)) return false;
+  return lines.slice(GAME_SEED_HEAD.length, -2).every((l) => GAME_SEED_LINE.test(l));
+}
+
+/**
+ * `existing` with the facets it does not hold yet added (every other byte kept); null when nothing is to be added, or when the
+ * file is no longer in a shape the platform can add to safely (then it is the user's, and it is left alone). PURE.
+ */
+export function withGameSeedFacets(existing: string, projectId: string, facets: readonly GameSeedFacet[]): string | null {
+  const text = String(existing);
+  const missing = facets.filter((f) => !new RegExp(`^\\s*${f}\\s*:`, 'm').test(text));
+  if (!missing.length) return null;
+  const head = /export const GAME_SEED\b[^=]*=\s*\{/.exec(text);
+  if (!head) return null;
+  const close = text.indexOf('\n};', head.index + head[0].length - 1);
+  if (close < 0) return null;
+  return text.slice(0, close + 1) + missing.flatMap((f) => gameSeedLines(projectId, f)).join('\n') + text.slice(close);
+}

@@ -133,11 +133,12 @@ describe('🧱 lock 2: the end of the turn puts back whatever was changed withou
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(route.indexOf('const integrityStartedAt = Date.now();'));
     const block = route.slice(at, route.indexOf('const integrityStartedAt = Date.now();'));
-    expect(block).toMatch(/await enforceGrowthAtTurnEnd\(\{ filesAtTurnStart: projectFilesAtTurnStart, request: prompt,/);
+    // The message AND the request it continues (growthRequestFor, build report #2530: a "continue" turn).
+    expect(block).toMatch(/await enforceGrowthAtTurnEnd\(\{ filesAtTurnStart: projectFilesAtTurnStart, request: growthRequestFor\(prompt, checksRequest\),/);
     expect(block).toMatch(/await runInPass\('growth-guard-restore', \(\) => actuator\.writeFile\(workspaceId, p, c\)\); writtenFiles\.set\(p, c\);/);
     expect(block).toMatch(/dispatcher\.platformWritesThisTurn\(\)/);
     expect(block).toMatch(/refused: dispatcher\.growthRefusedThisTurn\(\)/);
-    expect(route).toMatch(/dispatcher\.setGrowthBaseline\(projectFilesAtTurnStart, prompt\)/);
+    expect(route).toMatch(/dispatcher\.setGrowthBaseline\(projectFilesAtTurnStart, growthRequestFor\(prompt, checksRequest\)\)/);
   });
 
   it('the end-of-turn step itself: puts back, keeps what could not be read, reports and tells — through real ports', async () => {

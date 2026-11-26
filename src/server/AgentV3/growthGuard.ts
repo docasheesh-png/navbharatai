@@ -285,7 +285,33 @@ export interface GrowthVerdict { allow: boolean; reason?: string; restore?: stri
  * `after === null` means deleted. `platformWrote` is what the PLATFORM itself wrote there this turn (a kit refresh, a
  * recipe) — never a violation. When not allowed, `restore` is the content to put there. PURE.
  */
-export function growthVerdict(input: { path: string; before: string | undefined; after: string | null; request: string; platformWrote?: string | null; known?: PartsKnown }): GrowthVerdict {
+/**
+ * 🔓 A FEATURE FILE NOTHING RUNS IS UNFINISHED WORK, NOT A WORKING PART (build reports #2527–#2530, 2026-11-25). A turn wrote
+ * src/game/features/gun-fire.ts and never listed it; on the next turn ("continue") the guard refused every edit to it ("the
+ * request is not about it") — so the gun that was half-built could only be left broken or written a SECOND time beside it.
+ * The guard exists so a working part is never rewritten by a request about something else; a file that no file of the
+ * project imports at the start of the turn is in play nowhere, and changing it can break nothing that worked. PURE.
+ */
+export function featureInPlay(id: string, filesAtTurnStart: Readonly<Record<string, string>> | null | undefined): boolean {
+  if (!filesAtTurnStart) return true;                                    // nothing to judge by: treat it as in play
+  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const spec = new RegExp(String.raw`(?:from\s*|import\s*\(\s*|import\s+)['"][^'"]*(?:^|\/)${esc}(?:\.tsx?|\.jsx?)?['"]`);
+  return Object.entries(filesAtTurnStart).some(([p, c]) => typeof c === 'string' && featureIdOf(p) !== id && spec.test(c));
+}
+
+/**
+ * 🔁 THE WORDS THE GUARD READS ON A "CONTINUE" TURN (build report #2530, 2026-11-25). The user asked for a gun that fires; the
+ * build ran out of time; the user typed "continue" — and the guard judged every edit against that one word, so the feature the
+ * user had asked for was "not what the request is about". The message and the request it continues (requestForChecks: the
+ * same message when it names its own work) are read TOGETHER, so a continuation carries what it continues. PURE.
+ */
+export function growthRequestFor(message: string, continued: string | null | undefined): string {
+  const m = String(message ?? '');
+  const c = String(continued ?? '');
+  return c && c.trim() !== m.trim() ? `${m}\n${c}` : m;
+}
+
+export function growthVerdict(input: { path: string; before: string | undefined; after: string | null; request: string; platformWrote?: string | null; known?: PartsKnown; filesAtTurnStart?: Readonly<Record<string, string>> | null }): GrowthVerdict {
   const { path, before, after, request, known } = input;
   // A NEW feature that only pretends to grow the map (Q-3304): refused at the write, with the one path that does.
   if (typeof before !== 'string' && after !== null && FEATURE_FILE.test(path) && path !== FEATURES_INDEX && featurePretendsToGrowMap(path, after)) {
@@ -313,6 +339,7 @@ export function growthVerdict(input: { path: string; before: string | undefined;
   }
   if (FEATURE_FILE.test(path)) {
     const id = featureIdOf(path);
+    if (input.filesAtTurnStart && !featureInPlay(id, input.filesAtTurnStart)) return { allow: true };
     if (after === null) return mayRemove(request, id, known) ? { allow: true } : { allow: false, restore: before, reason: `the feature "${id}" was deleted, and the request did not ask to remove it` };
     return mayEdit(request, id, known) ? { allow: true } : { allow: false, restore: before, reason: `the feature "${id}" was rewritten, and the request is not about it` };
   }
@@ -386,7 +413,7 @@ export function growthRestores(input: {
   const known = partsKnown(input.filesAtTurnStart);
   for (const path of growthProtectedPaths(input.filesAtTurnStart)) {
     if (!(path in input.now)) continue;                               // not read: never judged on a guess
-    const v = growthVerdict({ path, before: input.filesAtTurnStart[path], after: input.now[path], request: input.request, platformWrote: input.platformWrote?.get(path) ?? null, known });
+    const v = growthVerdict({ path, before: input.filesAtTurnStart[path], after: input.now[path], request: input.request, platformWrote: input.platformWrote?.get(path) ?? null, known, filesAtTurnStart: input.filesAtTurnStart });
     if (!v.allow && typeof v.restore === 'string') out.push({ path, restore: v.restore, reason: v.reason || 'changed without being asked' });
   }
   return out;

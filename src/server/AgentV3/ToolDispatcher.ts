@@ -407,7 +407,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX_WITH_DANGER, GAME_STREET_DANGER_FEATURE, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -1307,7 +1307,7 @@ export class ToolDispatcher {
     if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
     let rel = path;
     try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
-    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown });
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown, filesAtTurnStart: this.growthBaseline });
     if (verdict.allow) return;
     this.growthRefused.add(rel);
     try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }
@@ -10698,10 +10698,22 @@ export class ToolDispatcher {
             await this.ensurePlayerFile(agent, 'generate_open_world');
             // The game's own list of features: created once, never replaced (it is the user's game from then on).
             let listed = false;
+            let danger = false;
             try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!listed) {
-              const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX, { agent, source: 'generate_open_world' });
+              // 🦹 A game with a fight in it (the seed passes danger: true when it laid the systems kit) starts with its enemies, bystanders
+              // and police as the first feature (problem 4, Q-3521) — only when the systems those need are really in the project.
+              if (owRec.danger === true) {
+                const has = async (p: string) => { try { await this.actuator.readFile(this.workspaceId, p); return true; } catch { return false; } };
+                if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {
+                  const feature = await this.guardedWrite(GAME_STREET_DANGER_PATH, GAME_STREET_DANGER_FEATURE, { agent, source: 'generate_open_world' });
+                  this.state?.recordFileChange({ path: GAME_STREET_DANGER_PATH, kind: feature.kind }, agent);
+                  getWorkspaceMemory(this.workspaceId).indexFile(GAME_STREET_DANGER_PATH, feature.content);
+                  danger = true;
+                }
+              }
+              const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, danger ? GAME_FEATURES_INDEX_WITH_DANGER : GAME_FEATURES_INDEX, { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_FEATURES_INDEX_PATH, index.content);
             }
@@ -10709,7 +10721,8 @@ export class ToolDispatcher {
             const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
             this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
             getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
-            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.'
+              + (danger ? ' The game ALREADY has its fight: src/game/features/streetDanger.ts (listed in FEATURES) spawns enemies who chase and attack, bystanders who can be hurt, and the police with wanted stars on a crime; the punch lands. Change THAT file for anything about enemies, police or fighting — never add a second set.' : '');
           }
         }
         this.scheduleCheckpoint('open world starter');

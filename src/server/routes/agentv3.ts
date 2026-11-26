@@ -77,6 +77,9 @@ import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
+import { noteServerMemory } from '../AgentV3/buildPhases/serverMemoryPulse';
+import { enemiesAtTurnStart } from '../AgentV3/buildPhases/enemiesTurn';
+import { housesAtTurnStart } from '../AgentV3/buildPhases/housesTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
 import { raceWorldAtTurnStart } from '../AgentV3/raceWorld';
@@ -86,7 +89,7 @@ import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../Age
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
 import { offerBugHunt, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
-import { isKitFile as isGameKitFile } from '../AgentV3/growthGuard';
+import { isKitFile as isGameKitFile, growthRequestFor } from '../AgentV3/growthGuard';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -14375,6 +14378,7 @@ async function noteBuildOutcome(
     // See progressEta.ts for why measurement beats every constant we could tune here.
     let etaPlannedFiles = 0;
     let etaFirstFileAt = 0;
+    const memoryPulse = { band: 0, since: Date.now() };   // serverMemoryPulse.ts — the highest memory band this build has recorded
     /**
      * Files the PLATFORM laid down before the builder's first call (the game-kit seed, gameKitSeed.ts —
      * build 46e2d74b). They sit in `writtenFiles` so they are saved, but they are not progress on the
@@ -14578,6 +14582,7 @@ async function noteBuildOutcome(
       }
       // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
       // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
+      noteServerMemory(memoryPulse, { record: (issue) => buildDiagRef?.record(issue) }, Date.now() - memoryPulse.since); // Q-3354: the server's memory before a loss
       etaTick += 1;
       if (!abort.signal.aborted && etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
@@ -17746,7 +17751,7 @@ async function noteBuildOutcome(
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
         // 🧱 GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when the turn began, and the user's own words.
-        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, prompt); } catch { /* the end-of-turn lock still holds */ }
+        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, growthRequestFor(prompt, checksRequest)); } catch { /* the end-of-turn lock still holds */ }
         try {
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
@@ -19585,6 +19590,13 @@ async function noteBuildOutcome(
       // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3302/Q-3303 — failedbr #2495):
       // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
       buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
+      // 🦹 "ENEMY BANAO" ON AN OPEN WORLD THAT EXISTS: the platform lays the kit, writes and lists street danger (enemiesTurn.ts).
+      buildPrompt = withPlatformHandoff(await enemiesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
+        runRecipe: async (name) => !(await dispatcher.dispatch({ id: `enemies-${name}`, name: 'run_recipe', input: { name } }, 'architect', { signal: abort.signal })).is_error }), buildPrompt);
+      // 🚪 "GHAR KE ANDAR JAANA HAI": every city house becomes one you can walk into (housesTurn.ts).
+      buildPrompt = withPlatformHandoff(await housesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       // 🏁 "RACE SHEHAR ME KARO" — the user's yes moves a road-library race onto the world's city roads (raceWorld.ts, map
       // expansion item 8): the platform writes the switch itself, last, after the files it needs. OFF unless AGENTV3_RACING_WORLD=on.
@@ -21793,7 +21805,7 @@ async function noteBuildOutcome(
       // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
       // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
       if (!abort.signal.aborted && !initialTerminalDecline) {
-        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
+        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: growthRequestFor(prompt, checksRequest), read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
           platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
           refused: dispatcher.growthRefusedThisTurn(), written: [...writtenFiles.keys()], record: (issue) => buildDiag.record(issue),
@@ -23954,7 +23966,7 @@ async function noteBuildOutcome(
             try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
           }
           const adServingPlayer = (await adFactsNow()).players.length > 0;
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer });
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt: checksRequest, appSource, adServingPlayer });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's
@@ -26126,6 +26138,7 @@ async function noteBuildOutcome(
           // claim a typecheck happened when it did not.
           // …or a write-time compile that really looked at the project (Q-3249: "no typecheck ran" beside 5 write-time runs).
           typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
+          prodBuildFailed: prodBuildOutcome === 'failed', // "game build clean hai" over a failed production build (#2526)
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
           // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3305).

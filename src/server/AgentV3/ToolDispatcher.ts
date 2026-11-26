@@ -6,7 +6,7 @@ import { composeRule } from './gameAssets/composeRule';
 import { composeEffect } from './gameAssets/composeEffect';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { CAR_FILE_PATH, raceCarFile } from './carSwap';
-import { starterCarPaint } from '../lib/projectVariety';
+import { GAME_SEED_FILE_PATH, gameSeedFileSource, starterCarPaint, withGameSeedFacets, type GameSeedFacet } from '../lib/projectVariety';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
@@ -119,6 +119,8 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 
 /** A recipe's files in flight at once: enough to end the one-by-one wait, few enough for any sandbox. */
 const RECIPE_WRITE_CONCURRENCY = 6;
+/** The kit files whose creation gives a game its own seed (src/game/gameSeed.ts, Q-3373): the action town and the race starter. */
+const ACTION_TOWN_PATH = 'src/game/three/buildings.ts', RACE_STARTER_PATH = 'src/game/RacingRoadGame.tsx';
 import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
@@ -4159,6 +4161,25 @@ export class ToolDispatcher {
     return true;
   }
 
+  /**
+   * 🎲 This game's own seeds (src/game/gameSeed.ts, projectVariety.ts — Q-3373): the facets whose kit file this recipe call has
+   * just CREATED are written, the file created or only the missing lines added. A facet already there, or a file no longer in a
+   * shape the platform can add to, is left exactly as it is; a game whose kit file already existed gets nothing, so an edit never
+   * moves its town or its road. True when it was written now.
+   */
+  private async ensureGameSeedFile(agent: AgentRole, facets: readonly GameSeedFacet[], source: string): Promise<boolean> {
+    if (!facets.length) return false;
+    let current: string | null = null;
+    try { current = await this.actuator.readFile(this.workspaceId, GAME_SEED_FILE_PATH); }
+    catch (error) { if (!isNotFoundError(error)) throw error; }
+    const next = current === null ? gameSeedFileSource(this.workspaceId, facets) : withGameSeedFacets(current, this.workspaceId, facets);
+    if (next === null) return false;
+    const written = await this.guardedWrite(GAME_SEED_FILE_PATH, next, { agent, source });
+    this.state?.recordFileChange({ path: GAME_SEED_FILE_PATH, kind: written.kind }, agent);
+    getWorkspaceMemory(this.workspaceId).indexFile(GAME_SEED_FILE_PATH, written.content);
+    return true;
+  }
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
@@ -4217,6 +4238,7 @@ export class ToolDispatcher {
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
+      if (wrote.kind === 'create') this.recipeCreated.add(path);
       return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`;
     };
     lines.push(...await mapWithConcurrency(Object.entries(files), additiveOnly ? 1 : RECIPE_WRITE_CONCURRENCY, one));
@@ -4237,6 +4259,8 @@ export class ToolDispatcher {
    * replaced only after it is READ and found to be an older kit version, never on the strength of this set.
    */
   private readonly kitCurrentPaths = new Set<string>();
+  /** Kit files a recipe (or the layers it brought) CREATED in this dispatcher — read from the writes themselves, no sandbox read. */
+  private readonly recipeCreated = new Set<string>();
 
   private noteKitCurrent(path: string, content: string): void {
     if (recipeFilePool().get(path)?.content === content) this.kitCurrentPaths.add(path);
@@ -4334,6 +4358,7 @@ export class ToolDispatcher {
         this.noteKitCurrent(path, f.content);
         all[path] = f.content;
         added.set(path, f);
+        this.recipeCreated.add(path);
       }
       const refreshed: string[] = [];
       for (const [path, f] of plan.refresh) {
@@ -10800,6 +10825,9 @@ export class ToolDispatcher {
           ? gshRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gsh = generateGameShell(gshInclude);
+        // 🎲 A race starter (or an action town) this call CREATES gets this project's own seed (src/game/gameSeed.ts); one that
+        // already existed keeps the road and the town it had. "Created" is read from the writes themselves (recipeCreated).
+        this.recipeCreated.delete(RACE_STARTER_PATH); this.recipeCreated.delete(ACTION_TOWN_PATH);
         const gshWritten = await this.writeRecipeFiles(gsh.files, agent);
         const gshLayers = await this.addMissingRecipeLayers(gsh.files, agent);
         // 🧍 Every game on the shell swaps its character in src/game/player.ts, which the shell reads by itself (2026-11-22:
@@ -10808,8 +10836,13 @@ export class ToolDispatcher {
         // 🎲 A race the seed KNOWS is a race (its include names the race starter) gets its own car file with a paint fixed by
         // this project (projectVariety.ts): six new races are not six red cars, and an edit never repaints it.
         const gshCar = gshInclude?.includes('racingroadgame') && gsh.files['src/game/RacingRoadGame.tsx'] ? await this.ensureRaceCarFile(agent) : false;
+        const gshFacets: GameSeedFacet[] = [
+          ...(this.recipeCreated.has(ACTION_TOWN_PATH) ? ['town' as const] : []),
+          ...(this.recipeCreated.has(RACE_STARTER_PATH) ? ['road' as const] : []),
+        ];
+        const gshSeed = await this.ensureGameSeedFile(agent, gshFacets, 'generate_game_shell');
         this.scheduleCheckpoint('game shell');
-        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}${gshCar ? `\ncreated ${CAR_FILE_PATH} (the car the player drives — RacingRoadGame reads it by itself)` : ''}\n\n${gsh.instructions}${gshLayers}`;
+        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}${gshCar ? `\ncreated ${CAR_FILE_PATH} (the car the player drives — RacingRoadGame reads it by itself)` : ''}${gshSeed ? `\nwrote ${GAME_SEED_FILE_PATH} (this game's own ${gshFacets.join(' and ')} — the kit reads it by itself; never pass a fixed seed)` : ''}\n\n${gsh.instructions}${gshLayers}`;
       }
 
       case 'generate_melody': {
@@ -10912,14 +10945,17 @@ export class ToolDispatcher {
           ? g3Rec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const g3 = generateGame3D(g3Include);
+        // 🎲 The action town file this call CREATES gets this project's own town seed (src/game/gameSeed.ts, Q-3373).
+        this.recipeCreated.delete(ACTION_TOWN_PATH);
         const g3Written = await this.writeRecipeFiles(g3.files, agent);
         const g3Layers = await this.addMissingRecipeLayers(g3.files, agent);
+        const g3Seed = this.recipeCreated.has(ACTION_TOWN_PATH) ? await this.ensureGameSeedFile(agent, ['town'], 'generate_game_3d') : false;
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.
         // Since 2026-10-04 the dependency is INSTALLED, not named (installRecipeDependencies, called by
         // addMissingRecipeLayers): `g3Layers` says what happened, including when it could not be done.
-        return `Wired the 3D layer:\n${g3Written.join('\n')}\n\n${g3.instructions}${g3Layers}`;
+        return `Wired the 3D layer:\n${g3Written.join('\n')}${g3Seed ? `\nwrote ${GAME_SEED_FILE_PATH} (this game's own town — createActionTown() reads it by itself; never pass a fixed seed)` : ''}\n\n${g3.instructions}${g3Layers}`;
       }
 
       case 'generate_game_runtime': {

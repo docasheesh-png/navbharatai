@@ -14,7 +14,7 @@ import {
   domGameKind, domGameNotPlayedVerdict, isCanvasGameProject, gameDefectsMessage, gameScopeVerdict, missingKitLayerPaths, parsePlaytest,
   playtestDefects, playtestNotRunVerdict, playtestOutcome, playtestSkipReason, playtestVerdict, replayFromCode, withKitLayersFromDisk,
 } from '../gamePlaytest';
-import { asksForEnemies, scopeMatch, type GameScopeContract } from '../gameIntent';
+import { asksForEnemies, asksForHeldItem, scopeMatch, type GameScopeContract } from '../gameIntent';
 import { gameGotWorse, gameMeasureFromIssues, gameUndoMessage, versionBeforeTurn } from '../gameRegression';
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage } from '../gameGeometryProbe';
 import { GAME_PLACEHOLDER_CODE, PLACEHOLDERS_CLEARED_MESSAGE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage, type PlaceholderFinding } from '../gamePlaceholderProbe';
@@ -148,9 +148,13 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         const fromFiles = missingModelFindings(playedFiles, present);
         // Enemies are looked for only when the request asked for them (report #2519: asked for, built, never on screen) —
         // the contract, or this turn's own words when an edit turn has no contract (BR2532).
-        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff, { enemies: !!p.contract?.requiredFeatures.includes('enemies') || asksForEnemies(p.request) });
+        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff, { enemies: !!p.contract?.requiredFeatures.includes('enemies') || asksForEnemies(p.request), held: asksForHeldItem(p.request) });
         const placeholders = combinePlaceholderFindings(fromFiles, fromPage);
         out.placeholders = placeholders;
+        // 🧾 KADAM 2: WHAT THIS REQUEST ASKED FOR IS PROVED, NOT CLAIMED (build report #2535). An asked-for thing the page
+        // showed is not there becomes a defect the completion gate reads, so the build is never reported done without it.
+        // A page that was not read says nothing (no finding), so "could not look" is never turned into "missing".
+        for (const f of fromPage) if (f.kind === 'MISSING_ENEMIES' || f.kind === 'MISSING_HELD') out.played.defects.push({ code: 'GAME_DEFECT_ASK_NOT_MET', evidence: f.evidence });
         const placeholderMsg = placeholderFindingsMessage(placeholders);
         if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }

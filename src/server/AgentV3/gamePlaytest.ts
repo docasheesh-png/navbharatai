@@ -2232,7 +2232,8 @@ export type GameDefectCode =
   | 'GAME_DEFECT_SILENT'          // 2026-11-19: the game's code plays sound, and a whole playthrough played none
   | 'GAME_DEFECT_TOUCH_SCROLLS'   // 2026-11-20 (failedbr #2477): a touch handler's preventDefault was ignored (passive listener)
   | 'GAME_DEFECT_TOO_HEAVY'       // 2026-11-21: a frame asks more of the GPU than a budget phone can draw smoothly
-  | 'GAME_DEFECT_NOT_SHOWN';      // BR #2535: the game said a model or item the code asked for could not be shown
+  | 'GAME_DEFECT_NOT_SHOWN'       // BR #2535: the game said a model or item the code asked for could not be shown
+  | 'GAME_DEFECT_ASK_NOT_MET';    // Kadam 2: what THIS request asked for (enemies, an item in the hand) is not in the played game
 export interface GameDefect { code: GameDefectCode; evidence: string }
 
 export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = [], replay?: GameCodeFacts | null): GameDefect[] {

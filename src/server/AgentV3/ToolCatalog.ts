@@ -2678,7 +2678,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, collision, groundcontact, environment, surfaces, '
-              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable, city, citytraffic, citypeople, physics, dents. Default = all; imports are pulled in automatically. '
+              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, realism, atmosphere, breakable, city, citytraffic, citypeople, physics, dents. Default = all; imports are pulled in automatically. '
               + 'dents = enableVehicleDents(): every car that crashes is dented where it hit (deeper for a harder crash), scuffed, and says VEHICLE_DAMAGED { vehicle, damage 0..1 }; repairVehicle(car) restores it. '
               + 'groundcontact = standOnGround / restOriginY: the lowest point of a model sits on the ground, every frame. '
               + 'city = createCity({ blocksX, blocksZ, style }): a whole grid of city blocks — streets, crossings, pavements, shops, apartments, offices, houses, parks; city.spawn, city.route(from, to) for left-lane AI routes, city.lotsOf(kind) for mission targets. citytraffic = createCityTraffic(city): vehicles that drive the grid, turn at crossings and obey traffic lights. citypeople = createCityPeople(city, { traffic }): people on the pavements who cross on the zebras when the cars have red. '

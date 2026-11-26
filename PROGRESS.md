@@ -6275,3 +6275,25 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Fixed on the way:** `ribbon` kept any sample more than 6 cm from the body at its own point, which is right for the pallu's hanging end. Between a strap's waypoints, that made the curve arch into the air. Now `freeBeyond` is a parameter, and a strap passes `Infinity`; the pallu keeps the old value, so the saree file is unchanged.
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
+
+## 2026-11-26 — Asked-for enemies are put where the hero is, and the playtest proves they are on screen (Q-3401)
+
+The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attack kare, to builder pura kam kar deta hai … par real game me enemies show hi nahi hote".
+
+- **Evidence:** BR2519 ("Knight Boxer enemy show nahi ho rahe hai"). The builder said the enemies were visible and attacking.
+  - Its enemies were hand-made: a custom GLTFLoader dressed bots of a `criminal-mobs` feature, around a fixed centre of a 1000-house city.
+  - It wrote that it "could not test by playing". The playtest ran out of time while starting the game (Q-3332).
+- **Earlier work, merged 2026-11-25 (#4532/#4533):** the kit already had `Entities`, which verifies each spawn: in the scene, at a finite position, with a visible body. The admin's game was built the day before.
+- **Two gaps were still open:**
+  1. Nothing PROVED that asked-for enemies are on screen. The played evidence covered score, level, sound, restart and a vehicle.
+  2. There was no primitive to put characters where the hero is.
+- **Fix:**
+  - `Entities.spawnAround(n, spec, {near, far})` rings characters round the PLAYER, on the ground, at golden-angle spacing.
+  - `window.__nbEntities` is a read-only list of live characters plus the player's position. It is added by the constructor and removed by `dispose`.
+  - The playtest's existing placeholder page hook measures, with the game's own camera: hostiles alive, the nearest one's distance, and how many are in the frame.
+  - `MISSING_ENEMIES` is said only when the contract asked for enemies. It fires when none is alive (with the failed-spawn count), when all are more than 60 m away and none is in view, or when the enemies are made outside Entities. It goes to the builder through the existing placeholder repair note.
+  - The system prompt and the systems instructions say "enemies go where the hero is".
+- **Proof:** `tests/enemiesAreWhereTheHeroIs.test.ts`, 8 tests, run on the real emitted kit and the real page hook. Each of three reversions made it fail: rings round the origin, no hook, no camera check. The related suites pass: 3906 tests in 164 files.
+- **What it does NOT fix:**
+  - A game the playtest never plays gets no page read (Q-3332, owned elsewhere).
+  - The admin's existing city game keeps its hand-made enemies until a turn moves them onto Entities. With this change, the next turn's playtest says so, and the builder is told the fix.

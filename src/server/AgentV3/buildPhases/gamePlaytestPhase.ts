@@ -125,7 +125,8 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         // Bounded: a slow listing must never hold the build — after 5 s the file check says nothing.
         const present = p.listFiles ? await listWithin(p.listFiles, 5000) : [];
         const fromFiles = missingModelFindings(playedFiles, present);
-        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff);
+        // Enemies are looked for only when the request asked for them (report #2519: asked for, built, never on screen).
+        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff, { enemies: !!p.contract?.requiredFeatures.includes('enemies') });
         const placeholderMsg = placeholderFindingsMessage(combinePlaceholderFindings(fromFiles, fromPage));
         if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }

@@ -23,6 +23,7 @@ import {
 } from '../lib/githubNativeHandoff';
 import { signWebState, parseWebState, webReturnFragment } from '../lib/githubWebState';
 import { spaFallbackShouldDefer } from '../lib/spaFallback';
+import { randomBytes } from 'crypto';
 
 /** Device tickets already redeemed on this instance — see TicketLedger for the honest limit. */
 const deviceTicketLedger = new TicketLedger();
@@ -33,11 +34,21 @@ const UPDATE_APP_MESSAGE = 'Please update the NavBharatAI app to connect GitHub.
 /**
  * Key for signing the OAuth `state`. Reuses the secret the platform already requires rather than adding
  * another env var for the admin to set — one more key is one more thing to be unset in production.
- * The dev fallback keeps local runs and tests working; `encrypt` is what refuses a missing key in
- * production, and it refuses it on the path that actually matters (the ticket itself).
+ *
+ * 🔒 NEVER A FIXED FALLBACK (security audit 2026-11-21). This used to fall back to a string written right
+ * here, which anyone reading the code could use to sign a state. Production without the key now refuses
+ * (the same rule `encrypt` applies); a local run gets a random key for that process, which is all a
+ * sign-then-verify round trip on one machine needs.
  */
+let devHandoffSecret: string | null = null;
 function handoffSecret(): string {
-  return process.env.SECRET_ENCRYPTION_KEY || process.env.SECRET_KEY_V1 || 'navbharatai-dev-state-secret';
+  const configured = process.env.SECRET_ENCRYPTION_KEY || process.env.SECRET_KEY_V1;
+  if (configured) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to sign a GitHub hand-off: SECRET_ENCRYPTION_KEY (or SECRET_KEY_V1) is not configured.');
+  }
+  if (!devHandoffSecret) devHandoffSecret = randomBytes(32).toString('hex');
+  return devHandoffSecret;
 }
 
 // Production redirect URI is hardcoded per the original code's explicit directive.

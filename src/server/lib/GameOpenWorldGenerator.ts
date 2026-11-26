@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { varietySeed } from './projectVariety';
 
 // THE OPEN-WORLD STARTER (failedbr #2485, 2026-11-21 — admin: "is game me to map aya hi nahi, bas ek character aya … jo
 // joystick se hawa me move kar raha hai … library ka use kyu nahi ho raha, hona chahiye").
@@ -1892,7 +1892,7 @@ export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
 /** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
 export function gameWorldFileSource(options: { city?: boolean; workspaceId?: string } = {}): string {
   const seed = options.workspaceId
-    ? createHash('sha256').update('world:' + options.workspaceId).digest().readUInt32BE(0) || 1
+    ? varietySeed(options.workspaceId, 'world')
     : 7;
   return [
     '// THIS GAME\'S MAP. The land is NavBharatAI\'s big Athree map; the places on it are the regions list below.',

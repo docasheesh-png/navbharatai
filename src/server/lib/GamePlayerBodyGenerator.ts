@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { pickVariant } from './projectVariety';
 
 // 🧍 THE PLAYER'S BODY, FOR EVERY GAME ON THE KIT (admin 2026-11-22: "Use as my character" — the user's own model, or one
 // from the game library — must work in ALL games, not only the open world).
@@ -630,6 +630,5 @@ export const GAME_PLAYER_FILE_VARIANTS = STARTER_LOOKS.map(look => {
 });
 
 export function gamePlayerFileSource(workspaceId: string): string {
-  const choice = createHash('sha256').update('player:' + workspaceId).digest().readUInt32BE(0);
-  return GAME_PLAYER_FILE_VARIANTS[choice % GAME_PLAYER_FILE_VARIANTS.length];
+  return pickVariant(workspaceId, 'player', GAME_PLAYER_FILE_VARIANTS);
 }

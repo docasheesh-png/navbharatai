@@ -148,6 +148,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1fc69964aa1f6861ea80bab3d929b9913c4191ab2e0eff410fcb254f73302ca0",
     "e7a54b73e4f0e2b10691d8a2ad47e467aa899c9f2f69dfe7b1acc04ce44c9172"
   ],
+  "src/game/RoyaleGame.tsx": [
+    "311e46f6d8b356404bde145111171b21663211eea4ec9a8fa7bfb631a3763220"
+  ],
+  "src/game/RoyaleOnline.tsx": [
+    "e841a240407c83c92095bfaff62bd4bfda2611b48a8a392f0d93a11f0ed621e0"
+  ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
     "f997b0e9ce8519c7e70278a84002bbb31c335ccb0527e02fc0f179645d6134ce",
@@ -592,6 +598,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
     "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8"
+  ],
+  "src/game/royale/onlineClient.ts": [
+    "34daf1faeaa0be26e95667fc095b16a40d4b0b62c53220ae2961d8a3a66e8f2b"
+  ],
+  "src/game/royale/onlineMatch.ts": [
+    "3890c6b08b6ecbe5858621795fe0d5a24a4a8861a100503bbc73adc83586e20e"
   ],
   "src/game/royale/practice.ts": [
     "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9",

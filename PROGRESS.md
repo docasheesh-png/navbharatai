@@ -6644,6 +6644,25 @@ GAME_FEATURES_INDEX_WITH_DANGER stayed a hand-written copy of what the dispatche
 Fix: one DOWN_SECONDS (6, every blow); GAME_FEATURES_INDEX_WITH_DANGER is derived from featuresIndexWith(GAME_FEATURES_INDEX,
 'streetDanger'), so the dispatcher and the fixture cannot drift; the street-danger test asserts the dispatcher's real line.
 
+## 2026-11-26 — Q-3611…Q-3614: account deletion now erases the bucket objects only a record could find (PR #4594)
+
+The Q-3410 storage census (#4571) left four open exceptions — per-user Cloud Storage objects that outlived account
+deletion because their key names a share token, a content hash or an upload id (or, for native builds, because no
+eraser called the owner-derived folder). **Class:** an object filed for one user under a key that is not that user is
+invisible to the account eraser, and `deleteUserData` erases the only record pointing at it.
+- **Q-3611** share-link HTML: new pages filed `shares/<owner>/<token>.html` (verified owner); `eraseUserShareHtml`
+  deletes that folder and each legacy page through its own record, before `deleteUserData`. Foreign pointers refused.
+- **Q-3612** never-public APK: deleted before the listing through `navStoreApkObjects()`, kept when another listing
+  names the same content-addressed object; a failed delete keeps the listing de-identified (`objectsNotConfirmed`).
+  Sibling: the republish cleanup deleted the old APK even when another person's listing named it — now
+  `deleteApkIfUnreferenced`.
+- **Q-3613** zip-upload chunks: `eraseUserZipUploadChunks` (chunks, then record) + `sweepAbandonedZipUploads`
+  (record gone or older than 48 h), started by `beginSharedUpload`.
+- **Q-3614** native .apk/.aab: `eraseUserNativeArtifacts` stops running builds, then deletes `mobile-builds/<uid-hash>/`.
+- Each eraser has its own response line in DELETE /api/profile; failures are failures. The census now requires all four.
+- **Lock:** `tests/accountDeletionReachesRecordOnlyStorage.test.ts` — 16 reversions, each fails.
+- **New rows:** Q-3702 (OPEN: native build job rows not erased; the collection census is blind to non-`*_COLLECTION`
+  constants), Q-3703 (🟡 decision: delete a departing user's signing keys?), Q-3704 (OPEN: expired shares never purged).
 ## 2026-11-26 — failedbr #2549: police the user asks for are the kit's real police, put in by the platform
 
 The kit's Dispatch (a police car with its siren drives in, officers get out) existed and no game used it; the builder hand-wrote

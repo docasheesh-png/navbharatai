@@ -181,6 +181,7 @@ export class Entities {
   private readonly list: Inner[] = [];
   private readonly off: (() => void) | null;
   private readonly offShot: () => void;
+  private readonly offBlows: Array<() => void>;
   private readonly options: EntityOptions;
   /** How many spawns were verified, and how many failed and were rolled back — the honest count. */
   readonly report = { spawned: 0, failed: 0, removed: 0 };
@@ -197,6 +198,22 @@ export class Entities {
         for (let o: THREE.Object3D | null = hit; o; o = o.parent) if (o === e.object) { this.hurt(e, Number(p!.damage), p!.point ?? e.object.position, p!.byPlayer !== false); return; }
       }
     });
+    // The player's bare fist (the shell's punch, when the game reads no attack of its own) and a car the player drives
+    // into someone with WORLD.runOver on: both are blows, and a blow lands on the character it reaches.
+    this.offBlows = [
+      events.on('PLAYER_PUNCHED', (p: { position?: { x: number; y: number; z: number }; yaw?: number; damage?: number; range?: number } | undefined) => {
+        if (!p?.position || !(Number(p.damage) > 0)) return;
+        this.melee(new THREE.Vector3(p.position.x, p.position.y, p.position.z), Number(p.yaw) || 0, Number(p.damage), { range: Number(p.range) || 1.6, only: 'first', byPlayer: true, attacker: host.player?.object });
+      }),
+      events.on('VEHICLE_STRUCK', (p: { position?: { x: number; y: number; z: number }; radius?: number; damage?: number } | undefined) => {
+        if (!p?.position || !(Number(p.damage) > 0)) return;
+        const r = Number(p.radius) || 1.8;
+        for (const e of this.alive()) {
+          const q = e.object.position;
+          if (Math.hypot(q.x - p.position.x, q.z - p.position.z) - e.radius <= r && Math.abs(q.y - p.position.y) < 2.5) this.hurt(e as Inner, Number(p.damage), e.object.position, true);
+        }
+      }),
+    ];
     LIVE.add(this);
     publishHook();
   }
@@ -459,6 +476,7 @@ export class Entities {
     for (const e of [...this.list]) e.remove();
     this.off?.();
     this.offShot();
+    for (const off of this.offBlows) off();
     LIVE.delete(this);
     publishHook();
   }

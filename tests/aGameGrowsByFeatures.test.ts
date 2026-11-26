@@ -111,8 +111,8 @@ describe('🧩 where it ships, and what the builder is told', () => {
     expect(generateOpenWorld().files['src/game/OpenWorldGame.tsx']).toMatch(/host\.current\?\.update\(ctx, world\.current, delta\)/);
     // The list is the user's file: created once on mount, never replaced.
     const dispatcher = read('src/server/AgentV3/ToolDispatcher.ts');
-    // The list is written inside `if (!listed)` only — with the street danger in it when the game has a fight (problem 4, Q-3521).
-    expect(dispatcher).toMatch(/if \(!listed\) \{[\s\S]{0,1600}?const index = await this\.guardedWrite\(GAME_FEATURES_INDEX_PATH, danger \? GAME_FEATURES_INDEX_WITH_DANGER : GAME_FEATURES_INDEX, \{ agent, source: 'generate_open_world' \}\);/);
+    // Created only when it is not there. Enemies the first request asked for, and street danger when the game has a fight, are both listed.
+    expect(dispatcher).toMatch(/if \(!listed\) \{[\s\S]{0,2400}let indexSource = GAME_FEATURES_INDEX;[\s\S]{0,2400}featuresIndexWith\(indexSource, 'enemies'\)[\s\S]{0,2400}featuresIndexWith\(indexSource, 'streetDanger'\)[\s\S]{0,800}const index = await this\.guardedWrite\(GAME_FEATURES_INDEX_PATH, indexSource, \{ agent, source: 'generate_open_world' \}\);/);
   });
 
   it('the rule is said on the first build, and on EVERY later turn of a game that has the list — whatever the turn says', () => {

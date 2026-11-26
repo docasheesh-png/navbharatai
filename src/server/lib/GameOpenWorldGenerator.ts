@@ -36,10 +36,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
 import { geometryTier } from '../three/surfaces';
 import { settings } from '../core/settings';
-import { events } from '../core/events';
 import { localLowestY, setGround } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { damagePlayer } from '../core/state';
+import { events } from '../core/events';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
@@ -85,6 +85,25 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * { wall: false } keeps the edge without drawing the wall. false removes it (only when the user asks for an endless map).
    */
   boundary?: false | { margin?: number; wall?: boolean };
+  /**
+   * THE PEOPLE IN EVERY CITY (admin 2026-11-26: "city ke log solid nahi hai, hero ke aar paar ho jaate hai, punch se kuch nahi
+   * hota … jab user kahe tab"). solid: the player cannot walk through them; hittable: a punch, a shot or a car knocks them
+   * down, and they get up and walk on. Both off unless the user asked (a crowd is scenery by default). A region's own
+   * city.people options win over these.
+   */
+  citizens?: { solid?: boolean; hittable?: boolean };
+  /**
+   * A CAR THE PLAYER DRIVES HURTS WHAT IT HITS (admin 2026-11-26: "gadi ki takkar se log mare … jab user kahe, default me
+   * nahi"). On: driving into a character (systems/entities.ts) faster than RUN_OVER_SPEED hurts it by RUN_OVER_DAMAGE, and a
+   * hittable crowd's people fall. Off by default.
+   */
+  runOver?: boolean;
+  /**
+   * EVERY BUILDING OPENS (admin 2026-11-26: "painted door wala ghar … user kahe to andar ja sake"). On: walking up to a city
+   * building's front door turns it into a walk-in building (city.openLot: a door that opens with Use, rooms, a floor, walls).
+   * Off by default — a city's buildings are scenery until the user asks.
+   */
+  openBuildings?: boolean;
   /**
    * 🚪 WALK INTO THE HOUSES (admin 2026-11-26: "ghar me game open karo … painted gate ko real gate banao … hero andar chala
    * jayega"). true: every house in every city on the map is the kit's enterable house — a real door (E, or Use on a phone),
@@ -134,6 +153,9 @@ const EDGE_STEP = 8;
 const EDGE_HEIGHT = 3.2;
 /** Health lost each second in water when the game is not a swimming one (WORLD.water). */
 export const DROWN_PER_SECOND = 20;
+/** WORLD.runOver: a driven car faster than this (m/s) strikes what it touches, for this much damage. */
+export const RUN_OVER_SPEED = 4;
+export const RUN_OVER_DAMAGE = 60;
 /**
  * The open country kept between two places, edge to edge, in metres (failedbr #2499: "maps thode pas pas rahe, aur beech me
  * road ho"): a village keeps about 150 m, a big city up to 300 m — a short drive on the road between them.
@@ -433,7 +455,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, enterableHouses, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -465,6 +487,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const ground = markWorldCollider(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ visible: false })), 'ground');
   ground.frustumCulled = false;
   ctx.scene.add(ground);
+  // 🚗 THE MAP'S GROUND IS THE KIT'S GROUND (admin 2026-11-26 #7/#8/#11: "cities ke beech car zameen me dhas jati hai / hawa
+  // me"). The big map never told the kit where its ground is, so getGround() was null here: settleOnGround (every driven car)
+  // and groundScene (every frame's "nothing sinks") returned at once, and a car kept the height it had while the hills rose
+  // and fell under it between the places. Now every mover follows the map's own height, in render metres through the
+  // floating origin; a flier keeps userData.ground = false, and a car in water is the water's (WORLD.water).
+  setGround((x, z) => map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z));
   const centre = { x: Number.NaN, z: Number.NaN };
   const step = patchSize / cells;
   const layGround = (wx: number, wz: number): void => {
@@ -499,6 +527,19 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const venueRoots: THREE.Group[] = [];
   let disposed = false;
   const locals: THREE.Object3D[] = [];
+  const carSpeed: { last: THREE.Vector3 | null } = { last: null };
+  // A hittable crowd falls to the player's punch (a blow just in front of the fist) and to a shot that lands among it.
+  const offCrowdBlows = [
+    events.on('PLAYER_PUNCHED', (p: { position?: { x: number; y: number; z: number }; yaw?: number; range?: number } | undefined) => {
+      if (!p?.position) return;
+      const r = (Number(p.range) || 1.6) * 0.6, yaw = Number(p.yaw) || 0;
+      const at = { x: p.position.x + Math.sin(yaw) * r, y: p.position.y, z: p.position.z + Math.cos(yaw) * r };
+      for (const c of towns) c.people?.hitAt(at, r);
+    }),
+    events.on('SHOT_HIT', (p: { point?: { x: number; y: number; z: number } } | undefined) => {
+      if (p?.point) for (const c of towns) c.people?.hitAt(p.point, 0.5);
+    }),
+  ];
   // The ground already given to a place, a land or a user map. Kept in 1 km cells as well as in order, so "is anything here?"
   // looks only at the cells near the spot — the same answer as asking every entry (the cells reach as far as the widest one),
   // in a few steps instead of a thousand.
@@ -951,7 +992,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     root.add(city.root);
     const traffic = trafficOption === false ? null : createCityTraffic(city, { count: p.preset.traffic, tier: city.tier, ...(trafficOption || {}) });
     if (traffic) root.add(traffic.root);
-    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, tier: city.tier, ...(peopleOption || {}) });
+    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, tier: city.tier, ...(citizensOption || {}), ...(peopleOption || {}) });
     if (people) root.add(people.root);
     const local = new THREE.Object3D(); root.add(local);
     // Built again after it was freed: the same cars, where they were (never a second set handed to ctx.vehicles).
@@ -1698,6 +1739,14 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
       const seated = ctx.vehicles.seated;
+      // WORLD.runOver: the car the player drives, moving faster than RUN_OVER_SPEED, strikes what it touches this frame.
+      let struck = false;
+      if (seated) {
+        const sp = carSpeed.last ? Math.hypot(seated.position.x - carSpeed.last.x, seated.position.z - carSpeed.last.z) / Math.max(delta, 1e-3) : 0;
+        carSpeed.last = carSpeed.last ?? new THREE.Vector3();
+        carSpeed.last.copy(seated.position);
+        struck = runOver && sp > RUN_OVER_SPEED && sp < 120;   // above 120 m/s it was a teleport or an origin shift, not driving
+      } else carSpeed.last = null;
       const punched = !seated && !!(ctx as { input?: { wasPressed?: (a: string) => boolean } }).input?.wasPressed?.('attack');
       towns.forEach((t, i) => {
         const d = Math.hypot(at.x - t.centre.x, at.z - t.centre.z);
@@ -1709,6 +1758,19 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         // ⛔ NOTHING PASSES THROUGH A VEHICLE (admin 2026-11-22: "jab bhi 2 object takrayenge to aar paar nahi jane chahiye"):
         // the player on foot — or the car they drive — is pushed out of any traffic car it ran into, every frame.
         if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
+        // A solid crowd: the player on foot never walks through a person (citizens.solid).
+        if (!seated) t.people?.pushOut(ctx.player.object.position);
+        // WORLD.openBuildings: the building whose front door the player walks up to opens (one per frame at most).
+        if (openBuildings && !seated) {
+          const lp = locals[i].position;
+          for (const lot of t.city.plan.lots) {
+            if (lot.open || lot.kind === 'park' || Math.hypot(lot.entrance.x - lp.x, lot.entrance.z - lp.z) > 4) continue;
+            t.city.openLot(lot);
+            break;
+          }
+        }
+        if (struck) t.people?.hitAt(seated!.position, 1.8);
+
         // 🧍 …and nobody walks through a PERSON either (open-world problem #6): the player on foot is pushed out of the crowd,
         // and the Attack button (F / J / a click, Attack on a phone) knocks down the person in front.
         if (!seated && t.people) {
@@ -1717,11 +1779,14 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           if (fell) { try { events.emit('CITIZEN_HIT', { position: { x: fell.x, y: fell.y, z: fell.z } }); } catch { /* a listener must not undo the hit */ } }
         }
       });
+      if (struck) events.emit('VEHICLE_STRUCK', { position: { x: seated!.position.x, y: seated!.position.y, z: seated!.position.z }, radius: 1.8, damage: RUN_OVER_DAMAGE });
       reapHidden(at);
     },
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();
+      setGround(null);
       disposed = true;
+      for (const off of offCrowdBlows) off();
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
       for (const root of userRoots) ctx.scene.remove(root);
       userRoots.length = 0;
@@ -1998,8 +2063,27 @@ export const OPEN_WORLD_BRIDGE_PATH = 'src/game/play/openWorld.ts';
 export const OPEN_WORLD_STARTER_PATH = 'src/game/OpenWorldGame.tsx';
 
 /** The App that mounts the starter — written by the platform only where no game is mounted yet. */
-export function openWorldAppSource(options: { city?: boolean; title?: string } = {}): string {
+/**
+ * The camera shots the request asks for (admin 2026-11-26 #9): death — "hero marne ke baad cinematic camera / zoom /
+ * game over animation"; intro — "game start hone se pahle pura map ka drone shot". {} when neither. PURE.
+ */
+export function cinematicsWanted(prompt: string | null | undefined): { death?: true; intro?: true } {
+  const t = String(prompt ?? '');
+  const camera = /\b(?:cinematic\w*|camera|cutscene|drone\s*shot|drone|zoom\s*in|zoom\s*out|slow\s*mo\w*|animation|video|intro|flyover|fly\s*over)\b|सिनेमैटिक|कैमरा|ड्रोन/i;
+  if (!camera.test(t)) return {};
+  const death = /\b(?:death|dies|die|dead|marne|mar\s+jaye|mar\s+jane|maut|game\s*over|haar)\b|मरने|मौत|गेम\s*ओवर/i.test(t);
+  const intro = /\b(?:drone|intro|start\s+hone\s+se\s+pahle|shuru\s+hone\s+se\s+pahle|before\s+(?:the\s+)?(?:game|play)\s+starts?|pura\s+map|whole\s+map|flyover|fly\s*over|opening)\b|ड्रोन/i.test(t);
+  return { ...(death ? { death: true as const } : {}), ...(intro ? { intro: true as const } : {}) };
+}
+
+export function openWorldAppSource(options: { city?: boolean; title?: string; cinematics?: { death?: boolean; intro?: boolean }; graphics?: 'real' } = {}): string {
   const title = String(options.title ?? 'Open World').replace(/[^\p{L}\p{N} .,!?'-]/gu, '').trim().slice(0, 60) || 'Open World';
+  const gameOpts: string[] = [];
+  if (options.cinematics && (options.cinematics.death || options.cinematics.intro)) {
+    gameOpts.push('cinematics: { ' + [options.cinematics.death ? 'death: true' : '', options.cinematics.intro ? 'intro: true, introRadius: 400' : ''].filter(Boolean).join(', ') + ' }');
+  }
+  if (options.graphics === 'real') gameOpts.push("graphics: 'real'");
+  const cine = gameOpts.length ? ' options={{ ' + gameOpts.join(', ') + ' }}' : '';
   return [
     "import { OpenWorldGame } from './game/OpenWorldGame';",
     "import { FEATURES } from './game/features';",
@@ -2011,7 +2095,7 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
     '// The MAP grows the same way: its places (city, town, village) are the regions list in src/game/world.ts.',
     '// The world, the player and the camera are the kit\'s.',
     'export default function App() {',
-    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES} />;`,
+    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES}${cine} />;`,
     '}',
     '',
   ].join('\n');
@@ -2213,6 +2297,38 @@ export function wantsSwimming(prompt: string | null | undefined): boolean {
   return !/\b(?:no|not|don'?t|never)\s+(?:\w+\s+){0,2}swim|\btair(?:na|ne)?\s+(?:nahi|nahin|mat)\b|(?:nahi|mat)\s+tair|तैर\S*\s+(?:नहीं|मत)/i.test(t);
 }
 
+/**
+ * What the user asked of the city crowd (admin 2026-11-26 #1): solid ("log solid hon", "aar paar na jaye", "takra jaye") and
+ * hittable ("punch se gire", "maar sake", "log ko maaro", "goli lage"). {} when neither. PURE.
+ */
+export function citizensWanted(prompt: string | null | undefined): { solid?: true; hittable?: true } {
+  const t = String(prompt ?? '');
+  const people = /\b(?:log|logo|logon|people|citizens?|pedestrians?|npcs?|crowd|bheed|janta|aadmi|insaan)\b|लोग|भीड़/i;
+  if (!people.test(t)) return {};
+  const solid = /\b(?:solid|aar\s*paar|aar-paar|aarpaar|pass\s+through|walk\s+through|takra\w*|collid\w*|collision|bump)\b|आर[- ]?पार/i.test(t);
+  const hittable = /\b(?:punch|maar\w*|mar\s+sake|maro|hit|hittable|knock\w*|gir\w*|fall|goli|shoot\w*|kill\w*|attack\w*|lad\w*)\b|मार|गिर/i.test(t);
+  return { ...(solid || hittable ? { solid: true as const } : {}), ...(hittable ? { hittable: true as const } : {}) };
+}
+
+/** The user asked for a car to hurt what it drives into (admin 2026-11-26 #18: default off). PURE. */
+/** The user asked to go inside the city's buildings (admin 2026-11-26 #2). PURE. */
+export function openBuildingsWanted(prompt: string | null | undefined): boolean {
+  const t = String(prompt ?? '');
+  const building = /\b(?:ghar|gharon|ghaar|house|houses|building|buildings|imarat|dukaan|dukan|shop|shops|makaan|makan|office)\b|घर|बिल्डिंग|दुकान|मकान/i;
+  // Words for going IN — never a bare "open" or "khule" ("open-world", "khule maidan" are about the map, failedbr #2485).
+  const inside = /\b(?:andar|ander|enter|enters|entering|enterable|inside|go\s+in|get\s+in|walk\s+in|(?:door|darwaza|darwaaza|gate)\s+(?:khule|khulna|khul\s+jaye|open\w*)|(?:open|khol)\w*\s+(?:the\s+)?(?:door|darwaza|darwaaza))\b|अंदर|दरवाज/i;
+  if (!building.test(t) || !inside.test(t)) return false;
+  return !/\b(?:andar|ander|enter\w*|inside)\b[^.!?\n]{0,16}\b(?:nahi|nahin|mat|no|not)\b|\b(?:no|not|don'?t|mat|nahi)\b[^.!?\n]{0,12}\b(?:andar|enter|inside)\b/i.test(t);
+}
+
+export function runOverWanted(prompt: string | null | undefined): boolean {
+  const t = String(prompt ?? '');
+  const car = /\b(?:car|cars|gaadi|gadi|gaari|vehicle|truck|bike|bus)\b|गाड़ी|गाडी/i;
+  const hurts = /\b(?:takkar|takar|run\s*over|runs\s*over|kuchal\w*|crush\w*|ram\w*|thok\w*|hit\w*|mar\s*jaye|mare|maregi|marenge|die|dies|kill\w*|ud\s*jaye)\b|टक्कर|कुचल/i;
+  if (!car.test(t) || !hurts.test(t)) return false;
+  return !/\b(?:no|not|don'?t|never|bina|nahi|nahin|mat)\b[^.!?\n]{0,20}\b(?:takkar|run\s*over|kuchal\w*|kill\w*|mare)\b|\b(?:takkar|kuchal\w*|mare)\b[^.!?\n]{0,12}\b(?:nahi|nahin|mat)\b/i.test(t);
+}
+
 const SEEDABLE_REGION_KINDS = new Set(['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach']);
 /**
  * The regions the first build lays down, from the places the user named (AgentV3/worldSetting.ts). Anything that is not a
@@ -2230,7 +2346,7 @@ export function seedRegions(regions: unknown): Array<{ id: string; kind: string 
   return out.slice(0, 60);
 }
 
-export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; swim?: boolean; workspaceId?: string } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; openBuildings?: boolean; workspaceId?: string } = {}): string {
   const named = seedRegions(options.regions);
   const seed = options.workspaceId
     ? varietySeed(options.workspaceId, 'world')
@@ -2257,6 +2373,12 @@ export function gameWorldFileSource(options: { city?: boolean; regions?: unknown
     "  water: '" + (options.swim ? 'swim' : 'drown') + "',",
     '  // The map\'s edge: a wall this many metres past the farthest place. A bigger map = a bigger margin or more places.',
     '  boundary: { margin: 800 },',
+    ...(options.citizens && (options.citizens.solid || options.citizens.hittable)
+      ? ['  // The city crowd, as the user asked: solid (no walking through people) and/or hittable (a punch, a shot or a car knocks them down).',
+        '  citizens: { solid: ' + (options.citizens.solid === true) + ', hittable: ' + (options.citizens.hittable === true) + ' },']
+      : []),
+    ...(options.runOver ? ['  // A car the player drives hurts the people and characters it hits (the user asked for it).', '  runOver: true,'] : []),
+    ...(options.openBuildings ? ['  // Walk up to any city building\'s front door and it opens: you can go inside (the user asked for it).', '  openBuildings: true,'] : []),
     '};',
     '',
   ].join('\n');
@@ -2303,7 +2425,16 @@ export function generateOpenWorld(): RecipeOutput {
       'WATER: WORLD.water is \'drown\' by default (in water the player loses health every second and dies); set \'swim\' only when the user asks',
       'for swimming ("tairna", "swim"). EDGE: WORLD.boundary keeps a stone wall margin metres past the farthest place — never remove it unless the',
       'user asks for an endless map; "map / jagah bada karo" → a bigger margin or more regions (it moves out by itself). RESTART puts the player',
-      'back at the start by itself (ctx.setRespawn) — never write your own restart.',
+      'back at the start by itself (ctx.setRespawn) — never write your own restart. PEOPLE: the city crowd is scenery unless the user asks —',
+      '"log solid hon / aar paar na jaye" → WORLD.citizens = { solid: true }; "punch se gire / log ko maar sake" → { solid: true, hittable: true }.',
+      'BUILDINGS: "ghar / building ke andar ja sake" → WORLD.openBuildings = true (walking up to a front door opens it as a walk-in',
+      'building: door with Use, rooms, floor, walls); never draw your own interior over a city building.',
+      'CARS: "gaadi ki takkar se log mare" → WORLD.runOver = true (off by default). A punch (the Attack button without a gun) already hurts any',
+      'character in reach; never write your own punch hit test. CAMERA SHOTS: "hero marne ke baad cinematic camera / game over animation" →',
+      '<OpenWorldGame options={{ cinematics: { death: true } }} />; "start se pahle pura map ka drone shot" → { intro: true, introRadius: 400 };',
+      'any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]).',
+      'Never move the camera yourself. GRAPHICS: "realistic / real 3D / HD graphics" → <OpenWorldGame options={{ graphics: \'real\' }} />',
+      '(lighting, reflections and soft shadows everywhere; ambient occlusion and bloom only on a capable device) — never add your own post-processing.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

@@ -1327,16 +1327,30 @@ export function runRates(m: Match): { current: number; required: number | null }
  * hits a boundary (a six when going big), good timing finds runs, and the further off it is the likelier an edge to a
  * fielder; a big miss is bowled when the ball was on the stumps and a dot ball when it was not.
  */
-export function shotFromTiming(timingError: number, ball: { onStumps: boolean; aggressive?: boolean }, rng: Rng): { runs: number; out: Dismissal | null; shot: string } {
+export type CricketDifficulty = 'easy' | 'normal' | 'hard';
+/**
+ * 🏏 THE TIMING WINDOWS, seconds either side of the moment the ball reaches the bat (admin 2026-11-26: "bowl bat se touch
+ * hi nahi ho rahi, na run lag rahe hai, na chauke chhakke"). One window for every game was 30 ms for a boundary and 70 ms
+ * for runs — tighter than a phone's own touch delay, so on a phone nearly every swing was a dot or a miss. 'hard' keeps
+ * those old windows; 'normal' (the default) and 'easy' are what a thumb on glass can hit.
+ */
+export const CRICKET_TIMING: Record<CricketDifficulty, { perfect: number; good: number; edge: number; late: number }> = {
+  easy: { perfect: 0.08, good: 0.15, edge: 0.22, late: 0.32 },
+  normal: { perfect: 0.05, good: 0.1, edge: 0.16, late: 0.25 },
+  hard: { perfect: 0.03, good: 0.07, edge: 0.12, late: 0.2 },
+};
+
+export function shotFromTiming(timingError: number, ball: { onStumps: boolean; aggressive?: boolean }, rng: Rng, difficulty: CricketDifficulty = 'normal'): { runs: number; out: Dismissal | null; shot: string } {
+  const w = CRICKET_TIMING[difficulty] ?? CRICKET_TIMING.normal;
   const e = Math.abs(Number.isFinite(timingError) ? timingError : 1);
   const big = !!ball.aggressive;
-  if (e <= 0.03) return big ? { runs: 6, out: null, shot: 'six' } : { runs: 4, out: null, shot: 'four' };
-  if (e <= 0.07) {
+  if (e <= w.perfect) return big ? { runs: 6, out: null, shot: 'six' } : { runs: 4, out: null, shot: 'four' };
+  if (e <= w.good) {
     if (big) return rng() < 0.15 ? { runs: 0, out: 'caught', shot: 'caught in the deep' } : { runs: 4, out: null, shot: 'four' };
     return rng() < 0.5 ? { runs: 2, out: null, shot: 'two' } : { runs: 3, out: null, shot: 'three' };
   }
-  if (e <= 0.12) return rng() < (big ? 0.3 : 0.1) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 1, out: null, shot: 'single' };
-  if (e <= 0.2) return rng() < (big ? 0.45 : 0.25) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 0, out: null, shot: 'dot' };
+  if (e <= w.edge) return rng() < (big ? 0.3 : 0.1) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 1, out: null, shot: 'single' };
+  if (e <= w.late) return rng() < (big ? 0.45 : 0.25) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 0, out: null, shot: 'dot' };
   return ball.onStumps ? { runs: 0, out: 'bowled', shot: 'bowled' } : { runs: 0, out: null, shot: 'missed' };
 }
 
@@ -1445,6 +1459,146 @@ export function deliveryPath(f: CricketLayout, o: { speed?: number; lengthFromBa
     return { x, y: Math.max(0.036, y), z };
   };
   return { at, bounceTime, batTime, stumpsTime };
+}
+
+/**
+ * 🏏 WHERE THE BALL GOES OFF THE BAT. deliveryPath ran the ball on through the batter to the stumps whatever the swing,
+ * so a game drew a well-timed shot as the ball passing through the bat. A shot that scores or is caught now leaves the
+ * bat: a four runs along the ground over the boundary, a six flies over it, one to three runs go into the field, a catch
+ * goes up to a fielder. from: where the ball met the bat. PURE given rng.
+ */
+export function battedBallPath(f: CricketLayout, shot: { runs: number; out: Dismissal | null; shot: string }, from: { x: number; y: number; z: number }, rng: Rng): {
+  at: (t: number) => { x: number; y: number; z: number };
+  seconds: number;
+  /** 'four' / 'six' cross the rope; 'field' stops in the field; 'catch' ends in a fielder's hands. */
+  kind: 'four' | 'six' | 'field' | 'catch';
+} {
+  // Into the field in front of the bat: towards the bowler's end, up to 75 degrees either side.
+  const spread = (rng() * 2 - 1) * (75 * Math.PI / 180);
+  const ax = f.along.x, az = f.along.z;
+  const dx = ax * Math.cos(spread) - az * Math.sin(spread), dz = ax * Math.sin(spread) + az * Math.cos(spread);
+  const toRope = f.boundary + 3;
+  const kind: 'four' | 'six' | 'field' | 'catch' = shot.out === 'caught' ? 'catch' : shot.runs === 6 ? 'six' : shot.runs === 4 ? 'four' : 'field';
+  const distance = kind === 'six' ? f.boundary * 1.15 : kind === 'four' ? toRope : kind === 'catch' ? 18 + rng() * (f.boundary * 0.5) : 12 + shot.runs * 7 + rng() * 6;
+  const seconds = kind === 'six' ? 3.2 : kind === 'four' ? 2.6 : kind === 'catch' ? 2.4 : 1.6 + shot.runs * 0.3;
+  const peak = kind === 'six' ? 22 : kind === 'catch' ? 14 : 1.2;
+  const at = (t: number) => {
+    const u = Math.max(0, Math.min(1, t / seconds));
+    // A lofted shot is a parabola; a ground shot slows as it rolls (eased out) with a small first bounce.
+    const along = kind === 'six' || kind === 'catch' ? u : 1 - (1 - u) * (1 - u);
+    const d = distance * along;
+    const y = kind === 'six' || kind === 'catch' ? from.y + 4 * peak * u * (1 - u) - from.y * u : Math.max(0.036, (from.y + peak * 4 * u * (1 - u)) * Math.max(0, 1 - u * 3));
+    return { x: from.x + dx * d, y: Math.max(0.036, y), z: from.z + dz * d };
+  };
+  return { at, seconds, kind };
+}
+
+export interface CricketPlayOptions {
+  layout?: CricketLayout;
+  overs?: number; wickets?: number; teams?: [string, string];
+  difficulty?: CricketDifficulty;
+  /** Bowling speed range, m/s (default [22, 30] ≈ 80–108 km/h). */
+  speed?: [number, number];
+  /** Seconds a tap takes to reach the game (touch screen + one frame). Subtracted from every swing. Default 0.05. */
+  inputLag?: number;
+  rng?: Rng;
+}
+export type CricketPlayPhase = 'ready' | 'bowling' | 'hit' | 'dead' | 'over';
+export interface CricketPlay {
+  match: Match;
+  readonly layout: CricketLayout;
+  readonly phase: CricketPlayPhase;
+  /** Where the ball is now (draw the ball here every frame). */
+  ball(): { x: number; y: number; z: number };
+  /** Seconds until the ball reaches the bat (negative once it is past) — for a "swing now" cue. */
+  untilBat(): number;
+  /** Bowl the next ball (from 'ready' or 'dead'). */
+  bowlNext(): boolean;
+  /** The player's tap: once per ball. aggressive = going big. Returns the shot, or null when not now. */
+  swing(aggressive?: boolean): { timingError: number; runs: number; out: Dismissal | null; shot: string } | null;
+  /** Advance the play by dt seconds. When a ball is finished it is scored with bowl() and onBall is told. */
+  update(dt: number): void;
+  /** The last ball, as scored. */
+  readonly last: { runs: number; out: Dismissal | null; shot: string } | null;
+  onBall: ((ball: { runs: number; out: Dismissal | null; shot: string }, match: Match) => void) | null;
+}
+
+/**
+ * 🏏 ONE BALL, START TO SCORE — the play a cricket game used to write by hand, and got wrong (the swing measured against
+ * the wrong moment, the ball drawn through the bat, the runs never added). The controller bowls along deliveryPath,
+ * measures the tap against the moment THIS ball reaches the bat (minus the touch delay), sends a scoring shot off the bat
+ * (battedBallPath), and scores the ball with bowl() when it lands — so runs, fours, sixes, wickets and the over all move.
+ * A ball not swung at goes on to the stumps: bowled when it was on them, a dot when not. PURE given rng.
+ */
+export function createCricketPlay(o: CricketPlayOptions = {}): CricketPlay {
+  const f = o.layout ?? cricketLayout();
+  const rng: Rng = o.rng ?? Math.random;
+  const difficulty: CricketDifficulty = o.difficulty === 'easy' || o.difficulty === 'hard' ? o.difficulty : 'normal';
+  const lag = Number.isFinite(o.inputLag as number) ? Math.max(0, Math.min(0.2, o.inputLag as number)) : 0.05;
+  const [lo, hi] = Array.isArray(o.speed) ? o.speed : [22, 30];
+  let phase: CricketPlayPhase = 'ready';
+  let t = 0, deadFor = 0;
+  let path: ReturnType<typeof deliveryPath> | null = null;
+  let hit: ReturnType<typeof battedBallPath> | null = null;
+  let hitStart = 0;
+  let onStumps = true;
+  let result: { runs: number; out: Dismissal | null; shot: string } | null = null;
+  const rest = { x: f.bowler.release.x, y: 1.0, z: f.bowler.release.z };
+  const play: CricketPlay = {
+    match: createMatch({ overs: o.overs, wickets: o.wickets, teams: o.teams }),
+    layout: f,
+    get phase() { return phase; },
+    last: null,
+    onBall: null,
+    ball() {
+      if (phase === 'hit' && hit) return hit.at(t - hitStart);
+      if (path && (phase === 'bowling' || phase === 'dead')) return path.at(Math.min(t, path.stumpsTime + 0.4));
+      return { ...rest };
+    },
+    untilBat() { return path && phase === 'bowling' ? path.batTime - t : Infinity; },
+    bowlNext() {
+      if (play.match.over) { phase = 'over'; return false; }
+      if (phase !== 'ready' && phase !== 'dead') return false;
+      const line = (rng() * 2 - 1) * 0.35;
+      onStumps = Math.abs(line) < 0.16;
+      path = deliveryPath(f, { speed: lo + rng() * Math.max(0, hi - lo), lengthFromBatter: 3 + rng() * 5, line });
+      hit = null; result = null; t = 0; phase = 'bowling';
+      return true;
+    },
+    swing(aggressive = false) {
+      if (phase !== 'bowling' || !path || result) return null;
+      const timingError = (t - lag) - path.batTime;
+      result = shotFromTiming(timingError, { onStumps, aggressive }, rng, difficulty);
+      // A scoring shot or a catch leaves the bat where the ball meets it — never before the ball gets there.
+      if (result.runs > 0 || result.out === 'caught') { hitStart = Math.max(t, path.batTime); }
+      return { timingError, ...result };
+    },
+    update(dt) {
+      if (!(dt > 0)) return;
+      t += Math.min(dt, 0.1);
+      if (phase === 'bowling' && path) {
+        if (result && (result.runs > 0 || result.out === 'caught') && t >= hitStart) {
+          hit = battedBallPath(f, result, path.at(hitStart), rng);
+          phase = 'hit';
+        } else if (t >= path.stumpsTime + 0.3) {
+          finish(result ?? shotFromTiming(Infinity, { onStumps }, rng, difficulty));
+        }
+      } else if (phase === 'hit' && hit && t - hitStart >= hit.seconds) {
+        finish(result!);
+      } else if (phase === 'dead') {
+        deadFor -= dt;
+        if (deadFor <= 0 && !play.match.over) phase = 'ready';
+      }
+    },
+  };
+  const finish = (ball: { runs: number; out: Dismissal | null; shot: string }) => {
+    play.match = bowl(play.match, { extra: null, runs: ball.runs, out: ball.out });
+    (play as { last: typeof ball | null }).last = ball;
+    phase = play.match.over ? 'over' : 'dead';
+    deadFor = 1.2;
+    play.onBall?.(ball, play.match);
+  };
+  return play;
 }
 
 /**
@@ -2584,8 +2738,8 @@ export { createDeck, shuffleCards, deal, cardName, isRed, SUITS, teenPattiHand, 
 export type { Card, Suit, TeenPattiCategory, TeenPattiHand, MeldType, Declaration } from './cards';
 export { createCarrom, placeStriker, strikerFits, shoot, stepPhysics, BOARD as CARROM_BOARD, BASELINE, BASELINE_HALF_LENGTH, COIN_RADIUS, STRIKER_RADIUS, POCKET_RADIUS } from './carrom';
 export type { CarromState, Disc, DiscKind, QueenState, ShotResult } from './carrom';
-export { createMatch, bowl, summary, runRates, oversText, shotFromTiming, cricketLayout, deliveryPath, checkCricketLayout, yawTo, PITCH_LENGTH, PITCH_WIDTH, POPPING_CREASE, STUMPS_HEIGHT, STUMPS_WIDTH } from './cricket';
-export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra, CricketLayout, FieldSpot } from './cricket';
+export { createMatch, bowl, summary, runRates, oversText, shotFromTiming, cricketLayout, deliveryPath, battedBallPath, createCricketPlay, CRICKET_TIMING, checkCricketLayout, yawTo, PITCH_LENGTH, PITCH_WIDTH, POPPING_CREASE, STUMPS_HEIGHT, STUMPS_WIDTH } from './cricket';
+export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra, CricketLayout, FieldSpot, CricketDifficulty, CricketPlay, CricketPlayOptions, CricketPlayPhase } from './cricket';
 export { createBusiness, roll as rollBusiness, buy, decline, endTurn, payJailFine, build, sellHouse, mortgage, unmortgage, cannotBuild, rentFor, netWorth, ownsGroup, groupSquares, computerWantsToBuy, computerTurn, BUSINESS_BOARD, CHANCE_CARDS, DEFAULT_BUSINESS_RULES } from './business';
 export type { BusinessState, BusinessPlayer, BusinessRules, BusinessPhase, BusinessEvent, BusinessResult, BoardSquare, SquareKind, ChanceCard } from './business';
 export { createMatch3, swapTiles, hint as match3Hint, findRuns } from './match3';
@@ -2630,6 +2784,37 @@ const EXAMPLE = [
 ].join('\n');
 
 /** Generate the pack (or a subset; every engine needs dice.ts). PURE. */
+export const CRICKET_RULES_PATH = 'src/game/cricketRules.ts';
+/**
+ * THE MATCH'S RULES AS THE USER'S DATA (admin 2026-11-26: "user AI ko bol kar API call se kuch change karwa sake"): the
+ * game's own file, created once with the request's overs, wickets and difficulty and never replaced — "5 over ka match",
+ * "easy karo", "bowling tez karo", "boundary chhoti karo" each change one line here. PURE.
+ */
+export function cricketRulesFileSource(request: string | null | undefined): string {
+  const t = String(request ?? '');
+  const num = (re: RegExp, lo: number, hi: number, d: number) => { const m = re.exec(t); const n = m ? Number(m[1]) : NaN; return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+  const overs = num(/(?<!\d)(\d{1,3})\s*(?:over|overs|ovar)\b/i, 1, 50, 2);
+  const wickets = num(/(?<!\d)(\d{1,3})\s*(?:wicket|wickets|wiket)\b/i, 1, 10, 3);
+  const difficulty = /\b(?:hard|mushkil|tough|pro)\b/i.test(t) ? 'hard' : /\b(?:easy|aasan|asaan|simple|bachon|kids?)\b/i.test(t) ? 'easy' : 'normal';
+  return [
+    '// THIS MATCH\'S RULES — the game\'s own file. A change the user asks for is a change here, never in the play code.',
+    "import type { CricketPlayOptions } from './board';",
+    '',
+    'export const CRICKET_RULES = {',
+    '  overs: ' + overs + ',',
+    '  wickets: ' + wickets + ',',
+    "  teams: ['India', 'Australia'] as [string, string],",
+    "  /** 'easy' (wide timing), 'normal', 'hard' (tight timing). */",
+    "  difficulty: '" + difficulty + "' as 'easy' | 'normal' | 'hard',",
+    '  /** Bowling speed range, metres a second (25 ≈ 90 km/h). */',
+    '  speed: [22, 30] as [number, number],',
+    '  /** Boundary rope, metres from the pitch (pass to cricketLayout({ boundary })). */',
+    '  boundary: 65,',
+    '} satisfies CricketPlayOptions & { boundary: number };',
+    '',
+  ].join('\n');
+}
+
 export function generateBoardGames(include?: string[]): BoardGamesResult {
   const wanted = Array.isArray(include) && include.length
     ? new Set(include.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))
@@ -2660,8 +2845,12 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
       + 'CRICKET IN 3D: every place comes from cricketLayout() — stumps at strikerStumps / bowlerStumps, the batter at f.batter'
       + ' (rotation.y = f.batter.yaw: IN FRONT of his stumps at the crease, facing the bowler — never behind his stumps), the bowler'
       + ' from f.bowler.runUp to f.bowler.release, the keeper behind the striker\'s stumps, the camera at f.camera. The ball follows'
-      + ' deliveryPath(f, { speed, lengthFromBatter }); the perfect moment is its batTime. On every shot call batter.act(\'bat\') (the'
-      + ' kit humanoid\'s bat swing) so the batter visibly plays it, then shotFromTiming for the runs. checkCricketLayout(...) must'
+      + ' THE PLAY IS createCricketPlay({ layout: f, ...CRICKET_RULES }) from src/game/cricketRules.ts (never your own timing, ball path'
+      + ' or scoring): draw the ball at play.ball() every frame, call play.update(dt), play.bowlNext() for each ball, and on the'
+      + ' player\'s tap play.swing(aggressive) — it is measured against the moment THIS ball reaches the bat, a scoring shot flies off'
+      + ' the bat (a four along the ground over the rope, a six over it), and the ball is scored into play.match by itself (show'
+      + ' summary(play.match), play.last.shot). On every swing call batter.act(\'bat\') (the kit humanoid\'s bat swing). A change the'
+      + ' user asks for (overs, wickets, "easy/hard", bowling speed, boundary, team names) is a change to CRICKET_RULES. checkCricketLayout(...) must'
       + ' return [] for the positions you used.',
   };
 }

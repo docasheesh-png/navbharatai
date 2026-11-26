@@ -49,6 +49,9 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { onlineMultiplayerWanted, ROOMS_HANDOFF } from '../lib/GameRoomsGenerator';
+import { realGraphicsWanted } from '../lib/GameRealismGenerator';
+import { enemyRequestFrom } from '../lib/GameEnemiesFeature';
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
@@ -59,7 +62,7 @@ import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
-import { wantsSwimming } from '../lib/GameOpenWorldGenerator';
+import { wantsSwimming, citizensWanted, runOverWanted, cinematicsWanted, openBuildingsWanted } from '../lib/GameOpenWorldGenerator';
 import { genreKitsFor } from '../lib/GameGenreKitsGenerator';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
 import { namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
@@ -332,10 +335,24 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
     const include = genreKitsFor(request, genre);
     return include.length ? { include } : undefined;
   }
+  // Enemies the request asks for go in with the first build (GameEnemiesFeature.ts), not in a later "enemy banao" turn.
   if (recipe === 'generate_open_world') {
     const setting = worldSettingFrom(request);
     const regions = worldRegionsFor(setting);
-    return { mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request), ...(regions.length ? { regions } : {}), ...(plan.includes('generate_game_systems') ? { danger: true } : {}), ...(wantsSwimming(request) ? { swim: true } : {}) };
+    const enemies = enemyRequestFrom(request);
+    const citizens = citizensWanted(request);
+    return {
+      mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request),
+      ...(regions.length ? { regions } : {}),
+      ...(plan.includes('generate_game_systems') ? { danger: true } : {}),
+      ...(wantsSwimming(request) ? { swim: true } : {}),
+      ...(enemies ? { enemies } : {}),
+      ...(citizens.solid || citizens.hittable ? { citizens } : {}),
+      ...(runOverWanted(request) ? { runOver: true } : {}),
+      ...(openBuildingsWanted(request) ? { openBuildings: true } : {}),
+      ...(realGraphicsWanted(request) ? { graphics: 'real' } : {}),
+      ...(Object.keys(cinematicsWanted(request)).length ? { cinematics: cinematicsWanted(request) } : {}),
+    };
   }
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
@@ -768,6 +785,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
         + ' carrom, cricket, match-3 and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
         + ' move, and announce what happened. Card games are points or pretend chips only, never real money.'
       : '',
+    // 🌐 Online play with friends (admin 2026-11-26 #10) runs on the user's own Supabase, never a fake lobby (GameRoomsGenerator.ts).
+    has('generate_game_3d') && onlineMultiplayerWanted(opts.request) ? ROOMS_HANDOFF : '',
     has('generate_genre_kits')
       ? '🥊 THE GENRE\'S RULES ARE ALREADY IN src/game/genres/: a FIGHTING game is fighting.ts (createMatch, then stepMatch every frame:'
         + ' frames, hit-stun, combos, blocking, throws, specials, rounds, the computer opponent) and a TOWER DEFENSE is towerDefense.ts'

@@ -6533,6 +6533,34 @@ villagers / bot", and "jo move library me nahi hai, NavBharatAI khud API call se
 - Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
 - Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
 - KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.
+
+## 2026-11-26 — PR B of the admin's 18-point game list: enemies in one step, a punch that lands, solid/hittable crowds, run-over, scope
+
+Stacked on PR A (claude/game-play-fixes-a). Queue Q-3505..Q-3508.
+- #4 enemies: GameEnemiesFeature.ts — the platform writes src/game/features/enemies.ts from the request and lists it (first open-world build via the seed; later turns via growthTurn.addEnemiesAtTurnStart). Root: the kit had every part of an enemy and nothing put them in a game; each request asked a model to assemble them by hand. The written file is compiled against the real kit in tests/enemiesComeWhenAsked.test.ts.
+- #1 punch + crowd: the shell's punch emits PLAYER_PUNCHED; Entities hurt the first character in reach; city people gain solid/hittable (WORLD.citizens, only when asked).
+- #18 run-over: WORLD.runOver (off by default) → VEHICLE_STRUCK.
+- #14 scope: with a held gun, a Zoom button (Z) steps 1x/2x/4x/8x.
+Remaining from the list: PR C (#2 enterable buildings, #7/8/11 vehicle ground census, #17 variety, #9 cinematic camera) and PR D (#10 multiplayer on the user's backend, #20 real-3D tier).
+
+## 2026-11-26 — PR C of the admin's 18-point game list: camera shots the user describes (#9)
+
+Stacked on PR B. Queue Q-3509 (fix in PR) and Q-3510..Q-3514 (still OPEN, honestly recorded — not started in this session):
+- #9: play/cinematics.ts — shot lists as data, a Director in the render loop, DEATH_CAM / introDrone / HERO_SHOT, ctx.cinematic(list), GameOptions.cinematics from the request (cinematicsWanted), HUD bars and title, the end card waits, a tap skips.
+- OPEN: #2 enterable painted-door city lots (Q-3510), #7/8/11 car ground census (Q-3511, not reproduced), #17 variety (Q-3512, mostly exists since 2026-11-25; blocked on which case the admin saw), #10 multiplayer on the user's backend (Q-3513), #20 realism tier (Q-3514).
+- Note for the next session: PR A's open-world edge is separate from play/boundary.ts on purpose (it is in WORLD metres, follows the floating origin and grows with places; boundary.ts declares fixed render-space bounds). If they are ever unified, boundary.ts must learn the floating origin first.
+
+## 2026-11-26 — Q-3515: the cricket bat meets the ball (admin)
+
+Stacked on PR C. Roots: the timing windows (30/70 ms) were tighter than a phone's touch delay, and the kit had no play between the rules engine and the 3D layout (the arrival moment, the ball leaving the bat and the scoring were each game's own code; deliveryPath ran the ball through the batter). Fix: CRICKET_TIMING by difficulty, battedBallPath, createCricketPlay, and src/game/cricketRules.ts as the user's own rules file (changed by asking). tests/theBatMeetsTheBall.test.ts plays it on the real engine, proven by two reversions.
+
+## 2026-11-26 — Q-3510 (#2): a city building opens when the user asks
+
+Stacked on the cricket branch. city.openLot redraws one block without the lot's ground floors and stands a walk-in building (three/buildings.ts) there; WORLD.openBuildings opens the door the player walks up to. Each city block now draws from its own random stream (window tones per block change once, deterministically). tests/aCityBuildingOpensWhenAsked.test.ts.
+
+## 2026-11-26 — Q-3511 (#7/#8/#11): a car follows the open world's ground between the places
+
+Root: the Athree open world never registered its terrain with the kit's ground (getGround() null), so settleOnGround and groundScene did nothing there. createOpenWorld now calls setGround with the map's height through the floating origin. tests/aCarFollowsTheOpenWorldGround.test.ts (reverted → fails). Note: the first build of the #2 reader matched "open-world"/"khule maidan" in failedbr #2485's request; fixed on the #2 branch with that request as a fixture.
 ## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
 
 Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
@@ -6557,6 +6585,13 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
 
+## 2026-11-26 — Q-3514 (#20): real 3D graphics when the user asks
+
+three/realism.ts (GameOptions.graphics 'real'): image-based lighting and soft shadows everywhere; GTAO + subtle bloom + output pass on a capable device only. Stacked on the car-ground branch. tests/realGraphicsWhenAsked.test.ts.
+
+## 2026-11-26 — Q-3513 (#10): play with friends online on the user's own Supabase
+
+three/rooms.ts: joinRoom on the user's Supabase Realtime (raw websocket, Phoenix protocol, no package), remotePlayers, showRoomNotice (RED line until VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are saved). The 3D handoff asks the builder to request the keys. Q-3490 (NavBharatAI-hosted rooms) is separate and stays open. tests/friendsPlayOnTheUsersOwnBackend.test.ts.
 ## 2026-11-26 — Admin Home "total revenue NOT real": the index was deployed to the wrong database (Q-3700)
 - Admin screenshot: `9 FAILED_PRECONDITION: The query requires an index` for the revenue sum, although #4545's `deploy-firestore-indexes` step reports SUCCESS on every merge.
 - Root cause: the index link names `databases/(default)` (103-byte encoded name), and so did an earlier production error; the server reads `(default)` (FIRESTORE_DATABASE_ID), but `firebase.json` deployed indexes only to `navbharat-prod`.

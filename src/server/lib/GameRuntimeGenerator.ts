@@ -148,6 +148,8 @@ export const DEFAULT_ACTIONS: ActionMap = {
   // Crouch, and dive while swimming (play/character.ts) — C, Left Ctrl, or the right stick pressed in.
   crouch: ['KeyC', 'ControlLeft', 'Pad:11'],
   drift: ['Space', 'Pad:4'],
+  // The held gun's scope: 1x → 2x → 4x → 8x (the shell's zoomScope).
+  zoom: ['KeyZ'],
 };
 
 /** A stick inside this radius is at rest (worn sticks never read exactly 0). */
@@ -348,6 +350,10 @@ export type GameEvent =
   | 'PROJECTILE_HIT_WORLD'
   | 'DISPATCHED' | 'DISPATCH_ARRIVED' | 'DISPATCH_FAILED' | 'DISPATCH_STOOD_DOWN' | 'WANTED_LEVEL_CHANGED' | 'PLAYER_ARRESTED'
   | 'WEAPON_FIRED' | 'WEAPON_RELOADED' | 'WEAPON_EMPTY' | 'MELEE_SWING' | 'MELEE_HIT' | 'PROJECTILE_HIT'
+  // The shell's bare-fist punch (a cone in front of the player) and a car the player drove into someone (WORLD.runOver).
+  | 'PLAYER_PUNCHED' | 'VEHICLE_STRUCK'
+  // play/cinematics.ts: a camera shot list began / ended (the HUD shows bars and the title, and holds the end card).
+  | 'CINEMATIC_STARTED' | 'CINEMATIC_ENDED'
   | 'ITEM_COLLECTED' | 'ITEM_USED' | 'SCORE_CHANGED'
   | 'QUEST_STARTED' | 'QUEST_COMPLETED'
   | 'BOSS_SPAWNED' | 'BOSS_PHASE_CHANGED' | 'BOSS_DEFEATED'

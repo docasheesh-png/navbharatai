@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Flag, Lock, Sparkles, Gamepad2, Type } from 'lucide-react';
 import { authedHeaders } from '../../lib/authHeaders';
+import { withStoreAdminSession } from '../../lib/storeAdminHeaders';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { auth } from '../../lib/firebase';
 import { clientWorkspaceId, v3SessionStorageKey, writeRemixHandoff } from '../agentv3/v3SessionContinuity';
@@ -133,9 +134,12 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     setOpening(true);
     setError('');
     try {
+      // Who is opening travels with the open (and the admin session, when active): a HELD app (the
+      // automatic content check flagged it) is served only to its owner and a store admin, so the
+      // admin can play it before deciding. For every other app the server ignores it.
       const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(appId)}/open`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withStoreAdminSession(await authedHeaders({ 'Content-Type': 'application/json' })),
         body: JSON.stringify(pw ? { password: pw } : {}),
       });
       const data = await res.json().catch(() => null);
@@ -172,7 +176,7 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     void open();
     void (async () => {
       try {
-        const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(appId)}`);
+        const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(appId)}`, { headers: withStoreAdminSession(await authedHeaders()) });
         const data = await res.json().catch(() => null);
         if (cancelled) return;
         if (!res.ok || !data?.app) {

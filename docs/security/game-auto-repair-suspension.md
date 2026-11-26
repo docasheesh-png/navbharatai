@@ -47,3 +47,29 @@ built WITHOUT re-enabling this path — `gameAutoRepairEnabled()` still returns 
   restored until the user taps.
 
 None of the risks above apply: no repair runs unasked, and no rollback is made from an incomplete snapshot.
+
+## 2026-11-26 — one narrow in-build repair, with a real way back (the suspension above still stands)
+
+The admin approved (Q-3374) ONE bounded repair inside the build for placeholder findings only. It does not use this path:
+`gameAutoRepairEnabled()` still returns false, `runGameRepair` is still a stub, and measured defects are still not repaired
+automatically. What it does instead answers each requirement listed under "Scope and future release gate":
+
+- **Complete inventory, binaries and metadata** — `gameWorkspaceBackup.ts` archives the WHOLE project tree with tar (modes,
+  symlinks, hard links, every binary) outside the project, and writes a manifest of every path's type, mode, link target and
+  the sha256 of every regular file. Only folders named `node_modules` and Vite's transient `*.timestamp-*.mjs` files are
+  outside it, by declaration.
+- **Fail closed** — a special file, a control character in a name, a tree over 400 MB, too little free space, or any tar
+  warning (a file that changed or could not be read) means no backup, and then no repair.
+- **Verified recovery** — a restore removes every non-directory outside the dependency folders, extracts the archive,
+  removes directories the repair created, and compares a fresh manifest with the backup's byte for byte, checked against
+  the backup's own fingerprint. A mismatch is reported as a warning and the backup is kept for recovery.
+- **No races with active writers** — the repair runs with file tools only (every other tool is refused by the runner,
+  `onlyTheseTools`), so it cannot run commands or installers; its pass is aborted and given 15 s to stand down before the
+  restore starts; a write it made into a dependency folder is never kept and is reported as not restorable.
+- **Narrow scope** — only when the findings are ALL MISSING_MODEL and/or EMPTY_MAP; kept only if the game, played again, has
+  fewer placeholder findings, no new kind, no new defect and a score not lower.
+- **Tests** — `tests/aGameRepairCanAlwaysGoBack.test.ts` runs the real backup and restore against a real directory for every
+  scenario this document lists (binary move, binary delete, a file a text map never saw, a mode change, a swapped link, a
+  created directory) and for each refusal; `tests/aPlaceholderIsRepairedInTheBuild.test.ts` covers the keep/undo decision.
+
+Kill switch: `AGENTV3_GAME_PLACEHOLDER_REPAIR=off` (see `docs/claude/ENV_REGISTRY.md`).

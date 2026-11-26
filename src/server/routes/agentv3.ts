@@ -266,7 +266,7 @@ import {
   explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, sayRepairGateNote, runExplorerRepair,
   explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS, explorerRepairPrompt,
 } from '../AgentV3/explorerRepair';
-import { withoutPlatformCheckTools, REPAIR_WITHHELD_TOOLS } from '../AgentV3/repairScope';
+import { withoutPlatformCheckTools, REPAIR_WITHHELD_TOOLS, onlyTheseTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { applyGateRedNotice } from '../AgentV3/gateRedNotice';
@@ -591,7 +591,8 @@ import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhases/buildHeadroom';
 import { type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
-import { runGamePlaytestPhase } from '../AgentV3/buildPhases/gamePlaytestPhase';
+import { runGamePlaytestPhase, runGamePlaceholderRepairPhase, type GamePlaceholderRepairPorts, type GamePlaytestPorts, type GamePlaytestResult } from '../AgentV3/buildPhases/gamePlaytestPhase';
+import { PLACEHOLDER_REPAIR_TOOLS, PLACEHOLDER_REPAIR_MAX_STEPS, PLACEHOLDER_REPAIR_MAX_TOKENS_PER_TURN } from '../AgentV3/gamePlaceholderRepair';
 import { gameProofKeeper } from '../AgentV3/gameProofPictures';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -783,7 +784,7 @@ import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, pre
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS, GAME_AUTO_REPAIR_SUSPENSION_REASON } from '../AgentV3/gameRepair';
+import { gameAutoRepairEnabled, gameCompleteGateEnabled, gameIncompleteReason, GAME_REPAIR_PASS, GAME_AUTO_REPAIR_SUSPENSION_REASON } from '../AgentV3/gameRepair';
 import { scopeMatch } from '../AgentV3/gameIntent';
 import { playtestDefects, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
@@ -24872,6 +24873,16 @@ async function noteBuildOutcome(
       // Game Engine Ultra Phase 3 inputs (gameRepair.ts): the last measured defects and still-missing named features.
       type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[]; played: boolean };
       const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
+      // The first play's ports and result, kept for the one bounded placeholder repair's replay (Q-3374/Q-3365).
+      const gamePlayKeep: { ports?: GamePlaytestPorts; play?: GamePlaytestResult } = {};
+      // ONE place a play's answer reaches the release gate — the first play and a kept repair's replay alike (Q-3365).
+      const applyGamePlayed = (played: GamePlaytestResult): void => {
+        gameProof = played.proof;
+        gateEvidence.game = played.gate; // the release gate reads the same answer (autopsy 61279465)
+        if (played.featuresUnverified) gateEvidence.gameFeaturesUnverified = played.featuresUnverified; // named, never proven (gameProof.ts)
+        else delete gateEvidence.gameFeaturesUnverified; // a replay that proved them all leaves none behind
+        if (played.played) gamePlayedRef.cur = played.played;
+      };
       const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
         gamePlaytestDone = true;
@@ -24896,13 +24907,8 @@ async function noteBuildOutcome(
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
           keepPictures: gameProofKeeper({ buildId, verifiedOwnerUid: verified?.uid, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363, filed by the VERIFIED owner (Q-3410)
-        });
-        if (played) {
-          gameProof = played.proof;
-          gateEvidence.game = played.gate; // the release gate reads the same answer (autopsy 61279465)
-          if (played.featuresUnverified) gateEvidence.gameFeaturesUnverified = played.featuresUnverified; // named, never proven (gameProof.ts)
-          if (played.played) gamePlayedRef.cur = played.played;
-        }
+        }, gamePlayKeep);
+        if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }
       };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest
       // first-minute failure — a tab that white-screens, a button whose handler throws, a link to a page
@@ -25052,58 +25058,53 @@ async function noteBuildOutcome(
       // The explorer did not run (switched off, no time, or it failed before its presses were in): the game
       // is still played. A no-op when it already ran above.
       await runGamePlaytest();
-      // 🎮 GAME ENGINE ULTRA PHASE 3 (gameRepair.ts) — automatic repair is suspended. Legacy repair wiring below is unreachable.
-      // Previously: one focused pass on the
-      // measured defects, replayed, kept only if strictly better, else undone; the platform absorbs its cost
-      // (PHASE_GAME_REPAIR is always barren). Gate: a game still unplayable or missing named features is RED.
-      let gamePlayed = gamePlayedRef.cur;
+      // 🎮 GAME ENGINE ULTRA PHASE 3 (gameRepair.ts) — automatic repair of measured DEFECTS stays suspended (its way back was a
+      // text map; docs/security/game-auto-repair-suspension.md). What runs instead is narrower and admin-approved (Q-3374,
+      // 2026-11-26): when the placeholder look found ONLY a missing model and/or an empty map, ONE bounded pass — file tools
+      // only, a time and a token cap, a byte-exact backup first — then the game is played again by the phase's own replay;
+      // kept only if strictly better, else every byte is put back and verified. The platform pays it, kept or undone
+      // (barrenPhases.add(PHASE_GAME_REPAIR)). A kept replay reaches the gate through applyGamePlayed, so GAME_PROOF and the
+      // unverified-feature list describe the game that ships (Q-3365). Gate: a game still unplayable or missing features is RED.
+      const gamePlaceholderRepairPorts = (): GamePlaceholderRepairPorts => ({
+        first: gamePlayKeep.ports && gamePlayKeep.play ? { ports: gamePlayKeep.ports, result: gamePlayKeep.play } : null,
+        canRun: result?.ok === true && !!lastPreviewUrl && !!actuator.runCommand && !abort.signal.aborted && !platformDoneRef.cur && !awaitsShellNow(),
+        headroomMs: roomLeftMs(),
+        userPrompt: prompt,
+        buildSignal: abort.signal,
+        filesNow: () => ({ ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }),
+        captured: writtenFiles,
+        allowed: async () => {
+          // The free tier's platform-paid automatic repairs share ONE daily allowance (explorerRepairBudget.ts).
+          const freeListed = isAgentV3FreeUser(userId, email);
+          const weakAllowed = String(powerLevelReqEffective) === 'weak' && !freeListed ? await explorerRepairBudget.allowed().catch(() => null) : true;
+          const gate = explorerRepairTierGate({ tier: String(powerLevelReqEffective), freeListed, weakAllowed });
+          if (!gate.attempt) return { ok: false, reason: gate.reason };
+          if (gate.countAgainstWeakBudget) void explorerRepairBudget.record();
+          return { ok: true };
+        },
+        runCommand: (command) => withTimeout(actuator.runCommand!(workspaceId, command), 60_000, 'game-placeholder-backup'),
+        repair: async (repairPrompt, ctl) => {
+          barrenPhases.add(PHASE_GAME_REPAIR); // platform-paid, kept or undone — set BEFORE the first call (billingPhase.ts)
+          const runner = new AgentRunner({
+            ...baseRunnerOpts, signal: ctl.signal, client: buildTurnRunner(healRunnerOpts()), platformRequest: true, focusedRepair: true,
+            tools: baseRunnerOpts.tools.filter((t) => PLACEHOLDER_REPAIR_TOOLS.has(t.name)), withheldTools: onlyTheseTools(PLACEHOLDER_REPAIR_TOOLS),
+            maxSteps: PLACEHOLDER_REPAIR_MAX_STEPS, maxTokensPerTurn: PLACEHOLDER_REPAIR_MAX_TOKENS_PER_TURN, model: resolveModel(powerLevelReqEffective),
+            usageSink: { add: (u) => { buildUsage.add(u); ctl.onTokens(Number(u?.inputTokens ?? 0) + Number(u?.outputTokens ?? 0)); }, total: () => buildUsage.total() },
+            persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+          });
+          const r = await runInBillingPhase(PHASE_GAME_REPAIR, () => runInPass(GAME_REPAIR_PASS, () => runner.run(repairPrompt)));
+          return !!r?.ok;
+        },
+        persist: (files) => mergeWorkspaceFiles(workspaceId, files),
+        forget: (paths) => removeWorkspaceFilesResult(workspaceId, paths),
+        resolveOnRecheck: (code) => buildDiag.resolveOnRecheck(code),
+        record: (issue) => buildDiag.record(issue),
+        backupId: `${String(workspaceId).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)}-${buildStartedAt}`,
+      });
+      const repairedPlay = await runGamePlaceholderRepairPhase(gamePlaceholderRepairPorts());
+      if (repairedPlay) applyGamePlayed(repairedPlay);
+      const gamePlayed = gamePlayedRef.cur;
       if (gamePlayed && (gamePlayed.defects.length > 0 || gamePlayed.scopeMissing.length > 0) && !abort.signal.aborted) {
-        if (gameAutoRepairEnabled() && lastPreviewUrl && actuator.runCommand) {
-          try {
-            const previewUrl = lastPreviewUrl;
-            const headroomMs = roomLeftMs();
-            const snap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
-            const outcome = await runGameRepair(gamePlayed.defects, gamePlayed.scopeMissing, prompt, {
-              repairMs: explorerRepairPlan(headroomMs).repairMs, snapshot: snap, buildSignal: abort.signal,
-              io: {
-                repair: async (repairPrompt, signal) => {
-                  const runner = new AgentRunner({
-                    ...baseRunnerOpts, signal, client: buildTurnRunner(healRunnerOpts()), platformRequest: true, focusedRepair: true,
-                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS, model: resolveModel(powerLevelReqEffective),
-                    persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
-                  });
-                  const r = await runInBillingPhase(PHASE_GAME_REPAIR, () => runInPass(GAME_REPAIR_PASS, () => runner.run(repairPrompt)));
-                  return !!r?.ok;
-                },
-                replay: async () => {
-                  const files = (await collectWorkspaceFiles(actuator, workspaceId)).files;
-                  const out = await withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(previewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-repair-replay');
-                  const run = parsePlaytest(out.stdout);
-                  const v = playtestVerdict(run, replayFromCode(files));
-                  const outcome = playtestOutcome(v.code);
-                  return { defects: playtestDefects(run, v.score, missingKitLayerPaths(files), replayFromCode(files)), scopeMissing: gameContract ? scopeMatch(gameContract, files).missing : [],
-                    proof: v.score && outcome !== 'not-run' ? { outcome, score: v.score.overall } : null };
-                },
-                changedSince: async (s0) => changedWorkspacePaths(s0, (await collectWorkspaceFiles(actuator, workspaceId)).files).length,
-                revert: revertToGreenSnapshot,
-              },
-            });
-            barrenPhases.add(PHASE_GAME_REPAIR);
-            buildDiag.record({ phase: 'preview', ...gameRepairRecord(outcome) });
-            if (outcome.kept && outcome.after) {
-              gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing, played: outcome.proof ? true : gamePlayed.played };
-              // The repaired game was PLAYED again and nothing hard remains: that replay is the gate's game proof.
-              if (outcome.proof) {
-                gameProof = { ...outcome.proof };
-                gateEvidence.game = gameProof.outcome;
-                if (gameProof.outcome === 'passed') buildDiag.resolveOnRecheck('GAME_PLAYTEST_ISSUES');
-              }
-              if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
-            }
-          } catch (e) {
-            try { buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_REPAIR_SKIPPED', autoResolved: true, message: `Game repair could not run: ${e instanceof Error ? e.message : String(e)}` }); } catch { /* best-effort */ }
-          }
-        }
         if (!gameAutoRepairEnabled()) {
           try { buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_REPAIR_SKIPPED', autoResolved: true, message: GAME_AUTO_REPAIR_SUSPENSION_REASON }); } catch { /* diagnostic only */ }
         }

@@ -422,6 +422,7 @@ import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
 import { generateBoardGames } from '../lib/BoardGamesGenerator';
+import { generateGenreKits } from '../lib/GameGenreKitsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -10588,6 +10589,18 @@ export class ToolDispatcher {
         return `Added the India games pack:\n${bgWritten.join('\n')}\n\n${bg.instructions}${bgLayers}`;
       }
 
+      case 'generate_genre_kits': {
+        // GENRE KITS (game-maker audit 2026-11-26): the rules of a fighting game and a tower-defense game, which the kit had no
+        // code for — every such request used to be written from memory.
+        const gkRec = (input as Record<string, unknown>) || {};
+        const gkInclude = Array.isArray(gkRec.include) ? gkRec.include.filter((v): v is string => typeof v === 'string') : undefined;
+        const gk = generateGenreKits(gkInclude);
+        const gkWritten = await this.writeRecipeFiles(gk.files, agent);
+        const gkLayers = await this.addMissingRecipeLayers(gk.files, agent);
+        this.scheduleCheckpoint('genre kits');
+        return `Added the genre kits:\n${gkWritten.join('\n')}\n\n${gk.instructions}${gkLayers}`;
+      }
+
       case 'generate_world_2d': {
         // THE 2D WORLD (admin 2026-11-19: "bada map … sample bane rakhe ho … perfect add hon ki ek hi lage"). The recipe decides
         // from the REQUEST — the user's wish, not one word (world2dIntent → largeWorldIntent) — so a big map is never put under
@@ -10630,7 +10643,7 @@ export class ToolDispatcher {
             try { await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH); mapped = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!mapped) {
-              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
+              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, regions: owRec.regions, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }

@@ -26,9 +26,11 @@
  *     (window.__nbEntities) and the game's own camera: no hostile character alive; or every one far from the player and
  *     none in view; or the game makes its enemies by hand, outside Entities, so nothing can show they are on screen.
  *
- * WHAT HAPPENS WITH THEM: one GAME_PLACEHOLDERS line in the build report (admin), and a builder-only repair note on the next
+ * WHAT HAPPENS WITH THEM: one GAME_PLACEHOLDERS line in the build report (admin). When the findings are ONLY a missing
+ * model and/or an empty map, ONE bounded repair runs inside the same build, platform-paid, kept only if the replay is
+ * strictly better (gamePlaceholderRepair.ts, Q-3374, admin-approved 2026-11-26). Anything left gets a builder-only repair note on the next
  * game turn (`placeholderRepairNote`, the same path as the geometry look) — after which that turn's playtest looks again,
- * and a defect that is gone is simply not recorded. Never scored, never a gate, never a paid call, never shown to the user.
+ * and a defect that is gone is simply not recorded. Never scored, never a gate, the look itself is never a paid call (the repair is the platform's cost), never shown to the user.
  * Every value from the page is clamped and every name stripped, because the page runs the game's code.
  * Kill switch: AGENTV3_GAME_PLACEHOLDER_PROBE=off. PURE except the env read.
  */
@@ -258,11 +260,18 @@ export function placeholderFindingsMessage(findings: readonly PlaceholderFinding
   return `Placeholder look (builder-only): ${findings.map((f, i) => `(${i + 1}) ${f.kind} — ${f.evidence}; fix: ${f.fix}.`).join(' ')}`.slice(0, 2000);
 }
 
+/**
+ * The GAME_PLACEHOLDERS line a KEPT in-build repair records when its replay found no stand-in left (Q-3374,
+ * gamePlaceholderRepair.ts). It is the LAST such line, so the next turn reads it and hands the builder nothing.
+ */
+export const PLACEHOLDERS_CLEARED_MESSAGE = 'Placeholder look (builder-only): none left — the in-build placeholder repair removed them and the replay confirmed it.';
+
 interface IssueLike { code?: unknown; message?: unknown }
 /** The builder's repair note for the NEXT game turn, from the last report's GAME_PLACEHOLDERS line, or null. PURE. */
 export function placeholderRepairNote(issues: ReadonlyArray<IssueLike> | null | undefined): string | null {
   const list = Array.isArray(issues) ? issues : [];
   const hit = [...list].reverse().find((i) => String(i?.code ?? '') === GAME_PLACEHOLDER_CODE);
+  if (hit && String(hit.message ?? '') === PLACEHOLDERS_CLEARED_MESSAGE) return null; // repaired in the build itself
   const msg = hit ? String(hit.message ?? '').replace(/^Placeholder look \(builder-only\):\s*/, '').trim() : '';
   if (!msg) return null;
   return [

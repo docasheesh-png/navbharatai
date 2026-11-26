@@ -20,6 +20,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { envFlag } from '../envFlag';
 import { addressRateKey } from '../clientAddress';
 import { RoyaleMatchService, type Conn } from './matchService';
+import { claimDailyStartInFirestore } from './dailyStartCap';
 
 export const ROYALE_WS_PATH = '/api/royale-online/ws';
 export const MAX_FRAME_BYTES = 512;
@@ -148,7 +149,8 @@ async function verifyStoreApp(appId: string, access: string | null): Promise<App
   return canAccessNavData(found, access) ? 'ok' : 'private';
 }
 
-export const royaleMatchService = new RoyaleMatchService();
+// The daily start cap is counted on the shared Firestore counter (Q-3392); the in-memory cap is its fallback.
+export const royaleMatchService = new RoyaleMatchService({ claimDailyStart: claimDailyStartInFirestore });
 
 export function handleRoyaleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
   if ((req.url || '').split('?')[0] !== ROYALE_WS_PATH) return false;

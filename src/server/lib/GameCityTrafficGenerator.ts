@@ -13,6 +13,7 @@
 export const GAME_CITY_TRAFFIC = String.raw`import * as THREE from 'three';
 import { CITY_ROAD_Y, CITY_ZEBRA, type City, type CityPlan } from './city';
 import { createAutoRickshaw, createBus, createCar } from './objects';
+import { geometryTier, type GeometryTier } from './surfaces';
 
 export type CityTrafficKind = 'car' | 'auto' | 'bus';
 export type LightColour = 'green' | 'amber' | 'red';
@@ -28,6 +29,60 @@ export interface CityTrafficOptions {
   /** false: no traffic lights (vehicles still keep their gap and stop for the player). */
   lights?: boolean;
   seed?: number;
+  /**
+   * 'light' (queue Q-2698: a device with no GPU or a weak phone): each vehicle is drawn as ONE mesh (a car was 17 draw calls,
+   * a bus 22) and at most LIGHT_TRAFFIC vehicles drive. 'full': every part its own mesh, up to 60. Left out: geometryTier().
+   */
+  tier?: GeometryTier;
+}
+
+/** The most vehicles a light-tier city drives, whatever count asked (a full-tier city keeps up to 60). */
+export const LIGHT_TRAFFIC = 6;
+
+/**
+ * One mesh for a whole model (the light tier): every part's triangles, moved into the model's own frame and coloured with
+ * its material's colour, in one geometry with one vertex-coloured material. The model's shared part geometry is left
+ * untouched (other vehicles use it); the merged geometry is the caller's to dispose. Parts that are not drawn are left out.
+ */
+export function flattenModel(model: THREE.Object3D, material: THREE.Material): THREE.Mesh {
+  model.updateMatrixWorld(true);
+  const toModel = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const pos: number[] = [], nor: number[] = [], col: number[] = [];
+  const c = new THREE.Color(), m = new THREE.Matrix4();
+  model.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.visible || (mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) return;
+    let hidden = false;
+    for (let p: THREE.Object3D | null = mesh.parent; p && p !== model; p = p.parent) if (!p.visible) hidden = true;
+    if (hidden) return;
+    const src = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    if (!src.getAttribute('normal')) src.computeVertexNormals();
+    src.applyMatrix4(m.multiplyMatrices(toModel, mesh.matrixWorld));
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const p = src.getAttribute('position'), n = src.getAttribute('normal');
+    const groups = src.groups.length && Array.isArray(mesh.material) ? src.groups : [{ start: 0, count: p.count, materialIndex: 0 }];
+    for (const g of groups) {
+      const mat = mats[g.materialIndex ?? 0] as THREE.Material & { color?: THREE.Color };
+      if (!mat || mat.visible === false) continue;
+      c.set(mat.color ?? 0xffffff);
+      const end = Math.min(p.count, g.start + (Number.isFinite(g.count) ? g.count : p.count));
+      for (let i = g.start; i < end; i++) {
+        pos.push(p.getX(i), p.getY(i), p.getZ(i));
+        nor.push(n.getX(i), n.getY(i), n.getZ(i));
+        col.push(c.r, c.g, c.b);
+      }
+    }
+    src.dispose();
+  });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+  const out = new THREE.Mesh(geometry, material);
+  out.name = (model.name || 'vehicle') + ' (one mesh)';
+  out.castShadow = true; out.receiveShadow = true;
+  return out;
 }
 
 /** A vehicle on its way from one crossing (grid node) to the next. */
@@ -114,7 +169,9 @@ export function edgeLength(plan: CityPlan, from: [number, number], to: [number, 
 export function createCityTraffic(city: City, options: CityTrafficOptions = {}): CityTraffic {
   const plan = city.plan;
   const rand = rngOf(options.seed ?? plan.seed + 101);
-  const count = Math.max(1, Math.min(60, Math.round(options.count ?? 12)));
+  const tier: GeometryTier = options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier();
+  const light = tier === 'light';
+  const count = Math.max(1, Math.min(light ? LIGHT_TRAFFIC : 60, Math.round(options.count ?? 12)));
   const kinds: CityTrafficKind[] = options.kinds && options.kinds.length ? options.kinds : ['car', 'car', 'auto', 'car', 'bus', 'auto'];
   const cruiseBase = Math.max(2, options.speed ?? 9);
   const green = Math.max(1, options.greenSeconds ?? 8);
@@ -122,10 +179,21 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
   const root = new THREE.Group();
   root.name = 'City traffic';
   const paints = [0xb42b2b, 0x1d4ed8, 0xf3f4f6, 0x111827, 0x9ca3af, 0x0f766e, 0xf59e0b];
-  const build = (k: CityTrafficKind): THREE.Group => {
+  const model = (k: CityTrafficKind): THREE.Group => {
     if (k === 'auto') return createAutoRickshaw({ detail: 'lite' });
     if (k === 'bus') return createBus({ detail: 'lite' });
     return createCar({ detail: 'lite', color: paints[Math.floor(rand() * paints.length)] });
+  };
+  // Light tier: the same model, drawn as one mesh inside a group that moves exactly as the model would have.
+  const bodyMat = light ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 }) : null;
+  const merged: THREE.BufferGeometry[] = [];
+  const build = (k: CityTrafficKind): THREE.Group => {
+    const full = model(k);
+    if (!bodyMat) return full;
+    const one = flattenModel(full, bodyMat);
+    merged.push(one.geometry);
+    const g = new THREE.Group(); g.name = full.name; g.userData = { ...full.userData }; g.add(one);
+    return g;
   };
   const lengthOf: Record<CityTrafficKind, number> = { car: 4.4, auto: 3, bus: 10 };
   const cars: TrafficCar[] = [];
@@ -152,7 +220,7 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
   // Lights: one lamp per approach axis at each crossing, as two instanced meshes (two draw calls for the whole city).
   const nodes: Array<[number, number]> = [];
   for (let i = 0; i <= plan.blocksX; i++) for (let j = 0; j <= plan.blocksZ; j++) nodes.push([i, j]);
-  const lampGeo = new THREE.SphereGeometry(0.28, 10, 8);
+  const lampGeo = light ? new THREE.SphereGeometry(0.28, 6, 4) : new THREE.SphereGeometry(0.28, 10, 8);
   const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const poleGeo = new THREE.BoxGeometry(0.14, 4, 0.14);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.7 });
@@ -298,6 +366,8 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
       root.removeFromParent();
       lampGeo.dispose(); lampMat.dispose(); poleGeo.dispose(); poleMat.dispose();
       lampsZ.dispose(); lampsX.dispose(); poles.dispose();
+      for (const g of merged) g.dispose();
+      bodyMat?.dispose();
       // The vehicles' own geometry is NOT freed here: the kit shares parts (wheels, shells) between every vehicle,
       // the player's car included, so disposing them would break cars that are still on screen.
     },

@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { ordinal } from '../adminReportParts';
+import { GameProofPictures, proofPicturesFromIssues, type ProofPictureRef } from './GameProofPictures';
 
 export interface BuildHistoryItem {
   id: string;
@@ -30,6 +31,8 @@ export interface LatestBuildFacts {
   summary?: string;
   rootCause?: string;
   prompt?: string;
+  /** Q-3363: the GAME_PROOF pictures this build kept privately for the admin ([] when none). */
+  proofPictures?: ProofPictureRef[];
 }
 
 export type WorkspaceReportsAnswer =
@@ -63,6 +66,7 @@ export function readWorkspaceReports(status: number, body: unknown): WorkspaceRe
     summary: typeof l.summary === 'string' ? l.summary : undefined,
     rootCause: typeof l.rootCause === 'string' ? l.rootCause : undefined,
     prompt: typeof l.prompt === 'string' ? l.prompt : undefined,
+    proofPictures: proofPicturesFromIssues(l.issues),
   } : null;
   return { kind: 'found', latest, history };
 }
@@ -82,9 +86,11 @@ function Dot({ ok }: { ok?: boolean }) {
 }
 
 /** What the panel shows for one settled answer. Presentational, so a static render can prove every state. */
-export function WorkspaceReportsView({ answer, workspaceId, onCopy, onDownload, onRetry }: {
+export function WorkspaceReportsView({ answer, workspaceId, onCopy, onDownload, onRetry, headers }: {
   answer: WorkspaceReportsAnswer;
   workspaceId: string;
+  /** The admin token headers — the proof pictures are fetched through the admin route with them. */
+  headers?: Record<string, string>;
   onCopy: (workspaceId: string, buildId?: string) => void;
   onDownload: (workspaceId: string, buildId?: string) => void;
   onRetry: () => void;
@@ -119,6 +125,7 @@ export function WorkspaceReportsView({ answer, workspaceId, onCopy, onDownload, 
         <p className="text-[11px] text-body leading-relaxed break-words">{latest?.summary || 'No summary was recorded for this build.'}</p>
         {latest?.rootCause ? <p className="text-[11px] text-warn leading-relaxed break-words">Root cause: {latest.rootCause}</p> : null}
       </div>
+      {headers && latest?.proofPictures?.length ? <GameProofPictures pictures={latest.proofPictures} headers={headers} /> : null}
 
       {/* THE WHOLE 0→100% SESSION — every recorded build of this app, oldest to newest. */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -169,5 +176,5 @@ export function WorkspaceBuildReports({ workspaceId, headers, onCopy, onDownload
   if (state.s === 'loading') {
     return <p className="flex items-center gap-2 text-[12px] font-bold text-muted" role="status"><Loader2 className="w-4 h-4 animate-spin" aria-hidden /> Loading this app's builds…</p>;
   }
-  return <WorkspaceReportsView answer={state.answer} workspaceId={workspaceId} onCopy={onCopy} onDownload={onDownload} onRetry={() => void load()} />;
+  return <WorkspaceReportsView answer={state.answer} workspaceId={workspaceId} onCopy={onCopy} onDownload={onDownload} onRetry={() => void load()} headers={headers} />;
 }

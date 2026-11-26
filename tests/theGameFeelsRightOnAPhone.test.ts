@@ -149,12 +149,18 @@ describe('📱 full screen, the orientation, the notch', () => {
     expect(lockCalls).toEqual(['landscape']);
     free.dispose();
   });
-  it('on a phone, Play goes full screen (the tap is the permission)', async () => {
+  // Admin 2026-11-26 (iPhone screenshot): "swipe se full screen nahi honi chahiye, bas button se". Play used to go full
+  // screen on a phone; full screen is now the player's own choice, made only with the Full screen button.
+  it('on a phone, Play does NOT go full screen — only the Full screen button does', async () => {
     const host = new FakeEl('div'); const container = new FakeEl('div'); host.appendChild(container);
     const game = new SHELL.Game({ container, startScreen: {}, setup: () => [] });
     game.start();
     game.play();
     await Promise.resolve();
+    expect(host.fullscreenCalls).toBe(0);
+    expect(game.isFullscreen).toBe(false);
+    expect(lockCalls).toEqual([]);
+    await game.toggleFullscreen();
     expect(host.fullscreenCalls).toBe(1);
     game.dispose();
   });

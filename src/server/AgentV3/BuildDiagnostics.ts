@@ -13,7 +13,21 @@
 import { usdAmount } from '../lib/usdAmount';
 import { isReadOnlyInspection } from './shellInspection';
 import { isNpmInstallWithoutPackageJson, isMissingStartToolchain, type DevServerLaunchInput } from './devServerLaunchPlan';
-import { startBandLabel } from './RequestAnalyser';
+import { scoreBandVersusRouting } from './RequestAnalyser';
+
+/**
+ * What the request analyser concluded, and — since Q-3466 — the routing verdict beside it, so a COMPLEX build whose score
+ * sits in the cheapest band says which of the two decided (`scoreBandVersusRouting`).
+ */
+export interface RequestAnalysisRecord {
+  taskType: string;
+  complexityScore: number;
+  complexityBand: string;
+  signalsCouldNotRead?: boolean;
+  routedAs?: 'complex' | 'simple';
+  routedBy?: string;
+  bandOverriddenByRouting?: string;
+}
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
 import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
@@ -908,7 +922,7 @@ export interface BuildDiagnosticsReport {
    * Observability only: written once at build start from a value the route already computed, read by
    * nothing in the build path.
    */
-  requestAnalysis?: { taskType: string; complexityScore: number; complexityBand: string; signalsCouldNotRead?: boolean };
+  requestAnalysis?: RequestAnalysisRecord;
   liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
   liveCacheReadInputTokens?: number;
@@ -1109,7 +1123,7 @@ export class BuildDiagnostics {
   private todoOnlyTally?: { turns: number; latencyMs: number; firstInRun?: number };
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
-  private requestAnalysis?: { taskType: string; complexityScore: number; complexityBand: string; signalsCouldNotRead?: boolean };
+  private requestAnalysis?: RequestAnalysisRecord;
   /** See the transient-status note in the narration handler. */
   private transientStatusRecorded = false;
   /** Type errors the LAST typecheck row recorded (SANDBOX_CMD "typecheck … → N type errors" / "clean"). */
@@ -2770,7 +2784,10 @@ export class BuildDiagnostics {
    * Record what the analyser concluded about this request. Called once, at build start, with a value
    * the route has already computed — no work is done here and nothing in the build reads it back.
    */
-  setRequestAnalysis(a: { taskType?: string; complexityScore?: number; startTier?: string; unreadable?: boolean } | null | undefined): void {
+  setRequestAnalysis(
+    a: { taskType?: string; complexityScore?: number; startTier?: string; unreadable?: boolean } | null | undefined,
+    routing?: { verdict?: string; source?: string } | null,
+  ): void {
     const taskType = typeof a?.taskType === 'string' ? a.taskType.trim() : '';
     const startTier = typeof a?.startTier === 'string' ? a.startTier.trim() : '';
     const score = a?.complexityScore;
@@ -2786,13 +2803,17 @@ export class BuildDiagnostics {
     // flag presents a default as a measurement, exactly as `startTier: "gemini"` once did.
     // Recorded only when TRUE, so every existing report and every English build is byte-identical.
     const couldNotRead = a?.unreadable === true;
+    // Q-3466: the band and the routing verdict come from ONE function, the same one the COMPLEXITY_ROUTING line reads.
+    const band = scoreBandVersusRouting(startTier, routing);
     this.requestAnalysis = {
       // 🔴 Q-2748 (autopsy 05eb30ba): the report no longer carries the band's KEY. Keys are historical model names
       // ("sonnet" = the standard band), and printed beside a label they still read as "this Weak build started on
       // Sonnet" — the class autopsy 2b0a3ed5 fixed only halfway by adding the label. The key stays in cost telemetry
       // and the lanes; the report carries only what it means. modelPerformance maps legacy reports back.
-      taskType, complexityScore: score, complexityBand: startBandLabel(startTier),
+      taskType, complexityScore: score, complexityBand: band.scoreBand,
       ...(couldNotRead ? { signalsCouldNotRead: true } : {}),
+      ...(band.routedAs ? { routedAs: band.routedAs, routedBy: band.routedBy } : {}),
+      ...(band.overridden ? { bandOverriddenByRouting: band.note } : {}),
     };
   }
 

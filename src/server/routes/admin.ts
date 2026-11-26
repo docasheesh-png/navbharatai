@@ -86,13 +86,13 @@ import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
 import { getBuildTriage, markBuildTriage } from '../AgentV3/AdminBuildTriageStore';
 import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, deleteAllApkReports } from '../lib/AdminApkReportStore';
-import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentBuildReports } from '../AgentV3/DiagnosticsStore';
+import { getBuildOutcomesMany, listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentBuildReports } from '../AgentV3/DiagnosticsStore';
 import { buildCostRow, summarizeCosts, costTrend, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../lib/buildCostLedger';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
-import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
-import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
+import { matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
+import { tierOfIdentity } from '../lib/identityTier';
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, runningSandboxLifecycleNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
@@ -144,6 +144,7 @@ import { listWorkspaceAppsPage, getWorkspaceAppsMany, listUserWorkspaceAppsResul
 import {
   BUILT_APPS_PAGE_SIZE, clampPageSize, parseAppsQuery, joinBuiltAppRows, builtAppRow, encodeCursor, decodeCursor,
   annotateBuiltAppRows, liveOrphans, type BuiltAppRow, type BuiltAppOwnerIdentity,
+  parseAppsView, viewFilters, takeMatches, SCAN_BATCH, SCAN_BATCHES,
 } from '../AgentV3/adminBuiltApps';
 import { readConversationNamesMany } from '../AgentV3/FirestoreConversationStore';
 import {
@@ -1092,12 +1093,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const resolved = (r.userId ? identities.get(String(r.userId).trim()) : null) ?? identityFrom(r.userId, null);
         return {
           ...r,
-          accountTier: accountTier({
-            anonymous: resolved.anonymous,
-            freeListed: freeListLabelForStoredEmail(r.userId, r.email || resolved.email || null), // a label (Q-624)
-            wallet: resolved.paid === null ? null : { totalMoneySpent: resolved.paid ? 1 : 0 },
-            walletFound: resolved.paid !== null,
-          }) as AccountTier,
+          accountTier: tierOfIdentity(r.userId, resolved, r.email),
         };
       });
       res.json({ reports: withTier });
@@ -1437,14 +1433,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const withTier = matched.map((b) => {
         const identity = b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null;
         const resolved = identity ?? identityFrom(b.ownerUid, null);
-        const tier: AccountTier = accountTier({
-          anonymous: resolved.anonymous,
-          freeListed: freeListLabelForStoredEmail(b.ownerUid, resolved.email || null), // a label (Q-624)
-          // `paid` already rode in on the identity, read from the wallet document this route fetched
-          // for the name and email — so the tier costs no extra Firestore read.
-          wallet: resolved.paid === null ? null : { totalMoneySpent: resolved.paid ? 1 : 0 },
-          walletFound: resolved.paid !== null,
-        });
+        const tier: AccountTier = tierOfIdentity(b.ownerUid, resolved);
         return { ...b, owner: { ...resolved, label: identityLabel(resolved) }, tier, triage: triage.get(b.workspaceId) ?? null };
       });
       // Applied AFTER the identity resolve, because the tier is not knowable from the build record —
@@ -2884,16 +2873,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const finish = async (rows: BuiltAppRow[]): Promise<BuiltAppRow[]> => {
         if (rows.length === 0) return rows;
         const uids = rows.map((r) => r.userId || r.ownerUid);
-        const [identities, names, inv] = await Promise.all([
+        const [identities, names, inv, outcomes] = await Promise.all([
           resolveUserIdentities(uids, getDb() as never).catch(() => new Map()),
           readConversationNamesMany(rows.map((r) => r.workspaceId)),
           boundedInventory(),
+          // The LAST build's result, for the pass / fail sort and filter (admin 2026-11-26). One field-masked read.
+          getBuildOutcomesMany(rows.map((r) => r.workspaceId)),
         ]);
         const owners = new Map<string, BuiltAppOwnerIdentity>();
         for (const [uid, id] of identities) owners.set(uid, { email: id.email, name: id.name, anonymous: id.anonymous, label: identityLabel(id) });
-        const out = annotateBuiltAppRows(rows, owners, names).map((r) => (
-          r.snapshotUrl && snapshotCopyIsDead(r.snapshotUrl, inv) ? { ...r, snapshotUrl: null, snapshotAt: 0 } : r
-        ));
+        const out = annotateBuiltAppRows(rows, owners, names).map((r) => {
+          const uid = r.userId || r.ownerUid;
+          const identity = uid ? identities.get(uid) : undefined;
+          const row: BuiltAppRow = {
+            ...r,
+            outcome: outcomes.get(r.workspaceId) ?? 'unknown',
+            // Paid / free by the ONE rule All builds uses (identityTier.ts); an owner never resolved stays unknown.
+            tier: identity ? tierOfIdentity(uid, identity) : 'unknown',
+          };
+          return row.snapshotUrl && snapshotCopyIsDead(row.snapshotUrl, inv) ? { ...row, snapshotUrl: null, snapshotAt: 0 } : row;
+        });
         if (inv.complete) healDeadSnapshotRecordsThrottled(snapshotHealDeps());
         return out;
       };
@@ -2944,9 +2943,38 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         return;
       }
 
-      // The default: every built app, newest save first.
+      // SORT AND FILTER (admin 2026-11-26: "be tarteeb hai, sort karne ka system banao — old new, free paid, fail pass").
+      // The order is a real query order (newest or oldest save first, over EVERY built app, not only a loaded page). A
+      // filter reads facts that live in other collections, so the page is FOUND by reading in order and keeping matches,
+      // bounded (SCAN_BATCHES × SCAN_BATCH) — and the answer says how many apps it looked at.
+      const view = parseAppsView(req.query as Record<string, unknown>);
+      const order = view.sort === 'oldest' ? 'asc' : 'desc';
       const after = rawCursor ? decodeCursor(rawCursor) : null;
-      const pageRes = await listWorkspaceAppsPage({ limit, afterDocId: after });
+      if (viewFilters(view)) {
+        const kept: BuiltAppRow[] = [];
+        let resumeAfter: string | null = after;
+        let scanned = 0;
+        let exhausted = false;
+        for (let batch = 0; batch < SCAN_BATCHES && kept.length < limit; batch++) {
+          const pageRes = await listWorkspaceAppsPage({ limit: SCAN_BATCH, afterDocId: resumeAfter, order });
+          if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the built-app list.' }); return; }
+          if (pageRes.apps.length === 0) { exhausted = true; break; }
+          const { deployments, sandboxes } = await enrich(pageRes.apps.map((a) => a.workspaceId));
+          const rows = await finish(joinBuiltAppRows(pageRes.apps, deployments, sandboxes));
+          const got = takeMatches(rows, view, limit - kept.length);
+          kept.push(...got.kept);
+          scanned += got.examined;
+          // Resume after the last app LOOKED AT — stopping mid-batch must never skip a match after it.
+          resumeAfter = got.examined < rows.length ? got.lastExamined : pageRes.nextAfterDocId;
+          if (!pageRes.nextAfterDocId && got.examined >= rows.length) { exhausted = true; break; }
+        }
+        res.json({
+          ok: true, mode: 'all', view, rows: kept, orphaned: [], scanned,
+          nextCursor: exhausted ? null : encodeCursor(resumeAfter), pageSize: limit,
+        });
+        return;
+      }
+      const pageRes = await listWorkspaceAppsPage({ limit, afterDocId: after, order });
       if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the built-app list.' }); return; }
       const ids = pageRes.apps.map((a) => a.workspaceId);
       const { deployments, sandboxes } = await enrich(ids);
@@ -2955,12 +2983,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // ride the FIRST page only, as their own strip — and only the ones still LIVE (`liveOrphans`):
       // the flag is set on every record of a deleted workspace, offline and never-published included,
       // and a strip headed "Live" must not list apps that are not.
-      const orphanRecs = after ? [] : liveOrphans(await deploymentStore.listOrphaned(200)).slice(0, 50);
+      // Newest-first only: the strip is "what is live and unmoderated NOW", not part of an oldest-first reading.
+      const orphanRecs = after || view.sort !== 'newest' ? [] : liveOrphans(await deploymentStore.listOrphaned(200)).slice(0, 50);
       const [rows, orphaned] = await Promise.all([
         finish(joinBuiltAppRows(pageRes.apps, deployments, sandboxes)),
         finish(orphanRecs.map((r) => builtAppRow(null, r, undefined, r.workspaceId))),
       ]);
-      res.json({ ok: true, mode: 'all', rows, orphaned, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
+      res.json({ ok: true, mode: 'all', view, rows, orphaned, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
     } catch (e: any) {
       console.error('[ADMIN] built-apps list error:', e?.message);
       res.status(500).json({ ok: false, error: 'Internal server error.' });

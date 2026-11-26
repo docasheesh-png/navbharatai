@@ -168,7 +168,8 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
-  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote,
+  isTestOnlyFile, releaseBuildExcludesTests, releaseConsequence } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { hollowFeatureWriteNote } from './hollowFeature';
@@ -3881,6 +3882,21 @@ export class ToolDispatcher {
    */
   private _tsProject: TsProjectVerdict = 'unknown';
   private _tsProbeAttempts = 0;
+  /**
+   * Does the release build leave test files out (Q-3462)? Read once, and only when a typecheck has an error in a test
+   * file — the only time the answer changes a note. A read that fails stays unknown and is asked again next time.
+   */
+  private _releaseExcludesTests: boolean | null = null;
+  private async releaseExcludesTests(errors: ReadonlyArray<{ file: string }>): Promise<boolean | null> {
+    if (this._releaseExcludesTests !== null || !errors.some((e) => isTestOnlyFile(e.file))) return this._releaseExcludesTests;
+    try {
+      const pkg = await this.actuator.readFile(this.workspaceId, 'package.json');
+      const config = /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(String(pkg ?? ''))?.[1]?.replace(/^\.\//, '').replace(/["']/g, '');
+      const tsconfig = config ? await this.actuator.readFile(this.workspaceId, config).catch(() => null) : null;
+      this._releaseExcludesTests = releaseBuildExcludesTests(typeof pkg === 'string' ? pkg : null, typeof tsconfig === 'string' ? tsconfig : null);
+    } catch { /* unknown stays unknown — the note keeps its cautious wording */ }
+    return this._releaseExcludesTests;
+  }
 
   /** The write-time typecheck's own numbers, for the build report (`WRITE_TIME_TYPECHECK`). */
   writeTypecheckStats(): WriteTypecheckStats {
@@ -4659,8 +4675,10 @@ export class ToolDispatcher {
       }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
-      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);
+      // Q-3462: a test file's error is said as a release blocker only when the release build compiles test files.
+      const releaseExcludesTests = await this.releaseExcludesTests(errors);
+      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, { releaseExcludesTests }) + members;
+      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, { releaseExcludesTests });
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
@@ -8558,7 +8576,11 @@ export class ToolDispatcher {
               // this tool holds no file content, and reading one back would put I/O in a hot path for a
               // sharper wording. The sourceless form still names both causes in order and still says not
               // to rewrite the file, which is the loop that had to break.
-              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
+              // Q-3462 sibling: errors only in test files the release build leaves out are not a failed production build.
+              const release = releaseConsequence(tscErrs, await this.releaseExcludesTests(tscErrs));
+              tscHeader = release.blocksRelease
+                ? `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`
+                : `TYPE ERROR(S) in test files only — ${release.text}. Fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscStatus = 'clean';
             }
@@ -10445,11 +10467,11 @@ export class ToolDispatcher {
         const made = await composeAction(name, description, askStandIn, supplied);
         if (made.kind === 'refused') refuse(made.reason);
         if (made.kind === 'library') {
-          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger). It plays on the character the user chose. Nothing was written.`;
+          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger) — on the player; add a third argument for other characters: 'police' (every police character), 'villager', 'all', or one entity's object. It plays on any body. Nothing was written.`;
         }
         const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
         this.scheduleCheckpoint('character action');
-        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it; it plays on the character the user chose, whatever model it is. Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
+        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it — on the player, or with a third argument on other characters ('police', 'villager', 'all', or one entity's object); it plays on any body, whatever model it is.${made.def.loop || made.def.hold ? ` It ${made.def.loop ? 'loops' : 'holds its last pose'} until stopAction(ctx, who).` : ''} Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
       }
 
       case 'compose_rule': {

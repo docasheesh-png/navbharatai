@@ -132,9 +132,10 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // still renders, else undone (routes/agentv3.ts). It may never touch a secret file, and never a TEST file
   // — "fix the source, do not weaken the test" is enforced here rather than merely asked for.
   'vaccine-repair',
-  // Game Engine Ultra Phase 3 (gameRepair.ts): a game the playtest PROVED broken, repaired once and kept only
-  // if the game, played again, is strictly better — otherwise undone. One bounded pass; disabled only when
-  // AGENTV3_GAME_AUTO_REPAIR=off.
+  // The in-build game repair: today only the bounded placeholder repair (gamePlaceholderRepair.ts, Q-3374) — a missing
+  // model or an empty map the playtest SAW, repaired once with file tools only and kept only if the game, played again,
+  // is strictly better; otherwise every byte is put back from a verified backup. AGENTV3_GAME_PLACEHOLDER_REPAIR=off
+  // disables it. Automatic repair of measured defects stays suspended (gameRepair.ts).
   'game-repair',
 ]);
 

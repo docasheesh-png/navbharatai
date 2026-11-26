@@ -99,9 +99,12 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
   ['puzzle', /\b(puzzle|sudoku|match[- ]?3|candy|2048|tetris|crossword|memory game)\b/i],
   ['runner', /\b(endless\s+runn(?:er|ing)|runner|subway surf)|(?:एंडलेस|अंतहीन)\s*(?:रनर|रनिंग|दौड़)/i],
   ['platformer', /\b(platformer|mario|jump(ing)? game)\b/i],
-  ['shooter', /\b(shoot(er|ing)|fps|gun|space invaders?|bullet)\b/i],
-  ['fighting', /\b(fight(ing)?|god of war|combat|brawler|boxing)\b/i],
+  // A ball sport is read before a shooter (game-maker coverage benchmark 2026-11-26: "basketball shooting game" read as a shooter).
   ['sports', /\b(cricket|football|soccer|basketball|tennis|badminton|golf)\b/i],
+  ['shooter', /\b(shoot(er|ing)|fps|gun|space invaders?|bullet)\b/i],
+  // Game-maker audit 2026-11-26: "fighter", "kushti", "ladai / maar-peet wala game" read as unknown (named titles — Tekken,
+  // Street Fighter — are read by the shared catalogue, lib/wellKnownGameTitles).
+  ['fighting', /\b(fight(ing|ers?)?|god of war|combat|brawler|boxing|kushti|dangal|mukke?baa?zi|ladaa?i\s+(?:wala|waala|ka)\s+(?:game|khel)|maa?r[\s-]*peet)\b/i],
   ['rpg', /\b(rpg|role[- ]?playing|open world|adventure)\b/i],
   ['strategy', /\b(strategy|tower defen[cs]e|rts)\b/i],
   ['arcade', /\b(arcade|flappy|pong|breakout|pac-?man)\b/i],
@@ -170,6 +173,7 @@ const NAMED_KINDS: Partial<Record<GameTitleKind, Omit<NamedGameReference, 'name'
   royale: ROYALE_SPEC,
   fps: { genre: 'shooter', dimension: '3d', camera: 'first-person' },
   runner: { genre: 'runner', dimension: '3d', camera: 'third-person' },
+  fighting: { genre: 'fighting', dimension: 'unspecified', camera: 'unspecified' },
 };
 
 /**

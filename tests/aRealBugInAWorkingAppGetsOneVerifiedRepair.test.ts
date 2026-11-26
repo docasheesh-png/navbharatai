@@ -150,7 +150,9 @@ describe('the route wires it the only safe way', () => {
     // Four since 2026-09-28: the explorer repair (explorerRepair.ts) is the fourth verifyAfterFix site, same helper.
     // Five since 2026-09-30: the test-suite repair on a green app (autopsy 8e124182), same helper.
     // Six since 2026-10-30: the game repair (gameRepair.ts, AGENTV3_GAME_AUTO_REPAIR), same helper.
-    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(6);
+    // Five again since 2026-11-26 (Q-3374): that unreachable game-repair wiring was removed; the one game repair that runs
+    // (the placeholder repair) undoes with a byte-exact, manifest-checked restore (gameWorkspaceBackup.ts), not this one.
+    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(5);
     const def = route.slice(route.indexOf('const revertToGreenSnapshot'), route.indexOf('const revertToGreenSnapshot') + 1200);
     expect(def).toContain('await applyGreenSnapshotRestore(plan)');
     expect(def).toContain('if (!snapshotRestoreComplete(plan, outcome)) throw');

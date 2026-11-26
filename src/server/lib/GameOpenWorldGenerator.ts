@@ -1978,8 +1978,24 @@ export const OPEN_WORLD_BRIDGE_PATH = 'src/game/play/openWorld.ts';
 export const OPEN_WORLD_STARTER_PATH = 'src/game/OpenWorldGame.tsx';
 
 /** The App that mounts the starter — written by the platform only where no game is mounted yet. */
-export function openWorldAppSource(options: { city?: boolean; title?: string } = {}): string {
+/**
+ * The camera shots the request asks for (admin 2026-11-26 #9): death — "hero marne ke baad cinematic camera / zoom /
+ * game over animation"; intro — "game start hone se pahle pura map ka drone shot". {} when neither. PURE.
+ */
+export function cinematicsWanted(prompt: string | null | undefined): { death?: true; intro?: true } {
+  const t = String(prompt ?? '');
+  const camera = /\b(?:cinematic\w*|camera|cutscene|drone\s*shot|drone|zoom\s*in|zoom\s*out|slow\s*mo\w*|animation|video|intro|flyover|fly\s*over)\b|सिनेमैटिक|कैमरा|ड्रोन/i;
+  if (!camera.test(t)) return {};
+  const death = /\b(?:death|dies|die|dead|marne|mar\s+jaye|mar\s+jane|maut|game\s*over|haar)\b|मरने|मौत|गेम\s*ओवर/i.test(t);
+  const intro = /\b(?:drone|intro|start\s+hone\s+se\s+pahle|shuru\s+hone\s+se\s+pahle|before\s+(?:the\s+)?(?:game|play)\s+starts?|pura\s+map|whole\s+map|flyover|fly\s*over|opening)\b|ड्रोन/i.test(t);
+  return { ...(death ? { death: true as const } : {}), ...(intro ? { intro: true as const } : {}) };
+}
+
+export function openWorldAppSource(options: { city?: boolean; title?: string; cinematics?: { death?: boolean; intro?: boolean } } = {}): string {
   const title = String(options.title ?? 'Open World').replace(/[^\p{L}\p{N} .,!?'-]/gu, '').trim().slice(0, 60) || 'Open World';
+  const cine = options.cinematics && (options.cinematics.death || options.cinematics.intro)
+    ? ' options={{ cinematics: { ' + [options.cinematics.death ? 'death: true' : '', options.cinematics.intro ? 'intro: true, introRadius: 400' : ''].filter(Boolean).join(', ') + ' } }}'
+    : '';
   return [
     "import { OpenWorldGame } from './game/OpenWorldGame';",
     "import { FEATURES } from './game/features';",
@@ -1991,7 +2007,7 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
     '// The MAP grows the same way: its places (city, town, village) are the regions list in src/game/world.ts.',
     '// The world, the player and the camera are the kit\'s.',
     'export default function App() {',
-    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES} />;`,
+    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES}${cine} />;`,
     '}',
     '',
   ].join('\n');
@@ -2124,7 +2140,10 @@ export function generateOpenWorld(): RecipeOutput {
       'back at the start by itself (ctx.setRespawn) — never write your own restart. PEOPLE: the city crowd is scenery unless the user asks —',
       '"log solid hon / aar paar na jaye" → WORLD.citizens = { solid: true }; "punch se gire / log ko maar sake" → { solid: true, hittable: true }.',
       'CARS: "gaadi ki takkar se log mare" → WORLD.runOver = true (off by default). A punch (the Attack button without a gun) already hurts any',
-      'character in reach; never write your own punch hit test.',
+      'character in reach; never write your own punch hit test. CAMERA SHOTS: "hero marne ke baad cinematic camera / game over animation" →',
+      '<OpenWorldGame options={{ cinematics: { death: true } }} />; "start se pahle pura map ka drone shot" → { intro: true, introRadius: 400 };',
+      'any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]).',
+      'Never move the camera yourself.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

@@ -113,7 +113,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d",
     "2273a3a237b8eccfde08365a9429bbdc5d8a7711880de150b1598bcb371f6fa0",
     "4439b2801ec915f5a79a1a5e7c639119a6ffe50b32bc0f8ee8288fb00065f43a",
-    "2ffbc4bd1085a8d27bb1967ebb82a2c1a46b32edf82d8dda18b9b9b6129ff786"
+    "2ffbc4bd1085a8d27bb1967ebb82a2c1a46b32edf82d8dda18b9b9b6129ff786",
+    "12a6b45e8df4ae00af731b44662bbd41fc704d2b6edc836b543f6eacab3fbc43"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -364,7 +365,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "49992550ae54aec705d3a3fd59b857c28a81d56b71db8d0dd80bd76bc20081d8",
     "0894372937214040b8b25c49599522b4eac706bc76fffd86cb098307a52311a4",
     "fd1cd406e310aebfb086c08d14cacfe7f030b02a79be16e46ddf269833d11cad",
-    "53cacb7c9c9e832f728aaf1f4c785f4fb120f56383d804cdee95a517a0244c96"
+    "53cacb7c9c9e832f728aaf1f4c785f4fb120f56383d804cdee95a517a0244c96",
+    "668d5cf3987be1b6d247ee1380f247c8f7909d041d64a18f9b0d532b6fc4d958"
   ],
   "src/game/core/feel.ts": [
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
@@ -541,6 +543,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1d488bb92891605c983ffd1c90b852599aeb80c618159223d83812166108eae2",
     "a783c10adc502f7ba9232d6d47e3d3b1c56e2ba289373035a07d077aa9ce6440",
     "249f936b33af103962fc7fe80313790d075cd904821a6061420709287ef4b42b"
+  ],
+  "src/game/play/cinematics.ts": [
+    "56cccbd611c7c0293d5f6cbbb2403b96a332773a47043bec6667a3a10af7439d"
   ],
   "src/game/play/features.ts": [
     "e09a02029b1467748dedfd26bcf67f94980bbb61362f0059c5dcf03dc3c7512c",
@@ -866,7 +871,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c921a6669aa6b988cbf9f74039a7364c0a0f1253310f114a591b536f9f10184d",
     "bb78d8204a9757abf17692e115790e9d585dfd8af35edec8a24adb87225dbab7",
     "dc2ffaef9e627518f873d855bdc53dcfc1b139f34a629f317157fcce55b3ecf3",
-    "bc6a259049248d579dc7dd961c41fd0f9787316c6c5c58818d1e92903c60057f"
+    "bc6a259049248d579dc7dd961c41fd0f9787316c6c5c58818d1e92903c60057f",
+    "72a08fcdad017f91003ced1ef62cb84e6d9b2d8cd7ad83e6f35a02b97e19aba1"
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",

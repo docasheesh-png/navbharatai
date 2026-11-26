@@ -10645,7 +10645,8 @@ export class ToolDispatcher {
               this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_FEATURES_INDEX_PATH, index.content);
             }
-            const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined });
+            const owCine = owRec.cinematics && typeof owRec.cinematics === 'object' ? owRec.cinematics as Record<string, unknown> : null;
+            const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined, cinematics: owCine ? { death: owCine.death === true, intro: owCine.intro === true } : undefined });
             const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
             this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
             getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);

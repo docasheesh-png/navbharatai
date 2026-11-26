@@ -10,8 +10,15 @@
 // ⚠️ PER INSTANCE, AND SAID SO: rooms live in one Cloud Run instance's memory. Two players who reach DIFFERENT
 // instances do not meet; each still gets a real match (with labelled bots after the wait). A shared matchmaker is
 // an open item (BUILD_REPORT_QUEUE Q-3391), not something this file pretends to be.
+//
+// THE DAILY START CAP IS THE EXCEPTION — IT IS SHARED (Q-3392): with a `claimDailyStart` (royaleWs.ts passes the
+// Firestore one, dailyStartCap.ts) every match start is counted on one counter per app per UTC day across all
+// instances BEFORE the room opens. If that store does not answer (an error, or no answer within CLAIM_TIMEOUT_MS),
+// the start falls back to this instance's in-memory count and the server log says so — a transient store failure
+// must not stop every game in the store, and the in-memory cap still bounds this instance meanwhile.
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { ClaimDailyStart, StartClaim } from './dailyStartCap';
 import { MAX_PLAYERS, applyMove, applyShot, createRoom, forfeit, snapshot, stepRoom, COVER, LOOT_SPOTS, ARENA_HALF, type Room, type MatchResult } from './matchCore';
 
 export interface Conn { send(msg: Record<string, unknown>): void; close(code: number, reason: string): void }
@@ -23,7 +30,7 @@ export const QUOTAS = {
   MAX_ROOMS_TOTAL: 50,
   /** Players one app may have waiting in its queue. */
   MAX_QUEUE_PER_APP: 16,
-  /** Matches one app may START per server-clock day (per instance). */
+  /** Matches one app may START per UTC day — across all instances when a shared claimer is wired (Q-3392), else per instance. */
   MAX_MATCHES_PER_APP_PER_DAY: 300,
   /** Open match connections on one instance. */
   MAX_CONNECTIONS_TOTAL: 400,
@@ -45,6 +52,10 @@ export const LONE_WAIT_MS = 30_000;
 export const RECONNECT_GRACE_MS = 15_000;
 /** An ended room is kept this long, so a player who reconnects late still gets THE result (never a second one). */
 export const ENDED_ROOM_KEEP_MS = 60_000;
+/** A shared daily-cap claim that has not answered in this long is treated as 'unavailable' (the in-memory fallback). */
+export const CLAIM_TIMEOUT_MS = 4_000;
+/** The "shared cap unavailable" warning is logged at most this often per instance. */
+export const FALLBACK_LOG_EVERY_MS = 5 * 60_000;
 
 type Session = {
   playerId: string; appId: string; conn: Conn | null;
@@ -54,7 +65,15 @@ type Session = {
 };
 type RoomEntry = { room: Room; humans: string[]; ticks: number; reported: boolean; endedAt: number };
 
-export type ServiceOptions = { now?: () => number; botsAllowed?: boolean; quotas?: Partial<Quotas>; secret?: Buffer; onResult?: (room: Room, result: MatchResult) => void };
+export type ServiceOptions = {
+  now?: () => number; botsAllowed?: boolean; quotas?: Partial<Quotas>; secret?: Buffer; onResult?: (room: Room, result: MatchResult) => void;
+  /** The shared daily start counter (Q-3392). Absent ⇒ the cap is this instance's in-memory count only. */
+  claimDailyStart?: ClaimDailyStart;
+  /** Where the fallback warning goes (tests capture it). */
+  log?: (line: string) => void;
+};
+
+const DAILY_LIMIT_REASON = "This game has reached today's online match limit. Try again tomorrow, or play Practice.";
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -68,9 +87,19 @@ export class RoyaleMatchService {
   private readonly queues = new Map<string, string[]>();
   private readonly rooms = new Map<string, RoomEntry>();
   private readonly daily = new Map<string, { day: string; count: number }>();
+  private readonly claimDailyStart?: ClaimDailyStart;
+  private readonly log: (line: string) => void;
+  /** Apps with a shared-cap claim in flight: their queue waits for the answer (one claim per app at a time). */
+  private readonly claiming = new Set<string>();
+  private readonly pendingClaims = new Set<Promise<void>>();
+  /** Starts already counted (or permitted by the fallback) but not yet used, per app, for one UTC day. */
+  private readonly prepaid = new Map<string, { day: string; n: number }>();
+  /** Apps the shared counter has called full, and the UTC day it said so — no further claims that day. */
+  private readonly sharedFull = new Map<string, string>();
+  private lastFallbackLogAt = -Infinity;
   private timer: ReturnType<typeof setInterval> | null = null;
   private roomSeq = 0;
-  readonly counters = { matchesStarted: 0, resultsRecorded: 0, refusedFull: 0, droppedMessages: 0 };
+  readonly counters = { matchesStarted: 0, resultsRecorded: 0, refusedFull: 0, droppedMessages: 0, sharedCapFallbacks: 0 };
 
   constructor(opts: ServiceOptions = {}) {
     this.now = opts.now ?? Date.now;
@@ -79,6 +108,8 @@ export class RoyaleMatchService {
     // Per process: a resume token is only meaningful on the instance that holds the room anyway.
     this.secret = opts.secret ?? randomBytes(32);
     this.onResult = opts.onResult;
+    this.claimDailyStart = opts.claimDailyStart;
+    this.log = opts.log ?? ((line) => console.warn(line));
   }
 
   // ── identity ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -189,6 +220,75 @@ export class RoyaleMatchService {
     return d && d.day === today ? d.count : 0;
   }
 
+  /** Today's cap is reached: by this instance's own count, or by the shared counter's last answer. */
+  private dailyCapReached(appId: string): boolean {
+    if (this.dailyCount(appId) >= this.quotas.MAX_MATCHES_PER_APP_PER_DAY) return true;
+    const full = this.sharedFull.get(appId);
+    if (full === undefined) return false;
+    if (full === day(this.now())) return true;
+    this.sharedFull.delete(appId); // a new UTC day: the shared counter starts again
+    return false;
+  }
+
+  /** Use one already-counted start for today, if this instance holds one. */
+  private takePrepaid(appId: string): boolean {
+    const p = this.prepaid.get(appId);
+    if (!p) return false;
+    if (p.day !== day(this.now())) { this.prepaid.delete(appId); return false; }
+    if (--p.n <= 0) this.prepaid.delete(appId);
+    return true;
+  }
+
+  private refuseDaily(appId: string): void {
+    const q = this.queues.get(appId);
+    if (!q) return;
+    for (const id of q.splice(0)) {
+      const s = this.sessions.get(id); if (!s) continue;
+      s.state = 'idle';
+      s.conn?.send({ t: 'full', reason: DAILY_LIMIT_REASON });
+    }
+    this.queues.delete(appId);
+  }
+
+  /**
+   * Ask the shared counter for one start. The queue stays as it is meanwhile (a player may still leave); on the
+   * answer the start is either refused for the whole queue ('full'), or held as a prepaid start and matchmaking
+   * runs again — so the room is built from whoever is queued THEN, never from a list taken before the wait.
+   */
+  private claim(appId: string, now: number): void {
+    const claimer = this.claimDailyStart!;
+    const today = day(now);
+    this.claiming.add(appId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<StartClaim>((resolve) => { timer = setTimeout(() => resolve('unavailable'), CLAIM_TIMEOUT_MS); timer.unref?.(); });
+    const asked = Promise.resolve().then(() => claimer(appId, this.quotas.MAX_MATCHES_PER_APP_PER_DAY, now)).catch((): StartClaim => 'unavailable');
+    const done: Promise<void> = Promise.race([asked, timeout]).then((verdict) => {
+      clearTimeout(timer);
+      this.claiming.delete(appId);
+      if (verdict === 'full') { this.sharedFull.set(appId, today); this.refuseDaily(appId); return; }
+      if (verdict === 'unavailable') {
+        this.counters.sharedCapFallbacks++;
+        const t = this.now();
+        if (t - this.lastFallbackLogAt >= FALLBACK_LOG_EVERY_MS) {
+          this.lastFallbackLogAt = t;
+          this.log('[royale-online] the shared daily match-start counter did not answer; this start uses the in-memory cap of '
+            + this.quotas.MAX_MATCHES_PER_APP_PER_DAY + ' per app per day on THIS instance until it does (with N instances, up to N times that).');
+        }
+      }
+      if (day(this.now()) !== today) return; // the day turned while asking: the next tick asks again for the new day
+      const p = this.prepaid.get(appId);
+      this.prepaid.set(appId, { day: today, n: (p && p.day === today ? p.n : 0) + 1 });
+      this.matchmake(appId, this.now());
+    }).catch((e) => { this.claiming.delete(appId); console.error('[royale-online] daily cap claim failed:', e); })
+      .finally(() => { this.pendingClaims.delete(done); });
+    this.pendingClaims.add(done);
+  }
+
+  /** Resolves when every shared-cap claim in flight has been answered and acted on (tests drive the clock). */
+  async settled(): Promise<void> {
+    while (this.pendingClaims.size) await Promise.all([...this.pendingClaims]);
+  }
+
   private enqueue(s: Session): void {
     if (!s.conn) return;
     if (s.state === 'playing') {
@@ -199,8 +299,8 @@ export class RoyaleMatchService {
       s.state = 'idle';
     }
     if (s.state !== 'idle') return; // already queued
-    if (this.dailyCount(s.appId) >= this.quotas.MAX_MATCHES_PER_APP_PER_DAY) {
-      s.conn.send({ t: 'full', reason: "This game has reached today's online match limit. Try again tomorrow, or play Practice." });
+    if (this.dailyCapReached(s.appId)) {
+      s.conn.send({ t: 'full', reason: DAILY_LIMIT_REASON });
       return;
     }
     const q = this.queues.get(s.appId) ?? [];
@@ -229,20 +329,14 @@ export class RoyaleMatchService {
 
   private matchmake(appId: string, now: number): void {
     const q = this.queues.get(appId);
-    if (!q || !q.length) return;
+    if (!q || !q.length || this.claiming.has(appId)) return;
     const oldest = Math.min(...q.map((id) => this.sessions.get(id)?.queuedAt ?? now));
     const due = q.length >= MAX_PLAYERS || (q.length >= 2 && now - oldest >= QUEUE_FILL_MS) || (q.length === 1 && this.botsAllowed && now - oldest >= LONE_WAIT_MS);
     if (!due) return;
-    if (this.dailyCount(appId) >= this.quotas.MAX_MATCHES_PER_APP_PER_DAY) {
-      for (const id of q.splice(0)) {
-        const s = this.sessions.get(id); if (!s) continue;
-        s.state = 'idle';
-        s.conn?.send({ t: 'full', reason: "This game has reached today's online match limit. Try again tomorrow, or play Practice." });
-      }
-      this.queues.delete(appId);
-      return;
-    }
+    if (this.dailyCapReached(appId)) { this.refuseDaily(appId); return; }
     if (this.appRooms(appId) >= this.quotas.MAX_ROOMS_PER_APP || this.liveRooms() >= this.quotas.MAX_ROOMS_TOTAL) { this.tellQueue(appId, true); return; }
+    // The shared cap (Q-3392): a start is counted across instances BEFORE its room opens.
+    if (this.claimDailyStart && !this.takePrepaid(appId)) { this.claim(appId, now); return; }
     const humans = q.splice(0, MAX_PLAYERS);
     if (!q.length) this.queues.delete(appId);
     this.startRoom(appId, humans, now);
@@ -339,7 +433,7 @@ export class RoyaleMatchService {
       s.conn.close(4503, 'restarting');
       told++;
     }
-    this.sessions.clear(); this.queues.clear(); this.rooms.clear();
+    this.sessions.clear(); this.queues.clear(); this.rooms.clear(); this.prepaid.clear();
     this.stopTimer();
     return told;
   }

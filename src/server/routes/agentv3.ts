@@ -362,6 +362,7 @@ import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } 
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, seedSourceInventory, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
 import { writePlatformFiles, readWriteOutcomes, type WriteOutcome } from '../AgentV3/writeOutcomes';
+import { writeRepairKeepingOnlyWhatHelps } from '../AgentV3/buildPhases/typecheckGateRepair';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -21466,12 +21467,12 @@ async function noteBuildOutcome(
                 autoResolved: true,
               });
             }
-            // The verdict below re-runs the compiler on the workspace, so it reads what landed, whatever this said.
-            await runInPass('typecheck-gate-repair', () => writePlatform(fixes, 'tscgate-w'));
+            // BR2532: it can only HELP — a file it breaks is put back, then re-checked (typecheckGateRepair.ts).
+            check = await writeRepairKeepingOnlyWhatHelps(fixes, check, { read: (p) => actuator.readFile(workspaceId, p), write: async (files, tag) => readWriteOutcomes(files, await runInPass('typecheck-gate-repair', () => writePlatform(files, tag))).landed.map((f) => f.path), check: runTsc, record: (d) => buildDiag.record(d) }, 'tscgate-w');
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
+            check = await runTsc();
           }
-          check = await runTsc();
           if (compilerRepairProven(check)) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Type errors fixed — the finished build now compiles cleanly.', ts: Date.now() });
           } else {
@@ -24885,7 +24886,7 @@ async function noteBuildOutcome(
             awaitsShell: !!awaitsShellNow(), platformDone: !!platformDoneRef.cur, timeLeft: roomFor(PLAYTEST_BUDGET_MS + 30_000), // S4: the 90 s round + its margin
           },
           files: playtestFiles,
-          contract: gameContract ?? null,
+          contract: gameContract ?? null, request: gameTurnRequest(prompt, milestoneRequest),
           play: () => withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(lastPreviewUrl!, { storageState: signedInState(), startLabels, rules: (gameContract?.rules ?? []).map((r) => r.id) })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest'),
           readFile: (p) => actuator.readFile(workspaceId, p),
           listFiles: () => actuator.listFiles(workspaceId),

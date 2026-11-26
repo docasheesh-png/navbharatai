@@ -14,7 +14,7 @@ import {
   domGameKind, domGameNotPlayedVerdict, isCanvasGameProject, gameDefectsMessage, gameScopeVerdict, missingKitLayerPaths, parsePlaytest,
   playtestDefects, playtestNotRunVerdict, playtestOutcome, playtestSkipReason, playtestVerdict, replayFromCode, withKitLayersFromDisk,
 } from '../gamePlaytest';
-import { scopeMatch, type GameScopeContract } from '../gameIntent';
+import { asksForEnemies, scopeMatch, type GameScopeContract } from '../gameIntent';
 import { gameGotWorse, gameMeasureFromIssues, gameUndoMessage, versionBeforeTurn } from '../gameRegression';
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage } from '../gameGeometryProbe';
 import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage } from '../gamePlaceholderProbe';
@@ -60,6 +60,8 @@ export interface GamePlaytestPorts {
   /** The project as it stands after this turn's writes. */
   files: Record<string, string>;
   contract: GameScopeContract | null;
+  /** This turn's request — an edit turn has no contract, but may still ask for enemies (BR2532). */
+  request?: string;
   /** Runs the playtest script in the sandbox (the route wraps the timeout); its stdout is parsed. */
   play: () => Promise<{ stdout: string }>;
   readFile: (path: string) => Promise<string | null | undefined>;
@@ -132,7 +134,9 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         // Bounded: a slow listing must never hold the build — after 5 s the file check says nothing.
         const present = p.listFiles ? await listWithin(p.listFiles, 5000) : [];
         const fromFiles = missingModelFindings(playedFiles, present);
-        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff);
+        // Enemies are looked for only when the request asked for them (report #2519: asked for, built, never on screen) —
+        // the contract, or this turn's own words when an edit turn has no contract (BR2532).
+        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff, { enemies: !!p.contract?.requiredFeatures.includes('enemies') || asksForEnemies(p.request) });
         const placeholderMsg = placeholderFindingsMessage(combinePlaceholderFindings(fromFiles, fromPage));
         if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }

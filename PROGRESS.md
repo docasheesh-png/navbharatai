@@ -6169,6 +6169,23 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
 
+## 2026-11-25 — Autopsy failedbr #2523 + #2525 (FPS shooter, server lost, continue build)
+
+**Billing check (code read, not assumed):** both build debits (`debitWalletForBuild`, agentv3.ts settle and watchdog
+finalizer) run only at the END of a build, and a build with `!result.ok` bills 0. #2523's server died without running
+JS, so it never reached a debit: it was not charged. #2525 is charged only if it settles ok, for its own spend (estimate
+₹0.10).
+
+**Fixed in PR #4554:** Q-3460 — the seeded game kit failed its own first typecheck (6 errors
+across playerBody, externalAssets ×2, RacingRoadGame, openWorld, worldLayer, plus the LOD block). New census
+`tests/theKitTypechecksInTheAppItShipsTo.test.ts` compiles the whole kit under the scaffold tsconfig and strict; each
+fix reverted-and-failed; a scratch app with three@0.180 + @types/three + TS 5.9.3 compiles it with 0 errors.
+
+**Recorded in BUILD_REPORT_QUEUE.md:** Q-3461 (vitest declared, never installed — decision), Q-3462 (typecheck note says
+test errors fail the release), the four lost servers are main's Q-3354 (recorded first by another session, same evidence), Q-3463 (no live dead-build sweep), Q-3464 (Surplus 404 on six models → provider
+breaker; evidence for Q-3316), Q-3465 (fallbackMs 0), Q-3466 (COMPLEX vs cheapest band), Q-3467 (fallback message names
+the wrong ladder), Q-3468 (HERO_OBJECTS "table"), Q-3469 (Surplus on COMPLEX game builds — decision), Q-3470 (no
+continue hand-off), Q-3471 (seed assets serial after recipes).
 ## 2026-11-25 — "FREE AI CHALU KAREIN": an app's AI, free, in three steps under the ❗ button
 
 Admin, verbatim: *"navbharatai me jab bhi koi user ai banwaye, koi bhi ai. to header me ❗ button me 2
@@ -6245,6 +6262,13 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
   - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.
 - **2026-11-26 follow-up (same PR #4544):** CI caught `tests/webSocketSingleSource.test.ts` — the kit opened a socket without a resolver. Not a lint nit: the store player is a srcdoc frame whose base is the PARENT page, which in the Android/iOS app is the local shell, so the online socket would have dialled the phone (the Sonic-on-phones class, 2026-08-13). Fix: the open route writes `window.__NBAI_API_ORIGIN` per response (`src/server/lib/storeApiOrigin.ts`, strict scheme://host[:port] only), and the kit's `resolveWebSocketUrl` prefers it. Locks: `tests/aStoreAppKnowsWhereTheApiIs.test.ts` and the native case in `tests/theOnlineRoyaleKitTalksToTheRealServer.test.ts` (reverted ⇒ fails). Sibling NavData (relative fetch from the same frame) recorded as Q-3393.
 
+## 2026-11-26 — Q-2698: the open world's frame rate in the sandbox, measured to its causes (claude/light-city-tier)
+- **Measured, not assumed.** Playwright + SwiftShader, 1280×720, the open-world starter built from the merged kit. A Chrome trace showed the game's own JS at ~2 ms a frame and the GPU process ~23% busy; the frame was waiting on 36,000 synthetic input messages a second. Cause: the playtest clicks the canvas, the shell asks for pointer lock, and pointer lock in an automated headless browser floods input. Lock stubbed, same build: 4 → 15 fps.
+- **Fix 1 (root):** the shell skips pointer lock when `navigator.webdriver` is set. A person's own browser never sets it, so desktop mouse capture is unchanged.
+- **Fix 2:** a light geometry tier (`geometryTier()` in three/surfaces.ts). It is chosen automatically for a software renderer or a ≤4-core/≤4 GB touch phone; Settings (Auto quality off + Graphics low) force it, and any other Graphics choice with Auto off forces full. It draws one textured facade panel per wall instead of a box per window, road marks as quads, each moving vehicle as one mesh, and at most 6 vehicles and 12 people. The starter place drops from 360 meshes / 84.8k triangles to 163 / 34.0k (on screen: 222–233 draw calls → 146–147). Colliders are identical vertex for vertex (the RNG draws are kept). The full tier is unchanged. `generateGame3D(['city'])` now ships surfaces.ts, which the city imports.
+- **Result:** before 0.2–4.4 fps, after 9.3–11.6 fps. **The ≥ 20 fps target was NOT reached.** The geometry tier alone did not move the fps. The ceiling is software compositing reading the canvas back every frame (Q-3381, blocked: it needs a GPU or a compositor change in the sandbox). The checker-side lock stub for games that do not use the kit shell is Q-3380 (gamePlaytest.ts is being edited by #4541/#4542).
+- **Tests:** `tests/aCityIsLightWithoutAGpu.test.ts`. Mesh and triangle budgets per tier on the real kit, identical colliders, traffic and people working in the light tier, tier selection, the webdriver guard, module-subset imports. Each was proven by reversion.
+- **Not done:** parked (drivable) cars stay whole in both tiers (68 meshes for 4 cars), and no impostors for far cities.
 ## 2026-11-26 — No pointer lock in the platform's browsers (Q-3380, follow-up to #4552)
 - gamePlaytest.ts (desktop page) and clickExplorer.ts (every fresh page) stub Element.prototype.requestPointerLock before app code runs, so a game the builder wrote itself (or an older kit copy) can no longer flood the headless page with synthetic input after the playtest clicks its canvas (#4552 measured 4 → 15 fps with the lock stubbed).
 - Test: tests/aPlaytestBrowserNeverLocksThePointer.test.ts (removing the playtest install fails it).
@@ -6286,5 +6310,52 @@ The admin approved option A. What changed:
 - **Kill switch:** `AGENTV3_GAME_PROOF_KEEP=off`.
 - **Proof:** `tests/gameProofPicturesAreKeptPrivately.test.ts` (20 tests). Seven separate reversions each fail it: no admin middleware, no hash check, no size cap, no count cap, no path guard, no `stored` key, a shifted expiry.
 - **Open:** Q-3410 (account erasure does not reach these pictures before the 30 days are up).
+## 2026-11-26 — Asked-for enemies are put where the hero is, and the playtest proves they are on screen (Q-3401)
+
+The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attack kare, to builder pura kam kar deta hai … par real game me enemies show hi nahi hote".
+
+- **Evidence:** BR2519 ("Knight Boxer enemy show nahi ho rahe hai"). The builder said the enemies were visible and attacking.
+  - Its enemies were hand-made: a custom GLTFLoader dressed bots of a `criminal-mobs` feature, around a fixed centre of a 1000-house city.
+  - It wrote that it "could not test by playing". The playtest ran out of time while starting the game (Q-3332).
+- **Earlier work, merged 2026-11-25 (#4532/#4533):** the kit already had `Entities`, which verifies each spawn: in the scene, at a finite position, with a visible body. The admin's game was built the day before.
+- **Two gaps were still open:**
+  1. Nothing PROVED that asked-for enemies are on screen. The played evidence covered score, level, sound, restart and a vehicle.
+  2. There was no primitive to put characters where the hero is.
+- **Fix:**
+  - `Entities.spawnAround(n, spec, {near, far})` rings characters round the PLAYER, on the ground, at golden-angle spacing.
+  - `window.__nbEntities` is a read-only list of live characters plus the player's position. It is added by the constructor and removed by `dispose`.
+  - The playtest's existing placeholder page hook measures, with the game's own camera: hostiles alive, the nearest one's distance, and how many are in the frame.
+  - `MISSING_ENEMIES` is said only when the contract asked for enemies. It fires when none is alive (with the failed-spawn count), when all are more than 60 m away and none is in view, or when the enemies are made outside Entities. It goes to the builder through the existing placeholder repair note.
+  - The system prompt and the systems instructions say "enemies go where the hero is".
+- **Proof:** `tests/enemiesAreWhereTheHeroIs.test.ts`, 8 tests, run on the real emitted kit and the real page hook. Each of three reversions made it fail: rings round the origin, no hook, no camera check. The related suites pass: 3906 tests in 164 files.
+- **What it does NOT fix:**
+  - A game the playtest never plays gets no page read (Q-3332, owned elsewhere).
+  - The admin's existing city game keeps its hand-made enemies until a turn moves them onto Entities. With this change, the next turn's playtest says so, and the builder is told the fix.
+
+## 2026-11-26 — Q-3402 (BR2532): a repair pass never breaks a file that was clean
+
+- **Report:** admin, "isme game ban gaya par enemy aa hi nahi rahe". The game built, but no enemy appeared.
+- **What happened:**
+  - The builder wrote `src/game/features/monsters.ts`. The write-time typecheck said that file was clean, with 3 errors left in old kit files.
+  - After the summary, the typecheck-gate repair pass was shown every written file and asked to fix those 3 errors. It rewrote `monsters.ts` with APIs that do not exist (`world.scene`, `controller.position`).
+  - The re-check failed, and the pass's writes were kept. No monster reached the scene, and the production build named the monsters.ts errors.
+  - The builder's summary blamed old kit files.
+- **Root cause:** a model repair's writes were kept even when they made the project worse. The typecheck-gate pass reverted nothing. The agentic endgame reverted only when the TOTAL error count rose, so 3 errors fixed in one file plus 3 new ones in another passed.
+- **Also:** the turn was an edit, and an edit turn records no game contract. So the playtest never looked for the asked-for enemies.
+- **Fix:**
+  - `repairBreakage.ts` holds one pure rule. A touched file that gained its first error goes back. A raised total puts back every touched file.
+  - `buildPhases/typecheckGateRepair.ts` (moved out of the route) snapshots, writes, re-checks, puts back what the rule names, records `REPAIR_REVERTED`, and re-checks.
+  - `EndgameRepair` applies the same per-file rule beside its count rule.
+  - `asksForEnemies` (gameIntent.ts) reads enemies from the turn's own words (English, Hinglish, Hindi; a declined sentence and "chatbot" do not count). The playtest uses it when there is no contract.
+- **Proof:** `tests/aRepairNeverBreaksACleanFile.test.ts`, 9 tests, replaying BR2532 on the real helper and the real endgame. Three reversions each made it fail: the rule, the endgame rule, the Hindi words. The related suites pass: 774 tests in 45 files.
+- **Watch:** the next game edit that asks for enemies. `REPAIR_REVERTED` shows if a repair broke a file; `MISSING_ENEMIES` shows if none is on screen.
+### 2026-11-26 — Q-3392: the online Royale daily match-start cap is shared across instances (PR #4559)
+
+- **Problem:** the per-app daily cap (300) lived in each Cloud Run instance's memory, so N instances allowed N × 300 starts a day.
+- **Root cause / class:** a quota that bounds NavBharatAI's own bill was counted in process memory. The other online caps are per instance on purpose (rooms live in one instance); this one is a daily total, so it needs one count.
+- **Fix:** `matchService.ts` claims each start on a shared counter before the room opens (one claim per app at a time; the room is built from whoever is queued when the answer arrives). The counter is the durable limiter's own Firestore window — `DurableRateLimit.firestoreRateCounter` was extracted so `consumeDurableRate` and the Royale cap share one implementation (NavData's daily quota is inside a row-total transaction and is not reusable). One `rate_limits_v1` doc per app per UTC day; increment-then-read, so a boundary race refuses early and never lets a start through late; `expireAt` for the TTL policy (Q-809). No sharding: ≤300 accepted writes/app/day plus one refused write per instance per day ("full" is remembered).
+- **Fallback (stated choice):** `consumeWithStore` now marks its fail-open result `unavailable`; an error or a 4 s timeout makes the start use the in-memory cap, logged at most every 5 min, never blocking play.
+- **Tests:** `tests/theOnlineDailyCapIsSharedByEveryInstance.test.ts`. Reverted the claim line ⇒ 6/9 fail; reverted the `unavailable` flag ⇒ 3/9 fail; reverted the production wiring ⇒ 1/9 fails.
+- **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.

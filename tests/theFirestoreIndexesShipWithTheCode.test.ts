@@ -30,7 +30,10 @@ describe('every merge deploys firestore.indexes.json', () => {
   });
   it('firebase.json points the deploy at the file that holds the indexes', () => {
     const cfg = JSON.parse(readFileSync('firebase.json', 'utf8'));
-    expect(cfg.firestore.indexes).toBe('firestore.indexes.json');
+    // An array since Q-3700: one entry per database (the live server reads `(default)`), each with the file.
+    const entries = Array.isArray(cfg.firestore) ? cfg.firestore : [cfg.firestore];
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) expect(e.indexes).toBe('firestore.indexes.json');
   });
 });
 

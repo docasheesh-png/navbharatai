@@ -15,6 +15,7 @@
 // Kept OUT of the AgentV3 module on purpose: the module imports nothing from the
 // live AI router (strangler-fig isolation). The route is the composition root,
 // so the coupling to shared infra lives here, exactly like the actuator wiring.
+import { addFallbackMs } from '../AgentV3/fallbackTime';
 import type { TurnRunner, TurnResult, RunTurnParams } from '../AgentV3';
 import { AIRouterManager } from '../AI/AIRouterManager';
 
@@ -75,9 +76,12 @@ export function makeResilientTurnRunner(
 ): TurnRunner {
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
+      const startedAt = Date.now();
       try {
         return await primary.runTurn(params);
       } catch (err) {
+        // Q-3465 sibling: the primary's failed seconds are this turn's fallback time (fallbackTime.ts).
+        const lostMs = Date.now() - startedAt;
         const reason = err instanceof Error ? err.message : String(err);
         // Surface the EXACT Claude failure in the logs (greppable tag) so the
         // root cause is visible without reading the chat reply. The status code
@@ -87,7 +91,7 @@ export function makeResilientTurnRunner(
         try {
           const { response } = await getRouter().route(flattenTranscript(params.messages), params.system);
           const note = `_(Claude unavailable — ${reason.slice(0, 140)}. Replied via ${response.provider}.)_\n\n`;
-          return textTurn(note + response.content);
+          return addFallbackMs(textTurn(note + response.content), lostMs);
         } catch (fallbackErr) {
           // Even the fallback router failed — surface both failures honestly.
           const fb = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);

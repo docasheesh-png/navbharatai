@@ -59,7 +59,7 @@ import { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE_VARIANTS } fr
 import { GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH } from '../lib/GameOpenWorldGenerator';
 import { isUneditedGeneratedGameAssetFile } from './gameAssets/generatedAssetFiles';
 import { CAR_FILE_PATH, raceCarFile } from './carSwap';
-import { STARTER_CAR_PAINTS } from '../lib/projectVariety';
+import { GAME_SEED_FILE_PATH, isUneditedGameSeedFile, STARTER_CAR_PAINTS } from '../lib/projectVariety';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -166,6 +166,9 @@ export function isPlatformSeededFile(path: string | null | undefined, content: s
   // byte-exact match counts (gameAssets/generatedAssetFiles.ts). Without it, add_library_models' loader was given
   // a starter test as if the builder had written it.
   if (isUneditedGeneratedGameAssetFile(key, content)) return true;
+  // 🎲 This game's own seed file (src/game/gameSeed.ts, Q-3373): its numbers are the project's own, so no fixed index holds it;
+  // only the platform's own header and its own `key: number,` lines, byte for byte, count.
+  if (key === GAME_SEED_FILE_PATH && isUneditedGameSeedFile(content)) return true;
   // 🧬 AN OLDER STARTER IS STILL OUR STARTER (autopsy db07e0af) — the same class for the framework starter and the
   // starter-chip templates: before the design kit last changed, every workspace was seeded with the kit of the day,
   // and that untouched `src/index.css` was graded as the user's code. Line endings and the ends of the file are

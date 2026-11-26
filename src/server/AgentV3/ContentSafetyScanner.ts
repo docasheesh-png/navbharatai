@@ -76,15 +76,25 @@ const CONTENT_RULES: ContentRule[] = [
  * disagree about scope — and the one that read less would be the one that missed something.
  */
 export function scannableText(files: Map<string, Buffer> | null | undefined): string {
-  if (!files || files.size === 0) return '';
-  const parts: string[] = [];
+  return scannableFiles(files).map(([, text]) => text).join('\n');
+}
+
+/**
+ * The same scannable text, kept PER FILE (2026-11-26, Q-3560). The illegal-category rules pair their
+ * two halves inside one file only — a word in one kit file and another word in a different file are
+ * not a phrase anyone reads — and the admin's review screen names the file a finding came from. One
+ * definition of "which files, and how much of each" serves both shapes, so they cannot disagree.
+ */
+export function scannableFiles(files: Map<string, Buffer> | null | undefined): Array<[string, string]> {
+  if (!files || files.size === 0) return [];
+  const parts: Array<[string, string]> = [];
   for (const [path, buf] of files) {
     if (!SCANNED_EXT.test(path)) continue;
     try {
-      parts.push(buf.toString('utf-8').slice(0, PER_FILE_MAX));
+      parts.push([path, buf.toString('utf-8').slice(0, PER_FILE_MAX)]);
     } catch { /* skip a non-utf8 file */ }
   }
-  return parts.join('\n');
+  return parts;
 }
 
 /**

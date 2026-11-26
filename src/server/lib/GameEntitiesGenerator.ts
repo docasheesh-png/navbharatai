@@ -180,6 +180,7 @@ function publishHook(): void {
 export class Entities {
   private readonly list: Inner[] = [];
   private readonly off: (() => void) | null;
+  private readonly offShot: () => void;
   private readonly options: EntityOptions;
   /** How many spawns were verified, and how many failed and were rolled back — the honest count. */
   readonly report = { spawned: 0, failed: 0, removed: 0 };
@@ -187,6 +188,15 @@ export class Entities {
   constructor(private readonly host: EntityHost, options: EntityOptions = {}) {
     this.options = options;
     this.off = host.onStep ? host.onStep((dt) => this.update(dt)) : null;
+    // The gun the player holds (the shell's hand gun) hits a character it is aimed at: SHOT_HIT names the object hit.
+    this.offShot = events.on('SHOT_HIT', (p: { object?: THREE.Object3D | null; point?: { x: number; y: number; z: number }; damage?: number; byPlayer?: boolean } | undefined) => {
+      const hit = p?.object;
+      if (!hit || !(Number(p?.damage) > 0)) return;
+      for (const e of this.list) {
+        if (!e.alive) continue;
+        for (let o: THREE.Object3D | null = hit; o; o = o.parent) if (o === e.object) { this.hurt(e, Number(p!.damage), p!.point ?? e.object.position, p!.byPlayer !== false); return; }
+      }
+    });
     LIVE.add(this);
     publishHook();
   }
@@ -288,6 +298,9 @@ export class Entities {
           events.emit('ENTITY_REMOVED', { id: this.id, kind: this.kind });
         },
       };
+      // ANY ACTION ON ANY CHARACTER (2026-11-26): play/actions.ts finds this character — by its kind ('police',
+      // 'villager') or 'all' — through this getter. A function, so cloning the object never copies the body or health.
+      controller.object.userData.actor = () => ({ kind: e.kind, humanoid: e.humanoid, model: e.model, health: e.health });
       list.push(e);
       this.report.spawned++;
       events.emit('ENTITY_SPAWNED', { id: e.id, kind, position: { x: p.x, y: p.y, z: p.z } });
@@ -329,6 +342,13 @@ export class Entities {
       e.health.tick(dt);
       e.cooldown.tick(dt);
       if (e.health.isDead) { this.whileDead(e, dt); continue; }
+      // An action is playing on it (performAction — sit, dance, salute, swim …): it stands still and lets the action move
+      // it, instead of walking off mid-salute. The action clears the flag when it ends (or stopAction does).
+      if (e.object.userData.acting) {
+        e.controller.update(dt, { moveX: 0, moveZ: 0, sprint: false, jumpPressed: false, jumpHeld: false });
+        e.humanoid?.update(dt, 0, true);
+        continue;
+      }
       const pos = e.object.position;
       let vx = 0;
       let vz = 0;
@@ -438,6 +458,7 @@ export class Entities {
   dispose(): void {
     for (const e of [...this.list]) e.remove();
     this.off?.();
+    this.offShot();
     LIVE.delete(this);
     publishHook();
   }

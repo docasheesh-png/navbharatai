@@ -47,7 +47,7 @@ export const CANONICAL_GAMES: readonly CanonicalGame[] = [
   { id: 'flight-sim', prompt: '3d flight simulator game banao, plane udao aur land karo', genre: 'simulator', coverage: 'kit-only' },
   { id: 'boat-race', prompt: 'boat racing game on a river', genre: 'racing', coverage: 'starter' },
   // Runners
-  { id: 'endless-runner', prompt: 'subway surfers jaisa endless runner game banao', genre: 'runner', coverage: 'kit-only', note: 'a runner with no 3D word is drawn flat, so the 3D LaneRunner starter is never laid down (Q-3483)' },
+  { id: 'endless-runner', prompt: 'subway surfers jaisa endless runner game banao', genre: 'runner', coverage: 'starter', note: 'a named runner title (Subway Surfers) is now drawn in 3D, so the LaneRunner starter is laid down (#4561); an unnamed runner still is not (Q-3483)' },
   { id: 'temple-runner', prompt: 'an endless runner through a jungle temple with coins and jumps', genre: 'runner', coverage: 'kit-only', note: 'same as endless-runner (Q-3483)' },
   { id: 'dino-runner', prompt: 'chrome dino jaisa runner game, cactus se bacho', genre: 'runner', coverage: 'kit-only' },
   // Open worlds, places
@@ -100,7 +100,7 @@ export const CANONICAL_GAMES: readonly CanonicalGame[] = [
 ];
 
 /** The most canonical games that may be "kit-only" (the builder improvises). It may only ever go DOWN. */
-export const MAX_KIT_ONLY = 28;
+export const MAX_KIT_ONLY = 27; // endless-runner moved up with #4561
 
 export interface CoverageRead {
   id: string;

@@ -1,3 +1,4 @@
+import { addFallbackMs } from '../../AgentV3/fallbackTime';
 import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { strongOffersOnly } from './strongOffers';
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
@@ -329,6 +330,7 @@ export async function createSurplusBuildSession(options: {
           // refusal, the build's own budget/deadline, or exhausting the retry budget end it.
           const policy = stayAlive;
           let lastError: unknown;
+          const turnStartedAt = Date.now();
           for (let attempt = 0; attempt <= policy.retries; attempt++) {
             throwIfStopped(params.signal);
             const now0 = Date.now();
@@ -337,7 +339,8 @@ export async function createSurplusBuildSession(options: {
             const deadlineAt = Math.min(outer, now0 + policy.turnMs);
             const noticesBefore = attemptNotices;
             try {
-              return await native.runTurn({ ...params, deadlineAt });
+              // Q-3465: failed attempts and the waits between them come before this answer — fallback time of the turn.
+              return addFallbackMs(await native.runTurn({ ...params, deadlineAt }), now0 - turnStartedAt);
             } catch (error) {
               lastError = error;
               if (!isSurplusTurnRetryable(error) || params.signal?.aborted || terminalPolicyFailure) throw error;

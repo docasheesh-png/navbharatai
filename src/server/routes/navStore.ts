@@ -56,7 +56,7 @@ import {
   saveWebAppBakedPage, readWebAppBake,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
   recordRemixOrigin, getRemixOrigin, keyShapedEnvVars, listWebAppReports,
-  sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots,
+  sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots, webAppServableTo,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
 import { generateEnvExample } from '../AgentV3/EnvExampleGenerator';
@@ -332,6 +332,19 @@ async function ingestApkSubmission(
     } catch {
       return { httpStatus: 502, body: { error: 'Your app could not be saved. Nothing was published — please try again.' } };
     }
+}
+
+/**
+ * May the caller of `req` be served this web app? `webAppServableTo` is the rule; this only supplies
+ * who is asking — and asks ONLY for a held app, so an ordinary open costs no extra token check.
+ * A held app (admin 2026-11-26) answers its owner and a store admin, and is "not on the store" to
+ * everyone else, link included.
+ */
+async function webAppServable(req: Request, found: WebStoreApp | null | undefined): Promise<boolean> {
+  if (!found || found.status === 'removed') return false;
+  if (!found.heldForReview) return true;
+  const me = await verifyFirebaseIdentity(req).catch(() => null);
+  return webAppServableTo(found, { uid: me?.uid ?? null, isStoreAdmin: storeAdminRequest(req, identityGrantEmail(me)) });
 }
 
 export function registerNavStoreRoutes(app: Express): void {
@@ -850,7 +863,7 @@ export function registerNavStoreRoutes(app: Express): void {
         return res.status(422).json({ error: safety.refusalMessage });
       }
       if (safety.flagged) {
-        audit('STORE_PUBLISH_FLAGGED', { uid: me.uid, workspaceId, class: safety.contentClass, findings: safety.summary });
+        audit('STORE_PUBLISH_FLAGGED', { uid: me.uid, workspaceId, class: safety.contentClass, findings: safety.summary, held: safety.holdForReview });
       }
 
       // RE-PUBLISH = same listing, new version — one app id per (owner, workspace), so updating
@@ -870,8 +883,14 @@ export function registerNavStoreRoutes(app: Express): void {
          * listing. A flagged app goes back to `unlisted` and back into the queue however it got
          * listed — the app still publishes and its own link still works, but being FEATURED has to
          * be earned again.
+         *
+         * A HELD app (admin 2026-11-26 — the sexual/illegal text check fired) goes further: its link
+         * does NOT work for anyone but the owner and a store admin until an admin lists it. There is no
+         * auto-approval for a web app at all; `forceUnlisted` is always true when it is held, so not
+         * even an earlier listing survives.
          */
         status: existing?.status === 'listed' && !safety.forceUnlisted ? 'listed' : 'unlisted',
+        heldForReview: safety.holdForReview,
         uid: me.uid,
         name, description, iconDataUrl,
         visibility,
@@ -909,10 +928,10 @@ export function registerNavStoreRoutes(app: Express): void {
          * What the app IS. `adult` gives it the 18+ badge and hides it from viewers who have not
          * turned the setting on; `general` changes nothing.
          *
-         * `illegal` cannot reach here — that publish was refused above, before anything was saved —
-         * and this narrows rather than casts, so a future reorder that broke that ordering would
-         * store `general` (harmless, reviewable) instead of silently persisting `illegal` on a
-         * record whose whole point is that it never exists.
+         * `illegal` is no longer refused (admin 2026-11-26) — such an app is HELD (`heldForReview`
+         * above), never served to the public. It is narrowed to `general` rather than cast, so the
+         * stored class only ever means "how to show it once a person has listed it"; the finding
+         * itself lives in `safetyFindings`, which is what the admin's review screen reads.
          */
         contentClass: safety.contentClass === 'adult' ? 'adult' as const : 'general' as const,
         publishedAt: Date.now(),
@@ -968,6 +987,8 @@ export function registerNavStoreRoutes(app: Express): void {
       webPlayerCache.delete(id); // the old version's compiled page must not survive the update
       res.json({
         ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}`,
+        // Held for a person: the creator is told plainly, with no rule name and no matched text.
+        ...(safety.holdForReview ? { heldForReview: true as const, heldNotice: safety.heldMessage } : {}),
         ...(safety.contentClass === 'adult' ? { contentClass: 'adult' as const } : {}),
         // Not a refusal — they are allowed to build it, they simply have not said they are an adult
         // yet. Saying which switch would have made this ordinary beats leaving them to guess why
@@ -993,7 +1014,7 @@ export function registerNavStoreRoutes(app: Express): void {
   app.get('/api/nav-store/web/app/:id', async (req: Request, res: Response) => {
     try {
       const found = await getWebApp(String(routeParam(req.params.id) || ''));
-      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (!found || !(await webAppServable(req, found))) return res.status(404).json({ error: 'This app is not on the store.' });
       // The detail view is the ONE place the screenshot bytes ship — never on the browse list, so a
       // gallery of listings stays light. Best-effort: a screenshot read failure still returns the app.
       const screenshots = (found.screenshotCount ?? 0) > 0 ? await getWebAppScreenshots(found.id).catch(() => []) : [];
@@ -1025,7 +1046,7 @@ export function registerNavStoreRoutes(app: Express): void {
        */
       const bakedEarly = readWebAppBake(appId).catch(() => null);
       const found = await getWebApp(appId);
-      if (!found || found.status === 'removed') {
+      if (!found || !(await webAppServable(req, found))) {
         void bakedEarly;  // resolved and discarded — an app that is gone serves nothing
         return res.status(404).json({ error: 'This app is not on the store.' });
       }
@@ -1184,7 +1205,7 @@ export function registerNavStoreRoutes(app: Express): void {
     try {
       const mine = await listMyWebApps(me.uid);
       const creators = await resolveCreators([me.uid], realCreatorLookupDeps).catch(() => new Map());
-      res.json({ apps: mine.map((a) => ({ ...toPublicWebApp(a, creators.get(a.uid)), status: a.status, workspaceId: a.workspaceId })) });
+      res.json({ apps: mine.map((a) => ({ ...toPublicWebApp(a, creators.get(a.uid)), status: a.status, workspaceId: a.workspaceId, heldForReview: !!a.heldForReview })) });
     } catch (e) {
       logStoreError('web/mine', e);
       res.status(502).json({ error: 'Could not load your apps.' });
@@ -1268,7 +1289,7 @@ export function registerNavStoreRoutes(app: Express): void {
   app.post('/api/nav-store/web/app/:id/remix', async (req: Request, res: Response) => {
     try {
       const found = await getWebApp(String(routeParam(req.params.id) || ''));
-      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (!found || !(await webAppServable(req, found))) return res.status(404).json({ error: 'This app is not on the store.' });
       if (found.visibility === 'private') {
         const pw = typeof req.body?.password === 'string' ? req.body.password : '';
         // The password is a credential: guesses are counted per (app, address), across instances (privateAppPasswordBudget.ts).
@@ -1449,7 +1470,7 @@ export function registerNavStoreRoutes(app: Express): void {
     if (reason.length < 5) return res.status(400).json({ error: 'Say briefly what is wrong with this app.' });
     try {
       const found = await getWebApp(String(routeParam(req.params.id) || ''));
-      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (!found || !(await webAppServable(req, found))) return res.status(404).json({ error: 'This app is not on the store.' });
       await reportWebApp(found.id, me?.uid || 'anon', reason);
       res.json({ ok: true });
     } catch (e) {
@@ -1589,9 +1610,10 @@ export function registerNavStoreRoutes(app: Express): void {
         });
         await removeWebApp(id, removalReason, me?.email || 'admin');
       } else {
-        await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
+        // Listing is the admin's approval, so it is also what releases a HELD app (admin 2026-11-26).
+        await updateWebApp(id, { status: 'listed', heldForReview: false, reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
       }
-      audit('STORE_WEB_REVIEW_DECISION', { reviewer: me?.email || '', id, ownerUid: found.uid, before: found.status, decision, note: decision === 'removed' ? removalReason : (why.reason || ''), reasonGiven: decision !== 'removed' || !why.legacy, result: 'ok' });
+      audit('STORE_WEB_REVIEW_DECISION', { reviewer: me?.email || '', id, ownerUid: found.uid, before: found.status, wasHeld: !!found.heldForReview, decision, note: decision === 'removed' ? removalReason : (why.reason || ''), reasonGiven: decision !== 'removed' || !why.legacy, result: 'ok' });
       res.json({ ok: true, id, status: decision });
       // Congratulate the creator AFTER the response — same discipline as web/publish's bake above,
       // so a slow/unconfigured email provider can never hold up the admin's review screen.

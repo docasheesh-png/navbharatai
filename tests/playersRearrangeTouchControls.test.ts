@@ -366,7 +366,8 @@ describe('the game wires it in', () => {
   });
 
   it('the game hands its gameId over (layouts are per game) and exposes the controls to the HUD', () => {
-    expect(GAME).toContain('new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions })');
+    // A held gun relabels Attack as Fire through `buttons` (2026-11-26); the gameId still travels with every layout.
+    expect(GAME).toContain('new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions, ...(buttons ? { buttons } : {}) })');
     expect(GAME).toContain('get touchControls(): TouchControls | null { return this.touch; }');
   });
 

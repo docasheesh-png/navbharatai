@@ -461,7 +461,7 @@ async function mountGameAsset(
       document.body.appendChild(credit);
     }
     let disposed = false;
-    return {
+    const handle: GameAssetHandle = {
       root, source: 'model',
       update(dt) { if (!disposed && Number.isFinite(dt) && dt > 0) mixer?.update(Math.min(dt, 0.1)); },
       play(role, fadeSeconds = 0.15) {
@@ -476,6 +476,11 @@ async function mountGameAsset(
       },
       dispose() { if (disposed) return; disposed = true; credit?.remove(); mixer?.stopAllAction(); mixer?.uncacheRoot(visual); root.removeFromParent(); disposeRoot(root); },
     };
+    // ANY MOVE ON ANY CHARACTER (2026-11-26): when this model is an NPC's body, play/actions.ts plays the model's OWN clip
+    // for a move it has (jump, punch, kick, swim …) through this — the game's handle.update(dt) keeps advancing it. A
+    // function, so cloning the model never copies the mixer.
+    root.userData.playRole = (role: string) => handle.play?.(role) ?? false;
+    return handle;
   } catch {
     if (loaded) disposeRoot(loaded);
     return fallback();

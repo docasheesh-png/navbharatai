@@ -74,10 +74,9 @@ export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = 
   };
   for (const o of others()) before.set(o, o.position.clone());
   if (!placeAtSpawn && target() !== ctx.player.object) before.set(target(), target().position.clone());
-  // The edge of the map (OpenWorldOptions.boundary) belongs to the open world on foot — with nothing to follow this layer IS
-  // the open world, edge included. A race, a flight or a match that follows a car or a camera decides its own limits, so
-  // there it is off unless the game asks for it (worldOptions.boundary).
-  const world = createOpenWorld(view, follow === undefined ? worldOptions : { boundary: false, ...worldOptions });
+  // A world that follows something other than the player (a car the game drives, a flying camera) has no edge unless the game
+  // asks for one (boundary): holding that thing in place would fight the game's own movement of it.
+  const world = createOpenWorld(view, follow ? { boundary: false, ...worldOptions } : worldOptions);
   making = false;
   const origin = world.map.chunks!.origin;
   for (const [o, p] of before) { o.position.x = p.x - origin.x; o.position.z = p.z - origin.z; }

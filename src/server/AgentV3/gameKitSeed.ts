@@ -53,15 +53,16 @@ import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { gameCombatFrom, gameRuleData, gameRulesFrom, wantsCombatKit } from './gameRules';
-import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, type GameScopeContract } from './gameIntent';
+import { asksForBattleRoyale, bigWorldWantsThreeD, buildGameContract, gameContractBlock, gameScopeContractEnabled, MOVING_2D_GENRES, namedGameReference, namesTitleDrawnIn3D, type GameScopeContract } from './gameIntent';
 import { analyzeGameRequirements, gameDesignBlock } from './gameDesignDocument';
 import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
+import { wantsSwimming } from '../lib/GameOpenWorldGenerator';
 import { genreKitsFor } from '../lib/GameGenreKitsGenerator';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
-import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
+import { namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_BUDGET, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
@@ -280,10 +281,11 @@ export function gameKitWants3D(prompt: string | null | undefined): boolean {
   if (namedNonSmartphone(text)) return false;
   // A royale is drawn in 3D — the ONE royale reader (failedbr #2475: the private list here had no "bgmi").
   if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text) || asksForBattleRoyale(text)) return true;
-  // A named title read by the shared tolerant matcher (failedbr #2497): GTA, Minecraft, and a first-person shooter title
-  // (Valorant, Call of Duty, Counter-Strike — the contract already says 3D first-person for those, and the kit must agree).
-  // A runner title stays with its genre's 2D kit, as the 2D kit was designed ("temple run jaisa").
-  if (namesGtaTitle(text) || namesGameTitleOfKind(text, 'sandbox') || findGameTitles(text).some((m) => m.kind === 'fps' && !m.plainWord)) return true;
+  // A named title read by the shared tolerant matcher (failedbr #2497): GTA, Minecraft, and every title the CONTRACT draws in
+  // 3D — a first-person shooter (Valorant, Call of Duty) and an endless runner (Temple Run, Subway Surfers: both real games are
+  // 3D third-person lane runners, and the 3D shell carries the lane-runner starter — admin decision 2026-11-26, Q-3314). One
+  // table for both readers (gameIntent namesTitleDrawnIn3D), so the kit and the contract cannot disagree again.
+  if (namesGtaTitle(text) || namesGameTitleOfKind(text, 'sandbox') || namesTitleDrawnIn3D(text)) return true;
   if (bigWorldIsDrawnIn3D(text)) return true;
   try {
     return heroObjectContract(text).categories.some((c) => c === 'vehicle-land' || c === 'vehicle-water');
@@ -333,7 +335,7 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_open_world') {
     const setting = worldSettingFrom(request);
     const regions = worldRegionsFor(setting);
-    return { mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request), ...(regions.length ? { regions } : {}), ...(plan.includes('generate_game_systems') ? { danger: true } : {}) };
+    return { mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request), ...(regions.length ? { regions } : {}), ...(plan.includes('generate_game_systems') ? { danger: true } : {}), ...(wantsSwimming(request) ? { swim: true } : {}) };
   }
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers

@@ -21,6 +21,10 @@
  *   • HIDDEN CONTROLS (page, phone) — an on-screen control that is laid out but sits mostly off the screen, is fully
  *     transparent, hidden, or too small for a thumb. A control hidden ON PURPOSE (display: none, e.g. Drift outside a car)
  *     has no layout and is never judged.
+ *   • MISSING ENEMIES (page, only when the request asked for enemies) — 2026-11-26, report #2519 ("Knight Boxer enemy show
+ *     nahi ho rahe hai"): the build said the enemies were there and the game showed none. Read from the kit's Entities
+ *     (window.__nbEntities) and the game's own camera: no hostile character alive; or every one far from the player and
+ *     none in view; or the game makes its enemies by hand, outside Entities, so nothing can show they are on screen.
  *
  * WHAT HAPPENS WITH THEM: one GAME_PLACEHOLDERS line in the build report (admin). When the findings are ONLY a missing
  * model and/or an empty map, ONE bounded repair runs inside the same build, platform-paid, kept only if the replay is
@@ -41,7 +45,8 @@ export type PlaceholderKind =
   | 'STATIC_CHARACTER'
   | 'PLAYER_UNDERWATER'
   | 'EMPTY_MAP'
-  | 'HIDDEN_CONTROLS';
+  | 'HIDDEN_CONTROLS'
+  | 'MISSING_ENEMIES';
 export interface PlaceholderFinding { kind: PlaceholderKind; evidence: string; fix: string; /** The file it is about, when it is one. */ path?: string }
 
 export function gamePlaceholderProbeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -119,7 +124,21 @@ export interface PlaceholderPageRead {
   brokenTextures?: string[] | null;
   failed?: Array<{ url?: string; why?: string }> | null;
   standing?: { feet?: number; land?: number; water?: number | null; seated?: boolean } | null;
+  /** The kit's characters (systems/entities.ts) as the page saw them; null when the game does not use Entities. */
+  characters?: CharactersRead | null;
 }
+export interface CharactersRead {
+  spawned?: number;
+  failed?: number;
+  /** Hostile characters alive now. */
+  hostiles?: number;
+  /** Distance from the player to the nearest living hostile, metres. */
+  nearestM?: number | null;
+  /** Living hostiles with a visible body inside the game camera's frame. */
+  inView?: number;
+}
+/** The farthest a hostile may stand, with none in view, before "the enemies are not where the hero is". */
+export const ENEMY_NEAR_M = 60;
 export interface ControlsRead { total?: number; off?: Array<{ name?: string; why?: string }> | null }
 
 /** How deep the water over the land must stand above the player's feet before the player's head is under it. */
@@ -134,7 +153,7 @@ export const EMPTY_SCENE_MESHES = 2;
  * phone. Each read may be null (an older script, a 2D game, a stage that did not finish), and then that detector says
  * nothing. At most 6 findings. PURE.
  */
-export function pagePlaceholderFindings(start: PlaceholderPageRead | null | undefined, end: PlaceholderPageRead | null | undefined, controls?: ControlsRead | null): PlaceholderFinding[] {
+export function pagePlaceholderFindings(start: PlaceholderPageRead | null | undefined, end: PlaceholderPageRead | null | undefined, controls?: ControlsRead | null, wanted: { enemies?: boolean } = {}): PlaceholderFinding[] {
   const out: PlaceholderFinding[] = [];
   const s = start && typeof start === 'object' ? start : null;
   const e = end && typeof end === 'object' ? end : null;
@@ -198,7 +217,34 @@ export function pagePlaceholderFindings(start: PlaceholderPageRead | null | unde
       fix: 'keep every on-screen control inside the screen (env(safe-area-inset-*) margins), fully opaque enough to see, and at least 40 px — or use the kit\'s touch controls',
     });
   }
+  const enemies = wanted.enemies ? missingEnemiesFinding(s, e) : null;
+  if (enemies) out.unshift(enemies); // the thing the user asked for comes first
   return out.slice(0, 6);
+}
+
+/**
+ * Asked-for enemies that the player cannot meet: none alive, all far away and none in view, or made outside the kit's
+ * Entities so that nothing can show they are there. Reads the round's end (after play), else its start. null when the page
+ * was never read (a stage that did not finish says nothing). PURE.
+ */
+export function missingEnemiesFinding(start: PlaceholderPageRead | null, end: PlaceholderPageRead | null): PlaceholderFinding | null {
+  const read = end ?? start;
+  if (!read) return null;
+  const c = read.characters ?? (start?.characters ?? null);
+  const use = 'spawn them with the kit: const crowd = new Entities(ctx, { playerHealth }); crowd.spawnAround(6, { kind: \'enemy\', body: <the loaded library model> }) — near the hero, on the ground, verified, chasing';
+  if (!c || typeof c !== 'object') {
+    return { kind: 'MISSING_ENEMIES', evidence: 'enemies were asked for, but the game does not create them with the kit\'s Entities, so nothing showed that a single one is on screen', fix: use };
+  }
+  const hostiles = num(c.hostiles, 0, 1e4) ?? 0, failed = num(c.failed, 0, 1e4) ?? 0, spawned = num(c.spawned, 0, 1e4) ?? 0;
+  const nearest = num(c.nearestM, 0, 1e7), inView = num(c.inView, 0, 1e4) ?? 0;
+  if (hostiles === 0) {
+    const why = failed > 0 ? `${failed} spawn${failed === 1 ? '' : 's'} failed and were rolled back` : spawned > 0 ? 'every one spawned has already gone' : 'none was spawned';
+    return { kind: 'MISSING_ENEMIES', evidence: `enemies were asked for, but no hostile character was alive in the game (${why})`, fix: use };
+  }
+  if (inView === 0 && nearest !== null && nearest > ENEMY_NEAR_M) {
+    return { kind: 'MISSING_ENEMIES', evidence: `${hostiles} enem${hostiles === 1 ? 'y is' : 'ies are'} alive, but the nearest stands ${Math.round(nearest)} m from the player and none was in view`, fix: 'spawn them where the hero is: crowd.spawnAround(n, { kind: \'enemy\' }) uses the player\'s position, never a fixed point of the map' };
+  }
+  return null;
 }
 
 /** The file findings and the page findings as one list: a file already named missing is said once. At most 6. PURE. */
@@ -306,7 +352,34 @@ export const PLACEHOLDER_PAGE_HOOK = String.raw`() => {
       for (const c of (o.children || [])) walk(c, underCam || isCam);
     };
     walk(sc, false);
-    return { meshes, skinned, brokenTextures: broken, failed: failed.slice(), standing };
+    // The kit's characters, measured against the camera the game really drew with (systems/entities.ts publishes them).
+    let characters = null;
+    try {
+      const ent = typeof window.__nbEntities === 'function' ? window.__nbEntities() : null;
+      if (ent && Array.isArray(ent.list)) {
+        const pl = Array.isArray(ent.player) ? ent.player : null;
+        const vi = cam && cam.matrixWorldInverse && cam.projectionMatrix ? cam.matrixWorldInverse.elements : null;
+        const pr = vi ? cam.projectionMatrix.elements : null;
+        const onScreen = (x, y, z) => {
+          if (!vi || !pr) return false;
+          const cx = vi[0] * x + vi[4] * y + vi[8] * z + vi[12], cy = vi[1] * x + vi[5] * y + vi[9] * z + vi[13];
+          const cz = vi[2] * x + vi[6] * y + vi[10] * z + vi[14], cw = vi[3] * x + vi[7] * y + vi[11] * z + vi[15];
+          const px = pr[0] * cx + pr[4] * cy + pr[8] * cz + pr[12] * cw, py = pr[1] * cx + pr[5] * cy + pr[9] * cz + pr[13] * cw;
+          const pw = pr[3] * cx + pr[7] * cy + pr[11] * cz + pr[15] * cw;
+          return pw > 0 && Math.abs(px / pw) <= 1 && Math.abs(py / pw) <= 1;
+        };
+        let hostiles = 0, inView = 0, nearest = null;
+        for (const r of ent.list.slice(0, 64)) {
+          if (!Array.isArray(r) || r[1] !== 1 || r[2] !== 1) continue;
+          hostiles++;
+          const x = Number(r[3]), y = Number(r[4]), z = Number(r[5]);
+          if (pl) { const d = Math.hypot(x - Number(pl[0]), z - Number(pl[2])); if (Number.isFinite(d) && (nearest === null || d < nearest)) nearest = d; }
+          if (r[6] === 1 && onScreen(x, y + 1, z)) inView++;
+        }
+        characters = { spawned: Number(ent.spawned) || 0, failed: Number(ent.failed) || 0, hostiles, nearestM: nearest === null ? null : Math.round(nearest * 10) / 10, inView };
+      }
+    } catch (e) { characters = null; }
+    return { meshes, skinned, brokenTextures: broken, failed: failed.slice(), standing, characters };
   };
   window.__nbControlsOff = () => {
     const off = [];

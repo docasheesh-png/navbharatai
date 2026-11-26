@@ -42,7 +42,7 @@ export interface WorldLayer extends OpenWorld {
 export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = {}): WorldLayer {
   const { follow, placeAtSpawn = true, carry = [], ...worldOptions } = options;
   const pick = typeof follow === 'function' ? follow : null;
-  let chosen: THREE.Object3D | null = (pick ? pick() : follow) ?? null;
+  let chosen: THREE.Object3D | null = (typeof follow === 'function' ? follow() : follow) ?? null;
   const target = (): THREE.Object3D => chosen ?? ctx.player.object;
   const carried = new Set<THREE.Object3D>(carry);
   // When the camera itself is followed, the world moves it once (as the followed thing), never a second time as the camera.

@@ -1569,6 +1569,7 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
           '(null + ENTITY_SPAWN_FAILED when it could not be verified). It ticks itself (ctx.onStep): the AI chases, the body walks ' +
           'and faces, nobody walks through anybody. Bullets: npcs.applyHits(bullets.update(dt, npcs.targets(), worldBlocker(ctx.scene))) — worldBlocker from play/aim.ts, made once; a bullet stops at a wall. A punch: ' +
           'npcs.melee(ctx.player.object.position, facingYaw, 25). goTo(point, onArrive) sends one somewhere (ENTITY_ARRIVED). ' +
+          'Enemies the user asked for go where the hero is: npcs.spawnAround(6, { kind: "enemy", body: model }) — a ring round the player, on the ground; the playtest checks one is alive and in view. ' +
           'Death falls, emits ENTITY_DIED, and clears the body away.\n'
         : '') +
       (files[GAME_DISPATCH_PATH]

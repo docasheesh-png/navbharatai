@@ -203,3 +203,43 @@ JSON came back (`if (data) setStatus(data as StoreStatus)`), so the first guard 
 - **The trigger is shown, not swallowed:** when the status cannot be read, the Publish tab prints the server's
   own sentence. ⚠️ Which guard answered that phone is OPEN (Q-013) — a 429 there would mean the per-IP burst
   guard is hitting a CGNAT phone network, a second real defect.
+
+### 🧑‍⚖️ A FLAGGED APP MART APP IS HELD FOR A PERSON, NOT REFUSED — and a pair must be a PHRASE (admin-mandated 2026-11-26, Q-3560)
+
+**What happened.** The admin published a plain cricket game to App Mart and was refused with *"This app was
+not published: it pairs words describing a child with explicitly sexual words. This is the one category we act
+on without waiting."* Root cause: `classifyPublishedText` fired a rule when its subject AND its context matched
+ANYWHERE in the app's text, and that text is every source file concatenated. The game kit itself carries
+three.js `object.children` in one file and the word "hardcore" in a code comment of another
+(`GameShellGenerator.ts`: *"car control hardcore joystick se nahi honi chahiye"*), so **every kit-built 3D game
+with the shell layer was refused as CSAM.** No account was marked: a refused publish saved nothing and wrote
+only a `STORE_PUBLISH_REFUSED` line to the server log (no strike, no takedown record, no admin queue entry).
+
+**1. The classifier (the class, fixed for every rule on the publish path).** Whole-document co-occurrence of two
+word lists over source code is not evidence. A pair now counts only inside ONE phrase: same file, same code
+statement (no `;`, `{`, `}` between), within `PAIR_WINDOW` (80) characters, neither half a code identifier
+(`obj.children`, `child.position`, `children[0]`), and not one of the words that are ambiguous alone —
+"hardcore" / "explicit" without a sexual noun after them ("hardcore mode", "explicit dispose"), "sex" as a form
+field ("Child sex: M/F"). The protective stand-down still reads the whole app. A census test runs every game
+recipe's real output and fails if any of them classifies as anything but `general`.
+
+**2. The policy — admin verbatim:** *"sex se sambandhit app publish apply ho jaye, admin ko saf saf bataya jaye,
+yeh problem hai, admin game khel ke dekhega! khud reject kar dega"*.
+- **What changed.** A finding of the sexual/illegal TEXT classifier (`ILLEGAL_RULES`, including
+  `ADULT_CONTENT`) on an App Mart publish **no longer refuses**. The app is saved, `heldForReview: true`,
+  `unlisted`, and is served to NOBODY but its owner and a store admin — not even by its direct link — until an
+  admin presses **List on the store** (which clears the hold) or **Remove**. The admin's review card shows a red
+  notice at the top and the file plus the exact matched phrase for each finding (≤ 3 excerpts per rule, ≤ 200
+  characters each). The creator reads only *"Submitted. An automatic check flagged something in this app…"* —
+  no rule name, no matched text, no accusation.
+- **This supersedes** the 2026-09-12 "illegal refuses unconditionally" rule for App Mart, and the 2026-09-12
+  "no matched text is returned" rule for these findings: a held app is judged by a person, who must see what the
+  check saw. The excerpt lives on the app record (`safetyFindings`), never in a creator-facing response.
+- **What did NOT change.** Prompt triage (`triagePrompt` — build, chat, image) still BLOCKS pornography and the
+  illegal categories at the prompt, and a refusal there is still final. The malware / phishing / wallet-drainer
+  rules (`CONTENT_RULES`) keep their behaviour (refuse in block mode, otherwise flag + unlist). Hosting
+  (`DeploymentStore`) never ran this classifier and is unchanged. No web app is ever auto-approved.
+- ⚠️ **Open (Q-3561):** prompt triage shares the same rule lists and still false-blocks prompts such as *"a
+  cricket game for kids with a hardcore mode"* (CSAM) and *"build a hardcore racing game app"* (adult). Prompt
+  triage was explicitly out of scope for this change; the fix (the same "ambiguous alone" narrowing) waits on
+  the admin's decision.

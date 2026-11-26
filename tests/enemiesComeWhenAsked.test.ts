@@ -137,6 +137,6 @@ describe('#4 a first build that asks for enemies has them', () => {
     // Not a picker action (the builder still runs after it), so it runs beside the picker composition, every turn.
     const turn = readFileSync(resolve(__dirname, '../src/server/AgentV3/platformDoneTurn.ts'), 'utf8');
     expect(turn).toMatch(/const enemies = await addEnemiesAtTurnStart\(io\);/);
-    expect(turn).toMatch(/const handoff = \[picked, enemies\]\.filter\(Boolean\)/);
+    expect(turn).toMatch(/const handoff = \[picked, enemies(?:, police)?\]\.filter\(Boolean\)/);
   });
 });

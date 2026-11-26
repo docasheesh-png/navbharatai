@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { policeRequestFrom } from '../lib/GamePoliceFeature';
 import { onlineMultiplayerWanted, ROOMS_HANDOFF } from '../lib/GameRoomsGenerator';
 import { realGraphicsWanted } from '../lib/GameRealismGenerator';
 import { enemyRequestFrom } from '../lib/GameEnemiesFeature';
@@ -347,6 +348,8 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
       ...(plan.includes('generate_game_systems') ? { danger: true } : {}),
       ...(wantsSwimming(request) ? { swim: true } : {}),
       ...(enemies ? { enemies } : {}),
+      // The kit's real police the request asked for go in with the first build too (GamePoliceFeature.ts).
+      ...(policeRequestFrom(request) ? { police: policeRequestFrom(request) } : {}),
       ...(citizens.solid || citizens.hittable ? { citizens } : {}),
       ...(runOverWanted(request) ? { runOver: true } : {}),
       ...(openBuildingsWanted(request) ? { openBuildings: true } : {}),

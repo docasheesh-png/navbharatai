@@ -22,6 +22,7 @@
 export const GAME_CITY = String.raw`import * as THREE from 'three';
 import { markWorldCollider, type WorldColliderKind } from './collision';
 import { geometryTier, type GeometryTier } from './surfaces';
+import { createEnterableHouse } from './buildings';
 
 export type LotKind = 'apartment' | 'shop' | 'office' | 'house' | 'park';
 export type CityStyle = 'town' | 'mixed' | 'downtown';
@@ -51,6 +52,14 @@ export interface CityOptions {
    * with no GPU or a weak phone. Left out: geometryTier() — the device decides, and the player's Settings override it.
    */
   tier?: GeometryTier;
+  /**
+   * 🚪 HOUSES YOU CAN WALK INTO (admin 2026-11-26: "user bole — ghar me game open karo, to painted gate ko real gate banao, ghar
+   * andar se khokhla hota hi hai, hero andar chala jayega"). Off by default: a house is one solid shell with its door painted
+   * on. When the user asks, every HOUSE lot is the kit's enterable house instead (three/buildings.ts, the same one the
+   * enterable-house rule uses): its own colour, a real door that swings open with the interact key (E, or Use on a phone),
+   * hollow rooms with a floor to stand on and walls that collide. Shops, apartments and offices stay shells.
+   */
+  enterableHouses?: boolean;
 }
 
 export interface CityLot {
@@ -393,6 +402,8 @@ function windowTexture(): THREE.DataTexture {
 export interface City {
   root: THREE.Group;
   plan: CityPlan;
+  /** The houses you can walk into (CityOptions.enterableHouses), one per house lot; empty when it is off. */
+  houses: THREE.Group[];
   /** The geometry tier this city was built at ('full' or 'light'). */
   tier: GeometryTier;
   /** Where to put the player's car or character: on a street, in the left lane, facing spawnHeading. */
@@ -489,7 +500,24 @@ export function createCity(options: CityOptions = {}): City {
     box(batchFor(i, j).ground, x1 - x0, CITY_KERB, z1 - z0, (x0 + x1) / 2, CITY_ROAD_Y + CITY_KERB / 2, (z0 + z1) / 2, 0xb9b4aa);
   }
 
-  for (const lot of plan.lots) buildLot(batchFor(lot.block[0], lot.block[1]), lot, top, r, box, light);
+  // The enterable houses (options.enterableHouses): the lot is still drawn into a batch that is thrown away, so the city's
+  // random draws — and so every later choice, park trees (colliders) included — are exactly those of the shell city.
+  const enterable: THREE.Group[] = [];
+  const discard = options.enterableHouses ? batches() : null;
+  for (const lot of plan.lots) {
+    if (discard && lot.kind === 'house') {
+      buildLot(discard, lot, top, r, box, light);
+      const fp = buildingFootprint(lot);
+      const house = createEnterableHouse({ width: fp.w, depth: fp.d, storeys: Math.min(2, lot.floors), wallColor: lot.color, roofColor: shade(lot.color, 0.7) });
+      house.position.set(fp.x, top, fp.z);
+      house.rotation.y = lot.facing.z > 0 ? 0 : Math.PI;                  // the door faces the lot's street, as the painted one did
+      house.name = 'City house ' + lot.id;
+      root.add(house);
+      enterable.push(house);
+      continue;
+    }
+    buildLot(batchFor(lot.block[0], lot.block[1]), lot, top, r, box, light);
+  }
   for (const [i, j] of plan.parks) buildPark(batchFor(i, j), plan, i, j, top, r, box);
   for (const light of plan.lights) {
     const i = Math.min(plan.blocksX - 1, Math.max(0, X.findIndex((x, k) => k < X.length - 1 && light.x > x && light.x < X[k + 1])));
@@ -519,7 +547,7 @@ export function createCity(options: CityOptions = {}): City {
 
   const toV = (p: CityPoint) => new THREE.Vector3(p.x, CITY_ROAD_Y, p.z);
   return {
-    root, plan, tier,
+    root, plan, tier, houses: enterable,
     spawn: toV(plan.spawn), spawnHeading: plan.spawn.heading,
     route: (from, to, o) => cityRoute(plan, from, to, o).map((p) => new THREE.Vector3(p.x, cityHeightAt(plan, p.x, p.z), p.z)),
     heightAt: (x, z) => cityHeightAt(plan, x, z),

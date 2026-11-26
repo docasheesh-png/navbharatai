@@ -56,7 +56,7 @@ export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = 
       if (target() === ctx.player.object) ctx.player.reset(x, y, z);
       else if (!making || placeAtSpawn) target().position.set(x, y, z);
     },
-    setWater(level: number) { if (target() === ctx.player.object) ctx.player.setWater(level); },
+    setWater(level: Parameters<GameContext['player']['setWater']>[0]) { if (target() === ctx.player.object) ctx.player.setWater(level); },
   };
   const view = Object.create(ctx) as GameContext;
   Object.defineProperty(view, 'player', { get: () => (target() === ctx.player.object ? ctx.player : player) });

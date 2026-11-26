@@ -21,6 +21,8 @@
  *   • goTo(x, z) walks it to a point and emits ENTITY_ARRIVED only when it is really there (police, a delivery, a guard).
  *   • spawnAround(n, spec) puts characters in a ring AROUND THE PLAYER, on the ground (2026-11-26, report #2519: "Knight
  *     Boxer enemy show nahi ho rahe" — the enemies of a 1000-house city stood around a fixed centre far from the hero).
+ *   • dress(entity, modelOrPromise) puts a model on a character while it LOADS without ever hiding it: the kit body stays
+ *     until the model is there (2026-11-26, reports #2518/#2519: bots hidden before their knight model loaded).
  *   • window.__nbEntities() is a read-only list of every live character (kind, hostile, position, a visible body) and the
  *     player's position, so the playtest can PROVE that the enemies a game was asked for are there and in view
  *     (gamePlaceholderProbe.ts MISSING_ENEMIES). It reads; it never changes the game.
@@ -145,6 +147,8 @@ interface Inner extends Entity {
   deadFor: number;
   gone: boolean;
   lastHitByPlayer: boolean;
+  /** A model put on the kit body with dress() — it stands in the kit person's place and falls with it. */
+  dressed?: THREE.Object3D;
 }
 
 let nextId = 1;
@@ -306,6 +310,27 @@ export class Entities {
     }
   }
 
+  /**
+   * 👕 DRESS A CHARACTER IN A MODEL THAT IS STILL LOADING (failedbr #2518/#2519: "Knight Boxer enemy show nahi ho rahe" — a game
+   * hid its bots' bodies first and loaded the knight model after, so every bot was invisible while it loaded, and for good
+   * when the load failed). The kit body stays until the model has arrived: then the model takes its place (sized to the
+   * character's height, feet on its ground, facing where it faces, falling when it dies) and the kit person's own meshes are
+   * hidden. A model that fails to load, or has nothing to see, leaves the kit body as it was. Resolves true when dressed.
+   */
+  async dress(entity: Entity, model: THREE.Object3D | PromiseLike<THREE.Object3D>): Promise<boolean> {
+    const e = entity as Inner;
+    let m: THREE.Object3D;
+    try { m = await model; } catch (error) { console.warn('[entities] ' + e.kind + ' keeps its body: the model did not load (' + String((error as { message?: string })?.message ?? error).slice(0, 120) + ')'); return false; }
+    if (e.gone || !m || !hasVisibleMesh(m)) { if (!e.gone) console.warn('[entities] ' + e.kind + ' keeps its body: the model has nothing to see'); return false; }
+    const box = new THREE.Box3().setFromObject(m), tall = box.max.y - box.min.y;
+    if (Number.isFinite(tall) && tall > 1e-3) { const k = e.height / tall; m.scale.multiplyScalar(k); m.position.y -= box.min.y * k; }
+    if (e.dressed) e.dressed.removeFromParent();
+    if (e.humanoid) e.model.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.visible = false; });   // the kit person steps aside
+    e.model.add(m);                                                       // turns and falls with the body
+    e.dressed = m;
+    return true;
+  }
+
   /** One step: decide, walk, face, attack, keep apart, die and clear away. ctx.onStep calls it; never call it twice a step. */
   update(delta: number): void {
     const dt = Math.min(0.1, Math.max(0, Number.isFinite(delta) ? delta : 0));
@@ -462,6 +487,7 @@ export class Entities {
     const front = Math.sin(facing) * (player.x - p.x) + Math.cos(facing) * (player.z - p.z) >= 0;
     e.humanoid?.die(front);
     if (!e.humanoid) e.model.rotation.x = -Math.PI / 2;
+    else if (e.dressed) e.dressed.rotation.x = -Math.PI / 2;            // a dressed model lies down with the body
     events.emit('ENTITY_DIED', { id: e.id, kind: e.kind, hostile: e.hostile, byPlayer: e.lastHitByPlayer, position: { x: p.x, y: p.y, z: p.z } });
   }
 

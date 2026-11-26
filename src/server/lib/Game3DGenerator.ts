@@ -7396,7 +7396,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     if (files['src/game/three/surfaces.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/physics.ts']) {
       files['src/game/three/groundContact.ts'] = FILES['src/game/three/groundContact.ts'];
     }
-    if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
+    // city.ts imports buildings.ts (its enterable houses, CityOptions.enterableHouses).
+    if (files['src/game/three/objects.ts'] || files['src/game/three/city.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
     // physics.ts turns the scene's solid colliders into fixed obstacles.
     if (files['src/game/three/physics.ts']) files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];

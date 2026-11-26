@@ -34,16 +34,18 @@ function typecheck(files: Record<string, string>, extra?: Record<string, string>
 
 describe('the words a user types choose the modules', () => {
   const pick = (p: string): string[] => athreeModulesFor(p).modules;
-  it('a river and some trees is a river and trees, in the build order, nothing else', () => {
+  // 2026-11-25 (admin, problem 5 — "intention, not words"): a named feature ADDS to the world; only "sirf/only/keval" narrows to it.
+  it('"sirf" narrows to what is named, in the build order; a named feature without it keeps the whole world', () => {
     expect(pick('sirf nadi aur ped wala map')).toEqual(['plants', 'rivers']);
-    expect(pick('a map with a river, a lake and a forest')).toEqual(['plants', 'rivers']);
-    expect(pick('samudra ke kinare jungle')).toEqual(['sea', 'plants']);
+    expect(pick('only roads and cars')).toEqual(['roads', 'vehicles']);
+    expect(pick('a map with a river, a lake and a forest')).toEqual(OPTIONAL);
+    expect(pick('samudra ke kinare jungle')).toEqual(OPTIONAL);
   });
-  it('racing and cars is roads and vehicles; rain and night is the sky; an island is the sea', () => {
-    expect(pick('3D racing game with cars on a big map')).toEqual(['roads', 'vehicles']);
-    expect(pick('gaadi aur sadak')).toEqual(['roads', 'vehicles']);
-    expect(pick('kohra aur raat ka mausam')).toEqual(['sky']);
-    expect(pick('battle royale on an island with rain')).toEqual(['sea', 'sky']);
+  it('racing and cars, rain and night, an island: the whole world, not just the named part (failedbr open worlds were bare grass)', () => {
+    expect(pick('3D racing game with cars on a big map')).toEqual(OPTIONAL);
+    expect(pick('gaadi aur sadak')).toEqual(OPTIONAL);
+    expect(pick('kohra aur raat ka mausam')).toEqual(OPTIONAL);
+    expect(pick('GTA jaisa open world game, 2 city aur cars')).toEqual(OPTIONAL);
   });
   it('everything is everything, and so is a request that names no feature, an empty one, and a word that only contains a feature word', () => {
     expect(pick('poora map chahiye')).toEqual(OPTIONAL);
@@ -51,7 +53,7 @@ describe('the words a user types choose the modules', () => {
     expect(pick('a big open world')).toEqual(OPTIONAL);
     expect(pick('')).toEqual(OPTIONAL);
     expect(pick(undefined as unknown as string)).toEqual(OPTIONAL);
-    expect(pick('a carpet shop by the river')).toEqual(['rivers']); // carpet is not car, and a tracker is not a track
+    expect(athreeModulesFor('sirf carpet shop by the river').modules).toEqual(['rivers']); // carpet is not car, and a tracker is not a track
     expect(pick('a tracker')).toEqual(OPTIONAL);
   });
   it('gives the reason in words, and never a module that does not exist', () => {

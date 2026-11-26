@@ -69,6 +69,7 @@ import { applyPlayerChoice, resolvePlayerChoice, humanoidCollider, findBones, pl
 import { updateActions } from './play/actions';
 import { aimFrom, type AimResult } from './play/aim';
 import { Director, DEATH_CAM, HERO_SHOT, introDrone, type Shot, type CinematicFrame } from './play/cinematics';
+import { applyRealism, type Realism } from './three/realism';
 import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
@@ -139,6 +140,11 @@ export interface GameOptions {
    * (introRadius metres of map, default 150). true for the ready shot, or your own Shot list. Off unless asked.
    */
   cinematics?: { death?: boolean | Shot[]; intro?: boolean | Shot[]; introRadius?: number };
+  /**
+   * 🌄 'real' when the user asked for real / realistic / HD graphics (three/realism.ts): image-based lighting and soft
+   * shadows everywhere, ambient occlusion and a subtle bloom on a capable device only. Default 'standard'.
+   */
+  graphics?: 'standard' | 'real';
   /** Additional world-space NPC/remote bodies that must block door swings. */
   doorOccupants?: (ctx: GameContext) => readonly DoorOccupant[];
   container: HTMLElement;
@@ -452,6 +458,8 @@ export class Game {
     // walked it in circles (verifier, 2026-10-11).
     this.rig = new CameraRig({ kind: options.camera === 'chase' ? 'third-person' : (options.camera ?? 'third-person') });
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
+    // The real look, only when asked (after the lights exist, so their shadows are set up).
+    if (options.graphics === 'real') { try { this.realism = applyRealism(this.renderer, this.scene, this.rig.camera); } catch (error) { console.error('[game] the real graphics could not start; drawing the standard look', error); } }
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
     this.playerChoice = resolvePlayerChoice(options.player);
     this.handGun = handGunFor(this.playerChoice);
@@ -1103,6 +1111,11 @@ export class Game {
     updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
     // Two players: each camera in its own half of the screen (three/splitscreen.ts).
     if (this.secondCamera) renderSplit(this.renderer, this.scene, [this.rig.camera, this.secondCamera]);
+    else if (this.realism) {
+      const sz = this.renderer.getSize(this.drawSize);
+      if (sz.x !== this.drawnW || sz.y !== this.drawnH) { this.drawnW = sz.x; this.drawnH = sz.y; this.realism.setSize(sz.x, sz.y); }
+      this.realism.render(this.scene, this.rig.camera);
+    }
     else this.renderer.render(this.scene, this.rig.camera);
   }
 
@@ -1132,6 +1145,12 @@ export class Game {
     setStatus('playing');
     this.playIntro();
   }
+
+  /** The real look (GameOptions.graphics 'real'), or null. */
+  realism: Realism | null = null;
+  private readonly drawSize = new THREE.Vector2();
+  private drawnW = 0;
+  private drawnH = 0;
 
   /** The camera-shot player (play/cinematics.ts). */
   readonly director = new Director();
@@ -1391,6 +1410,7 @@ export class Game {
       if (mesh.geometry) safe(() => mesh.geometry.dispose());
     });
     safe(() => disposeMaterials());
+    if (this.realism) safe(() => this.realism!.dispose());
     if (this.renderer) safe(() => this.renderer.dispose());
     if (this.canvas) safe(() => this.canvas.parentElement?.removeChild(this.canvas));
     // This is the game's bus, not the app's. Remove setup handlers on failed construction too.
@@ -5380,6 +5400,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drag on the right, Attack/Jump/Use/Run buttons bottom-right, and a Pause button in the HUD. They\n' +
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
+      "  graphics: 'real' — only when the user asks for realistic / real 3D / HD graphics (three/realism.ts: image lighting, soft shadows; ambient occlusion and a subtle bloom on a capable device). Never add your own EffectComposer.\n" +
       "  cinematics: { death: true, intro: true } — the user's camera shots (play/cinematics.ts): a death cam that closes in and holds on GAME OVER, a drone shot over the map before play; any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]). Never move the camera yourself.\n" +
       '- WHEN THE USER ASKS WHERE THE CONTROLS GO, set it in touchControls — never move them with your own CSS:\n' +
       "  \"joystick on the right\" / \"buttons on the left\" → joystick: { side: 'right' } (the buttons and camera drag swap\n" +

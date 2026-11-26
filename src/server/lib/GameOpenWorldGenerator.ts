@@ -2014,11 +2014,14 @@ export function cinematicsWanted(prompt: string | null | undefined): { death?: t
   return { ...(death ? { death: true as const } : {}), ...(intro ? { intro: true as const } : {}) };
 }
 
-export function openWorldAppSource(options: { city?: boolean; title?: string; cinematics?: { death?: boolean; intro?: boolean } } = {}): string {
+export function openWorldAppSource(options: { city?: boolean; title?: string; cinematics?: { death?: boolean; intro?: boolean }; graphics?: 'real' } = {}): string {
   const title = String(options.title ?? 'Open World').replace(/[^\p{L}\p{N} .,!?'-]/gu, '').trim().slice(0, 60) || 'Open World';
-  const cine = options.cinematics && (options.cinematics.death || options.cinematics.intro)
-    ? ' options={{ cinematics: { ' + [options.cinematics.death ? 'death: true' : '', options.cinematics.intro ? 'intro: true, introRadius: 400' : ''].filter(Boolean).join(', ') + ' } }}'
-    : '';
+  const gameOpts: string[] = [];
+  if (options.cinematics && (options.cinematics.death || options.cinematics.intro)) {
+    gameOpts.push('cinematics: { ' + [options.cinematics.death ? 'death: true' : '', options.cinematics.intro ? 'intro: true, introRadius: 400' : ''].filter(Boolean).join(', ') + ' }');
+  }
+  if (options.graphics === 'real') gameOpts.push("graphics: 'real'");
+  const cine = gameOpts.length ? ' options={{ ' + gameOpts.join(', ') + ' }}' : '';
   return [
     "import { OpenWorldGame } from './game/OpenWorldGame';",
     "import { FEATURES } from './game/features';",
@@ -2179,7 +2182,8 @@ export function generateOpenWorld(): RecipeOutput {
       'character in reach; never write your own punch hit test. CAMERA SHOTS: "hero marne ke baad cinematic camera / game over animation" →',
       '<OpenWorldGame options={{ cinematics: { death: true } }} />; "start se pahle pura map ka drone shot" → { intro: true, introRadius: 400 };',
       'any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]).',
-      'Never move the camera yourself.',
+      'Never move the camera yourself. GRAPHICS: "realistic / real 3D / HD graphics" → <OpenWorldGame options={{ graphics: \'real\' }} />',
+      '(lighting, reflections and soft shadows everywhere; ambient occlusion and bloom only on a capable device) — never add your own post-processing.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

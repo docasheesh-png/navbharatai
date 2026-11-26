@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { realGraphicsWanted } from '../lib/GameRealismGenerator';
 import { enemyRequestFrom } from '../lib/GameEnemiesFeature';
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
@@ -316,6 +317,7 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
       ...(citizens.solid || citizens.hittable ? { citizens } : {}),
       ...(runOverWanted(request) ? { runOver: true } : {}),
       ...(openBuildingsWanted(request) ? { openBuildings: true } : {}),
+      ...(realGraphicsWanted(request) ? { graphics: 'real' } : {}),
       ...(Object.keys(cinematicsWanted(request)).length ? { cinematics: cinematicsWanted(request) } : {}),
     };
   }

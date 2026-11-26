@@ -935,6 +935,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['ghar ke andar', 'building ke andar', 'andar ja sake', 'enter building', 'enterable', 'darwaza', 'door', 'painted door', 'dukaan ke andar', 'house inside'],
   },
   {
+    id: 'game_real_graphics',
+    name: 'Realistic 3D graphics in a game, when you ask',
+    path: 'NavBharatAI Pro → chat → ask for realistic / real 3D / HD graphics in a 3D game',
+    description: 'Ask for realistic graphics and the game switches to a real look: studio-style lighting that makes metal, glass and car paint reflect, and soft shadows, on every device; on a strong phone or computer it also adds soft shading in corners and under objects, and a gentle glow on the brightest highlights. A weak phone keeps the lighting and shadows and skips the heavier effects, so the game stays smooth.',
+    howToUse: 'Say "realistic graphics", "real 3D graphics", "HD graphics" or "asli jaisa dikhe" in your game request or later.',
+    relatedFeatures: ['game_play_basics', 'game_cinematic_camera'],
+    keywords: ['realistic', 'real graphics', 'real 3d', 'hd graphics', 'high graphics', 'asli jaisa', 'graphics achhe', 'better graphics', 'shadows', 'reflection'],
+  },
+  {
     id: 'game_2d_kit',
     name: '2D games that feel right — platformers, side-scrollers, runners',
     path: 'NavBharatAI Pro → chat → ask for any 2D game with movement (for example "Mario jaisa platformer banao", "2D runner game", "side scrolling shooter")',

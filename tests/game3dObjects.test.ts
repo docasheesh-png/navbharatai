@@ -48,7 +48,8 @@ function loadObjects(): Record<string, (o?: Record<string, unknown>) => unknown>
     if (!source) throw new Error('missing generated building dependency ' + id);
     const result: Record<string, unknown> = {};
     modules.set(id, result);
-    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    // A CommonJS harness has no import.meta: a kit file's import.meta.glob (the game's own optional files, e.g. src/game/gameSeed.ts) reads as "no such file" here, exactly as a bundler without glob support would.
+    const compiled = ts.transpileModule(source.replace(/import\.meta\.glob\(/g, '((..._glob: unknown[]) => ({}))('), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
     // eslint-disable-next-line no-new-func
     new Function('require', 'exports', 'module', compiled)(loadBuildingDependency, result, { exports: result });
     return result;

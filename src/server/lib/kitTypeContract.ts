@@ -236,10 +236,11 @@ const CONTRACT: readonly ContractEntry[] = [
 /**
  * The character budget the game seed hands the contract with — ONE number, read by the seed and by the test that proves the
  * whole contract fits it (it was two copies). 12_000 → 12_500 (2026-11-22, the touch-layout options) → 13_000 (2026-11-25,
- * ctx.aim and ctx.onStep joined GameContext) → 13_100 (2026-11-26, ctx.setRespawn: Restart stands the player at the start):
+ * ctx.aim and ctx.onStep joined GameContext) → 13_100 (2026-11-26, ctx.setRespawn: Restart stands the player at the start)
+ * → 13_300 (2026-11-26, ctx.cinematic and GameOptions.cinematics: the camera shots the user describes, Q-3509):
  * a whole section dropped from every game turn costs more than the characters.
  */
-export const KIT_CONTRACT_BUDGET = 13_100;
+export const KIT_CONTRACT_BUDGET = 13_300;
 
 /** Every name the contract covers, for the census that keeps this honest. */
 export const KIT_CONTRACT_NAMES: readonly string[] = CONTRACT.flatMap((e) => e.names);

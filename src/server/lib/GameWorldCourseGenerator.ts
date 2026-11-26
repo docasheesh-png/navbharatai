@@ -34,7 +34,20 @@ export interface WorldCourseOptions {
   finishKm?: number | null;
   /** Two leg ends further apart than this are joined by a straight link, and counted in gaps. Default 400 m. */
   joinGap?: number;
+  /** The places the legs join (centre and reach, world metres): leg ends inside one are the same stop of the tour. */
+  hubs?: ReadonlyArray<CourseHub>;
+  /**
+   * The shortest course wanted, in metres (at most MAX_COURSE_METRES). A route shorter than this is not stretched: it becomes laps
+   * of the TOUR — every leg driven out and back from the start, so the course stays on the real roads — until it is long enough.
+   */
+  minLength?: number;
 }
+
+/** A place the legs join: its centre and how far it reaches, in world metres. */
+export interface CourseHub { x: number; z: number; r: number }
+
+/** The longest course laps are laid to (the road library's longest map): a longer race finishes at the course's end. */
+export const MAX_COURSE_METRES = 100000;
 
 export interface CourseStatus { distance: number; lap: number; segment: null; ended: boolean; rebased: null }
 
@@ -47,12 +60,14 @@ export interface WorldCourse {
   readonly finish: number | null;
   /** Straight links laid where two legs did not meet (metres each) — the caller may route those through a place's streets. */
   readonly gaps: ReadonlyArray<number>;
+  /** 1 for the plain route; more when a short route became laps of the tour (minLength). */
+  readonly laps: number;
   /** Where the race starts: distance 0, facing along the course. */
   readonly startPose: CoursePose;
   /** The course at a distance; null before the start or past the end. */
   poseAt(distance: number): CoursePose | null;
   /** Every frame, with the player's car: how far along it has driven (the nearest point of the line near the last one). */
-  update(car: { position: { x: number; z: number } }): CourseStatus;
+  update(car: { position: { x: number; z: number }; rotation?: { y: number } }): CourseStatus;
   /** More road at the end (an endless race: the next place's highway). Returns the new length. */
   extend(points: ReadonlyArray<CoursePoint>): number;
   /** Back to the start (Play again). */
@@ -99,6 +114,61 @@ export function chainLegs(legs: ReadonlyArray<ReadonlyArray<CoursePoint>>, start
   return { points, gaps };
 }
 
+/** Every leg driven OUT and BACK from the start, depth first: a closed tour on the real roads that passes every place the
+ * legs reach and ends where it began. Leg ends inside the same hub (or within 30 m of each other) are one stop. */
+export function tourLegs(legs: ReadonlyArray<ReadonlyArray<CoursePoint>>, start?: CoursePoint, hubs: ReadonlyArray<CourseHub> = [], joinGap = 400): { points: CoursePoint[]; gaps: number[]; covered: boolean } {
+  const pool = legs.map((l) => (l || []).filter(finite)).filter((l) => l.length >= 2);
+  if (!pool.length) return { points: [], gaps: [], covered: true };
+  const hubList = (hubs || []).filter((h) => finite(h) && Number.isFinite(h.r));
+  const loose: CoursePoint[] = [];
+  const stopOf = (p: CoursePoint): number => {
+    let pick = -1, best = Infinity;
+    hubList.forEach((h, i) => { const d = dist(p, h) - h.r; if (d < best) { best = d; pick = i; } });
+    if (pick >= 0 && best <= 60) return pick;
+    for (let k = 0; k < loose.length; k++) if (dist(loose[k], p) <= 30) return hubList.length + k;
+    loose.push(p);
+    return hubList.length + loose.length - 1;
+  };
+  const from = pool.map((l) => stopOf(l[0])), to = pool.map((l) => stopOf(l[l.length - 1]));
+  const ways = new Map<number, number[]>();
+  pool.forEach((_, i) => { for (const n of from[i] === to[i] ? [from[i]] : [from[i], to[i]]) ways.set(n, [...(ways.get(n) ?? []), i]); });
+  let first = from[0];
+  if (finite(start)) {
+    let best = Infinity;
+    pool.forEach((l, i) => {
+      const a = dist(start, l[0]), b = dist(start, l[l.length - 1]);
+      if (a < best) { best = a; first = from[i]; }
+      if (b < best) { best = b; first = to[i]; }
+    });
+  }
+  const used = new Array(pool.length).fill(false);
+  const points: CoursePoint[] = [];
+  const gaps: number[] = [];
+  const lay = (leg: ReadonlyArray<CoursePoint>): void => {
+    if (points.length) { const g = dist(points[points.length - 1], leg[0]); if (g > joinGap) gaps.push(Math.round(g)); }
+    for (const p of leg) points.push({ x: p.x, z: p.z });
+  };
+  const walk = (stop: number): void => {
+    for (const i of ways.get(stop) ?? []) {
+      if (used[i]) continue;
+      used[i] = true;
+      const out = from[i] === stop ? pool[i] : [...pool[i]].reverse();
+      lay(out);
+      walk(from[i] === stop ? to[i] : from[i]);
+      lay([...out].reverse());
+    }
+  };
+  walk(first);
+  return { points, gaps, covered: used.every(Boolean) };
+}
+
+/** The length of a polyline, in metres. */
+export function pathLength(points: ReadonlyArray<CoursePoint>): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += dist(points[i - 1], points[i]);
+  return total;
+}
+
 /** A polyline every STEP metres (the last point kept). */
 export function resample(points: ReadonlyArray<CoursePoint>, step = STEP): CoursePoint[] {
   const out: CoursePoint[] = [];
@@ -120,16 +190,34 @@ export function resample(points: ReadonlyArray<CoursePoint>, step = STEP): Cours
 export function createWorldCourse(options: WorldCourseOptions): WorldCourse {
   const heightAt = options.heightAt ?? (() => 0);
   const origin = options.origin ?? (() => ({ x: 0, z: 0 }));
-  const chained = chainLegs(options.legs, options.start, options.joinGap ?? 400);
+  const joinGap = options.joinGap ?? 400;
+  const asked = options.finishKm != null && Number(options.finishKm) > 0 ? Number(options.finishKm) * 1000 : null;
+  let chained = chainLegs(options.legs, options.start, joinGap);
+  // A route shorter than the race wants is never stretched and never given a made-up distance: it becomes laps of the tour,
+  // every road driven out and back, so every metre counted is a metre of the world's own highways.
+  const want = Math.min(MAX_COURSE_METRES, Number(options.minLength) || 0);
+  // The same tour also replaces a chain that had to jump between legs in a straight line over open land (a link the car would
+  // drive off the road): when the tour reaches every leg with fewer such links, the course is the tour.
+  let laps = 1;
+  const short = want > 0 && pathLength(chained.points) < want;
+  if (short || chained.gaps.length) {
+    const tour = tourLegs(options.legs, options.start, options.hubs ?? [], joinGap);
+    const lap = pathLength(tour.points);
+    if (lap > 0 && (short || (tour.covered && tour.gaps.length < chained.gaps.length))) {
+      laps = Math.max(1, Math.ceil(want / lap));            // want 0 (a chain with gaps, no length asked): one lap
+      const points: CoursePoint[] = [];
+      for (let k = 0; k < laps; k++) points.push(...tour.points);
+      chained = { points, gaps: tour.gaps };
+    }
+  }
   let line: CoursePoint[] = resample(chained.points);
   if (line.length < 2) line = [{ x: 0, z: 0 }, { x: 0, z: STEP }];
   const cum: number[] = [0];
   const measure = (from: number): void => { for (let i = Math.max(1, from); i < line.length; i++) cum[i] = cum[i - 1] + dist(line[i - 1], line[i]); };
   measure(1);
-  const asked = options.finishKm != null && Number(options.finishKm) > 0 ? Number(options.finishKm) * 1000 : null;
   const length = (): number => cum[cum.length - 1];
   const finishAt = (): number | null => (asked === null ? null : Math.min(asked, length()));
-  let near = 0;
+  let near = 0, last = 0;
   const poseAt = (d: number): CoursePose | null => {
     if (!Number.isFinite(d) || d < 0 || d > length()) return null;
     let lo = 0, hi = cum.length - 1;
@@ -145,22 +233,38 @@ export function createWorldCourse(options: WorldCourseOptions): WorldCourse {
     get line() { return line; },
     get finish() { return finishAt(); },
     gaps: chained.gaps,
+    laps,
     get startPose() { return poseAt(0)!; },
     poseAt,
     update(car) {
       const o = origin(), px = car.position.x + o.x, pz = car.position.z + o.z;
       let best = Infinity, at = near;
+      // Where the line passes the same road twice (a lap of the tour drives each road out and back), two points of the line
+      // are equally near the car. The one the car FACES along wins (a car's forward is (sin, cos) of its rotation.y); then the
+      // one nearer the car's last place along the line, and on a tie the one further on (the turn at the end of a road), so the
+      // distance never runs backwards on the way home.
+      const heading = car.rotation && Number.isFinite(car.rotation.y) ? car.rotation.y : null;
+      const fx = heading === null ? 0 : Math.sin(heading), fz = heading === null ? 0 : Math.cos(heading);
       const scan = (from: number, to: number): void => {
+        const hits: Array<[number, number, boolean]> = [];
         for (let i = Math.max(0, from); i < Math.min(line.length - 1, to); i++) {
           const a = line[i], b = line[i + 1], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz || 1;
           const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / l2));
           const d = Math.hypot(px - (a.x + dx * t), pz - (a.z + dz * t));
-          if (d < best) { best = d; at = i + t; }
+          hits.push([d, i + t, heading === null || dx * fx + dz * fz >= 0]);
+          if (d < best) best = d;
+        }
+        const near1 = hits.filter(([d]) => d <= best + 1);
+        const facing = near1.filter(([, , f]) => f);
+        let gap = Infinity;
+        for (const [, here] of facing.length ? facing : near1) {
+          const g = Math.abs(here - last);
+          if (g < gap - 1e-6 || (Math.abs(g - gap) <= 1e-6 && here > at)) { gap = g; at = here; }
         }
       };
       scan(near - 40, near + 80);                                   // near where it was: a car drives, it does not jump
-      if (best > 30) scan(0, line.length - 1);                      // …unless it was put somewhere else (a respawn)
-      near = Math.floor(at);
+      if (best > 30) { best = Infinity; scan(0, line.length - 1); } // …unless it was put somewhere else (a respawn)
+      near = Math.floor(at); last = at;
       const i = Math.min(cum.length - 2, Math.floor(at));
       const distance = cum[i] + (cum[i + 1] - cum[i]) * (at - i);
       const f = finishAt();
@@ -175,7 +279,7 @@ export function createWorldCourse(options: WorldCourseOptions): WorldCourse {
       measure(from);
       return length();
     },
-    reset() { near = 0; },
+    reset() { near = 0; last = 0; },
     dispose() { line = [line[0], line[1]]; cum.length = 2; },
   };
 }
@@ -193,7 +297,7 @@ export const WORLD_RACE = String.raw`// THE WORLD RACE: the race runs on the ope
 import * as THREE from 'three';
 import type { GameContext } from '../Game';
 import { createWorldLayer, type WorldLayer } from './worldLayer';
-import { createWorldCourse, type CoursePose, type WorldCourse } from './worldCourse';
+import { createWorldCourse, pathLength, type CoursePose, type WorldCourse } from './worldCourse';
 import { createRace, type Race, type RaceStatus } from '../three/race';
 import type { WorldRegion } from './openWorld';
 
@@ -201,7 +305,8 @@ export interface WorldRaceOptions {
   /** The player's car (the kit car): it is followed by the world and put on the start line. */
   car: THREE.Object3D;
   opponents?: number;
-  /** A finish this many km along the route; null or more than the route: the end of the route. */
+  /** A finish this many km along the course (laps of the world's roads when the route is shorter, up to 100 km); null: the
+   * course's end, at least WORLD_RACE_MIN_METRES long. */
   finishKm?: number | null;
   /** The places to race through. Default: src/game/world.ts WORLD.regions, else four towns. */
   regions?: ReadonlyArray<WorldRegion>;
@@ -230,6 +335,16 @@ const TOWNS: WorldRegion[] = [
   { id: 'north-town', kind: 'town', toward: 'north', distance: 850 }, { id: 'far-town', kind: 'town', toward: 'north-east', distance: 1050 },
 ] as WorldRegion[];
 
+/**
+ * How long a world race is at least, in metres (admin decision 2026-11-26: "keep races as long as before"). Since places stand
+ * close together (PLACE_GAP), a game's own world.ts gives a much shorter route than the old spread did (four places: 1.9–3.4 km
+ * before, 0.8–1.4 km after), so a shorter route becomes laps of the world's own roads (worldCourse.ts tourLegs) until it is at
+ * least this long. 2 km is the shortest route the old spread gave four places, and about the race's own default towns.
+ */
+export const WORLD_RACE_MIN_METRES = 2000;
+/** Less road than this between the places (each highway counted once) is not a race, however many laps it is driven. */
+export const WORLD_RACE_MIN_ROAD_METRES = 500;
+
 function ownRegions(): ReadonlyArray<WorldRegion> | null {
   try {
     const found = import.meta.glob('../world.ts', { eager: true, import: 'WORLD' }) as Record<string, { regions?: ReadonlyArray<WorldRegion> } | undefined>;
@@ -245,12 +360,18 @@ export function startWorldRace(ctx: GameContext, options: WorldRaceOptions): Wor
   const origin = world.map.chunks!.origin;
   const legs = world.highways.map((h) => h.map((p) => ({ x: p.x, z: p.z })));
   const home = world.places[0]?.centre;
-  const course = createWorldCourse({ legs, start: home ? { x: home.x, z: home.z } : undefined, heightAt: (x, z) => world.heightAt(x, z), origin: () => ({ x: origin.x, z: origin.z }), finishKm: options.finishKm ?? null });
-  if (legs.length === 0 || course.length < 500) { world.dispose(); throw new Error('this world has no highway between its places to race on (it needs at least two places)'); }
+  if (legs.length === 0) { world.dispose(); throw new Error('this world has no highway between its places to race on (it needs at least two places)'); }
+  const road = legs.reduce((sum, leg) => sum + pathLength(leg), 0);
+  if (road < WORLD_RACE_MIN_ROAD_METRES) { world.dispose(); throw new Error('this world has only ' + Math.round(road) + ' m of highway between its places, too little to race on (a place further away, with distance, gives the race its road)'); }
+  const hubs = [...world.places, ...world.lands].map((p) => ({ x: p.centre.x, z: p.centre.z, r: p.radius }));
+  // The race's length: the user's finishKm, and never shorter than WORLD_RACE_MIN_METRES — laps of the world's roads if need be.
+  const asked = options.finishKm != null && Number(options.finishKm) > 0 ? Number(options.finishKm) * 1000 : 0;
+  const course = createWorldCourse({ legs, hubs, minLength: Math.max(WORLD_RACE_MIN_METRES, asked), start: home ? { x: home.x, z: home.z } : undefined, heightAt: (x, z) => world.heightAt(x, z), origin: () => ({ x: origin.x, z: origin.z }), finishKm: options.finishKm ?? null });
   const start = course.startPose;
   const putOnStart = (): void => { options.car.position.set(start.x, start.y, start.z); options.car.rotation.y = start.heading; };
   putOnStart();
-  const finish = course.finish ?? course.length;                         // the world's route ends: so does an "endless" race, for now
+  // The course's end (whole laps of the world's roads when the route alone was short): an "endless" race finishes there too.
+  const finish = course.finish ?? course.length;
   const race = createRace(ctx.scene, { stream: course, opponents: options.opponents ?? 3, finishDistance: finish });
   return {
     world, course, race,

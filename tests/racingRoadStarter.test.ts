@@ -5,6 +5,9 @@ import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 
 // Execute the emitted component, not a duplicate starter implementation. WebGL is
 // intentionally replaced; the real road geometry/stream is exercised separately.
+/** The game's own road (objects.ts projectRoadPlan, from src/game/gameSeed.ts — Q-3373), as the mocked kit hands it out. */
+const OWN_ROAD = { pieces: [], seed: 4242 };
+
 function mountStarter(props: Record<string, unknown> = {}, raceCustom?: Record<string, unknown>) {
   let effect: (() => (() => void)) | undefined;
   const handlers = new Map<string, () => void>();
@@ -33,7 +36,7 @@ function mountStarter(props: Record<string, unknown> = {}, raceCustom?: Record<s
     './three/race': { createRace },
     './play/raceCustom': raceCustom ?? { projectRaceChoices: () => ({ car: null, track: null }), applyCarChoice: () => ({ showing: 'kit', error: null, ready: Promise.resolve(), dispose: () => {} }),
       loadModelTrack: async () => ({ ok: false, reason: 'not used here' }) },
-    './three/objects': { createTrackStream: create, createCar: () => new THREE.Group(), createVehicleState: () => ({ speed: 20, heading: 0 }),
+    './three/objects': { createTrackStream: create, projectRoadPlan: () => OWN_ROAD, createCar: () => new THREE.Group(), createVehicleState: () => ({ speed: 20, heading: 0 }),
       driveVehicle: (_car: unknown, drive: unknown) => drive,
       RACING_ROAD_MAPS: Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Map ${i + 1}`, lengthKm: 10, lighting: i === 11 ? 'night' : 'day' })) },
   };
@@ -62,7 +65,7 @@ function mountStarter(props: Record<string, unknown> = {}, raceCustom?: Record<s
 describe('generated racing starter actually consumes the reusable library', () => {
   it('constructs default stream and shows all12 identities, distinct themes and12→1 loop', () => {
     const m = mountStarter();
-    expect(m.create).toHaveBeenCalledWith(undefined, { detail: 'lite' });
+    expect(m.create).toHaveBeenCalledWith(OWN_ROAD, { detail: 'lite' });               // no plan given: this game's own road
     expect(m.game.start).toHaveBeenCalledOnce();
     expect(m.context.follow).toHaveBeenCalledOnce();
     const skies = new Set<number>();

@@ -20,6 +20,7 @@ import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION, WORKSPACE_O
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { eraseUserSnapshots, liveSnapshotEraseDeps } from '../lib/snapshotErase';
 import { eraseUserWorkspaceAssetObjects, unconfirmedWorkspaceAssetEraseReport } from '../lib/workspaceAssetErase';
+import { eraseUserProofPictures } from '../AgentV3/gameProofPictures';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { deIdentifyPublishedListings, getListingDb } from '../lib/publishedListingErase';
 import { sendSafeError } from '../lib/httpError';
@@ -323,6 +324,11 @@ export function registerProfileRoutes(app: Express): void {
           ...unconfirmedWorkspaceAssetEraseReport(),
           failures: ['Workspace asset storage could not confirm removal.'],
         }));
+      // …AND THE GAME PROOF PICTURES (Q-3410): the playtest's private screenshots of the user's game, filed under the
+      // VERIFIED owner since Q-3410 so this can find them before their 30 days end. Owner-less legacy pictures are
+      // reported as a limitation (they still expire by day 30). Best-effort like every eraser here: reported, never thrown.
+      const gameProofPictures = await eraseUserProofPictures(identity.uid)
+        .catch(() => ({ attempted: false, ownerPicturesRemoved: false, foldersDeleted: 0, failures: ['Game proof picture storage could not confirm removal.'], limitations: [] as string[] }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
       // deletion then failed, with the owner unable to sign in and retry. Retained unverified records
       // are disclosed even when sign-in removal succeeds.
@@ -395,6 +401,8 @@ export function registerProfileRoutes(app: Express): void {
         snapshots,
         // A separate storage outcome, never folded into Firestore's document deletion count.
         workspaceAssetObjects,
+        // Its own line (Q-3410): the game proof pictures, with any legacy owner-less limitation said, never folded in.
+        gameProofPictures,
         proAttachments: { removed: true },
         /**
          * Its own line, and the one line here that is NOT a deletion count. `totalDeIdentified` is how

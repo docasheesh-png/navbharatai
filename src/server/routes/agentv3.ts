@@ -24895,7 +24895,7 @@ async function noteBuildOutcome(
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
-          keepPictures: gameProofKeeper({ buildId, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363
+          keepPictures: gameProofKeeper({ buildId, verifiedOwnerUid: verified?.uid, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363, filed by the VERIFIED owner (Q-3410)
         });
         if (played) {
           gameProof = played.proof;

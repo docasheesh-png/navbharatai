@@ -4235,7 +4235,7 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
       setNotice('Loading your track...');
       void loadModelTrack(trackChoice).then((built) => {
         if (released) { if (built.ok) built.track.dispose(); return; }
-        if (built.ok) { setNotice(built.notes.length ? built.notes.join(' ') : null); begin(built.track); }
+        if (built.ok === true) { setNotice(built.notes.length ? built.notes.join(' ') : null); begin(built.track); }
         else { setNotice('Your track "' + trackName + '" cannot be raced on: ' + built.reason + '. This race runs on the road library instead.'); begin(null); }
       });
     } else begin(null);

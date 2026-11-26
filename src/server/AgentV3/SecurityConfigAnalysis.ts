@@ -55,6 +55,18 @@ const RULES: Rule[] = [
 
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
 
+/**
+ * A payment ORDER is created in this file — a gateway SDK call or its REST endpoint. Only such a file is checked
+ * for a client-chosen amount, so an ordinary form that happens to post `amount` is never flagged.
+ */
+const PAYMENT_ORDER_CREATE =
+  /\b(?:orders|paymentIntents|paymentLinks|invoices)\.create\s*\(|\bcheckout\.sessions\.create\s*\(|\bPGCreateOrder\s*\(|api\.razorpay\.com\/v1\/orders|api\.cashfree\.com\/pg\/orders|sandbox\.cashfree\.com\/pg\/orders|api\.stripe\.com\/v1\/(?:payment_intents|checkout\/sessions)/;
+/** The amount to charge read straight from what the browser sent. */
+const CLIENT_AMOUNT =
+  /\b(?:req|request)\.(?:body|query)\??\.(?:amount|price|total|order_amount|unit_amount|amountInPaise|amount_in_paise)\b|\{[^}=]*\b(?:amount|price|total|order_amount|unit_amount)\b[^}=]*\}\s*=\s*(?:req|request)\.(?:body|query)\b/;
+const CLIENT_PRICE_MESSAGE =
+  'The amount charged comes from the request the browser sent — anyone can change it and pay ₹1 for a ₹999 item. Look the price up on the server from the product/plan id (or recompute the cart there). If the user is meant to choose the amount (a donation or wallet top-up), validate a minimum and maximum on the server instead.';
+
 /** Scan one file's content for insecure security-config patterns. PURE. */
 export function scanSecurityConfig(file: string, content: string): SecConfigIssue[] {
   if (!CODE_RE.test(file) || !content) return [];
@@ -70,7 +82,48 @@ export function scanSecurityConfig(file: string, content: string): SecConfigIssu
       }
     }
   }
+  // CLIENT-CHOSEN PRICE (security audit 2026-11-21): only in a file that creates a payment order.
+  if (PAYMENT_ORDER_CREATE.test(content)) {
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*(\/\/|\*)/.test(lines[i])) continue;
+      if (CLIENT_AMOUNT.test(lines[i])) {
+        issues.push({ severity: 'medium', rule: 'client-trusted-price', message: CLIENT_PRICE_MESSAGE, file, line: i + 1 });
+        break; // one finding per file is the actionable signal
+      }
+    }
+  }
   return issues;
+}
+
+/** The app's OWN sign-in style route: login, sign-up, OTP, password reset — the routes attackers hammer. */
+const AUTH_ROUTE =
+  /\b(?:app|router|server|api|auth)\.(?:post|put|all)\s*\(\s*['"`][^'"`]*\/(?:login|log-in|signin|sign-in|signup|sign-up|register|otp|send-otp|verify-otp|forgot-password|reset-password|password-reset|password\/reset)(?:['"`/?]|$)/i;
+/** Any rate limiter anywhere in the project's backend. */
+const RATE_LIMITER =
+  /express-rate-limit|express-slow-down|rate-limiter-flexible|@fastify\/rate-limit|hono-rate-limiter|\brateLimit\s*\(|\bslowDown\s*\(|\bRateLimiter(?:Memory|Redis)\b|\b\w*[lL]imiter\b/;
+const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+
+/**
+ * PROJECT-LEVEL: the app has its own sign-in routes and no rate limiter anywhere (security audit 2026-11-21).
+ * Project-wide because a limiter is usually mounted in a different file (`app.use('/api/auth', limiter)`).
+ * Apps that use a hosted auth (Supabase/Firebase) have no such route and are never flagged.
+ */
+export function scanProjectSecurityConfig(files: ReadonlyArray<{ path: string; content: string }>): SecConfigIssue[] {
+  const code = files.filter((f) => CODE_RE.test(f.path) && !SKIP_PATH.test(f.path) && typeof f.content === 'string');
+  if (code.some((f) => RATE_LIMITER.test(f.content))) return [];
+  for (const f of code) {
+    const lines = f.content.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*(\/\/|\*)/.test(lines[i])) continue;
+      if (AUTH_ROUTE.test(lines[i])) {
+        return [{
+          severity: 'medium', rule: 'auth-route-no-rate-limit', file: f.path, line: i + 1,
+          message: 'Sign-in, sign-up, OTP or password-reset routes have no rate limit anywhere in the app — anyone can try passwords or send OTPs (each a paid SMS) without limit. Add a limiter such as express-rate-limit on these routes.',
+        }];
+      }
+    }
+  }
+  return [];
 }
 
 /** A short, honest security-config block for the `evaluate` output. */

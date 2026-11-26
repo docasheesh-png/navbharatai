@@ -131,6 +131,18 @@ export function asksForBattleRoyale(text: string | null | undefined): boolean {
 }
 
 /**
+ * Does this turn's request ask for enemies — in English, Hinglish or Hindi? BR2532 (2026-11-26): an EDIT turn ("enemy
+ * bana, hero par attack kare") records no game contract, so the playtest never looked for enemies on that turn. The
+ * contract's own word list, plus the Hindi and Hinglish words for an enemy. A declined sentence ("no enemies") is not a
+ * request. "bot" is left out on purpose — a chatbot is not an enemy. PURE.
+ */
+export function asksForEnemies(text: string | null | undefined): boolean {
+  const raw = withoutDeclinedSentences(String(text ?? ''));
+  if (FEATURES.find(([f]) => f === 'enemies')![1].test(raw)) return true;
+  return /\b(dushman|dushmano|villains?|gund[ae]|goons?|rakshas|raakshas|bhoot)\b/i.test(raw) || /(दुश्मन|गुंडा|गुंडे|राक्षस|भूत)/.test(raw);
+}
+
+/**
  * An action, shooter or open-world game (PUBG, Free Fire, BGMI, GTA, in any language) is a world of
  * enterable houses. A flat 2D game is not. PURE.
  */

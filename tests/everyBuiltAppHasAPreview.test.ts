@@ -232,7 +232,9 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
   it('the list route exists and pages the FILE store by default, joined in batched reads', () => {
     expect(route).toContain("app.get('/api/admin/apps', verifyAdminToken");
     const block = route.slice(route.indexOf("app.get('/api/admin/apps'"), route.indexOf("app.post('/api/admin/apps/:workspaceId/preview'"));
-    expect(block).toContain('listWorkspaceAppsPage({ limit, afterDocId: after })');
+    // 2026-11-26: the page carries the admin's order (newest / oldest); a filtered page reads the same store in bounded batches.
+    expect(block).toContain('listWorkspaceAppsPage({ limit, afterDocId: after, order })');
+    expect(block).toContain('listWorkspaceAppsPage({ limit: SCAN_BATCH, afterDocId: resumeAfter, order })');
     expect(block).toContain('deploymentStore.getMany(ids)');
     expect(block).toContain('sandboxStore.getMany(ids)');
     expect(block).toContain('clampPageSize(req.query.limit ?? BUILT_APPS_PAGE_SIZE)');
@@ -253,7 +255,7 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
     const at = fileStore.indexOf('export async function listWorkspaceAppsPage');
     expect(at).toBeGreaterThan(0);
     const body = fileStore.slice(at, fileStore.indexOf('\nexport async function getWorkspaceAppsMany'));
-    expect(body).toContain("orderBy('savedAt', 'desc')");
+    expect(body).toContain("orderBy('savedAt', opts.order === 'asc' ? 'asc' : 'desc')");
     expect(body).toContain('startAfter(after)');
     expect(body).toContain('!isAppWorkspaceKey(d.id)'); // every derived key, not ::green alone — theAdminSeesWhoBuiltWhat.test.ts
     expect(body).toContain('if (fileCount <= 0) continue;');
@@ -262,7 +264,9 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
 
   it('the panel asks for twelve, appends the next twelve, and offers a preview on every row', () => {
     expect(panel).toContain('const PAGE_SIZE = 12;');
-    expect(panel).toContain("params.set('limit', String(PAGE_SIZE));");
+    // The query is built by ONE pure helper (adminAppModeration.appsListParams), still twelve at a time.
+    expect(panel).toContain('limit: PAGE_SIZE');
+    expect(readFileSync(join(__dirname, '..', 'src/lib/adminAppModeration.ts'), 'utf8')).toContain("p.set('limit', String(opts.limit));");
     expect(panel).toContain('Load ${PAGE_SIZE} more');
     expect(panel).toContain('<Eye size={11} /> Preview');
     expect(sheet).toContain("fetch(`/api/admin/apps/${encodeURIComponent(row.workspaceId)}/preview`");

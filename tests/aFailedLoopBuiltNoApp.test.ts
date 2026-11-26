@@ -39,6 +39,6 @@ describe('🔴 the same class in the report itself: the fallback line says when 
     expect(surplusFallbackMessage('mid_build_after_write')).not.toContain('before any user file');
     expect(surplusFallbackMessage('mid_build_engine_unavailable')).toContain('before any user file');
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toContain('message: surplusFallbackMessage(reason),');
+    expect(route).toContain('message: surplusFallbackMessage(reason, nextRung),');
   });
 });

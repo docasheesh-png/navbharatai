@@ -22,6 +22,14 @@ export function varietyIndex(projectId: string, facet: string, size: number): nu
   return digest.readUInt32BE(0) % n;
 }
 
+/**
+ * A whole 32-bit seed fixed by the project id and the facet (never 0) — for a choice that is a number, not a pool entry
+ * (the open world's WORLD.seed). The same digest as varietyIndex, so the two never disagree about a project. PURE.
+ */
+export function varietySeed(projectId: string, facet: string): number {
+  return createHash('sha256').update(facet + ':' + String(projectId ?? '')).digest().readUInt32BE(0) || 1;
+}
+
 /** The pool entry this project gets for this facet. PURE. */
 export function pickVariant<T>(projectId: string, facet: string, pool: readonly T[]): T {
   if (!pool.length) throw new Error('pickVariant: empty pool');

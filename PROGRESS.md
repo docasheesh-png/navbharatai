@@ -6244,6 +6244,12 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Result:** before 0.2–4.4 fps, after 9.3–11.6 fps. **The ≥ 20 fps target was NOT reached.** The geometry tier alone did not move the fps. The ceiling is software compositing reading the canvas back every frame (Q-3381, blocked: it needs a GPU or a compositor change in the sandbox). The checker-side lock stub for games that do not use the kit shell is Q-3380 (gamePlaytest.ts is being edited by #4541/#4542).
 - **Tests:** `tests/aCityIsLightWithoutAGpu.test.ts`. Mesh and triangle budgets per tier on the real kit, identical colliders, traffic and people working in the light tier, tier selection, the webdriver guard, module-subset imports. Each was proven by reversion.
 - **Not done:** parked (drivable) cars stay whole in both tiers (68 meshes for 4 cars), and no impostors for far cities.
+## 2026-11-26 — One seed rule, not four copies (reconciling #4541 with #4535)
+
+- **What was found:** after #4535 and #4541 both merged, the same per-project pick existed four times: #4535's starter look (`'player:'`), realistic outfit (`'human:'`) and world seed (`'world:'`), each a private `createHash('sha256').update(facet + ':' + id)`, plus #4541's `projectVariety.ts`. This is the same class as the drifted `safeRelPath` copies: duplicates that agree today and can drift tomorrow.
+- **Fix:** all three now call `projectVariety.ts` (`pickVariant` / the new `varietySeed`). The digests are identical, so no existing project's hero, outfit or map changes; a test proves byte-identity against the old formula for several ids.
+- **Lock:** a census in `tests/aNewGameGetsItsOwnLookAndKeepsIt.test.ts` fails when any server file hashes a facet and a project id by itself. Proved by putting back one private copy: the census fails.
+- **Queue:** Q-3370 and Q-3371 were closed by the #4541 merge, and Q-3372 by the #4535 merge. Q-3373 (action town seed) is no longer waiting on #4535; its row now gives the design it needs.
 ## 2026-11-26 — The game library's storage budget is 400 MiB (admin decision)
 
 - **Why:** after the Indian clothes (#4540) the catalogue was 307.6 MiB of the 320 MiB budget, leaving about 12 MiB (roughly five animated characters).

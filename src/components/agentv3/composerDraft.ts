@@ -36,3 +36,19 @@ export function loadDraft(storage?: ReadableStorage): string {
 function safeLocalStorage(): Storage | null {
   try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; }
 }
+
+/**
+ * Put `insert` where the caret is (or over the selected text) and say where the caret goes next — the user's own words are
+ * never replaced (admin 2026-11-26: a Game Library pick used to overwrite the whole box). A space is added on a side only
+ * where the neighbouring text is not already a space. No caret known (the box was never focused) ⇒ at the end. PURE.
+ */
+export function insertAtCursor(text: string, insert: string, start: number | null, end: number | null): { text: string; caret: number } {
+  const value = String(text ?? '');
+  const from = typeof start === 'number' && start >= 0 && start <= value.length ? start : value.length;
+  const to = typeof end === 'number' && end >= from && end <= value.length ? end : from;
+  const before = value.slice(0, from), after = value.slice(to);
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  const trail = after && !/^\s/.test(after) ? ' ' : after ? '' : ' ';
+  const out = before + lead + insert + trail + after;
+  return { text: out, caret: (before + lead + insert + trail).length };
+}

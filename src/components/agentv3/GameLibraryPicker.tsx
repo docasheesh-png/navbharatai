@@ -46,7 +46,11 @@ const label = (category: string) => category.replace(/[-_]+/g, ' ').replace(/\b\
 
 interface Props {
   /** Receives the ready-to-send instruction for the tapped model. */
-  onPick: (text: string) => void;
+  /**
+   * A tile was chosen. `mention` is the short id the composer inserts at the cursor (@character:<id>, @car:<id>, @model:<id>);
+   * the build reads it into the full instruction (server: libraryMention.ts). The user's own text is never replaced.
+   */
+  onPick: (mention: string) => void;
 }
 
 export function GameLibraryPicker({ onPick }: Props) {
@@ -140,7 +144,7 @@ export function GameLibraryPicker({ onPick }: Props) {
             key={row.id}
             type="button"
             title={row.animations.length ? `${row.name} — moves: ${row.animations.join(', ')}` : row.name}
-            onClick={() => { const text = use === 'car' ? data.carPrompts[row.id] : use === 'character' ? data.characterPrompts[row.id] : data.prompts[row.id]; if (text) onPick(text); }}
+            onClick={() => { const text = use === 'car' ? data.carPrompts[row.id] : use === 'character' ? data.characterPrompts[row.id] : data.prompts[row.id]; if (text) onPick(`@${use === 'add' ? 'model' : use}:${row.id}`); }}
             className="flex flex-col items-center gap-0.5 rounded-lg border border-line bg-surface p-1 text-center hover:border-accent"
           >
             {row.thumb

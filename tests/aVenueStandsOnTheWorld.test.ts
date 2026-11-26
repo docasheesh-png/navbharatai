@@ -130,7 +130,8 @@ describe('🏟️ the open world: a venue region', () => {
 
   it('is drawn when the player comes near (markings at real sizes, goals solid), moves with the origin, and leaves with the world', () => {
     const c = context();
-    const world = OW.createOpenWorld(c, { seed: 7, regions: [city, { id: 'ground', kind: 'venue', venue: 'football-field', toward: 'north', distance: 3000 }] });
+    // boundary: false — this walks 6 km past the venue to see it hidden, beyond the edge a game has by default (2026-11-26).
+    const world = OW.createOpenWorld(c, { seed: 7, boundary: false, regions: [city, { id: 'ground', kind: 'venue', venue: 'football-field', toward: 'north', distance: 3000 }] });
     const v = world.venues[0];
     world.frame(c, 1 / 60);
     expect(v.built).toBe(false);

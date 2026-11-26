@@ -45,7 +45,7 @@ export interface CityPeopleOptions {
   hittable?: boolean;
 }
 
-/** How long a knocked-down person lies before getting up, seconds. */
+/** How long a knocked-down person lies before getting up, seconds (a punch, a shot or a car — one number for every blow). */
 export const DOWN_SECONDS = 6;
 /** How far the player is kept from a person's centre when the crowd is solid, metres. */
 export const PERSON_RADIUS = 0.45;
@@ -103,9 +103,6 @@ export interface CityPeople {
   hit(origin: THREE.Vector3, yaw: number, range?: number, arc?: number): THREE.Vector3 | null;
   dispose(): void;
 }
-
-/** How long a punched person lies on the ground, in seconds. */
-export const DOWN_SECONDS = 4;
 
 /** How fast people cross a road, at least (m/s). */
 export const CROSS_SPEED = 1.4;

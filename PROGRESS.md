@@ -6634,3 +6634,12 @@ three/rooms.ts: joinRoom on the user's Supabase Realtime (raw websocket, Phoenix
 - **Siblings:** every `ILLEGAL_RULES` rule shares the new pairing on the publish path; `CONTENT_RULES` already used bounded windows; `DeploymentStore` never ran the classifier. **Open sibling Q-3561 (🟡 decision):** prompt triage false-blocks "a cricket game for kids with a hardcore mode" and similar prompts; out of scope by instruction.
 - **Accounts:** none marked. A refused publish saved nothing and logged only `STORE_PUBLISH_REFUSED`.
 - **Lock:** `tests/aKitGameIsNotACrime.test.ts` (census of every recipe; failed 11 tests when whole-document pairing was restored) and the hold tests in `storePublishSafety.test.ts` (failed 4 when "illegal refuses" was restored).
+
+## 2026-11-26 — main red after the game stack merged: two sessions built the same crowd and features-list code
+
+The game stack (#4578…#4584) and another session's street-danger work (e92a4949, "city people are solid and a punch knocks
+one down") both added crowd knock-down and both learned to start a game's features list. The merge kept both: citypeople.ts
+declared DOWN_SECONDS twice (6 and 4) — a parse error that failed every suite that writes the 3D kit — and
+GAME_FEATURES_INDEX_WITH_DANGER stayed a hand-written copy of what the dispatcher now builds with featuresIndexWith.
+Fix: one DOWN_SECONDS (6, every blow); GAME_FEATURES_INDEX_WITH_DANGER is derived from featuresIndexWith(GAME_FEATURES_INDEX,
+'streetDanger'), so the dispatcher and the fixture cannot drift; the street-danger test asserts the dispatcher's real line.

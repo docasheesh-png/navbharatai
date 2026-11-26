@@ -75,7 +75,8 @@ describe('a city you walk through has a fight in it — by intent, not by the wo
   it('wired: the dispatcher writes streetDanger.ts only when the systems are really there, lists it, and tells the builder', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
     expect(src).toContain("if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {");
-    expect(src).toContain('danger ? GAME_FEATURES_INDEX_WITH_DANGER : GAME_FEATURES_INDEX');
+    // One list, built once: the enemies the request asked for and street danger each add themselves (featuresIndexWith).
+    expect(src).toContain("indexSource = featuresIndexWith(indexSource, 'streetDanger') ?? indexSource;");
     expect(src).toContain('The game ALREADY has its fight: src/game/features/streetDanger.ts');
   });
 });

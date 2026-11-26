@@ -1,4 +1,5 @@
 import { varietySeed } from './projectVariety';
+import { featuresIndexWith } from './GameEnemiesFeature';
 
 // THE OPEN-WORLD STARTER (failedbr #2485, 2026-11-21 — admin: "is game me to map aya hi nahi, bas ek character aya … jo
 // joystick se hawa me move kar raha hai … library ka use kyu nahi ho raha, hona chahiye").
@@ -2254,20 +2255,6 @@ export default defineFeature<OpenWorld>({
 });
 `;
 
-/** The game's list of features with street danger already in it (the platform wrote the file beside it). */
-export const GAME_FEATURES_INDEX_WITH_DANGER = [
-  '// THIS GAME, AS A LIST. Each feature is one file in this folder that adds one thing to the game.',
-  '// To ADD something: create src/game/features/<name>.ts with defineFeature({ id, setup, update }) and add it to the list below.',
-  '// To CHANGE one thing: edit only that feature\'s file. To REMOVE it: take it out of the list. Nothing else needs to change.',
-  "import type { GameFeature } from '../play/features';",
-  "import type { OpenWorld } from '../play/openWorld';",
-  "import streetDanger from './streetDanger';",
-  '',
-  'export const FEATURES: GameFeature<OpenWorld>[] = [',
-  '  streetDanger, // enemies, bystanders and the police — src/game/features/streetDanger.ts',
-  '];',
-  '',
-].join('\n');
 
 export const GAME_FEATURES_INDEX_PATH = 'src/game/features/index.ts';
 /** The game's own list of features — the user's file (never a kit file): created once, then only ever added to. */
@@ -2282,6 +2269,13 @@ export const GAME_FEATURES_INDEX = [
   '];',
   '',
 ].join('\n');
+
+/**
+ * The game's list of features with street danger already in it (the platform wrote the file beside it) — built by the SAME
+ * featuresIndexWith the dispatcher uses (it was a hand-written copy; when enemies and street danger both learned to start a
+ * game's list, two writers drifted and main broke, 2026-11-26).
+ */
+export const GAME_FEATURES_INDEX_WITH_DANGER: string = featuresIndexWith(GAME_FEATURES_INDEX, 'streetDanger') ?? GAME_FEATURES_INDEX;
 
 export { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH };
 

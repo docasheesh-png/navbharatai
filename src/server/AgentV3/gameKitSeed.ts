@@ -59,6 +59,7 @@ import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
+import { wantsSwimming } from '../lib/GameOpenWorldGenerator';
 import { genreKitsFor } from '../lib/GameGenreKitsGenerator';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
 import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
@@ -317,7 +318,7 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_open_world') {
     const setting = worldSettingFrom(request);
     const regions = worldRegionsFor(setting);
-    return { mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request), ...(regions.length ? { regions } : {}) };
+    return { mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request), ...(regions.length ? { regions } : {}), ...(wantsSwimming(request) ? { swim: true } : {}) };
   }
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers

@@ -6236,3 +6236,7 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
   - **Smaller files:** the garment files now drop what nothing references (`pruneGlb`: the detached outfit, its materials and textures, the old head-only face list). Each model went from 3.45 to 2.4 MB, and the four look identical (the same changed-pixel proof at admission).
   - **Size now:** the catalogue is 307.6 MiB, inside the admin's 320 MiB budget, which stays the only limit. The snapshot line was replaced by a note.
   - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.
+
+## 2026-11-26 — No pointer lock in the platform's browsers (Q-3380, follow-up to #4552)
+- gamePlaytest.ts (desktop page) and clickExplorer.ts (every fresh page) stub Element.prototype.requestPointerLock before app code runs, so a game the builder wrote itself (or an older kit copy) can no longer flood the headless page with synthetic input after the playtest clicks its canvas (#4552 measured 4 → 15 fps with the lock stubbed).
+- Test: tests/aPlaytestBrowserNeverLocksThePointer.test.ts (removing the playtest install fails it).

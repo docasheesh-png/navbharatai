@@ -33,7 +33,7 @@ import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
 import { raceWorldYes } from '../src/server/AgentV3/mapGrowthIntent';
 import { enemyRequestFrom } from '../src/server/lib/GameEnemiesFeature';
-import { cinematicsWanted } from '../src/server/lib/GameOpenWorldGenerator';
+import { cinematicsWanted, openBuildingsWanted } from '../src/server/lib/GameOpenWorldGenerator';
 import { cricketRulesFileSource } from '../src/server/lib/BoardGamesGenerator';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
 import { reviewNotReadyUserLine, formatPartialReview, salvageReview } from '../src/server/AgentV3/partialReview';
@@ -180,6 +180,12 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  // Going inside the city's buildings (admin 2026-11-26 #2, Q-3510): the knowledge base tells the user to ask in these words.
+  'building ke andar jaana add karo': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/gameKitSeed.ts (openBuildingsWanted → WORLD.openBuildings); src/server/lib/GameCityGenerator.ts (city.openLot)`,
+    why: 'a build order: the first open-world build sets WORLD.openBuildings, and on a later turn the builder is told to set it; the open world opens the door the player walks up to',
+    proof: () => reachesWork('building ke andar jaana add karo') && openBuildingsWanted('building ke andar jaana add karo') && read('src/server/lib/GameOpenWorldGenerator.ts').includes('t.city.openLot(lot)'),
+  },
   // The cricket rules are the user's file (admin 2026-11-26, Q-3515): the knowledge base tells the user to change them by asking.
   '10 over ka match banao': {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/ToolDispatcher.ts (generate_board_games → src/game/cricketRules.ts); src/server/lib/BoardGamesGenerator.ts (cricketRulesFileSource, CRICKET_RULES)`,

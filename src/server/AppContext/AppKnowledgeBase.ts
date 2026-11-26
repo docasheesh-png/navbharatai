@@ -930,7 +930,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     name: 'Go inside the city\'s buildings in an open-world game',
     path: 'NavBharatAI Pro → chat → in an open-world game with a city, ask to go inside the buildings',
     description: 'City buildings are scenery with a painted door by default. Ask to go inside and every building opens as you walk up to its front door: it becomes a walk-in building on the same spot, facing its street, with a door that opens with Use (E on a keyboard), rooms you can walk around, a floor to stand on, walls you cannot walk through, and a roof that fades while you are inside. A tall building keeps its upper floors above.',
-    howToUse: 'Say "city ke ghar / building ke andar ja sake" (or "buildings should be enterable"), then walk up to any front door and press Use.',
+    howToUse: 'Say "building ke andar jaana add karo" (or "make the buildings enterable"), then walk up to any front door and press Use.',
     relatedFeatures: ['game_enemies_and_crowd', 'game_play_basics'],
     keywords: ['ghar ke andar', 'building ke andar', 'andar ja sake', 'enter building', 'enterable', 'darwaza', 'door', 'painted door', 'dukaan ke andar', 'house inside'],
   },

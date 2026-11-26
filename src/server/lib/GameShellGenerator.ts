@@ -4026,7 +4026,7 @@ import * as THREE from 'three';
 import { Game } from './Game';
 import { events } from './core/events';
 import { state } from './core/state';
-import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
+import { createCar, createTrackStream, createVehicleState, driveVehicle, projectRoadPlan, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
 import { createRace, type Race } from './three/race';
 import { applyCarChoice, loadModelTrack, loadWorldRace, projectRaceChoices, type CarChoice, type CarModelHandle, type ModelTrack, type TrackChoice, type WorldRaceHandle, type WorldRaceModule } from './play/raceCustom';
 
@@ -4097,7 +4097,8 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
               try { worldRace = worldMod.startWorldRace(ctx, { car, opponents, finishKm }); tuning.ground = worldRace.groundAt; }
               catch (error) { worldRace = null; setNotice('This race cannot run on the world (' + (error instanceof Error ? error.message : 'the world could not be made') + '), so it runs on the road library.'); }
             }
-            if (!custom && !worldRace) stream = createTrackStream(config.current.plan, { detail: 'lite' });
+            // No plan given: this game's own road (projectRoadPlan: its start map and land, from src/game/gameSeed.ts).
+            if (!custom && !worldRace) stream = createTrackStream(config.current.plan ?? projectRoadPlan(), { detail: 'lite' });
             const start = worldRace ? worldRace.startPose : custom ? custom.startPose : stream!.startPose;
             car = car ?? createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
             car.position.set(start.x, start.y, start.z);
@@ -4233,7 +4234,7 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
   return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
     <div ref={host} style={{ position: 'absolute', inset: 0 }} />
     <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
-      <div ref={hud}>{trackChoice?.model ? 'Your track' : '01/12 · Highway Straight · 0/10 km · Loop 1'}</div>
+      <div ref={hud}>{trackChoice?.model ? 'Your track' : 'Road library · Loop 1'}</div>
       <small>W/S or arrows: gas/brake · A/D: steer · Touch controls on phones</small>
     </div>
     <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {

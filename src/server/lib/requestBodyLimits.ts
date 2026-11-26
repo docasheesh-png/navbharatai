@@ -73,6 +73,7 @@ export const LARGE_BODY_ROUTES: readonly BodyRoute[] = [
   { path: '/api/admin/reports/:id/reply', why: '`screenshot` — the route reads a data URL like the user reply does' },
   { path: '/api/profile/photo', why: '`dataUrl` — the profile picture (ProfileEditForm.tsx)' },
   { path: '/api/mobile-ship/setup', why: '`iconDataUrl` — the store app icon (StoreBuildPanel.tsx)' },
+  { path: '/api/mobile-builds', why: '`iconDataUrl` — the same store app icon, for a Native Cloud Build (NativeBuildPanel.tsx); the route refuses one over 3 MB' },
   { path: '/api/nav-store/web/publish', why: '`iconDataUrl` and `screenshots` for the store listing (NavAppStore.tsx)' },
 
   // ── Whole projects (file maps) ───────────────────────────────────────────────────────────────────

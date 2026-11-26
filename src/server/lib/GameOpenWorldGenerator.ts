@@ -2255,6 +2255,15 @@ export default defineFeature<OpenWorld>({
 });
 `;
 
+/**
+ * Street danger for a game whose own enemies are already written (GameEnemiesFeature.ts — the enemies the user named): the
+ * same bystanders and police, and NO enemies of its own, so the game never gets a second set. PURE.
+ */
+export function streetDangerSource(opts: { ownEnemies?: boolean } = {}): string {
+  return opts.ownEnemies ? GAME_STREET_DANGER_FEATURE.replace('  enemies: 3,          // hostile people near the player at once (0 = none)', '  enemies: 0,          // hostile people near the player at once — 0: this game\'s own enemies are in features/enemies.ts')
+    : GAME_STREET_DANGER_FEATURE;
+}
+
 
 export const GAME_FEATURES_INDEX_PATH = 'src/game/features/index.ts';
 /** The game's own list of features — the user's file (never a kit file): created once, then only ever added to. */

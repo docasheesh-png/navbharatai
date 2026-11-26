@@ -22,7 +22,8 @@ import { workaroundCountOf } from '../../lib/healIssue';
 import { GREEN_RESTORE_UNCHECKED_DETAIL } from './GreenGuard';
 import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
 import { isOrphanedReport, settleOrphanedReport, isAbandonedReport } from './orphanedBuildReport';
-import { workspaceBuildIsLive, type BuildLeaseStore } from './workspaceBuildLease';
+import { workspaceBuildIsLive, workspaceLeaseEnabled, type BuildLeaseStore } from './workspaceBuildLease';
+import { BoundedCache } from '../lib/boundedCache';
 import { deadBuildHandoff, buildEndedUnrecorded } from './deadBuildHandoff';
 
 const COLLECTION = 'workspace_diagnostics_v3';
@@ -743,8 +744,8 @@ export async function settleAbandonedBuildReports(workspaceId: string, nowMs: nu
 }
 
 /** One status-poll settle per workspace per minute per instance — the poll can arrive every few seconds. */
-const lastStatusSettle = new Map<string, number>();
 export const STATUS_SETTLE_EVERY_MS = 60_000;
+const lastStatusSettle = new BoundedCache<string, true>({ maxEntries: 5_000, ttlMs: STATUS_SETTLE_EVERY_MS });
 
 /**
  * Called by `/api/agentv3/status` with the lease answer it already read. Fire-and-forget: never delays the poll, never
@@ -752,12 +753,13 @@ export const STATUS_SETTLE_EVERY_MS = 60_000;
  */
 export function settleAbandonedReportsOnStatus(workspaceId: string | null | undefined, leaseLive: boolean | null, nowMs = Date.now()): void {
   if (!workspaceId || leaseLive !== false) return;
-  const last = lastStatusSettle.get(workspaceId) ?? 0;
-  if (nowMs - last < STATUS_SETTLE_EVERY_MS) return;
-  lastStatusSettle.set(workspaceId, nowMs);
-  if (lastStatusSettle.size > 5_000) lastStatusSettle.clear(); // bounded; a cleared entry only allows one extra read
+  if (lastStatusSettle.get(workspaceId, nowMs)) return;
+  lastStatusSettle.set(workspaceId, true, nowMs);
   void settleAbandonedBuildReports(workspaceId, nowMs, leaseLive).catch(() => 0);
 }
+
+/** When the sweep last logged a failure (one line an hour at most). */
+let lastSweepErrorLogAt = 0;
 
 /**
  * The sweep (server.ts, every two minutes, one instance): in-progress reports across workspaces, a bounded batch per
@@ -765,7 +767,7 @@ export function settleAbandonedReportsOnStatus(workspaceId: string | null | unde
  * how many were settled. Never throws.
  */
 export async function sweepAbandonedBuildReports(nowMs: number = Date.now(), limit = 25): Promise<number> {
-  if (process.env.VITEST) return 0;
+  if (process.env.VITEST || !workspaceLeaseEnabled()) return 0; // no lease ⇒ nothing proves a build dead
   const db = getDb();
   if (!db) return 0;
   try {
@@ -785,7 +787,14 @@ export async function sweepAbandonedBuildReports(nowMs: number = Date.now(), lim
     if (settled) console.warn(`[DIAGNOSTICS] liveness sweep settled ${settled} abandoned build report(s).`);
     return settled;
   } catch (err) {
-    console.error(`[DIAGNOSTICS] liveness sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    // The sweep's collection-group index ships in firestore.indexes.json, whose deploy step may fail without holding a
+    // release (cloudbuild.yaml). Until it exists the query fails every run; said once an hour, not every two minutes —
+    // the status-poll door above needs no such index and keeps settling the workspaces users are looking at.
+    const now = Date.now();
+    if (now - lastSweepErrorLogAt >= 60 * 60_000) {
+      lastSweepErrorLogAt = now;
+      console.error(`[DIAGNOSTICS] liveness sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     return 0;
   }
 }
@@ -801,10 +810,10 @@ export async function loadDeadBuildHandoff(workspaceId: string, beforeStartedAt:
   const db = getDb();
   if (!db) return '';
   try {
-    const snap = await db.collection('workspace_diagnostics_v3').doc(workspaceId).collection('history')
-      .orderBy(admin.firestore.FieldPath.documentId(), 'desc').limit(3).get();
-    for (const doc of snap.docs) {
-      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+    // Newest first through the one index-safe reader (newestHistoryRefs — a descending document-id sort has no index).
+    const refs = await newestHistoryRefs(db.collection('workspace_diagnostics_v3').doc(workspaceId), 3);
+    for (const ref of refs) {
+      const report = (await ref.get()).data()?.report as BuildDiagnosticsReport | undefined;
       if (!report || typeof report.startedAt !== 'number' || report.startedAt >= beforeStartedAt) continue;
       // Only the build immediately before this one: an older dead build was already followed by another turn.
       return buildEndedUnrecorded(report) ? deadBuildHandoff(report, { nowMs }) : '';

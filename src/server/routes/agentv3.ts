@@ -238,7 +238,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive,
+  claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive, workspaceLeaseEnabled,
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { zTestFreeBilling } from '../lib/zTestAccount';
@@ -4109,14 +4109,9 @@ function noteBuildAccepted(diag: BuildDiagnostics): BuildDiagnostics {
   return diag;
 }
 
-/**
- * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
- * second build in the same workspace (autopsy eed79815 — see workspaceBuildLease.ts). Default ON;
- * `AGENTV3_WORKSPACE_LEASE=off` reverts to the in-memory lock alone, with no deploy.
- */
-export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off';
-}
+// `workspaceLeaseEnabled` moved beside the lease it switches (workspaceBuildLease.ts), so the liveness sweep reads the
+// same flag (Q-3463); re-exported here for every existing caller.
+export { workspaceLeaseEnabled };
 
 /**
  * The PLAN runner for a tier: its plan rung first (glm-5.3-flash / kimi-k2.7-code / Sonnet), then the
@@ -18841,7 +18836,8 @@ async function noteBuildOutcome(
 
       // 🪦 THE BUILD BEFORE THIS ONE DIED (failedbr #2525, Q-3470): its saved report says what it wrote and what its last
       // typecheck found, so this build does not re-read the project to learn it. '' unless that build ended unrecorded.
-      buildPrompt = withPlatformHandoff(await promptSteps.step('dead-build hand-off', () => loadDeadBuildHandoff(workspaceId, buildStartedAt)), buildPrompt);
+      const deadBuildNote = await promptSteps.step('dead-build hand-off', () => loadDeadBuildHandoff(workspaceId, buildStartedAt));
+      buildPrompt = [deadBuildNote, buildPrompt].filter(Boolean).join('\n\n---\n\n');
       // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript
       // for THIS workspace from the durable conversation store and prepend a short "User: … / You: …"
       // recap, so the model remembers what was discussed/done (not just the files). This is what

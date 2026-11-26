@@ -805,7 +805,7 @@ import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEt
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { rateIsConfigured } from '../AgentV3/sandboxRate';
 import { refuseUnusableBuildPrompt } from '../AgentV3/platformNoticePrompt';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { settleAbandonedReportsOnStatus, loadDeadBuildHandoff, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess, summaryAfterRescue } from '../AgentV3/renderRescue';
@@ -4629,7 +4629,10 @@ export function registerAgentV3Routes(app: Express): void {
     // build that really ended.
     let buildHeldElsewhere = false;
     if (!buildRunningHere && workspaceId && workspaceLeaseEnabled()) {
-      buildHeldElsewhere = (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true;
+      const leaseLive = await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId);
+      buildHeldElsewhere = leaseLive === true;
+      // Q-3463: a lapsed lease on a report still marked running is a dead build — settle it now, not at the next build.
+      settleAbandonedReportsOnStatus(workspaceId, leaseLive);
     }
     // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
@@ -18836,6 +18839,9 @@ async function noteBuildOutcome(
         }
       } catch { /* project context is best-effort — never blocks a build */ }
 
+      // 🪦 THE BUILD BEFORE THIS ONE DIED (failedbr #2525, Q-3470): its saved report says what it wrote and what its last
+      // typecheck found, so this build does not re-read the project to learn it. '' unless that build ended unrecorded.
+      buildPrompt = withPlatformHandoff(await promptSteps.step('dead-build hand-off', () => loadDeadBuildHandoff(workspaceId, buildStartedAt)), buildPrompt);
       // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript
       // for THIS workspace from the durable conversation store and prepend a short "User: … / You: …"
       // recap, so the model remembers what was discussed/done (not just the files). This is what

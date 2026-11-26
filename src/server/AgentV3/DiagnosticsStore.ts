@@ -21,7 +21,9 @@ import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 import { workaroundCountOf } from '../../lib/healIssue';
 import { GREEN_RESTORE_UNCHECKED_DETAIL } from './GreenGuard';
 import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
-import { isOrphanedReport, settleOrphanedReport } from './orphanedBuildReport';
+import { isOrphanedReport, settleOrphanedReport, isAbandonedReport } from './orphanedBuildReport';
+import { workspaceBuildIsLive, type BuildLeaseStore } from './workspaceBuildLease';
+import { deadBuildHandoff, buildEndedUnrecorded } from './deadBuildHandoff';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -708,6 +710,107 @@ export async function settleOrphanedBuildReports(workspaceId: string, newBuildSt
     console.error(`[DIAGNOSTICS] orphaned-report settle failed (workspace=${workspaceId}): ${err instanceof Error ? err.message : String(err)}`);
     return 0;
   }
+}
+
+/**
+ * SETTLE A DEAD BUILD WITHOUT WAITING FOR THE NEXT ONE (failedbr #2523, Q-3463). The admission settle above runs only when
+ * a new build starts — #2523 stayed "running" for 922 s because the user started nothing sooner. These two doors settle
+ * an in-progress report as soon as it is provably dead (`isAbandonedReport`: silent for two heartbeat intervals AND its
+ * workspace lease lapsed): the client's own status poll (the workspace it asks about), and a two-minute sweep over every
+ * in-progress report. Best-effort and bounded; a failure leaves the reports as they were. Never throws.
+ */
+export async function settleAbandonedBuildReports(workspaceId: string, nowMs: number, leaseLive: boolean | null): Promise<number> {
+  if (!workspaceId || leaseLive !== false || !Number.isFinite(nowMs)) return 0;
+  if (process.env.VITEST) return 0; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const snap = await db.collection('workspace_diagnostics_v3').doc(workspaceId).collection('history')
+      .where('inProgress', '==', true).limit(5).get();
+    let settled = 0;
+    for (const doc of snap.docs) {
+      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || !isAbandonedReport(report, nowMs, leaseLive)) continue;
+      await commitDiagnosticsHistory(db, workspaceId, settleOrphanedReport(report, { newBuildStartedAt: nowMs, foundBy: 'sweep' }), Date.now(), false);
+      settled += 1;
+    }
+    if (settled) console.warn(`[DIAGNOSTICS] settled ${settled} abandoned build report(s) in ${workspaceId}: lease lapsed, no work recorded for two heartbeats.`);
+    return settled;
+  } catch (err) {
+    console.error(`[DIAGNOSTICS] abandoned-report settle failed (workspace=${workspaceId}): ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
+}
+
+/** One status-poll settle per workspace per minute per instance — the poll can arrive every few seconds. */
+const lastStatusSettle = new Map<string, number>();
+export const STATUS_SETTLE_EVERY_MS = 60_000;
+
+/**
+ * Called by `/api/agentv3/status` with the lease answer it already read. Fire-and-forget: never delays the poll, never
+ * throws. Only a definite `false` (the lease lapsed) can settle anything.
+ */
+export function settleAbandonedReportsOnStatus(workspaceId: string | null | undefined, leaseLive: boolean | null, nowMs = Date.now()): void {
+  if (!workspaceId || leaseLive !== false) return;
+  const last = lastStatusSettle.get(workspaceId) ?? 0;
+  if (nowMs - last < STATUS_SETTLE_EVERY_MS) return;
+  lastStatusSettle.set(workspaceId, nowMs);
+  if (lastStatusSettle.size > 5_000) lastStatusSettle.clear(); // bounded; a cleared entry only allows one extra read
+  void settleAbandonedBuildReports(workspaceId, nowMs, leaseLive).catch(() => 0);
+}
+
+/**
+ * The sweep (server.ts, every two minutes, one instance): in-progress reports across workspaces, a bounded batch per
+ * run (the next run takes the rest). A report is settled only when its own workspace's lease answers `false`. Returns
+ * how many were settled. Never throws.
+ */
+export async function sweepAbandonedBuildReports(nowMs: number = Date.now(), limit = 25): Promise<number> {
+  if (process.env.VITEST) return 0;
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const snap = await db.collectionGroup('history').where('inProgress', '==', true).limit(limit).get();
+    let settled = 0;
+    for (const doc of snap.docs) {
+      const workspaceDoc = doc.ref.parent.parent;
+      if (!workspaceDoc || workspaceDoc.parent.id !== 'workspace_diagnostics_v3') continue;
+      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+      // The cheap test first: a report that recorded something recently needs no lease read at all.
+      if (!report || !isAbandonedReport(report, nowMs, false)) continue;
+      const leaseLive = await workspaceBuildIsLive(db as unknown as BuildLeaseStore, workspaceDoc.id, nowMs);
+      if (!isAbandonedReport(report, nowMs, leaseLive)) continue;
+      await commitDiagnosticsHistory(db, workspaceDoc.id, settleOrphanedReport(report, { newBuildStartedAt: nowMs, foundBy: 'sweep' }), Date.now(), false);
+      settled += 1;
+    }
+    if (settled) console.warn(`[DIAGNOSTICS] liveness sweep settled ${settled} abandoned build report(s).`);
+    return settled;
+  } catch (err) {
+    console.error(`[DIAGNOSTICS] liveness sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
+}
+
+/**
+ * THE HAND-OFF FROM A DEAD BUILD (failedbr #2525, Q-3470). The newest earlier report of this workspace, read once at the
+ * next build's start; when its build ended without recording an end, the block `deadBuildHandoff` writes from it, else
+ * ''. Bounded to three documents. Never throws.
+ */
+export async function loadDeadBuildHandoff(workspaceId: string, beforeStartedAt: number, nowMs: number = Date.now()): Promise<string> {
+  if (!workspaceId || !Number.isFinite(beforeStartedAt)) return '';
+  if (process.env.VITEST) return '';
+  const db = getDb();
+  if (!db) return '';
+  try {
+    const snap = await db.collection('workspace_diagnostics_v3').doc(workspaceId).collection('history')
+      .orderBy(admin.firestore.FieldPath.documentId(), 'desc').limit(3).get();
+    for (const doc of snap.docs) {
+      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || typeof report.startedAt !== 'number' || report.startedAt >= beforeStartedAt) continue;
+      // Only the build immediately before this one: an older dead build was already followed by another turn.
+      return buildEndedUnrecorded(report) ? deadBuildHandoff(report, { nowMs }) : '';
+    }
+    return '';
+  } catch { return ''; }
 }
 
 /**

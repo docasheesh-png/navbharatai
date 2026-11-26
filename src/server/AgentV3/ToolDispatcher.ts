@@ -421,6 +421,7 @@ import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
 import { generateBoardGames } from '../lib/BoardGamesGenerator';
+import { generateGenreKits } from '../lib/GameGenreKitsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -10574,6 +10575,18 @@ export class ToolDispatcher {
         const bgLayers = await this.addMissingRecipeLayers(bg.files, agent);
         this.scheduleCheckpoint('india games pack');
         return `Added the India games pack:\n${bgWritten.join('\n')}\n\n${bg.instructions}${bgLayers}`;
+      }
+
+      case 'generate_genre_kits': {
+        // GENRE KITS (game-maker audit 2026-11-26): the rules of a fighting game and a tower-defense game, which the kit had no
+        // code for — every such request used to be written from memory.
+        const gkRec = (input as Record<string, unknown>) || {};
+        const gkInclude = Array.isArray(gkRec.include) ? gkRec.include.filter((v): v is string => typeof v === 'string') : undefined;
+        const gk = generateGenreKits(gkInclude);
+        const gkWritten = await this.writeRecipeFiles(gk.files, agent);
+        const gkLayers = await this.addMissingRecipeLayers(gk.files, agent);
+        this.scheduleCheckpoint('genre kits');
+        return `Added the genre kits:\n${gkWritten.join('\n')}\n\n${gk.instructions}${gkLayers}`;
       }
 
       case 'generate_world_2d': {

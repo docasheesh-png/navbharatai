@@ -100,7 +100,8 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
   ['runner', /\b(endless\s+runn(?:er|ing)|runner|subway surf)|(?:एंडलेस|अंतहीन)\s*(?:रनर|रनिंग|दौड़)/i],
   ['platformer', /\b(platformer|mario|jump(ing)? game)\b/i],
   ['shooter', /\b(shoot(er|ing)|fps|gun|space invaders?|bullet)\b/i],
-  ['fighting', /\b(fight(ing)?|god of war|combat|brawler|boxing)\b/i],
+  // Game-maker audit 2026-11-26: "fighter", "street fighter / tekken jaisa", "kushti", "ladai / maar-peet wala game" read as unknown.
+  ['fighting', /\b(fight(ing|ers?)?|god of war|combat|brawler|boxing|kushti|dangal|mukke?baa?zi|ladaa?i\s+(?:wala|waala|ka)\s+(?:game|khel)|maa?r[\s-]*peet|tekken|mortal\s+kombat)\b/i],
   ['sports', /\b(cricket|football|soccer|basketball|tennis|badminton|golf)\b/i],
   ['rpg', /\b(rpg|role[- ]?playing|open world|adventure)\b/i],
   ['strategy', /\b(strategy|tower defen[cs]e|rts)\b/i],

@@ -6312,3 +6312,14 @@ PR is opened and NOT merged. Local CI was not run in full (admin); targeted suit
 
 **Next, in the admin's order:** Q-3451 + Q-3452 (map variety, boundary/water), then Q-3453 (solid citizens, punch), then
 Q-3454 (enterable houses, human citizens), then Q-3455 (library trees and animals).
+
+### 2026-11-26 (same branch, #4562) — a character makes its own moves (Q-3456)
+Admin, with a screenshot: *"mujhe aisa app maker chahiye jo movement khud bana le"*. Root cause: `findBones` matched exact
+bone names only, so any other rig, and any model with no skeleton, got "It is not animated" instead of a move; a model
+with no walk clip never walked. Class: a capability gated on one naming convention. Fix: `findBonesByShape` (skeleton
+shape, names still win), `RIGID_MOVES` (whole-body punch/kick/fire/swing/throw/use), `MADE_GAIT` (walk/run made after a real
+stand-in clip), one "animates its moves" line for a model with no clips. Builder line (`playerMoves.ts`), done message and
+`AppKnowledgeBase` say the same. Old tests that encoded "a missing move is never animated" were updated, citing the admin.
+Locked: `tests/aCharacterMakesItsOwnMoves.test.ts`. Still not made when missing: jump, swim, dive, block, hit, die, slide.
+Also fixed on CI: openWorld.ts's `softwareRenderer` import kept on its own line (the no-GPU guard pins it).
+

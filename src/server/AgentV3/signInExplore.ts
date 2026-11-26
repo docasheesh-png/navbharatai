@@ -33,7 +33,7 @@
  *
  * PURE: the candidate reader, the script builder and the output parser. The route runs the script.
  */
-import { SANDBOX_BROWSER_ARGS, playwrightImport, browserScriptRunLine } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, playwrightImport, browserScriptRunLine, noPointerLockInstall } from './sandboxBrowserScript';
 import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
 import { detectBackendPresence } from './BackendPresence';
 
@@ -370,6 +370,8 @@ async function attemptSignUp(page, name, who) {
 const browser = await chromium.launch({ args: ${JSON.stringify(SANDBOX_BROWSER_ARGS)} });
 try {
   const ctx = await browser.newContext(${JSON.stringify(BROWSER_PAGE_OPTIONS)});
+  // No pointer lock under automation (Q-3380): this browser clicks the app's buttons; the shared stub.
+  ${noPointerLockInstall('ctx')}
   const page = await ctx.newPage();
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   let signed = false;

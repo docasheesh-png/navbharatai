@@ -6339,6 +6339,15 @@ The admin approved three items.
   - **Lock:** `tests/aWorldRaceKeepsItsLength.test.ts`. Reversions: 7, 3 and 2 tests fail.
 - **Open:** Q-3455. Games already racing on their world keep their old `worldRace.ts` / `worldCourse.ts`, because nothing refreshes those two files.
 - **Queue IDs:** started at Q-3450, because Q-3420–Q-3442 are taken by open PRs #4554 and #4555.
+## 2026-11-26 — Game full screen: only the button, and it fills the screen (admin iPhone screenshot)
+
+- Q-3440: `Game.play()` no longer goes full screen on a phone; the Full screen button is the only way in (builder prompt
+  updated). Locked by a census (only Game.ts asks the browser; the only other caller is the button).
+- Q-3441: root of the "two-thirds screen": `createRenderer` wrote the window size in px onto a canvas Game.ts sizes at 100%,
+  and container-mode `handleResize` never touches the style, so the canvas never grew with its box. A page-sized canvas
+  now keeps its style. Locked by running the real generated renderer.ts into a grown box.
+- Q-3442 🟡: the HUD under the status bar inside the app's preview frame (iOS gives an iframe 0 safe-area insets) — needs
+  the page to pass its insets in; recorded with a recommendation.
 ## 2026-11-26 — Q-3363: game proof pictures kept privately for 30 days, admin-only (#4557, not merged)
 
 The admin approved option A. What changed:
@@ -6398,3 +6407,9 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+## 2026-11-26 — Q-3380: one no-pointer-lock stub on every platform browser that sends input (#4568)
+- **Problem:** a game that calls `requestPointerLock` floods a headless platform browser with synthetic input (108,052 messages in 3 s, 1–4 fps on #4552). #4553 stubbed it in the playtest's desktop context and the click explorer with two hand-written copies.
+- **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
+- **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
+- **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.

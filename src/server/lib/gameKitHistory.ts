@@ -112,7 +112,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad",
     "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d",
     "63dd5f6dc7104b31d8867f37276f525c60d5304b57e6a61cf808ddb1f6ed9489",
-    "fbe6b3b4b71502dc1e81e4a15c836bcfcdd12ebb42e5f6a4df79c31449a6fcb4"
+    "7b29dcf0bb4456d95b95e0e53764c86750df37cde399a1951b6bd45fc1a252af",
+    "fc19db0ac9aaec09d50817a2f4fd99b396d531dbfa8b8feed005974f9b32ec31"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -591,7 +592,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "f3a713a9f3c4b93f25190f8c65af7222d607bf8af7ce91edd998a23ea232846e",
     "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6",
     "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc",
-    "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54"
+    "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54",
+    "4f4fd465b581e330ec61b666668a3f6c077d66b2423ba3438d2c65e2f6235c30"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -609,7 +611,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/play/worldLayer.ts": [
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
-    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8"
+    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8",
+    "512ecf0defea0ea57ee1796d3c4c1714246aaa57e239abc4e77dcc2329bc8c3d"
   ],
   "src/game/royale/onlineClient.ts": [
     "34daf1faeaa0be26e95667fc095b16a40d4b0b62c53220ae2961d8a3a66e8f2b"
@@ -654,7 +657,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a687e1e6ffc7a08082cd1ff6a86461dde0fdef9c9c9f4501d0ed2de726900cce",
     "b2fa00c4e7db9c78014754291d132454b292a1588616fc91be9c31c62900f019",
     "bb36f7ea5190149b52e78ed63fea8e8c516fa57c4252ff261c5582aa40104359",
-    "fcf9d2fa12db51c1e6be3b5ed925139b86bec5acde9fa8a2183c41cbed5e5851"
+    "3d4f567f14d96b5f73b20a45ecb93ee5d7680c4399e1456a04cd4e3c6e1113ed",
+    "613854c5532ea2fdcc9cd3b1658bf33802e9def49737d5bd2584200c3ce58968"
   ],
   "src/game/systems/grenade.ts": [
     "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"

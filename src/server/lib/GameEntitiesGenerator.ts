@@ -176,6 +176,7 @@ function publishHook(): void {
 export class Entities {
   private readonly list: Inner[] = [];
   private readonly off: (() => void) | null;
+  private readonly offShot: () => void;
   private readonly options: EntityOptions;
   /** How many spawns were verified, and how many failed and were rolled back — the honest count. */
   readonly report = { spawned: 0, failed: 0, removed: 0 };
@@ -183,6 +184,15 @@ export class Entities {
   constructor(private readonly host: EntityHost, options: EntityOptions = {}) {
     this.options = options;
     this.off = host.onStep ? host.onStep((dt) => this.update(dt)) : null;
+    // The gun the player holds (the shell's hand gun) hits a character it is aimed at: SHOT_HIT names the object hit.
+    this.offShot = events.on('SHOT_HIT', (p: { object?: THREE.Object3D | null; point?: { x: number; y: number; z: number }; damage?: number; byPlayer?: boolean } | undefined) => {
+      const hit = p?.object;
+      if (!hit || !(Number(p?.damage) > 0)) return;
+      for (const e of this.list) {
+        if (!e.alive) continue;
+        for (let o: THREE.Object3D | null = hit; o; o = o.parent) if (o === e.object) { this.hurt(e, Number(p!.damage), p!.point ?? e.object.position, p!.byPlayer !== false); return; }
+      }
+    });
     LIVE.add(this);
     publishHook();
   }
@@ -423,6 +433,7 @@ export class Entities {
   dispose(): void {
     for (const e of [...this.list]) e.remove();
     this.off?.();
+    this.offShot();
     LIVE.delete(this);
     publishHook();
   }

@@ -6426,6 +6426,14 @@ villagers / bot", and "jo move library me nahi hai, NavBharatAI khud API call se
   (the handle's `play`), and `play/actions.ts` plays an NPC model's own clip for a move it has (falling back to the data pose),
   returning it to `idle` after. The game's `handle.update(dt)` keeps advancing it. Locked in `anyCharacterDoesAnyMove`
   (reversion-proven). Remaining honest limits: data moves look simpler than clips; humanoid bodies only.
+## 2026-11-26 — PR A of the admin's 18-point game list: restart, a gun that fires, drowning, the map's edge, library ids
+
+- Q-3516 (was Q-3500; renumbered at merge — #4563 had taken it) Restart / Menu stand the player at the start (ctx.setRespawn; open world sets its own), out of any car.
+- Q-3517 (was Q-3501; renumbered at merge — #4563 had taken it) A held gun fires: Attack becomes Fire, shots along ctx.aim, SHOT_HIT hurts Entities characters.
+- Q-3502 Water drowns by default (WORLD.water), swimming only when asked.
+- Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
+- Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
+- KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.
 ## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
 
 Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
@@ -6449,3 +6457,8 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
+
+## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
+- Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
+- Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.
+- Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.

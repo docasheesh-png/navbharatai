@@ -31,15 +31,16 @@ async function browserScript(script: string, argv: string, state = { url: 'http:
     url: () => state.url,
     setViewportSize: async () => {},
     goto: async (url: string) => { navigations.push(url); state.url = new URL(url).href; state.started = false; },
-    evaluate: async (fn: Function) => String(fn).includes('querySelectorAll') ? [{tag: 'textarea', label: state.started ? 'Review comment' : 'INTRO'}] : String(fn).includes('document') ? 1 : state.scrolls++,
+    // The pointer-lock stub every platform page carries (Q-3380) is not one of this harness's page reads.
+    evaluate: async (fn: Function) => String(fn).includes('requestPointerLock') ? undefined : String(fn).includes('querySelectorAll') ? [{tag: 'textarea', label: state.started ? 'Review comment' : 'INTRO'}] : String(fn).includes('document') ? 1 : state.scrolls++,
     waitForTimeout: async () => {}, screenshot: async () => Buffer.from('png'),
     $: async () => null,
     click: async () => { if (!state.started) throw new Error('selector timed out'); },
   };
-  const browser = { contexts: () => [{pages: () => [page]}] };
+  const browser = { contexts: () => [{pages: () => [page], addInitScript: async () => {}}] };
   const proc = { argv: ['node','script',argv], stdout: {write: () => {}}, stderr: {write: (s: string) => { throw new Error(s); }}, exit: () => { disconnected = true; } };
   await vm.runInNewContext(script, {URL, Buffer, process: proc, require: (name: string) => {
-    if (name === 'playwright') return {chromium: {connectOverCDP: async () => browser, launch: async () => ({newPage:async()=>page,close:async()=>{}})}};
+    if (name === 'playwright') return {chromium: {connectOverCDP: async () => browser, launch: async () => ({newPage:async()=>Object.assign(page, {addInitScript: async () => {}}),close:async()=>{}})}};
     if (name === 'fs') return {writeFileSync: (p: string, s: unknown) => files.set(p, String(s)), appendFileSync: () => {}};
     throw new Error(name);
   }});

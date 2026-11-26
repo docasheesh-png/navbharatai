@@ -6491,6 +6491,12 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
 
+## 2026-11-26 — Admin Home "total revenue NOT real": the index was deployed to the wrong database (Q-3700)
+- Admin screenshot: `9 FAILED_PRECONDITION: The query requires an index` for the revenue sum, although #4545's `deploy-firestore-indexes` step reports SUCCESS on every merge.
+- Root cause: the index link names `databases/(default)` (103-byte encoded name), and so did an earlier production error; the server reads `(default)` (FIRESTORE_DATABASE_ID), but `firebase.json` deployed indexes only to `navbharat-prod`.
+- Fix: `firebase.json` now lists both databases for `firestore.indexes.json`; rules still go only to `navbharat-prod`. Verified with firebase-tools 15.35.0's own config resolver that `--only firestore:indexes` targets both and `--only firestore:rules` deploys rules only where declared.
+- Lock: `tests/adminAnalyticsFirestoreIndex.test.ts` (both databases carry the index; rules not widened); `firestoreIndexSafe.test.ts` reads the array form.
+- Found on the way: `deploy-storage-rules` fails on every deploy (Q-3701, BLOCKED on the Cloud Build log).
 ## 2026-11-26 — "Made with NavBharatAI" was doubled on published apps, with no × (admin screenshot)
 
 - **Root cause:** two modules each put a badge in the same bottom-right corner, at the same z-index: the build writes

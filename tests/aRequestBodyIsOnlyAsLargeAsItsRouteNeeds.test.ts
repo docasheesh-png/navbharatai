@@ -29,6 +29,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/mobile-builds/signing-key/import': '`keystoreBase64` is an upload keystore, refused by decodeKeystore over 64 KB (~88 KB as base64) — far under 1 MB; the other fields are an alias, two passwords capped at 200 characters, and booleans',
   '/api/voice-ai/generate': 'strict five-key allowlist: at most 2,500 Unicode codepoints (5,000 UTF-16 units), language/voice catalog ids, UUID and numeric accepted price; centrally enforced 32 KB JSON cap, no attachments or endpoints',
   '/api/admin/game-assets/live-check': 'strict empty JSON object only; every caller field is rejected; no URL, asset id, prompt or credential is accepted; standard 1 MB parser cap unchanged',
   '/api/admin/traffic-control': 'strict four-key JSON allowlist (expectedRevision, body, reason, totp); the body is validated by parseControlBody: fixed keys, enum states, integer caps, at most 200 provider/model entries with short ids and admission notes capped at 200/120 characters, so it stays far under 1 MB; every other field rejected; standard 1 MB parser cap unchanged',

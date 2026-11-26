@@ -14,9 +14,9 @@ const raw = JSON.parse(readFileSync('scripts/fixtures/game-bench-prompts.json', 
 const fx = validateBenchFixture(raw);
 
 describe('the corpus', () => {
-  it('has exactly 44 prompts, 14 in the smoke set', () => {
-    expect(fx.prompts).toHaveLength(44);
-    expect(selectBenchPrompts(fx, 'smoke')).toHaveLength(14);
+  it('has exactly 45 prompts, 15 in the smoke set', () => {
+    expect(fx.prompts).toHaveLength(45);
+    expect(selectBenchPrompts(fx, 'smoke')).toHaveLength(15);
   });
   it('every prompt is still in the repo file it was taken from', () => {
     for (const p of raw.prompts as Array<{ prompt: string; source: string }>) {
@@ -54,10 +54,10 @@ describe('readings come only from the build\'s own diagnostics', () => {
       { code: 'GAME_DEFECTS', message: 'Game defects measured: GAME_DEFECT_INPUT_IGNORED — x; GAME_DEFECT_NO_TOUCH — y.' },
       { code: 'GAME_SCOPE_GAP' }, { code: 'GAME_REPAIR_UNREPAIRED' }, { code: 'GAME_COMPLETE_GATE_BLOCKED' },
     ]));
-    expect(g).toEqual({ kitSeeded: true, playtest: 'failed', gqs: 42, defects: ['GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH'], scope: 'gap', repair: 'unrepaired', gateBlocked: true });
+    expect(g).toEqual({ kitSeeded: true, playtest: 'failed', gqs: 42, defects: ['GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH'], scope: 'gap', repair: 'unrepaired', gateBlocked: true, askNotMet: false });
   });
   it('nothing recorded → nothing claimed', () => {
-    expect(gameSignalsFromEvents([])).toEqual({ kitSeeded: null, playtest: null, gqs: null, defects: [], scope: null, repair: null, gateBlocked: false });
+    expect(gameSignalsFromEvents([])).toEqual({ kitSeeded: null, playtest: null, gqs: null, defects: [], scope: null, repair: null, gateBlocked: false, askNotMet: false });
   });
   it('fail classes, worst first', () => {
     const ok = { success: true, metrics: { ok: true, filesCreated: 5, errored: false } };
@@ -68,6 +68,10 @@ describe('readings come only from the build\'s own diagnostics', () => {
     expect(gameFailClass(ok, { ...g, scope: 'gap' })).toBe('scope-gap');
     expect(gameFailClass(ok, null)).toBe('not-played');
     expect(gameFailClass(ok, g)).toBe('ok');
+    // Kadam 2: the game plays, but what the request asked for is not in it — its own class, ahead of a plain gate block.
+    expect(gameFailClass(ok, { ...g, gateBlocked: true, askNotMet: true })).toBe('ask-not-met');
+    expect(gameFailClass(ok, { ...g, gateBlocked: true, askNotMet: true, defects: ['GAME_DEFECT_BLANK'] })).toBe('not-playable');
+    expect(gameSignalsFromEvents([{ type: 'result', diagnostics: { issues: [{ code: 'GAME_COMPLETE_GATE_BLOCKED', message: 'Not reported complete: what you asked for is not in the game yet — nothing was in either hand.' }] } }]).askNotMet).toBe(true);
   });
   it('the summary counts only reported time and cost, with n', () => {
     const s = summarizeGameBench([
@@ -88,7 +92,7 @@ describe('the runner', () => {
       encoding: 'utf8', timeout: 60_000,
     });
     expect(out).toContain('Game bench');
-    expect(out).toContain('44 prompts');
+    expect(out).toContain('45 prompts');
     expect(out).toContain('DRY RUN (no build started)');
   }, 70_000);
 });

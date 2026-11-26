@@ -6310,3 +6310,27 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+## 2026-11-26 — Moves separated from characters: 120+ moves on ANY character, plus NavBharatAI-made moves
+
+**Admin task:** "sabhi characters ke moves ko character se alag kar do … sirf hero nahi kisi bhi character par … police /
+villagers / bot", and "jo move library me nahi hai, NavBharatAI khud API call se bana sake".
+
+- **Was:** library model clips belong to one rig (never retargeted); the data action system (2026-11-24) had 9 moves and
+  played only on the player.
+- **Library:** `src/server/lib/gameMoveLibrary.ts` — 120+ moves as data (shared pose pieces, mirrored sides), plus English /
+  Hindi / Hinglish aliases. The kit gets the SAME library and alias table injected as JSON (the old kit copy of the alias
+  table was a hand-typed duplicate of the server's — drift class removed; census test holds it).
+- **Vocabulary v2** (`GameActionsGenerator.ts`): whole-body motion (rise / pitch / roll / yaw shown on a pivot; forward /
+  side / turn real travel), `loop`, `hold`, `requires` (water, vehicle, seated, item), and world-touching steps: strike,
+  push, fire, throw, enterVehicle, exitVehicle.
+- **Any character:** `performAction(ctx, name, who?)` — no who = the player; a kind ('police', 'villagers'); 'all'; or one
+  entity's object. `stopAction`, `currentAction(ctx, who)`, `heldItem(ctx, who)`. Entities expose `userData.actor` and stand
+  still while acting; physics bodies take a strike as an impulse (`userData.onStruck`, removed only if physics installed it);
+  the shell runs `updateActions` after every character has animated. The player's own model clip wins where it exists.
+- **compose_action v2:** the prompt teaches the same vocabulary; the tool and the shell handoff say any character.
+- **Tests:** `tests/anyCharacterDoesAnyMove.test.ts` (21, real kit) — reversion-proven for the actor hook, stand-still and
+  the water rule. `theCharacterDoesWhatTheUserAsks` example of a missing move moved from "climb ladder" (now in the library)
+  to juggling.
+- **Honest limits:** data moves look simpler than hand-animated clips; humanoid bodies only (four-legged needs its own limb
+  map); NPC library-model clips are not used (no mixer access) — they play the data pose.

@@ -4,6 +4,7 @@ import { setPlayerModel } from '../characterSwap';
 import { needsHumanCharacter, prepareHumanAssets } from './humanPack';
 import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
 import { createHash } from 'node:crypto';
+import { pickVariant } from '../../lib/projectVariety';
 import { localModelEntries, localModelsOverride, localModelSubjects } from './localModelNote';
 import { downloadGameAsset } from './assetDownload';
 import { acquireGameAsset, type AssetEngineDependencies, type AssetOutcome } from './assetEngine';
@@ -116,7 +117,7 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
   const starter = !explicit && options.starterPlayerSource === gamePlayerFileSource(options.workspaceId)
     && needsHumanCharacter(options) && !/cartoon|stylized|stylised|low[ -]?poly|voxel|anime|pixel art/i.test(options.prompt)
     && !named.some(r => r.subject !== 'human' && catalogue.some(c => c.libraryCategory === 'character' && c.subjects.includes(r.subject)))
-    ? REALISTIC_HUMANS[createHash('sha256').update('human:' + options.workspaceId).digest().readUInt32BE(0) % REALISTIC_HUMANS.length]
+    ? pickVariant(options.workspaceId, 'human', REALISTIC_HUMANS)
     : undefined;
   const starterSubject = starter && catalogue.some(c => c.id === starter.id) ? starter.subjects[0] : undefined;
   const requested = starterSubject

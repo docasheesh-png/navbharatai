@@ -70,6 +70,25 @@ export const SANDBOX_BROWSER_ARGS: readonly string[] = Object.freeze([
   '--enable-unsafe-swiftshader',
 ]);
 
+/**
+ * 🖱️ NO POINTER LOCK UNDER AUTOMATION — the ONE stub every platform browser that sends input to an app installs
+ * (Q-3380, measured on #4552). A platform browser clicks a game canvas, the game asks for pointer lock, and in the
+ * automated headless browser that floods the page with synthetic input (108,052 messages in 3 s): the game drew 1–4 fps
+ * because of OUR browser, not its code (4 → 15 fps with the lock stubbed). A resolved promise and no pointerlockchange
+ * event: the game simply keeps the mouse free, as it would for a person who never granted the lock.
+ *
+ * Source text, not a function: it is pasted into generated sandbox scripts (ESM and CJS alike) as an init script.
+ * #4553 fixed it in two lanes with two hand-written copies; the journey, sign-in and Engineer AI browsers had none,
+ * and the playtest's phone context had none. tests/aPlaytestBrowserNeverLocksThePointer.test.ts is the census.
+ */
+export const NO_POINTER_LOCK_INIT = '() => { try { Element.prototype.requestPointerLock = function () { return Promise.resolve(); }; } catch (_e) { /* read-only: leave it */ } }';
+
+/** The generated line that installs the stub on a page or context, before any app code runs. PURE. */
+export function noPointerLockInstall(target: string): string {
+  if (!/^[A-Za-z_$][\w$]*$/.test(target)) throw new Error('noPointerLockInstall: target must be a variable name');
+  return `await ${target}.addInitScript(${NO_POINTER_LOCK_INIT});`;
+}
+
 /** The marker the run line prefixes its diagnostic lines with. Never a result marker. */
 export const SCRIPT_DIAG_MARKER = 'NBAI_DIAG:';
 

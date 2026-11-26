@@ -26,7 +26,7 @@ async function runAction(argv: string, startUrl: string) {
     $: async () => null,
     click: async (sel: string) => { if (state.url === 'about:blank') throw new Error('selector timed out'); clicks.push(sel); },
   };
-  const browser = { contexts: () => [{ pages: () => [page] }] };
+  const browser = { contexts: () => [{ pages: () => [page], addInitScript: async () => {} }] };
   const proc = { argv: ['node', 'script', argv], stdout: { write: () => {} }, stderr: { write: (s: string) => { throw new Error(s); } }, exit: () => {} };
   await vm.runInNewContext(BROWSER_ACTION_SCRIPT, { URL, Buffer, process: proc, require: (name: string) => {
     if (name === 'playwright') return { chromium: { connectOverCDP: async () => browser } };

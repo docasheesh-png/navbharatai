@@ -15,6 +15,13 @@ and `src/server/routes/mobileShip.ts` (the server pipeline around them), `src/se
 this file against that code: every failure code the classifier can name and every step of the generated
 workflow must appear here, so the document cannot silently rot.
 
+> **Two providers since 2026-11-25.** The user now chooses between **NavBharatAI Native Cloud Build** and the
+> **GitHub Actions Build** described here. Both use the same Phase A preparation (now one shared function,
+> `src/server/lib/mobileBuild/prepareMobileProject.ts`), and the native worker runs THIS pipeline's Phase B — the
+> same generated workflow, translated step by step (`workflowScript.ts`) — inside a disposable cloud machine,
+> with signing moved to a separate network-less machine. Everything about the native provider (architecture,
+> security, signing, API, configuration, rollback) is in **`MOBILE_NATIVE_BUILD.md`**.
+
 The pipeline has **three phases**. GitHub's green ticks are only Phase B; half of what decides whether a
 build survives happens before GitHub ever sees the app, and the recovery happens after.
 

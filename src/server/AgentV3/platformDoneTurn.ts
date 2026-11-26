@@ -27,7 +27,7 @@ import { carAsked, useAsCarPrompt, CAR_FILE_PATH } from './carSwap';
 import { mapPlaceAsked, type PlaceKind } from './worldGrow';
 import { WORLD_FILE } from './growthGuard';
 import { libraryDisplayName, useAsCharacterPrompt, addToGamePrompt, MAP_PLACE_PREFIX } from './gameAssets/libraryThumbnails';
-import { libraryActionsAtTurnStart } from './growthTurn';
+import { libraryActionsAtTurnStart, addEnemiesAtTurnStart } from './growthTurn';
 import { templateRunResult } from './templateVerify';
 import { formatEta, formatEtaRange } from '../lib/BuildTimeEstimator';
 import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
@@ -129,7 +129,11 @@ export async function libraryActionsForTurn(io: Parameters<typeof libraryActions
   env?: NodeJS.ProcessEnv;
 }): Promise<string> {
   const recorded: Issue[] = [];
-  const handoff = await libraryActionsAtTurnStart({ ...io, record: (issue) => { recorded.push(issue); io.record(issue); } });
+  const picked = await libraryActionsAtTurnStart({ ...io, record: (issue) => { recorded.push(issue); io.record(issue); } });
+  // 👾 Enemies the request asks for (GameEnemiesFeature.ts) go in at turn start too — but they are not a picker action: the
+  // builder still runs after them (they never finish a turn on their own), so they stay out of the picker composition above.
+  const enemies = await addEnemiesAtTurnStart(io);
+  const handoff = [picked, enemies].filter(Boolean).join('\n\n');
   try {
     const done = platformCompletedRequest(io.prompt, recorded, io.env);
     if (!done) return handoff;

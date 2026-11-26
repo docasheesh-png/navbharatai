@@ -32,6 +32,7 @@ import { wantsVersionUndo } from '../src/lib/versionUndoIntent';
 import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
 import { raceWorldYes } from '../src/server/AgentV3/mapGrowthIntent';
+import { enemyRequestFrom } from '../src/server/lib/GameEnemiesFeature';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
 import { reviewNotReadyUserLine, formatPartialReview, salvageReview } from '../src/server/AgentV3/partialReview';
 import { PLATFORM_SUGGESTED_REPLIES, platformSuggestedReply } from '../src/server/AgentV3/platformSuggestedReplies';
@@ -177,6 +178,12 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  // Enemies in one step (admin 2026-11-26 #4, Q-3505): the knowledge base tells the user to say "enemy banao" in an open-world game.
+  'enemy banao': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/platformDoneTurn.ts → growthTurn.ts (addEnemiesAtTurnStart); src/server/lib/GameEnemiesFeature.ts (enemyFeatureSource)`,
+    why: 'a build order on the open project: at turn start the platform reads the request, writes src/game/features/enemies.ts and lists it, and tells the builder they are in',
+    proof: () => reachesWork('enemy banao') && enemyRequestFrom('enemy banao') !== null && read('src/server/AgentV3/platformDoneTurn.ts').includes('await addEnemiesAtTurnStart(io)'),
+  },
   // The user's own map (admin 2026-11-22, Q-3248 follow-on): with a model attached, "isse north me jod do" adds it to the world.
   'isse north me jod do': {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/gameKitSeed.ts (GAME_WORLD_RULE → a 'custom' region); src/server/lib/GameOpenWorldGenerator.ts (loadUserMap)`,

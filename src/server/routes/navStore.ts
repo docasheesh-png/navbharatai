@@ -44,7 +44,7 @@ const jsZipLoader = async (buf: Buffer) => {
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import {
-  isStorageConfigured, putApk, getApk, getApkStream, deleteApk, saveApp, getApp, updateApp,
+  isStorageConfigured, putApk, getApk, getApkStream, deleteApk, deleteApkIfUnreferenced, saveApp, getApp, updateApp,
   listApps, listAppsByUid, toPublic, findRepublishTarget,
   type StoreApp, type SubmissionStatus,
 } from '../lib/navStoreStore';
@@ -308,10 +308,12 @@ async function ingestApkSubmission(
         ...(provenance ? { provenance } : {}),
       };
       await saveApp(record);
-      // The PREVIOUS version's bytes are no longer referenced by any record once this save lands —
-      // clean them up. Best-effort: a failed delete leaves an orphaned blob, never a broken submission.
+      // The PREVIOUS version's bytes are no longer referenced by THIS record once this save lands — clean
+      // them up, unless another listing names the same content-addressed object (identical bytes submitted
+      // by someone else share one object, Q-3612). Best-effort: a failed delete leaves an orphaned blob,
+      // never a broken submission.
       if (existing?.storagePath && existing.storagePath !== storagePath) {
-        await deleteApk(existing.storagePath).catch(() => {});
+        await deleteApkIfUnreferenced(existing.storagePath, id).catch(() => {});
       }
       const suspicious = scan.verdict === 'suspicious';
       return { httpStatus: 200, body: {

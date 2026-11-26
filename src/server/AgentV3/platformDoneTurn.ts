@@ -87,7 +87,7 @@ export function platformDoneMessage(req: PickerRequest): string {
     const name = libraryDisplayName(req.id);
     const moves = libraryMovesOf(req.id);
     const movesLine = !moves ? ''
-      : moves.has.length === 0 ? ' It has no animations of its own, so it moves without walking or posing.'
+      : moves.has.length === 0 ? ' It has no animations of its own, so NavBharatAI animates its walk, run and actions for it.'
         : ` It has its own animations for: ${moves.has.join(', ')}.${moves.lacks.length ? ` For the rest: ${lackedMovesClause(moves.lacks)}.` : ''}`;
     return `Done — your player character is now ${name}.${movesLine} The map, the controls and everything else are as they were. `
       + 'To bring the default person back, say "wapas purana character".';

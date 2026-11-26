@@ -6374,3 +6374,7 @@ Stacked on PR B. Queue Q-3509 (fix in PR) and Q-3510..Q-3514 (still OPEN, honest
 - #9: play/cinematics.ts — shot lists as data, a Director in the render loop, DEATH_CAM / introDrone / HERO_SHOT, ctx.cinematic(list), GameOptions.cinematics from the request (cinematicsWanted), HUD bars and title, the end card waits, a tap skips.
 - OPEN: #2 enterable painted-door city lots (Q-3510), #7/8/11 car ground census (Q-3511, not reproduced), #17 variety (Q-3512, mostly exists since 2026-11-25; blocked on which case the admin saw), #10 multiplayer on the user's backend (Q-3513), #20 realism tier (Q-3514).
 - Note for the next session: PR A's open-world edge is separate from play/boundary.ts on purpose (it is in WORLD metres, follows the floating origin and grows with places; boundary.ts declares fixed render-space bounds). If they are ever unified, boundary.ts must learn the floating origin first.
+
+## 2026-11-26 — Q-3515: the cricket bat meets the ball (admin)
+
+Stacked on PR C. Roots: the timing windows (30/70 ms) were tighter than a phone's touch delay, and the kit had no play between the rules engine and the 3D layout (the arrival moment, the ball leaving the bat and the scoring were each game's own code; deliveryPath ran the ball through the batter). Fix: CRICKET_TIMING by difficulty, battedBallPath, createCricketPlay, and src/game/cricketRules.ts as the user's own rules file (changed by asking). tests/theBatMeetsTheBall.test.ts plays it on the real engine, proven by two reversions.

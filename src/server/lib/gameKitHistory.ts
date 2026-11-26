@@ -299,7 +299,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/board/cricket.ts": [
     "c912fd6a9f49b5d828f8d92feea65c1eb709c64e55d2dcfa02463f0cb881033d",
     "c5f00e480e8bc981fcd5c8e2a062a07303a93551681657c77b8c09710db6e65f",
-    "b1e99575986d55fb75ab7c1e1287ba2890ce7babc7464f58e13ba00c775343c9"
+    "b1e99575986d55fb75ab7c1e1287ba2890ce7babc7464f58e13ba00c775343c9",
+    "e68fc85885d9e5e2a93491582ae25d29444ac6a83c77eda18ffe05b9d2672646"
   ],
   "src/game/board/dice.ts": [
     "ab07024bd0487471a0a2c903e1cdb1bafbb10650ae89494080819345970278bf"
@@ -318,7 +319,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8a88801150fb5209b305cb9ae82f8c96ca98db0b2688140ed7089fd1ade6e51d",
     "254d4b6ce2ca1925877aad9498e1e96f804ca8b64665112cc6f302d55fcb46ed",
     "b366258e80e6a739ab54a2f9a79ad664f55f7a471ec1a873c0ea66ec0aa948e7",
-    "bcef20916547c8d4ebb906c5be1b0d94466bb9e22c7d3ab55dff2e1ba0b854bc"
+    "bcef20916547c8d4ebb906c5be1b0d94466bb9e22c7d3ab55dff2e1ba0b854bc",
+    "59a1a10bdef6baed51ba33b1307f6c2f032747aa3d3afcc48505dc9157cccd8c"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"

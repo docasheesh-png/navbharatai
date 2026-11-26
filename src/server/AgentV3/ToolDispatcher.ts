@@ -421,7 +421,7 @@ import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Ar
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
-import { generateBoardGames } from '../lib/BoardGamesGenerator';
+import { generateBoardGames, cricketRulesFileSource, CRICKET_RULES_PATH } from '../lib/BoardGamesGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -10575,6 +10575,18 @@ export class ToolDispatcher {
         const bg = generateBoardGames(bgInclude);
         const bgWritten = await this.writeRecipeFiles(bg.files, agent);
         const bgLayers = await this.addMissingRecipeLayers(bg.files, agent);
+        // The match's rules are the game's own file (created once, never replaced): the user changes them by asking.
+        if (Object.keys(bg.files).some((p) => p.endsWith('/cricket.ts'))) {
+          let ruled = false;
+          try { await this.actuator.readFile(this.workspaceId, CRICKET_RULES_PATH); ruled = true; }
+          catch (error) { if (!isNotFoundError(error)) throw error; }
+          if (!ruled) {
+            const rules = await this.guardedWrite(CRICKET_RULES_PATH, cricketRulesFileSource(this.worldRequest()), { agent, source: 'generate_board_games' });
+            this.state?.recordFileChange({ path: CRICKET_RULES_PATH, kind: rules.kind }, agent);
+            getWorkspaceMemory(this.workspaceId).indexFile(CRICKET_RULES_PATH, rules.content);
+            bgWritten.push(CRICKET_RULES_PATH);
+          }
+        }
         this.scheduleCheckpoint('india games pack');
         return `Added the India games pack:\n${bgWritten.join('\n')}\n\n${bg.instructions}${bgLayers}`;
       }

@@ -917,6 +917,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['cinematic', 'camera', 'death cam', 'game over animation', 'drone shot', 'intro', 'zoom in', 'zoom out', 'cutscene', 'video', 'slow motion', 'hero marne ke baad', 'pura map', 'camera ghoome'],
   },
   {
+    id: 'game_cricket_play',
+    name: 'Cricket games where the bat meets the ball: runs, fours and sixes, rules you change by asking',
+    path: 'NavBharatAI Pro → chat → ask for a cricket game (for example "5 over ka cricket game banao")',
+    description: 'In a cricket game NavBharatAI builds, each ball is bowled, the tap is measured against the moment that ball reaches the bat (with an allowance for a phone screen), and a good shot visibly leaves the bat: a four runs along the ground over the boundary, a six flies over it, and singles, twos and threes go into the field; a ball left alone hits the stumps (bowled) or goes past. Runs, fours, sixes, wickets, overs and the result are scored by themselves. The match rules — overs, wickets, team names, difficulty (easy, normal, hard timing), bowling speed and boundary size — are kept in one place, so you can change any of them by asking.',
+    howToUse: 'Ask for "cricket game banao" (add overs, wickets or "easy" if you like). Later say "10 over karo", "easy karo", "bowling tez karo", "boundary chhoti karo" or "team ka naam Mumbai rakho".',
+    relatedFeatures: ['india_board_games'],
+    keywords: ['cricket', 'cricket game', 'bat', 'ball', 'bat se ball nahi lagti', 'run nahi lag rahe', 'chauka', 'chhakka', 'four', 'six', 'over', 'wicket', 'bowling speed', 'boundary', 'easy cricket', 'क्रिकेट'],
+  },
+  {
     id: 'game_2d_kit',
     name: '2D games that feel right — platformers, side-scrollers, runners',
     path: 'NavBharatAI Pro → chat → ask for any 2D game with movement (for example "Mario jaisa platformer banao", "2D runner game", "side scrolling shooter")',

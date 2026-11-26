@@ -102,7 +102,26 @@ export interface EntityOptions {
   corpseSeconds?: number;
   /** The player's capsule radius, for pushing apart. Default 0.4. */
   playerRadius?: number;
+  /** At most this many hostiles land attacks on the player in any ATTACK_WINDOW. Default ENTITY_BALANCE.maxAttackers. */
+  maxAttackers?: number;
+  /** Seconds after it spawns before a hostile may attack. Default ENTITY_BALANCE.attackGraceSeconds. */
+  attackGraceSeconds?: number;
 }
+
+/**
+ * ⚖️ THE FIGHT IS HARD, NEVER UNFAIR — every balance number in ONE place (Kadam 4, 2026-11-26). Before this, every hostile in
+ * reach attacked every 1.2 s for 10, with no cap and from the moment it spawned: six enemies took 50 health a second and the
+ * hero died in two — the "hero jaldi marta hai" class (the reference game fixed it the same way: a cap on shooters at once
+ * and a grace after landing). A game changes these per crowd with EntityOptions; the defaults live here.
+ */
+export const ENTITY_BALANCE = {
+  /** Hostiles that may land attacks on the player in one window. The rest close in and wait their turn. */
+  maxAttackers: 3,
+  /** Seconds a hostile waits after it spawns before its first attack (the player sees it before it hits). */
+  attackGraceSeconds: 2,
+  /** How long an attacker holds its place among the maxAttackers. */
+  attackWindowSeconds: 1.5,
+} as const;
 
 /** Push the walking circles of two bodies apart along the ground. 'a' and 'b' share it by weight (0 = does not move). PURE. */
 export function separate(a: THREE.Vector3, ra: number, wa: number, b: THREE.Vector3, rb: number, wb: number): boolean {
@@ -142,6 +161,9 @@ interface Inner extends Entity {
   config: EnemyConfig;
   damage: number;
   cooldown: Cooldown;
+  /** Seconds since it spawned, and the crowd clock of its last landed attack (ENTITY_BALANCE). */
+  age: number;
+  lastAttackAt: number;
   goal: Vec2 | null;
   onArrive?: (e: Entity) => void;
   deadFor: number;
@@ -301,6 +323,7 @@ export class Entities {
         radius, height, config,
         damage: spec.damage ?? 10,
         cooldown: new Cooldown(spec.attackEvery ?? 1.2),
+        age: 0, lastAttackAt: -1e9,
         goal: null, deadFor: 0, gone: false, lastHitByPlayer: false,
         get alive() { return !this.gone && !this.health.isDead; },
         goTo(target, onArrive) { this.goal = target ? { x: target.x, z: target.z } : null; this.onArrive = onArrive; },
@@ -355,9 +378,11 @@ export class Entities {
     const player = this.host.player.object.position;
     const me: Vec2 = { x: player.x, z: player.z };
     const far: Vec2 = { x: 1e9, z: 1e9 };
+    this.clock += dt;
     for (const e of [...this.list]) {
       e.health.tick(dt);
       e.cooldown.tick(dt);
+      e.age += dt;
       if (e.health.isDead) { this.whileDead(e, dt); continue; }
       // An action is playing on it (performAction — sit, dance, salute, swim …): it stands still and lets the action move
       // it, instead of walking off mid-salute. The action clears the flag when it ends (or stopAction does).
@@ -395,7 +420,7 @@ export class Entities {
         e.state = decision.state;
         vx = decision.velocity.x; vz = decision.velocity.z;
         if (decision.alerted) events.emit('ENTITY_ALERTED', { id: e.id, kind: e.kind });
-        if (e.hostile && decision.wantsAttack && e.cooldown.tryUse()) this.attack(e);
+        if (e.hostile && decision.wantsAttack && this.mayAttack(e) && e.cooldown.tryUse()) this.attack(e);
       }
       const max = Math.max(0.01, e.config.chaseSpeed);
       const mx = THREE.MathUtils.clamp(vx / max, -1, 1);
@@ -515,7 +540,21 @@ export class Entities {
     if (e.deadFor >= (this.options.corpseSeconds ?? 4)) e.remove();
   }
 
+  /** The crowd clock (seconds of update) — what ENTITY_BALANCE's window is measured on. */
+  private clock = 0;
+
+  /** Past its grace, and either already one of the current attackers or there is a free place (ENTITY_BALANCE). */
+  private mayAttack(e: Inner): boolean {
+    if (e.age < (this.options.attackGraceSeconds ?? ENTITY_BALANCE.attackGraceSeconds)) return false;
+    const recent = (o: Inner) => this.clock - o.lastAttackAt <= ENTITY_BALANCE.attackWindowSeconds;
+    if (recent(e)) return true;
+    let busy = 0;
+    for (const o of this.list) if (o !== e && o.alive && o.hostile && recent(o)) busy++;
+    return busy < Math.max(1, this.options.maxAttackers ?? ENTITY_BALANCE.maxAttackers);
+  }
+
   private attack(e: Inner): void {
+    e.lastAttackAt = this.clock;
     e.humanoid?.act(e.config.role === 'ranged' ? 'fire' : 'punch');
     const p = e.object.position;
     this.options.playerHealth?.damage(e.damage, { x: p.x, y: p.y, z: p.z });

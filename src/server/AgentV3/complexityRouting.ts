@@ -24,7 +24,7 @@
 // only worth taking where it is likely to pay, which is why `simple` is the default on every doubt.
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
-import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
+import { signalsCouldNotRead, signalsMatchedNothing, scoreBandVersusRouting } from './RequestAnalyser';
 import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures, MIN_RUN_ITEMS, MAX_ITEM_WORDS } from './enumeratedFeatures';
 import type { BuildIntent } from './IntentClassifier';
 import { withEnglishReading } from '../lib/devanagariTechTerms';
@@ -406,6 +406,19 @@ export function startLadderForComplexity(
   verdict: ComplexityVerdict,
 ): LadderRung[] {
   return verdict === 'complex' ? withoutCheapFlashLead(rungs) : [...rungs];
+}
+
+/**
+ * The COMPLEXITY_ROUTING report line (failedbr #2523 / #2525, Q-3466). It used to be built inline in the route and said
+ * "COMPLEX (score 15, model)" beside a requestAnalysis that said "cheapest band"; it now carries the same sentence
+ * `scoreBandVersusRouting` gives the requestAnalysis block, so the two cannot disagree in silence. PURE.
+ */
+export function complexityRoutingMessage(decision: ComplexityDecision, startTier: string | null | undefined): string {
+  const head = decision.verdict === 'complex'
+    ? `Complexity: COMPLEX (score ${decision.score}, ${decision.source}) — the build opens on the ladder's second rung, past the cheap flash opener.`
+    : `Complexity: simple (score ${decision.score}, ${decision.source}) — the build opens on the ladder's first rung.`;
+  const { note } = scoreBandVersusRouting(startTier, decision);
+  return note ? `${head} ${note}` : head;
 }
 
 /** True when this tier's ladder would actually be changed by a complex verdict — for the report line. */

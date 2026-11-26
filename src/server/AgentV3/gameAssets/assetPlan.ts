@@ -1,4 +1,5 @@
 import { parseEnvFlag } from '../../lib/envFlag';
+import { withoutNonObjectSenses } from '../../lib/heroObjectSpec';
 import { isZTestAccount } from '../../lib/zTestAccount';
 import { candidateMatches, type AssetRequirement } from './assetPolicy';
 import { CATALOGUE_MAX_ENTRIES, type ReviewedAsset } from './providers';
@@ -225,7 +226,8 @@ export function vocabularyFor(catalogue: readonly ReviewedAsset[]): Vocabulary {
 
 /** Bounded deterministic vocabulary, with conservative clause rejection rather than guessed negation scope. */
 export function gameAssetRequirements(prompt: string, catalogue: readonly ReviewedAsset[]): AssetRequirement[] {
-  const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
+  // One reader of "is this word the object" (failedbr #2523, Q-3468): the hero contract's own non-object senses go first.
+  const clauses = withoutNonObjectSenses(prompt.slice(0, 16000)).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
     .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
   const served = catalogue.slice(0, CATALOGUE_MAX_ENTRIES);

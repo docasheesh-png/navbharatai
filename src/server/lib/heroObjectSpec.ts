@@ -121,6 +121,17 @@ const NOT_THE_OBJECT = [
   // player DRIVE AN AIRCRAFT ("The player drives: a aircraft") while the hero contract asked for an air vehicle. A plane
   // of geometry — ground, floor, base, grid, water, clipping, image — or three.js's PlaneGeometry is not an aeroplane.
   /\b(?:ground|floor|base|flat|grid|water|xz|horizontal|clipping|image|focal|near|far)\s*-?\s*planes?\b|\bplane\s*-?\s*(?:geometry|mesh)\b|\bPlaneGeometry\b/gi,
+  // 🔴 failedbr #2523 (Q-3468, 2026-11-26): "a crosshair, score counter, health system" was handed a TABLE spec — the
+  // kitchen "counter" — and "first-person view" a HUMAN. A game's HUD and camera words are not objects in its world:
+  // a score / kill / lap counter, a first- or third-person view, a fire button, a home screen. Only the HUD word goes
+  // (a lookbehind), so "a coin counter" still has its coins.
+  /(?<=\b(?:score|kill|ammo|lap|step|coin|life|lives|hit|combo|bullet|death|point|move|turn|round|fps|frame|click|visitor|word|letter|character|time|timer|enemy|zombie)s?\s*-?\s*)counters?\b/gi,
+  /\bcounter\s*-?\s*(?:attacks?|strikes?|measures?|offers?|clockwise)\b/gi,
+  /\b(?:first|third|1st|3rd)\s*-?\s*person\b/gi,
+  /\b(?:fire|shoot|jump|attack|action)\s*-?\s*(?:buttons?|keys?|taps?)\b/gi,
+  /\bhome\s*-?\s*(?:screens?|pages?|buttons?|tabs?|menus?)\b/gi,
+  // "shooting mechanics", "core mechanics": the plural is how a game's rules are named, never people who fix cars.
+  /(?<!\b(?:two|three|four|five|\d+|some|many|the)\s+)\bmechanics\b/gi,
 ];
 
 export function withoutNonObjectSenses(text: string): string {

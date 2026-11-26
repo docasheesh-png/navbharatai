@@ -593,6 +593,7 @@ import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhas
 import { type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
 import { runGamePlaytestPhase, runGamePlaceholderRepairPhase, type GamePlaceholderRepairPorts, type GamePlaytestPorts, type GamePlaytestResult } from '../AgentV3/buildPhases/gamePlaytestPhase';
 import { PLACEHOLDER_REPAIR_TOOLS, PLACEHOLDER_REPAIR_MAX_STEPS, PLACEHOLDER_REPAIR_MAX_TOKENS_PER_TURN } from '../AgentV3/gamePlaceholderRepair';
+import { gameProofKeeper } from '../AgentV3/gameProofPictures';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -24905,6 +24906,7 @@ async function noteBuildOutcome(
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
+          keepPictures: gameProofKeeper({ buildId, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363
         }, gamePlayKeep);
         if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }
       };

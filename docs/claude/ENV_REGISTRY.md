@@ -5383,3 +5383,7 @@ unrelated and unchanged. The vault name the owner's key is stored under is `ZAI_
 (widened to all of their apps only from Keys & Secrets, by them). The builder may never ask for it mid-build
 (`AI_MODEL_KEY_NAMES` in `secretRequest.ts`), and a built app calling `api.z.ai` from its own page is caught by
 `browserAiKeyScan.ts`.
+
+### AGENTV3_GAME_PROOF_KEEP (code default: ON; not set in Cloud Run) — 2026-11-26
+
+Keeps the game playtest's proof pictures (`src/server/AgentV3/gameProofPictures.ts`, Q-3363, admin option A). Unset means ON. When on, up to three 480 px JPEGs per played game build are copied from the sandbox into the **existing private workspace-asset bucket**, the one `workspaceAssetBucketName` resolves (`WORKSPACE_ASSETS_BUCKET` → `NAV_STORE_BUCKET` → `FIREBASE_STORAGE_BUCKET`). They go under `game-proof-v1/<YYYY-MM-DD>/<buildId>/`, at most 40 KB each and 120 KB a build. They stay 30 days; a delete-after sweep removes each day folder after that. The server never sets bucket lifecycle rules. An optional console rule (delete, age 30, prefix `game-proof-v1/`) is a backup only. Only the admin can see them, through `GET /api/admin/game-proof-picture` (admin token). They are never public and never signed. `off` keeps the pictures in the sandbox, and GAME_PROOF says why. With no bucket configured, nothing is stored and GAME_PROOF says so.

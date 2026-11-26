@@ -3875,13 +3875,14 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     id: 'admin-built-apps',
     name: 'Built apps — every user\'s app, with a preview, unpublish, ban and restore (admin only)',
     path: 'Admin Dashboard → Apps → All apps (admin only)',
-    description: `The moderation list of EVERY app any user has built with NavBharatAI Pro — published or not — newest first, 12 at a time:
+    description: `The moderation list of EVERY app any user has built with NavBharatAI Pro — published or not — newest first by default (oldest first on request), 12 at a time:
 • Lists all users' built apps from the durable file store (an app that was built and never published is listed too), with its publish state: Live, Offline, Banned, Held, Paused or Not published
 • Every row shows WHAT the app is (the name the owner chose, else the title of their first prompt) and WHO built it (name and email); the owner opens their account, and the app id sits underneath
 • Loads 12 at a time with a "Load 12 more" button — never the whole list at once
 • PREVIEW on every row, live or offline: shows the saved copy of the last successful build when one exists, else the published app itself at its public link, else renders the app's saved files in the admin's own browser — without waking the owner's machine
 • Search by full app id, owner uid or public link (looked up directly); a fragment — including part of the app's name or the owner's name or email — filters the apps already loaded
 • Filter by state (Live / Offline / Banned / Held / Paused)
+• SORT AND FILTER (2026-11-26): Order — Newest first or Oldest first; Last build — Build passed, Build failed or No result; Paid or free user — Paid, Free, Admin or Unknown; Live or not — Live now or Not live. They combine (e.g. the oldest failed builds by free users). Every row shows a Build passed / Build failed / No build result chip and the owner's account type. A build with no result is never counted as failed and an unknown account is never counted as free. A filtered page looks through the apps in order and says how many it looked at; "Look further" continues from exactly where it stopped
 • Unpublish takes a live site offline (the owner can publish again); Ban removes it and the owner can never publish that workspace again unless an admin restores it
 • ONE PERSON'S APPS, ONE ACTION (2026-10-11): search by an owner's uid and a bar shows how many apps that person has and how many are live, with "Unpublish all live" and "Ban all". It acts on exactly the apps the per-row buttons would offer, one at a time, each with its own audit line and 180-day record, and says per app if any could not be confirmed offline. It needs the same typed reason
 • After a single Ban, the toast says how many OTHER live apps that person still has, and the list opens on that person's apps so none is left serving by oversight
@@ -3889,9 +3890,9 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
 • RESTORE on a Banned or Held app lifts the block and the owner can publish again: a banned app stays offline until the owner publishes, and a held app that was still live simply stays live
 • Unpublish, Ban and Restore each need the admin's own reason, and each is written to the audit log with the admin's name
 • Live apps whose owner deleted the workspace are shown in their own strip so they can still be moderated — and previewed at their public link`,
-    howToUse: 'Admin login required. Open the Admin Dashboard → Apps → All apps. Press Preview on any row to see the app; press "Load 12 more" for the next page; type a full app id, owner uid or link and press Enter to look one up; use the state dropdown to filter. Unpublish, Ban and Restore ask for confirmation and a reason; Restore appears only on a Banned or Held app.',
+    howToUse: 'Admin login required. Open the Admin Dashboard → Apps → All apps. Press Preview on any row to see the app; press "Load 12 more" for the next page; type a full app id, owner uid or link and press Enter to look one up; use the Order, Last build, Paid or free user and Live or not dropdowns to sort and filter ("Look further" continues a filtered search). Unpublish, Ban and Restore ask for confirmation and a reason; Restore appears only on a Banned or Held app.',
     relatedFeatures: [],
-    keywords: ['built apps', 'published apps', 'all apps', 'sabhi apps', 'preview app', 'admin preview', 'unpublish', 'ban app', 'takedown', 'moderation', 'security tab', 'user apps', 'load more', '12 at a time', 'offline app preview', 'who built this app', 'kisne banaya', 'app owner', 'owner email', 'app name', 'restore app', 'unban app', 'ban hatao', 'app wapas chalu', 'lift ban'],
+    keywords: ['built apps', 'published apps', 'all apps', 'sabhi apps', 'preview app', 'admin preview', 'unpublish', 'ban app', 'takedown', 'moderation', 'security tab', 'user apps', 'load more', '12 at a time', 'offline app preview', 'who built this app', 'kisne banaya', 'app owner', 'owner email', 'app name', 'restore app', 'unban app', 'ban hatao', 'app wapas chalu', 'lift ban', 'sort apps', 'oldest apps', 'newest apps', 'failed builds', 'passed builds', 'free user apps', 'paid user apps', 'purane apps', 'naye apps', 'fail apps', 'short karo', 'tarteeb'],
   },
   {
     id: 'admin-audience',

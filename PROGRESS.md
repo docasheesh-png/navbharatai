@@ -6504,6 +6504,14 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
   real stamped page: one badge, × closes it, guard leaves it closed after 4 s, refresh restores it, injected CSS cannot hide it.
 - **Limit (honest):** apps published BEFORE this change keep the old doubled badge until they are published again — the
   edge worker (`infra/cloudflare/mitrify-apps-worker.js`) serves stored files and is deployed by hand, so it was not changed.
+## 2026-11-26 — Admin Apps → Built apps: sort and filter (admin: "be tarteeb hai, sort karne ka system banao")
+- **Problem:** the list came newest-first only, with no way to see the oldest apps, only failed builds, or only paid/free users' apps.
+- **Built:** Order (newest / oldest — a real Firestore `orderBy('savedAt', asc|desc)`), Last build (passed / failed / no result, read field-masked from the diagnostics store via `getBuildOutcomesMany`), Paid or free user (paid / free / admin / unknown), Live or not. Filters combine.
+- **How a filtered page is found:** the facts live in three other collections, so the server reads apps in order in batches of 48 (at most 8 batches) and keeps matches. The reply says how many apps it looked at; the cursor resumes right after the last app examined — never skipping one it did not look at (`takeMatches`).
+- **Honesty:** a build with no result is never counted as failed; an unknown account is never counted as free.
+- **Sibling class fixed:** the paid/free tier was spelled out twice in `admin.ts` (build reports, All builds) and the apps list would have been a third copy → one `src/server/lib/identityTier.ts` (`tierOfIdentity`) used by all three.
+- **Tests:** `tests/adminAppsSortAndFilter.test.ts` (10; reversion-proven: the cursor rule and unknown≠failed fail when broken). Re-pointed guards in `everyBuiltAppHasAPreview`, `paidUserFilter`, `BuiltAppsPanel.render`.
+- Registry statuses (Banned / Held / Paused / Unpublished) keep their own list and ignore the other filters, with a note on screen.
 ## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
 - Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
 - Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.

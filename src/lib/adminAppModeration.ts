@@ -247,6 +247,70 @@ export interface BuiltAppRow {
    */
   appName?: string | null;
   owner?: { name: string; email: string; label: string; anonymous: boolean } | null;
+  /** The LAST build's result (admin 2026-11-26 sort/filter). Optional so an older server's row still renders. */
+  outcome?: 'passed' | 'failed' | 'unknown';
+  /** The owner's account — the same paid / free rule as All builds. */
+  tier?: 'paid' | 'free' | 'admin' | 'unknown';
+}
+
+// ── SORT AND FILTER (admin 2026-11-26: "list me app aa rahi hai, be tarteeb hai, sort karne ka system banao — old new,
+//    free paid, fail pass") ────────────────────────────────────────────────────────────────────────────────────────
+
+export type AppSort = 'newest' | 'oldest';
+export type AppOutcomeFilter = 'all' | 'passed' | 'failed' | 'unknown';
+export const APP_SORT_OPTIONS: ReadonlyArray<{ value: AppSort; label: string }> = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+];
+export const APP_OUTCOME_OPTIONS: ReadonlyArray<{ value: AppOutcomeFilter; label: string }> = [
+  { value: 'all', label: 'All builds' },
+  { value: 'passed', label: 'Build passed' },
+  { value: 'failed', label: 'Build failed' },
+  // Kept apart from both: a build that was cut off or is still running is neither a pass nor a fail.
+  { value: 'unknown', label: 'No result' },
+];
+/**
+ * Where an app is. "live" / "not-live" are judged per app by the ONE live rule (publishStateOf) and keep the date
+ * order; the registry states page the publish registry instead (their own mode, ordered by id).
+ */
+export const APP_PUBLISH_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '', label: 'Live or not' },
+  { value: 'live', label: 'Live now' },
+  { value: 'not-live', label: 'Not live' },
+  { value: 'unpublished', label: 'Unpublished' },
+  { value: 'taken_down', label: 'Banned' },
+  { value: 'held', label: 'Held' },
+  { value: 'plan_paused', label: 'Paused' },
+];
+/** True when the publish choice pages the registry (so the order and the other filters do not apply). PURE. */
+export function isRegistryStatus(publish: string): boolean {
+  return publish !== '' && publish !== 'live' && publish !== 'not-live';
+}
+
+/** The query string for one page of the list — only what differs from the default is sent. PURE. */
+export function appsListParams(opts: {
+  limit: number; cursor?: string | null; q?: string; publish: string; sort: AppSort; outcome: AppOutcomeFilter; tier: string;
+}): URLSearchParams {
+  const p = new URLSearchParams();
+  p.set('limit', String(opts.limit));
+  if (opts.cursor) p.set('cursor', opts.cursor);
+  if (opts.q) p.set('q', opts.q);
+  if (isRegistryStatus(opts.publish)) {
+    p.set('status', opts.publish);
+    return p;
+  }
+  if (opts.publish) p.set('publish', opts.publish);
+  if (opts.sort !== 'newest') p.set('sort', opts.sort);
+  if (opts.outcome !== 'all') p.set('outcome', opts.outcome);
+  if (opts.tier && opts.tier !== 'all') p.set('tier', opts.tier);
+  return p;
+}
+
+/** The chip a row shows for its last build. PURE. */
+export function outcomeChip(outcome: BuiltAppRow['outcome']): { label: string; tone: 'pass' | 'fail' | 'none' } {
+  if (outcome === 'passed') return { label: 'Build passed', tone: 'pass' };
+  if (outcome === 'failed') return { label: 'Build failed', tone: 'fail' };
+  return { label: 'No build result', tone: 'none' };
 }
 
 /** What the admin reads on a built app's row — every state yields real words, never blank. */

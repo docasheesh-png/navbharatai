@@ -110,7 +110,11 @@ describe('census: the brand has one mint and the label has one reader', () => {
 
   it('the stored-email free-list LABEL is read by the admin lists only', () => {
     const readers = files.filter((f) => !f.endsWith('featureFlag.ts') && code(f).includes('freeListLabelForStoredEmail('));
-    expect(readers).toEqual(['src/server/routes/admin.ts']);
+    // 2026-11-26: the admin lists read it through ONE helper (identityTier.ts), and only the admin routes may import
+    // that helper — so the label still reaches the admin lists and nothing else, never a grant.
+    expect(readers).toEqual(['src/server/lib/identityTier.ts']);
+    const helperUsers = files.filter((f) => !f.endsWith('identityTier.ts') && /from '[./]+(lib\/)?identityTier'/.test(code(f)));
+    expect(helperUsers).toEqual(['src/server/routes/admin.ts']);
     expect(freeListLabelForStoredEmail(null, LISTED)).toBe(true); // a label still shows the listed row
   });
 

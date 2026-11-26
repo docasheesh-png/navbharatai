@@ -31,7 +31,7 @@ export interface LatestBuildFacts {
   summary?: string;
   rootCause?: string;
   prompt?: string;
-  /** Q-3363: the GAME_PROOF pictures this build kept privately for the admin ([] when none). */
+  /** Q-3363: the GAME_PROOF pictures this build kept privately for the admin (absent when none). */
   proofPictures?: ProofPictureRef[];
 }
 
@@ -60,13 +60,15 @@ export function readWorkspaceReports(status: number, body: unknown): WorkspaceRe
       summary: typeof h.summary === 'string' ? h.summary : undefined,
     }));
   const l = b.latest && typeof b.latest === 'object' ? (b.latest as Record<string, unknown>) : null;
+  const proofPictures = l ? proofPicturesFromIssues(l.issues) : [];
   const latest: LatestBuildFacts | null = l ? {
     startedAt: typeof l.startedAt === 'number' ? l.startedAt : undefined,
     ok: typeof l.ok === 'boolean' ? l.ok : undefined,
     summary: typeof l.summary === 'string' ? l.summary : undefined,
     rootCause: typeof l.rootCause === 'string' ? l.rootCause : undefined,
     prompt: typeof l.prompt === 'string' ? l.prompt : undefined,
-    proofPictures: proofPicturesFromIssues(l.issues),
+    // Present only when the report kept pictures — an absent field, like every other one here, means "not recorded".
+    ...(proofPictures.length ? { proofPictures } : {}),
   } : null;
   return { kind: 'found', latest, history };
 }

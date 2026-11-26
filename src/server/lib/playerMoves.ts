@@ -71,14 +71,21 @@ export function playerMovesOf(names: readonly string[]): { has: Array<{ move: Pl
  * tests/aLibraryCharacterCanHoldAndPunch.test.ts.
  */
 export const MADE_FROM_SKELETON: readonly PlayerMoveName[] = ['punch', 'kick', 'swing', 'throw', 'fire', 'use'];
+/**
+ * Walking and running the kit MAKES when a model has no clip for them (playerBody.ts, MADE_GAIT; admin 2026-11-26: "aisa app
+ * maker chahiye jo movement khud bana le"): its legs and arms swing when it has them, else its whole body steps. Every move
+ * above is also made with the WHOLE BODY (RIGID_MOVES) for a model with no bones for it.
+ */
+export const MADE_GAIT_MOVES: readonly PlayerMoveName[] = ['walk', 'run'];
+const MADE_ANY = new Set<string>([...MADE_FROM_SKELETON, ...MADE_GAIT_MOVES]);
 
 /** The honest clause for moves a model has no clip for: which the kit makes from the skeleton, and which stay unanimated. PURE. */
 export function lackedMovesClause(lacks: readonly string[]): string {
   if (!lacks.length) return '';
-  const made = lacks.filter((m) => (MADE_FROM_SKELETON as readonly string[]).includes(m));
-  const not = lacks.filter((m) => !(MADE_FROM_SKELETON as readonly string[]).includes(m));
+  const made = lacks.filter((m) => MADE_ANY.has(m));
+  const not = lacks.filter((m) => !MADE_ANY.has(m));
   return [
-    made.length ? `${made.join(', ')} ${made.length === 1 ? 'is' : 'are'} not in its own clips, so NavBharatAI makes ${made.length === 1 ? 'it' : 'them'} from its skeleton when it has arm and leg bones (the game says so on screen)` : '',
+    made.length ? `${made.join(', ')} ${made.length === 1 ? 'is' : 'are'} not in its own clips, so NavBharatAI makes ${made.length === 1 ? 'it' : 'them'} from its skeleton, or with its whole body when it has no bones for ${made.length === 1 ? 'it' : 'them'} (the game says so on screen)` : '',
     not.length ? `${not.join(', ')} ${not.length === 1 ? 'is' : 'are'} not animated` : '',
   ].filter(Boolean).join('; ');
 }
@@ -91,7 +98,7 @@ export const ANY_ACTION_NOTE = 'any OTHER action the user asks for (pick up, ope
 
 /** One plain line for the builder: what the character can do, and what it cannot (so the user is told). PURE. */
 export function playerMovesLine(has: readonly string[], lacks: readonly string[]): string {
-  if (!has.length) return `it has NO animations of its own, so it moves without walking or posing — tell the user that plainly; ${ANY_ACTION_NOTE}`;
+  if (!has.length) return `it has NO animations of its own, so NavBharatAI animates its walk, run and actions for it (from its skeleton, or its whole body when it has no bones) — tell the user that plainly; ${ANY_ACTION_NOTE}`;
   return `its own moves: ${has.join(', ')}`
     + (lacks.length ? `; ${lackedMovesClause(lacks)} — tell the user plainly` : '')
     + `; ${ANY_ACTION_NOTE}`;

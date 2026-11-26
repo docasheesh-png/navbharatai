@@ -210,7 +210,7 @@ function fromHandle(handle: PlayerModelHandle): PlayerModel {
 //     toward the target direction in WORLD space for the length of the move, then let go. World space is what makes it work
 //     on any rig: the bones' local axes differ between rigs, a direction in the world does not. It is said once on screen
 //     that the move is made by NavBharatAI from the skeleton. A model with no such bones keeps the old honest line.
-export type BoneRole = 'rightHand' | 'leftHand' | 'rightUpperArm' | 'rightForeArm' | 'rightUpLeg' | 'rightLeg';
+export type BoneRole = 'rightHand' | 'leftHand' | 'rightUpperArm' | 'rightForeArm' | 'rightUpLeg' | 'rightLeg' | 'leftUpperArm' | 'leftForeArm' | 'leftUpLeg' | 'leftLeg';
 const BONE_NAMES: Record<BoneRole, readonly string[]> = {
   rightHand: ['righthand', 'handr', 'rhand', 'handright', 'wristr', 'rightwrist'],
   leftHand: ['lefthand', 'handl', 'lhand', 'handleft', 'wristl', 'leftwrist'],
@@ -218,6 +218,10 @@ const BONE_NAMES: Record<BoneRole, readonly string[]> = {
   rightForeArm: ['rightforearm', 'forearmr', 'lowerarmr', 'rightlowerarm', 'rforearm', 'elbowr'],
   rightUpLeg: ['rightupleg', 'thighr', 'upperlegr', 'rightupperleg', 'rightthigh', 'uplegr'],
   rightLeg: ['rightleg', 'calfr', 'shinr', 'lowerlegr', 'rightlowerleg', 'rightshin', 'legr'],
+  leftUpperArm: ['leftarm', 'upperarml', 'leftupperarm', 'arml', 'lupperarm', 'uparml'],
+  leftForeArm: ['leftforearm', 'forearml', 'lowerarml', 'leftlowerarm', 'lforearm', 'elbowl'],
+  leftUpLeg: ['leftupleg', 'thighl', 'upperlegl', 'leftupperleg', 'leftthigh', 'uplegl'],
+  leftLeg: ['leftleg', 'calfl', 'shinl', 'lowerlegl', 'leftlowerleg', 'leftshin', 'legl'],
 };
 /** 'mixamorig:RightForeArm' → 'rightforearm'; 'Hand.R' → 'handr'. */
 export function boneKey(name: string): string {
@@ -234,6 +238,52 @@ export function findBones(root: THREE.Object3D): Partial<Record<BoneRole, THREE.
   return out;
 }
 
+// 🦴 BY SHAPE, WHEN THE NAMES ARE UNKNOWN (admin 2026-11-26: "mujhe aisa app maker chahiye jo movement khud bana le" — a
+// character showed "Your character has no punch move of its own"). A rig named "Bip01 R UpperArm", "DEF-upper_arm.R" or
+// "Arm_R_012" has the same arms as a mixamo one; only the words differ. The skeleton's SHAPE says which chain is which: a
+// bone that branches into several chains (the chest, the hips), a chain that reaches out sideways is an arm, one that
+// reaches down is a leg, and the side is read in the character's own frame (+Z forward, -X its right). Names still win.
+const isBone = (o: THREE.Object3D) => (o as THREE.Bone).isBone === true || o.type === 'Bone';
+export function findBonesByShape(root: THREE.Object3D, frame: THREE.Object3D = root): Partial<Record<BoneRole, THREE.Object3D>> {
+  const all: THREE.Object3D[] = [];
+  root.traverse((o) => { if (isBone(o)) all.push(o); });
+  if (all.length < 6) return {};
+  frame.updateWorldMatrix(true, true);
+  const at = (o: THREE.Object3D) => frame.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
+  const kids = (o: THREE.Object3D) => o.children.filter(isBone);
+  const ys = all.map((o) => at(o).y);
+  const tall = Math.max(...ys) - Math.min(...ys);
+  if (!(tall > 1e-6)) return {};
+  /** A chain of single children from start; it stops at a bone that branches (a hand into fingers) or ends. */
+  const chainFrom = (start: THREE.Object3D) => { const out = [start]; let c = start; while (out.length < 8) { const k = kids(c); if (k.length !== 1) break; c = k[0]; out.push(c); } return out; };
+  const len = (a: THREE.Object3D, b: THREE.Object3D) => at(a).distanceTo(at(b));
+  /** A short first link is a clavicle or a hip bone, not the limb itself. */
+  const skipShort = (ch: THREE.Object3D[]) => (ch.length >= 4 && len(ch[0], ch[1]) < 0.5 * len(ch[1], ch[2]) ? ch.slice(1) : ch);
+  type Pick = { chain: THREE.Object3D[]; score: number };
+  const best: Record<string, Pick | undefined> = {};
+  const offer = (key: string, chain: THREE.Object3D[], score: number) => { if (!best[key] || score > best[key]!.score) best[key] = { chain, score }; };
+  for (const fork of all) {
+    const branches = kids(fork);
+    if (branches.length < 2) continue;
+    const base = at(fork);
+    for (const b of branches) {
+      const ch = chainFrom(b);
+      const end = at(ch[ch.length - 1]);
+      const side = end.x - base.x, drop = base.y - end.y;
+      if (Math.abs(side) > 0.12 * tall && ch.length >= 3 && Math.abs(side) > drop * 0.25) offer(side < 0 ? 'rightArm' : 'leftArm', skipShort(ch), Math.abs(side));
+      else if (drop > 0.3 * tall && ch.length >= 2 && Math.abs(side) < drop) offer(Math.sign(end.x - base.x) < 0 || (end.x === base.x && at(b).x < base.x) ? 'rightLeg' : 'leftLeg', skipShort(ch), drop);
+    }
+  }
+  const out: Partial<Record<BoneRole, THREE.Object3D>> = {};
+  const arm = (k: string, upper: BoneRole, fore: BoneRole, hand: BoneRole) => { const c = best[k]?.chain; if (c && c.length >= 3) { out[upper] = c[0]; out[fore] = c[1]; out[hand] = c[2]; } };
+  const leg = (k: string, up: BoneRole, low: BoneRole) => { const c = best[k]?.chain; if (c && c.length >= 2) { out[up] = c[0]; out[low] = c[1]; } };
+  arm('rightArm', 'rightUpperArm', 'rightForeArm', 'rightHand');
+  arm('leftArm', 'leftUpperArm', 'leftForeArm', 'leftHand');
+  leg('rightLeg', 'rightUpLeg', 'rightLeg');
+  leg('leftLeg', 'leftUpLeg', 'leftLeg');
+  return out;
+}
+
 type Aim = { role: BoneRole; dir: (t: number) => THREE.Vector3 };
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).normalize();
 const lerpDir = (a: THREE.Vector3, b: THREE.Vector3, t: number) => a.clone().lerp(b, Math.min(1, Math.max(0, t))).normalize();
@@ -245,6 +295,25 @@ export const MADE_MOVES: Partial<Record<PlayerMove, { seconds: number; aims: Aim
   throw: { seconds: 0.5, aims: [{ role: 'rightUpperArm', dir: (t) => lerpDir(v(-0.3, 0.8, -0.6), v(-0.1, 0.3, 1), t) }, { role: 'rightForeArm', dir: (t) => lerpDir(v(-0.2, 1, -0.4), v(-0.1, 0.2, 1), t) }] },
   kick: { seconds: 0.45, aims: [{ role: 'rightUpLeg', dir: () => v(-0.05, -0.2, 1) }, { role: 'rightLeg', dir: () => v(-0.05, -0.1, 1) }] },
   use: { seconds: 0.4, aims: [{ role: 'rightUpperArm', dir: () => v(-0.1, -0.4, 1) }, { role: 'rightForeArm', dir: () => v(-0.1, -0.6, 1) }] },
+};
+
+/**
+ * 🧍 A MODEL WITH NO SKELETON STILL MOVES (admin 2026-11-26). A rigid model (a statue-like file, one mesh) cannot bend an
+ * arm, but its WHOLE BODY can lunge into a punch, rock back from a shot, lean into a kick — a real, visible move instead of
+ * a line saying there is none. Offsets are in the character's own frame, in its heights, shaped by the move's progress k.
+ */
+export const RIGID_MOVES: Partial<Record<PlayerMove, { seconds: number; pose: (k: number) => { fwd: number; up: number; lean: number; twist: number } }>> = {
+  punch: { seconds: 0.35, pose: (k) => { const w = Math.sin(Math.PI * k); return { fwd: 0.1 * w, up: 0, lean: 0.18 * w, twist: -0.35 * w }; } },
+  fire: { seconds: 0.3, pose: (k) => { const w = Math.sin(Math.PI * k); return { fwd: -0.04 * w, up: 0, lean: -0.08 * w, twist: 0 }; } },
+  swing: { seconds: 0.45, pose: (k) => ({ fwd: 0.05 * Math.sin(Math.PI * k), up: 0, lean: 0.1 * Math.sin(Math.PI * k), twist: 0.6 - 1.2 * k }) },
+  throw: { seconds: 0.5, pose: (k) => { const w = Math.sin(Math.PI * k); return { fwd: 0.06 * w, up: 0, lean: (k < 0.4 ? -0.15 : 0.2) * w, twist: -0.3 * w }; } },
+  kick: { seconds: 0.45, pose: (k) => { const w = Math.sin(Math.PI * k); return { fwd: 0.05 * w, up: 0.02 * w, lean: -0.2 * w, twist: 0 }; } },
+  use: { seconds: 0.4, pose: (k) => { const w = Math.sin(Math.PI * k); return { fwd: 0.03 * w, up: -0.03 * w, lean: 0.15 * w, twist: 0 }; } },
+};
+/** Walk and run made by NavBharatAI when the model has no clip for them: steps per second and swing, in radians. */
+export const MADE_GAIT: Partial<Record<PlayerMove, { hz: number; legs: number; arms: number }>> = {
+  walk: { hz: 1.8, legs: 0.45, arms: 0.35 },
+  run: { hz: 2.8, legs: 0.75, arms: 0.6 },
 };
 
 /** The first child of a bone that the bone points at (its direction is bone → child). */
@@ -320,6 +389,10 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
   let down = false;
   let bones: Partial<Record<BoneRole, THREE.Object3D>> = {};
   let made: { move: PlayerMove; t: number; seconds: number } | null = null;
+  // A whole-body move for a model with no bones for it, and a walk/run made when the model has no clip (RIGID_MOVES, MADE_GAIT).
+  let rigid: { move: PlayerMove; t: number; seconds: number } | null = null;
+  let gait: { move: PlayerMove; phase: number } | null = null;
+  let body: { pivot: THREE.Object3D; position: THREE.Vector3; rotation: THREE.Euler } | null = null;
   const rests = new Map<THREE.Object3D, THREE.Quaternion>();
   const tallness = Number.isFinite(choice?.modelHeight) && Number(choice?.modelHeight) > 0 ? Number(choice?.modelHeight) : 1.75;
   const told = new Set<string>();
@@ -327,6 +400,12 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     if (told.has(move) || told.has('*')) return;
     told.add(move);
     say('player-move-' + move, 'Your character has no ' + move + ' move of its own. ' + rest);
+  };
+  /** Said once per made move — unless the character has no clips at all, which is said once for every move ('*'). */
+  const madeSaid = (move: PlayerMove, text: string) => {
+    if (told.has('made-' + move) || told.has('*')) return;
+    told.add('made-' + move);
+    say('player-move-made-' + move, text);
   };
   const failed = (why: string) => {
     if (gone) return;
@@ -352,7 +431,9 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     }
     holder.add(outer);
     model = m; wrapper = outer;
-    bones = findBones(m.root);
+    body = { pivot, position: pivot.position.clone(), rotation: pivot.rotation.clone() };
+    // Names first; the skeleton's shape fills every role the names did not (findBonesByShape).
+    bones = { ...findBonesByShape(m.root, outer), ...findBones(m.root) };
     // What the character holds (PLAYER.holds): library subjects, each put in its hand once it has loaded.
     for (const side of ['right', 'left'] as const) {
       const wanted = typeof choice?.holds?.[side] === 'string' ? String(choice?.holds?.[side]).trim() : '';
@@ -364,7 +445,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
         api.hold(item.root, side);
       }).catch(() => say('player-hold-missing-' + side, 'The ' + wanted + ' to hold could not be loaded, so nothing is in the hand.'));
     }
-    if (m.clips && m.clips.length === 0) { told.add('*'); say('player-moves-none', 'Your character has no animations of its own, so it moves without walking or posing.'); }
+    if (m.clips && m.clips.length === 0) { told.add('*'); say('player-moves-none', 'Your character has no animations of its own, so NavBharatAI animates its moves for it.'); }
     shown();
   };
   if (url) {
@@ -385,11 +466,20 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       if (!model || down || busy > 0) return false;
       if (role === looping) return exact;
       looping = role;
+      gait = null;
       exact = model.play(role, false);
       if (exact) return true;
+      // Its own nearest clip first (a run plays its real walk) — a real clip beats a made one.
       const stand = STAND_IN[role];
-      if (stand && model.play(stand, false)) tell(role, 'It plays its ' + stand + ' instead.');
-      else tell(role, 'That move is shown without an animation.');
+      if (stand && model.play(stand, false)) { tell(role, 'It plays its ' + stand + ' instead.'); return false; }
+      // No clip for walking or running at all: NavBharatAI makes the steps (legs and arms when it has them, else the body).
+      if (MADE_GAIT[role]) {
+        gait = { move: role, phase: 0 };
+        madeSaid(role, 'Your character has no ' + role + ' move of its own, so NavBharatAI animates one.');
+        return true;
+      }
+      if (role === 'idle') return false;
+      tell(role, 'That move is shown without an animation.');
       return false;
     },
     act(move) {
@@ -401,7 +491,16 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
           made = { move, t: 0, seconds: recipe.seconds };
           looping = '';
           busy = recipe.seconds;
-          if (!told.has('made-' + move)) { told.add('made-' + move); say('player-move-made-' + move, 'Your character has no ' + move + ' move of its own, so NavBharatAI animates one from its skeleton.'); }
+          madeSaid(move, 'Your character has no ' + move + ' move of its own, so NavBharatAI animates one from its skeleton.');
+          return true;
+        }
+        // No bones for it either: the whole body makes the move (RIGID_MOVES) — never a still character and a line saying so.
+        const whole = RIGID_MOVES[move];
+        if (whole && body) {
+          rigid = { move, t: 0, seconds: whole.seconds };
+          looping = '';
+          busy = whole.seconds;
+          madeSaid(move, 'Your character has no ' + move + ' move of its own, so NavBharatAI animates one with its whole body.');
           return true;
         }
         // Landing is the kit person's small settle pose, not a move anyone asked for: a model without one simply lands.
@@ -413,7 +512,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       busy = model.seconds(move) || 0.6;
       return true;
     },
-    revive() { down = false; busy = 0; looping = ''; made = null; },
+    revive() { down = false; busy = 0; looping = ''; made = null; rigid = null; gait = null; },
     hold(item, side = 'right') {
       if (!model || !wrapper) return false;
       const box = new THREE.Box3().setFromObject(item);
@@ -441,6 +540,47 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       rests.clear();
       if (busy > 0) { busy -= dt; if (busy <= 0) { busy = 0; looping = ''; } }
       model.update(dt);
+      const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
+      // The whole body back to where it stands, then this frame's made body move or steps (a rigid model's only motion).
+      if (body) { body.pivot.position.copy(body.position); body.pivot.rotation.copy(body.rotation); }
+      if (rigid && body) {
+        rigid.t += step;
+        const k = rigid.t / rigid.seconds;
+        const whole = RIGID_MOVES[rigid.move];
+        if (k >= 1 || !whole) rigid = null;
+        else {
+          const p = whole.pose(k);
+          body.pivot.position.z += p.fwd * tallness;            // the holder's +Z is the character's forward, whatever its turn
+          body.pivot.position.y += p.up * tallness;
+          body.pivot.rotation.x += p.lean;
+          body.pivot.rotation.y += p.twist;
+        }
+      }
+      if (gait && wrapper && !made && !rigid && !down) {
+        const g = MADE_GAIT[gait.move];
+        if (g) {
+          gait.phase += step * g.hz * Math.PI * 2;
+          const s = Math.sin(gait.phase);
+          const legs = bones.rightUpLeg && bones.leftUpLeg;
+          if (legs) {
+            wrapper.updateMatrixWorld(true);
+            const frame = wrapper.getWorldQuaternion(new THREE.Quaternion());
+            const swing = (role: BoneRole, a: number, side: number) => {
+              const bone = bones[role];
+              if (!bone) return;
+              if (!rests.has(bone)) rests.set(bone, bone.quaternion.clone());
+              aimBone(bone, v(side, -Math.cos(a), Math.sin(a)).applyQuaternion(frame), 0.9);
+            };
+            swing('rightUpLeg', g.legs * s, 0); swing('leftUpLeg', -g.legs * s, 0);
+            swing('rightLeg', g.legs * s - Math.max(0, -s) * g.legs * 0.8, 0); swing('leftLeg', -g.legs * s - Math.max(0, s) * g.legs * 0.8, 0);
+            swing('rightUpperArm', -g.arms * s, -0.15); swing('leftUpperArm', g.arms * s, 0.15);
+          } else if (body) {
+            // No legs to swing: the body bobs with each step and rocks a little, side to side.
+            body.pivot.position.y += Math.abs(s) * 0.035 * tallness;
+            body.pivot.rotation.z += s * 0.06;
+          }
+        }
+      }
       if (made && wrapper) {
         made.t += Number.isFinite(dt) && dt > 0 ? dt : 0;
         const k = made.t / made.seconds;
@@ -452,7 +592,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
         for (const aim of recipe.aims) {
           const bone = bones[aim.role];
           if (!bone) continue;
-          rests.set(bone, bone.quaternion.clone());
+          if (!rests.has(bone)) rests.set(bone, bone.quaternion.clone());
           aimBone(bone, aim.dir(k).clone().applyQuaternion(frame), weight);
         }
       }

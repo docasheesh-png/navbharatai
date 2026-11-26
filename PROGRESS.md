@@ -6649,3 +6649,9 @@ Fix: one DOWN_SECONDS (6, every blow); GAME_FEATURES_INDEX_WITH_DANGER is derive
 The kit's Dispatch (a police car with its siren drives in, officers get out) existed and no game used it; the builder hand-wrote
 police five times in #2549's project. GamePoliceFeature.ts + addPoliceAtTurnStart write src/game/features/policeDispatch.ts on
 the kit and list it (and on the first build); missing kit files are added. tests/policeComeWhenAsked.test.ts runs it on the real kit.
+
+## 2026-11-26 — a car picked in the Game Library arrives in an open-world game (admin)
+
+"Use as my car" refused in every game but the racing starter. carSwap.setLibraryCarAtTurnStart now writes
+src/game/features/myCar.ts (GameMyCarFeature.ts) in a game on the kit's features list: the model added, drivable in front of the
+player. tests/aLibraryCarArrivesInAnOpenWorld.test.ts.

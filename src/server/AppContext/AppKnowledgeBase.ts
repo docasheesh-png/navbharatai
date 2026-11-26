@@ -917,6 +917,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['police', 'pulis', 'police nahi aa rahi', 'police ki gaadi', 'police car', 'siren', 'cyron', 'sairan', 'officers', 'police utre', 'arrest', 'wanted', 'पुलिस'],
   },
   {
+    id: 'game_library_car_open_world',
+    name: 'A car picked in the Game Library is yours to drive in an open-world game too',
+    path: 'NavBharatAI Pro → chat → Game Library → pick a car → Use as my car',
+    description: 'Picking a car in the Game Library with Use as my car works in a racing game (it becomes the car you race) and in an open-world game: there the car — a police car, a taxi, a sports car, any car in the library — is put a few steps in front of your character at the start. Walk up to it, press Use (E on a keyboard) to get in, drive it, and press Use again to get out. Picking another car later replaces it.',
+    howToUse: 'Open the Game Library, choose a car, tap Use as my car and send. In the game, walk to the car in front of you and press Use.',
+    relatedFeatures: ['game_police', 'game_play_basics'],
+    keywords: ['game library car', 'use as my car', 'police car', 'car nahi aayi', 'car available nahi hai', 'meri gaadi', 'library se car', 'gaadi chalana', 'drive car open world'],
+  },
+  {
     id: 'game_cinematic_camera',
     name: 'Cinematic camera shots in a game: death cam, intro drone shot, any shot you describe',
     path: 'NavBharatAI Pro → chat → describe the shot in a 3D game request or a later message',

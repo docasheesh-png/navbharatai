@@ -6663,3 +6663,14 @@ invisible to the account eraser, and `deleteUserData` erases the only record poi
 - **Lock:** `tests/accountDeletionReachesRecordOnlyStorage.test.ts` — 16 reversions, each fails.
 - **New rows:** Q-3702 (OPEN: native build job rows not erased; the collection census is blind to non-`*_COLLECTION`
   constants), Q-3703 (🟡 decision: delete a departing user's signing keys?), Q-3704 (OPEN: expired shares never purged).
+## 2026-11-26 — failedbr #2549: police the user asks for are the kit's real police, put in by the platform
+
+The kit's Dispatch (a police car with its siren drives in, officers get out) existed and no game used it; the builder hand-wrote
+police five times in #2549's project. GamePoliceFeature.ts + addPoliceAtTurnStart write src/game/features/policeDispatch.ts on
+the kit and list it (and on the first build); missing kit files are added. tests/policeComeWhenAsked.test.ts runs it on the real kit.
+
+## 2026-11-26 — a car picked in the Game Library arrives in an open-world game (admin)
+
+"Use as my car" refused in every game but the racing starter. carSwap.setLibraryCarAtTurnStart now writes
+src/game/features/myCar.ts (GameMyCarFeature.ts) in a game on the kit's features list: the model added, drivable in front of the
+player. tests/aLibraryCarArrivesInAnOpenWorld.test.ts.

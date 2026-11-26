@@ -69,6 +69,7 @@ import { applyPlayerChoice, resolvePlayerChoice, humanoidCollider, findBones, pl
 import { updateActions } from './play/actions';
 import { aimFrom, type AimResult } from './play/aim';
 import { Director, DEATH_CAM, HERO_SHOT, introDrone, type Shot, type CinematicFrame } from './play/cinematics';
+export type { Shot, CinematicFrame } from './play/cinematics';
 import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
@@ -551,9 +552,10 @@ export class Game {
     this.disposers.push(events.on('GAME_OVER', () => { if (this.options.cinematics?.death) void this.director.play(this.shotsFor('death')); }));
     // A tap, a click or a key skips any shot playing.
     const skipShot = () => { if (this.director.active) this.director.skip(); };
-    options.container.addEventListener('pointerdown', skipShot);
-    window.addEventListener('keydown', skipShot);
-    this.disposers.push(() => { options.container.removeEventListener('pointerdown', skipShot); window.removeEventListener('keydown', skipShot); });
+    // Optional calls: a host element or window without listeners (a test double, a worker) must not stop the game starting.
+    options.container.addEventListener?.('pointerdown', skipShot);
+    if (typeof window !== 'undefined') window.addEventListener?.('keydown', skipShot);
+    this.disposers.push(() => { options.container.removeEventListener?.('pointerdown', skipShot); if (typeof window !== 'undefined') window.removeEventListener?.('keydown', skipShot); });
     // 🖱️ POINTER LOCK: a click on the canvas during play captures the mouse; any screen that is not play lets it go. The
     // browser drops the lock itself on Esc and never delivers that Esc to the page — so losing it mid-play IS the pause.
     const onCanvasClick = () => { if (state.status === 'playing') this.capturePointer(); };
@@ -2783,8 +2785,8 @@ export function Hud({ game }: { game: Game }) {
 
       {cine ? (
         <div data-cinematic="" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {cine.bars ? <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '11%', background: '#000' }} /> : null}
-          {cine.bars ? <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '11%', background: '#000' }} /> : null}
+          {cine.bars ? <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '11%', background: 'rgba(8, 10, 14, 0.92)' }} /> : null}
+          {cine.bars ? <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '11%', background: 'rgba(8, 10, 14, 0.92)' }} /> : null}
           {cine.title ? (
             <div style={{ textAlign: 'center', color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.85)' }}>
               <div style={{ fontSize: 'clamp(32px, 9vw, 84px)', fontWeight: 900, letterSpacing: 6 }}>{cine.title}</div>

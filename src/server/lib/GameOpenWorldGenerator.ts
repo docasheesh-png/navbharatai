@@ -78,6 +78,12 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * its shore). The player — on foot or in a car — is stopped at it and told once in a while. false: no edge.
    */
   boundary?: false | { margin?: number };
+  /**
+   * 🚪 WALK INTO THE HOUSES (admin 2026-11-26: "ghar me game open karo … painted gate ko real gate banao … hero andar chala
+   * jayega"). true: every house in every city on the map is the kit's enterable house — a real door (E, or Use on a phone),
+   * hollow rooms, walls that collide (CityOptions.enterableHouses). A place's own city options can still say false.
+   */
+  enterableHouses?: boolean;
 }
 
 /** The open country kept around the farthest place inside the edge of the map, and the smallest play area, in metres. */
@@ -413,7 +419,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, boundary, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, boundary, enterableHouses, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -925,7 +931,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     // (Auto quality off + Graphics low = light), and a place a game gave its own tier keeps it. The light tier stands the same
     // streets, buildings and colliders with fewer draw calls and triangles; a device with a real GPU draws exactly what it did.
     const tier = geometryTier(settings.get());
-    const city = createCity({ tier, ...p.cityOptions });
+    const city = createCity({ tier, ...(enterableHouses ? { enterableHouses: true } : {}), ...p.cityOptions });
     const plan = city.plan;
     const root = new THREE.Group(); root.name = 'Region ' + p.region.id;
     root.add(city.root);

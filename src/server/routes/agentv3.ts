@@ -79,6 +79,7 @@ import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
 import { noteServerMemory } from '../AgentV3/buildPhases/serverMemoryPulse';
 import { enemiesAtTurnStart } from '../AgentV3/buildPhases/enemiesTurn';
+import { housesAtTurnStart } from '../AgentV3/buildPhases/housesTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
 import { raceWorldAtTurnStart } from '../AgentV3/raceWorld';
@@ -19589,6 +19590,9 @@ async function noteBuildOutcome(
       buildPrompt = withPlatformHandoff(await enemiesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
         runRecipe: async (name) => !(await dispatcher.dispatch({ id: `enemies-${name}`, name: 'run_recipe', input: { name } }, 'architect', { signal: abort.signal })).is_error }), buildPrompt);
+      // 🚪 "GHAR KE ANDAR JAANA HAI": every city house becomes one you can walk into (housesTurn.ts).
+      buildPrompt = withPlatformHandoff(await housesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       // 🏁 "RACE SHEHAR ME KARO" — the user's yes moves a road-library race onto the world's city roads (raceWorld.ts, map
       // expansion item 8): the platform writes the switch itself, last, after the files it needs. OFF unless AGENTV3_RACING_WORLD=on.
       buildPrompt = withPlatformHandoff(await raceWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),

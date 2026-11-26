@@ -144,7 +144,8 @@ describe('🎚️ who picks the tier', () => {
   it('the open world reads it as each place is built and hands the city\'s tier to its traffic and people', () => {
     const ow = file(OPEN_WORLD_BRIDGE_PATH);
     expect(ow).toContain('const tier = geometryTier(settings.get());');
-    expect(ow).toContain('createCity({ tier, ...p.cityOptions })');
+    // The tier still comes first; WORLD.enterableHouses (2026-11-26) rides along, and a place's own options win over both.
+    expect(ow).toContain('createCity({ tier, ...(enterableHouses ? { enterableHouses: true } : {}), ...p.cityOptions })');
     expect(ow).toMatch(/createCityTraffic\(city, \{ count: p\.preset\.traffic, tier: city\.tier,/);
     expect(ow).toMatch(/createCityPeople\(city, \{ traffic, count: p\.preset\.people, tier: city\.tier,/);
   });

@@ -6321,6 +6321,54 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
+## 2026-11-26 — Open-world problems 4/5/8 and the autopsy of failedbr #2521–#2530 (Q-3520…Q-3535)
+
+Branch `claude/kind-cannon-s3hgxm`. The admin asked for the open-world problems in their order ("user ke words par nahi
+intention par kaam ho"), then for every small and big problem in the last ten build reports to be fixed. Per the admin, the
+PR is opened and NOT merged. Local CI was not run in full (admin); targeted suites, both typechecks and noUnusedImports were.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+- Q-3520 city does not grow → a narrow word list; no-city answered "no-city" → intent read from words, not wishes →
+  `growthWish` reads what each size word describes; map words (`map bada karo`) stay map growth → `aBiggerCityIsTheWishNotTheWords`.
+- Q-3521 no enemies/police in a GTA world → systems kit never seeded, starter made no entities → a genre's core action
+  missing from the starter → `streetDanger.ts` written first when the world has a fight, peaceful prompts excluded →
+  `anOpenWorldHasStreetDanger` (strict compile of the feature against the real kit; reverted-and-failed).
+- Q-3522 trees dropped → naming one module narrowed the set → "named" read as "only" → only/sirf/keval narrows → four pinned tests updated with the admin's instruction cited.
+- Q-3523 objects sink/float in the open world → `setGround` was never given the map's height → the ground-contact hard
+  rule unmet in one lane → the bridge sets and clears it → setGround guard.
+- Q-3524 gun never fires (#2526–#2530) → the playtest never pressed fire → an action the game is built around is never
+  exercised → `fireProbe` (F, J, click) + kit counters, reported through the rule probes → `aGunThatNeverFiresIsCaught`
+  (real browser; reverted-and-failed twice).
+- Q-3525 "continue" turns refused (#2524 wrote nothing for 8 min; #2527–#2530) → the guard read the word "continue", and
+  locked feature files nothing imports → a guard judging a continuation without what it continues → `growthRequestFor` at
+  both locks + `featureInPlay` → `aContinueTurnFinishesTheGunItStarted` (reverted-and-failed).
+- Q-3526 `<title>Continue the build from</title>` → named from this turn's message → an order about the build read as an
+  app description → continued request + continuation names nothing + junk title is a placeholder → `aContinueMessageIsNeverTheAppName`.
+- Q-3527 "game build clean hai" over PROD_BUILD_FAILED → the audit had no production-build fact → build-health claims
+  unaudited → `prodBuildFailed` + BUILD_CLEAN → `aBuildCleanClaimOverAFailedBuildIsCorrected` (reverted-and-failed).
+- Q-3528 lost builds carry no memory evidence → nothing recorded it before death → evidence must land before an OOM kill
+  → SERVER_MEMORY_HIGH per band on the build tick → `aLostBuildShowsItsServersMemory`. Q-3354 stays 🟡 BLOCKED on Cloud Run logs; six more death times added.
+- Q-3529, Q-3530: both proved TRUE by the reports (the "nothing written" line was accurate; the `.env` block was a real
+  `sed … .env`) → 🟡 waiting for the admin's agreement to close as not-a-defect.
+- Owned by other open PRs, deliberately not touched: kit typecheck errors (TS2352/TS2322 in openWorld.ts/worldLayer.ts) and
+  kit-file refusals on continue turns (#4554 Q-3420, #4536), the Surplus 404 storm, dead-build sweep, handover (#4554).
+- Queue ID note: this branch first used Q-3355/Q-3356 in code comments; those IDs are taken on main (failedbr #2499), so
+  they were renumbered to Q-3520/Q-3521.
+
+**Next, in the admin's order:** Q-3531 + Q-3532 (map variety, boundary/water), then Q-3533 (solid citizens, punch), then
+Q-3534 (enterable houses, human citizens), then Q-3535 (library trees and animals).
+
+### 2026-11-26 (same branch, #4562) — a character makes its own moves (Q-3536)
+Admin, with a screenshot: *"mujhe aisa app maker chahiye jo movement khud bana le"*. Root cause: `findBones` matched exact
+bone names only, so any other rig, and any model with no skeleton, got "It is not animated" instead of a move; a model
+with no walk clip never walked. Class: a capability gated on one naming convention. Fix: `findBonesByShape` (skeleton
+shape, names still win), `RIGID_MOVES` (whole-body punch/kick/fire/swing/throw/use), `MADE_GAIT` (walk/run made after a real
+stand-in clip), one "animates its moves" line for a model with no clips. Builder line (`playerMoves.ts`), done message and
+`AppKnowledgeBase` say the same. Old tests that encoded "a missing move is never animated" were updated, citing the admin.
+Locked: `tests/aCharacterMakesItsOwnMoves.test.ts`. Still not made when missing: jump, swim, dive, block, hit, die, slide.
+Also fixed on CI: openWorld.ts's `softwareRenderer` import kept on its own line (the no-GPU guard pins it).
+
+
 ## 2026-11-26 — Runner titles in 3D; each game its own town and race road; world races keep their length (PR #4561, Q-3314, Q-3373, Q-3450–Q-3455)
 
 The admin approved three items.
@@ -6417,6 +6465,24 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
 
+## 2026-11-26 — Failed builds #2523 / #2525: a dead build is found without waiting for the next one, and the next one is told what it did (PR #4575)
+- **Q-3463:** `isAbandonedReport` (orphanedBuildReport.ts): silent for two heartbeat intervals AND the workspace lease answers `false` (an unknown `null` never settles). Two places check it: the client's status poll (`settleAbandonedReportsOnStatus`, at most once a minute per workspace per instance) and a two-minute exclusive sweep (`sweepAbandonedBuildReports`, server.ts). The sweep's collection-group index on `history.inProgress` is in firestore.indexes.json. Its deploy step may fail without holding a release, so a failing sweep logs once an hour and the status-poll path still works. `workspaceLeaseEnabled` moved into workspaceBuildLease.ts so the sweep stands down when the lease is off.
+- **Q-3470:** `deadBuildHandoff.ts` takes the dead build's writes and its last typecheck from its saved report. `loadDeadBuildHandoff` reads them through the index-safe newest-refs reader and puts them in front of the prompt, before the conversation recap.
+- **Test:** `tests/aDeadBuildIsFoundAndHandedOver.test.ts`, using #2525's own saved report as the fixture (`tests/fixtures/failedbr2525-dead-build-report.json`). Three reversions each fail it.
+- **Q-3471 → 🟡 BLOCKED (admin decision):** assets and sounds download from one origin through a process-wide permit that refuses requests past one in the queue. That refusal is deliberate provider politeness, so running the two side by side would lose models and sounds when the cache is cold. The options are in the queue row; the recommendation is to let the permit queue a request for up to ~8 s.
+### 2026-11-26 (same branch, #4562) — enemies in every open world (Q-3540…Q-3544)
+Admin: *"kitna bhi prompt de! par open world game me enemy ban hi nahi rahe hai … enemy aye, fire kare, punch kare … sabhi
+possible cause aur root cause dhundo"*. Evidence: the code, plus failedbr #2510–#2532 (9 reports read in full).
+- Kit only on a NEW build; an "enemy banao" edit turn got nothing (#2510, #2514, #2518/#2519) → `enemiesTurn.ts` (Q-3540).
+- `async setup()` → host ran update before the monsters existed (#2531) → the host waits for it (Q-3541).
+- A throwing feature was silent → GAME_FEATURE_OFF from the playtest (Q-3542).
+- Street enemies punch-only, slow to arrive, immune to the hero's gun → fill at once, gunmen fire visibly, the hero's shot hits (Q-3543).
+- Enemy bodies hidden before their model loaded (#2518/#2519) → OPEN (Q-3544).
+- Already fixed by #4560 (merged 11:32): enemies far from the hero (`spawnAround`), no on-screen enemy check
+  (`window.__nbEntities`, MISSING_ENEMIES), a repair that rewrote a clean `monsters.ts` into a broken one (#2532).
+- Also seen: a server loss before any enemy was written (#2520, Q-3354); a turn spent on an unrelated warning (#2511), now covered by the platform acting itself.
+
+
 ## 2026-11-26 — Failed builds #2523 / #2525: honest routing band, fall-back engine, fallback time, hero objects, test-file typecheck notes (PR #4570)
 - **Q-3466:** `scoreBandVersusRouting` (RequestAnalyser.ts) is the one answer for the score's band and the routing verdict; COMPLEXITY_ROUTING (`complexityRoutingMessage`) and `requestAnalysis` (`routedAs`, `routedBy`, `bandOverriddenByRouting`) carry the same sentence when a model verdict overrides the band. `tests/theBandAndTheRoutingSayTheSameThing.test.ts` (reverted ⇒ 3 fail).
 - **Q-3467:** SURPLUS_FALLBACK names the engine that runs next (the Weak chain's planned model, read once Surplus is dropped), never "the Weak ladder"; the admission fall-back line (sibling) names the chain. **Q-3465:** `addFallbackMs` (fallbackTime.ts) adds the seconds before the answer to `fallbackMs` in every retrying wrapper (Surplus fail-open, Surplus stay-alive, proChainV2, resilient runner). `tests/theTurnAfterSurplusSaysWhereAndHowLong.test.ts` (reverted ⇒ 6 fail).
@@ -6487,6 +6553,14 @@ Stacked on PR B. Queue Q-3509 (fix in PR) and Q-3510..Q-3514 (still OPEN, honest
 ## 2026-11-26 — Q-3515: the cricket bat meets the ball (admin)
 
 Stacked on PR C. Roots: the timing windows (30/70 ms) were tighter than a phone's touch delay, and the kit had no play between the rules engine and the 3D layout (the arrival moment, the ball leaving the bat and the scoring were each game's own code; deliveryPath ran the ball through the batter). Fix: CRICKET_TIMING by difficulty, battedBallPath, createCricketPlay, and src/game/cricketRules.ts as the user's own rules file (changed by asking). tests/theBatMeetsTheBall.test.ts plays it on the real engine, proven by two reversions.
+
+## 2026-11-26 — Q-3510 (#2): a city building opens when the user asks
+
+Stacked on the cricket branch. city.openLot redraws one block without the lot's ground floors and stands a walk-in building (three/buildings.ts) there; WORLD.openBuildings opens the door the player walks up to. Each city block now draws from its own random stream (window tones per block change once, deterministically). tests/aCityBuildingOpensWhenAsked.test.ts.
+
+## 2026-11-26 — Q-3511 (#7/#8/#11): a car follows the open world's ground between the places
+
+Root: the Athree open world never registered its terrain with the kit's ground (getGround() null), so settleOnGround and groundScene did nothing there. createOpenWorld now calls setGround with the map's height through the floating origin. tests/aCarFollowsTheOpenWorldGround.test.ts (reverted → fails). Note: the first build of the #2 reader matched "open-world"/"khule maidan" in failedbr #2485's request; fixed on the #2 branch with that request as a fixture.
 ## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
 
 Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
@@ -6511,6 +6585,13 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
 
+## 2026-11-26 — Q-3514 (#20): real 3D graphics when the user asks
+
+three/realism.ts (GameOptions.graphics 'real'): image-based lighting and soft shadows everywhere; GTAO + subtle bloom + output pass on a capable device only. Stacked on the car-ground branch. tests/realGraphicsWhenAsked.test.ts.
+
+## 2026-11-26 — Q-3513 (#10): play with friends online on the user's own Supabase
+
+three/rooms.ts: joinRoom on the user's Supabase Realtime (raw websocket, Phoenix protocol, no package), remotePlayers, showRoomNotice (RED line until VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are saved). The 3D handoff asks the builder to request the keys. Q-3490 (NavBharatAI-hosted rooms) is separate and stays open. tests/friendsPlayOnTheUsersOwnBackend.test.ts.
 ## 2026-11-26 — Admin Home "total revenue NOT real": the index was deployed to the wrong database (Q-3700)
 - Admin screenshot: `9 FAILED_PRECONDITION: The query requires an index` for the revenue sum, although #4545's `deploy-firestore-indexes` step reports SUCCESS on every merge.
 - Root cause: the index link names `databases/(default)` (103-byte encoded name), and so did an earlier production error; the server reads `(default)` (FIRESTORE_DATABASE_ID), but `firebase.json` deployed indexes only to `navbharat-prod`.

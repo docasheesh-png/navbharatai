@@ -867,9 +867,6 @@ export class Game {
         this.hero.root.visible = !this.chased;
       }
       this.playerModel?.update(delta);
-      // Any action the game plays on the player (performAction: pick-up, open-door, eat, or one NavBharatAI made), after the
-      // body has posed itself, so the action's pose is the one drawn.
-      updateActions(this.context, delta);
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
@@ -883,6 +880,10 @@ export class Game {
       this.fireHandGun(delta);
       this.zoomScope();
       this.poseActionButtons();
+      // Any action the game plays (performAction — on the player, an NPC, or every NPC of a kind: jump, kick-car, dance,
+      // salute, or one NavBharatAI made) runs LAST, after the player's body, every character's walk (the step hooks above)
+      // and the button poses, so the action's pose is the one drawn on every character.
+      updateActions(this.context, delta);
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
       groundScene(this.scene);
@@ -5217,7 +5218,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       'controller and VFX layers — render it and you have a running game.\n' +
       (files[GAME_BOUNDARY_PATH] ? 'THE MAP HAS AN EDGE: pass bounds: { minX, maxX, minZ, maxZ } in the options (or ctx.world.setBounds in setup) — the player, the car they drive and every character stay inside behind real walls (walls: "invisible" when mountains or sea are the visible edge); never let anyone drive or walk off the map.\n' : '') +
       (files[GAME_AIM_PATH] ? 'EVERY GUN AIMS WITH ctx.aim(): const a = ctx.aim(); gun.update(dt, fire, a.muzzle, a.shot, bullets) — the crosshair point from the real muzzle; never a hand-written direction (a constant one fires the same way whatever the aim).\n' : '') +
-      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
+      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES, ON ANY CHARACTER (jump, kick the car, swim, open the car door, fire, dance, salute — the player, the police, the villagers, a bot) is played with performAction(ctx, name, who?) from ./game/play/actions: no who = the player; \'police\' / \'villager\' / any kind = every character of that kind; \'all\' = everyone; an entity\'s object = one. The kit has 120+ moves (MOVES in that file; Hindi names work); for any other, run_recipe({ name: "compose_action" }) makes it. Loops and stances end with stopAction(ctx, who). Never tell the user a character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +
       (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +

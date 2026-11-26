@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { WorkspaceBuildReports } from './WorkspaceBuildReports';
 import { Globe, Search, ExternalLink, Eye, Ban as BanIcon, RotateCcw } from 'lucide-react';
 import {
-  canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, ownerModerationTargets, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction, type OwnerAction,
+  appsListParams, isRegistryStatus, outcomeChip, APP_OUTCOME_OPTIONS, APP_PUBLISH_OPTIONS, APP_SORT_OPTIONS, type AppOutcomeFilter, type AppSort, canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, ownerModerationTargets, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction, type OwnerAction,
 } from '../../lib/adminAppModeration';
 import { useAppPreview } from './AppPreviewSheet';
+import { TIER_OPTIONS } from '../../lib/reportListFilter';
 
 /**
  * BUILT APPS — every user's built app, twelve at a time, each with a preview (admin 2026-09-18).
@@ -37,6 +38,8 @@ interface ListResponse {
   orphaned?: BuiltAppRow[];
   nextCursor?: string | null;
   scanLimited?: boolean;
+  /** How many apps a filtered page looked through (the server reads in order and keeps matches, bounded). */
+  scanned?: number;
 }
 
 export interface BuiltAppsPanelProps {
@@ -76,7 +79,13 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   const [queryInput, setQueryInput] = useState('');
   /** The query the last request was made with — the input can differ while the admin is still typing. */
   const [query, setQuery] = useState('');
+  // The publish choice: '' (all), 'live' / 'not-live' (judged per app), or a registry state (its own mode).
   const [statusFilter, setStatusFilter] = useState('');
+  // SORT AND FILTER (admin 2026-11-26: "be tarteeb hai, sort karne ka system banao — old new, free paid, fail pass").
+  const [sort, setSort] = useState<AppSort>('newest');
+  const [outcomeFilter, setOutcomeFilter] = useState<AppOutcomeFilter>('all');
+  const [tierFilter, setTierFilter] = useState('all');
+  const [scanned, setScanned] = useState<number | null>(null);
   const { openPreview, previewSheet } = useAppPreview(headers);
   /** The app whose build reports the "v" button opened (admin 2026-10-15). */
   const [reportApp, setReportApp] = useState<{ workspaceId: string; appName: string } | null>(null);
@@ -90,11 +99,9 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   const load = useCallback(async (opts: { cursor?: string | null; q: string; status: string; append: boolean }) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      params.set('limit', String(PAGE_SIZE));
-      if (opts.cursor) params.set('cursor', opts.cursor);
-      if (opts.q) params.set('q', opts.q);
-      if (opts.status) params.set('status', opts.status);
+      const params = appsListParams({
+        limit: PAGE_SIZE, cursor: opts.cursor, q: opts.q, publish: opts.status, sort, outcome: outcomeFilter, tier: tierFilter,
+      });
       const r = await fetch(`/api/admin/apps?${params.toString()}`, { headers });
       const d = (await r.json()) as ListResponse;
       if (!r.ok || d?.ok === false || !Array.isArray(d?.rows)) {
@@ -109,6 +116,8 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
       setScanLimited(d.scanLimited === true);
       setOrder(d.order ?? 'newest');
       setNextCursor(typeof d.nextCursor === 'string' && d.nextCursor ? d.nextCursor : null);
+      // How many apps a filtered page looked through — added up across "Load more", so the footer is honest.
+      setScanned((prev) => (typeof d.scanned === 'number' ? (opts.append ? (prev ?? 0) + d.scanned : d.scanned) : null));
       if (opts.append) {
         setRows((prev) => {
           const seen = new Set((prev || []).map((x) => x.workspaceId));
@@ -126,9 +135,9 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [headers['x-admin-token']]);
+  }, [headers['x-admin-token'], sort, outcomeFilter, tierFilter]);
 
-  // First page on mount, and a fresh first page whenever the state filter changes.
+  // First page on mount, and a fresh first page whenever the order or a filter changes.
   useEffect(() => { void load({ q: query, status: statusFilter, append: false }); }, [load, statusFilter, query]);
 
   // A moderation landed: re-read that one row and put it back in place. The page is kept — the admin
@@ -176,6 +185,9 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   }, [rows, mode, query]);
 
 
+  const registryMode = isRegistryStatus(statusFilter);
+  const filtering = !registryMode && (outcomeFilter !== 'all' || tierFilter !== 'all' || statusFilter === 'live' || statusFilter === 'not-live');
+
   const renderRow = (d: BuiltAppRow, opts: { orphan?: boolean } = {}) => {
     const view = publishStateView(d.publish, d.heldFrom);
     const plan = previewPlan(d);
@@ -205,6 +217,26 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 {name || 'Name not recorded'}
               </span>
             </div>
+            {(d.outcome || d.tier) && (
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                {d.outcome && (() => {
+                  const c = outcomeChip(d.outcome);
+                  return (
+                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                      c.tone === 'pass' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
+                      : c.tone === 'fail' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                      : 'bg-raised border-line text-muted'}`}>
+                      {c.label}
+                    </span>
+                  );
+                })()}
+                {d.tier && (
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full border bg-raised border-line text-body">
+                    {TIER_OPTIONS.find((o) => o.value === d.tier)?.label ?? 'Unknown'} user
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
               <span className="text-[10px] text-faint">by</span>
               {owner ? (
@@ -309,8 +341,9 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         </button>
       </div>
       <p className="text-[11px] text-muted leading-relaxed">
-        Every app any user has built — published or not — newest first, {PAGE_SIZE} at a time, with its name and
-        who built it.{' '}
+        Every app any user has built — published or not — {PAGE_SIZE} at a time, with its name, who built it, whether
+        its last build passed, and whether the owner is a paying user. Sort newest or oldest first, and filter by the
+        last build, by paid or free user, and by live or not.{' '}
         <span className="text-body">Preview</span> shows the app without waking its owner&apos;s machine.{' '}
         <span className="text-body">Unpublish</span> takes a live site off the internet and the owner can publish
         it again themselves. <span className="text-danger">Ban</span> removes it and stops that workspace publishing
@@ -337,18 +370,44 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
           </button>
         )}
         <select
+          aria-label="Order"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as AppSort)}
+          disabled={registryMode}
+          className="bg-well border border-line rounded-lg px-2.5 py-1.5 text-[11px] text-ink focus:outline-none focus:border-sky-500/40 disabled:opacity-40"
+        >
+          {APP_SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select
+          aria-label="Last build"
+          value={outcomeFilter}
+          onChange={(e) => setOutcomeFilter(e.target.value as AppOutcomeFilter)}
+          disabled={registryMode}
+          className="bg-well border border-line rounded-lg px-2.5 py-1.5 text-[11px] text-ink focus:outline-none focus:border-sky-500/40 disabled:opacity-40"
+        >
+          {APP_OUTCOME_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select
+          aria-label="Paid or free user"
+          value={tierFilter}
+          onChange={(e) => setTierFilter(e.target.value)}
+          disabled={registryMode}
+          className="bg-well border border-line rounded-lg px-2.5 py-1.5 text-[11px] text-ink focus:outline-none focus:border-sky-500/40 disabled:opacity-40"
+        >
+          {TIER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select
+          aria-label="Live or not"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="bg-well border border-line rounded-lg px-2.5 py-1.5 text-[11px] text-ink focus:outline-none focus:border-sky-500/40"
         >
-          <option value="">All built apps</option>
-          <option value="active">Live only</option>
-          <option value="unpublished">Offline</option>
-          <option value="taken_down">Banned</option>
-          <option value="held">Held</option>
-          <option value="plan_paused">Paused</option>
+          {APP_PUBLISH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
+      {registryMode && (
+        <p className="text-[10px] text-faint">This state is read from the publish registry, so the order and the other filters do not apply to it.</p>
+      )}
 
       {/* ONE PERSON'S APPS, ONE ACTION (Q-796). Shown only when the search is an owner's id. The buttons act on
           exactly the apps the per-row buttons would offer, by the same rules (ownerModerationTargets). */}
@@ -419,7 +478,11 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
       {!error && rows !== null && (
         <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
           <span className="text-[10px] text-faint">
-            {nextCursor ? `${rows.length} loaded — more available` : `${rows.length} loaded — that is all of them`}
+            {filtering && scanned !== null
+              ? (nextCursor
+                ? `${rows.length} match after looking through ${scanned} apps — more may match further on`
+                : `${rows.length} match among all ${scanned} apps looked through — that is all of them`)
+              : nextCursor ? `${rows.length} loaded — more available` : `${rows.length} loaded — that is all of them`}
           </span>
           {nextCursor && (
             <button
@@ -427,7 +490,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
               disabled={loading}
               className="px-3 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-ink hover:border-sky-500/40 disabled:opacity-40"
             >
-              {loading ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+              {loading ? 'Loading…' : filtering ? 'Look further' : `Load ${PAGE_SIZE} more`}
             </button>
           )}
         </div>

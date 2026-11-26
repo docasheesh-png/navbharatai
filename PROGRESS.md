@@ -6417,6 +6417,48 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
 
+## 2026-11-26 — Failed builds #2523 / #2525: honest routing band, fall-back engine, fallback time, hero objects, test-file typecheck notes (PR #4570)
+- **Q-3466:** `scoreBandVersusRouting` (RequestAnalyser.ts) is the one answer for the score's band and the routing verdict; COMPLEXITY_ROUTING (`complexityRoutingMessage`) and `requestAnalysis` (`routedAs`, `routedBy`, `bandOverriddenByRouting`) carry the same sentence when a model verdict overrides the band. `tests/theBandAndTheRoutingSayTheSameThing.test.ts` (reverted ⇒ 3 fail).
+- **Q-3467:** SURPLUS_FALLBACK names the engine that runs next (the Weak chain's planned model, read once Surplus is dropped), never "the Weak ladder"; the admission fall-back line (sibling) names the chain. **Q-3465:** `addFallbackMs` (fallbackTime.ts) adds the seconds before the answer to `fallbackMs` in every retrying wrapper (Surplus fail-open, Surplus stay-alive, proChainV2, resilient runner). `tests/theTurnAfterSurplusSaysWhereAndHowLong.test.ts` (reverted ⇒ 6 fail).
+- **Q-3468:** HUD and screen senses of catalogue words (score counter, leaderboard table, fire button, splash screen, text/hit box, first-/third-person) no longer become hero objects. `tests/aScoreCounterIsNotATable.test.ts` (#2523's prompt ⇒ only gun; reverted ⇒ 19 fail).
+- **Q-3462:** the write-time typecheck and the `typecheck` tool say a test-file error blocks the release only when the release config compiles tests (`releaseBuildExcludesTests`, globs locked to the platform tsconfig.build.json). `tests/aTestFileErrorIsNotAReleaseBlocker.test.ts` (reverted ⇒ 2 fail).
+- **Q-3464 → 🟡 BLOCKED (admin decision):** a provider-level Surplus breaker on a route-level 404; options and a recommendation (trip on the second distinct model's 404) in the queue row.
+- **Still open from these reports:** Q-3463, Q-3470 (build liveness / hand-off) and Q-3471 (seed speed) — next PR; Q-3461 and Q-3469 stay 🟡 (admin decisions); Q-3460 closed by #4554.
+## 2026-11-26 — Q-3410: deleting an account now deletes that user's game proof pictures (filed by verified owner)
+- **Root cause:** #4557 filed the playtest's private proof pictures as `game-proof-v1/<day>/<buildId>/…`. The key named the build, not the owner, so DELETE /api/profile had nothing to search by and a deleted user's pictures lived out their 30 days.
+- **Class:** a per-user bucket object keyed by something other than its owner (build id, token, upload id, content hash) is invisible to the account eraser.
+- **Fix:** new pictures go to `game-proof-v2/<day>/<owner>/<buildId>/…`; `<owner>` is the build route's VERIFIED uid (`verified?.uid`, never `req.body.userId`), encoded by the new shared `verifiedOwnerKeySegment` (`workspaceAssetStorage.ts`; `workspaceAssetVerifiedOwnerPrefix` now uses it too). A build with no verified owner keeps no pictures and GAME_PROOF says why. `eraseUserProofPictures` (called by DELETE /api/profile before the sign-in is removed, reported as its own `gameProofPictures` line) deletes `game-proof-v2/<day>/<owner>/` in each day folder. The day stays first, so the 30-day sweep is still one delete per day; it now sweeps both layouts. Old v1 pictures cannot be attributed: they are still served to the admin and deleted by day 30, and the eraser reports that limitation while any remain. The admin view accepts both layouts.
+- **Sibling hunt:** a census of every server module that touches Cloud Storage (`tests/accountDeletionReachesGameProofPictures.test.ts`). Each must say which eraser removes its objects, why they belong to nobody, or which queue row owns the gap. Three gaps found and recorded: Q-3611 (large share HTML `shares/<token>.html` orphaned when the `shares` docs are erased), Q-3612 (never-public App Store APK bytes left when the listing is deleted), Q-3613 (abandoned zip-upload chunks left when the `zip_uploads` record is erased).
+- **The census paid for itself at once:** merging main brought #4564's `mobileBuild/nativeArtifactStore.ts` (owner-hashed native build files that no eraser deletes); the census failed until it was registered, and it is recorded as Q-3614.
+- **Proof by reversion:** six reversions, each fails: eraser not called by the route (2 fail), eraser deletes whole day folders (1), key filed by build id only (7), route passes the claimed uid (2), admin view accepts only v1 (1), a new unregistered storage writer (1).
+
+## 2026-11-26 — Moves separated from characters: 120+ moves on ANY character, plus NavBharatAI-made moves
+
+**Admin task:** "sabhi characters ke moves ko character se alag kar do … sirf hero nahi kisi bhi character par … police /
+villagers / bot", and "jo move library me nahi hai, NavBharatAI khud API call se bana sake".
+
+- **Was:** library model clips belong to one rig (never retargeted); the data action system (2026-11-24) had 9 moves and
+  played only on the player.
+- **Library:** `src/server/lib/gameMoveLibrary.ts` — 120+ moves as data (shared pose pieces, mirrored sides), plus English /
+  Hindi / Hinglish aliases. The kit gets the SAME library and alias table injected as JSON (the old kit copy of the alias
+  table was a hand-typed duplicate of the server's — drift class removed; census test holds it).
+- **Vocabulary v2** (`GameActionsGenerator.ts`): whole-body motion (rise / pitch / roll / yaw shown on a pivot; forward /
+  side / turn real travel), `loop`, `hold`, `requires` (water, vehicle, seated, item), and world-touching steps: strike,
+  push, fire, throw, enterVehicle, exitVehicle.
+- **Any character:** `performAction(ctx, name, who?)` — no who = the player; a kind ('police', 'villagers'); 'all'; or one
+  entity's object. `stopAction`, `currentAction(ctx, who)`, `heldItem(ctx, who)`. Entities expose `userData.actor` and stand
+  still while acting; physics bodies take a strike as an impulse (`userData.onStruck`, removed only if physics installed it);
+  the shell runs `updateActions` after every character has animated. The player's own model clip wins where it exists.
+- **compose_action v2:** the prompt teaches the same vocabulary; the tool and the shell handoff say any character.
+- **Tests:** `tests/anyCharacterDoesAnyMove.test.ts` (21, real kit) — reversion-proven for the actor hook, stand-still and
+  the water rule. `theCharacterDoesWhatTheUserAsks` example of a missing move moved from "climb ladder" (now in the library)
+  to juggling.
+- **Honest limits:** data moves look simpler than hand-animated clips; humanoid bodies only (four-legged needs its own limb
+  map); NPC library-model clips are not used (no mixer access) — they play the data pose.
+- **Correction (same day):** NPC library-model clips ARE now used. `three/assetModels` exposes `root.userData.playRole`
+  (the handle's `play`), and `play/actions.ts` plays an NPC model's own clip for a move it has (falling back to the data pose),
+  returning it to `idle` after. The game's `handle.update(dt)` keeps advancing it. Locked in `anyCharacterDoesAnyMove`
+  (reversion-proven). Remaining honest limits: data moves look simpler than clips; humanoid bodies only.
 ## 2026-11-26 — PR A of the admin's 18-point game list: restart, a gun that fires, drowning, the map's edge, library ids
 
 - Q-3516 (was Q-3500; renumbered at merge — #4563 had taken it) Restart / Menu stand the player at the start (ctx.setRespawn; open world sets its own), out of any car.
@@ -6458,6 +6500,33 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
 
+## 2026-11-26 — Admin Home "total revenue NOT real": the index was deployed to the wrong database (Q-3700)
+- Admin screenshot: `9 FAILED_PRECONDITION: The query requires an index` for the revenue sum, although #4545's `deploy-firestore-indexes` step reports SUCCESS on every merge.
+- Root cause: the index link names `databases/(default)` (103-byte encoded name), and so did an earlier production error; the server reads `(default)` (FIRESTORE_DATABASE_ID), but `firebase.json` deployed indexes only to `navbharat-prod`.
+- Fix: `firebase.json` now lists both databases for `firestore.indexes.json`; rules still go only to `navbharat-prod`. Verified with firebase-tools 15.35.0's own config resolver that `--only firestore:indexes` targets both and `--only firestore:rules` deploys rules only where declared.
+- Lock: `tests/adminAnalyticsFirestoreIndex.test.ts` (both databases carry the index; rules not widened); `firestoreIndexSafe.test.ts` reads the array form.
+- Found on the way: `deploy-storage-rules` fails on every deploy (Q-3701, BLOCKED on the Cloud Build log).
+## 2026-11-26 — "Made with NavBharatAI" was doubled on published apps, with no × (admin screenshot)
+
+- **Root cause:** two modules each put a badge in the same bottom-right corner, at the same z-index: the build writes
+  the "made by NavBharatAI" signature into the app's own index.html (`AgentV3/appSignature.ts`, has a × since 2026-09-30),
+  and publishing stamped "Made with NavBharatAI" (`lib/madeWithBadge.ts`, no ×) on top of it — covering the signature's ×.
+- **Fix (the class: two owners of one corner):** `injectBadge` removes the build's signature from the page it stamps
+  (`withoutAppSignature`), so a published page carries ONE badge; the paid plan removes both. The publish badge gained the
+  same CSS-only × (checkbox, `autocomplete="off"` — works under a strict CSP, back on refresh, nothing stored), the guard
+  script respects a close and still re-shows a pill hidden by injected CSS, and the pill can shrink on a narrow phone.
+- **Proof:** `tests/onePublishedBadgeThatCloses.test.ts` (9, reversion-proven: 4 fail without the dedupe); Chromium run of a
+  real stamped page: one badge, × closes it, guard leaves it closed after 4 s, refresh restores it, injected CSS cannot hide it.
+- **Limit (honest):** apps published BEFORE this change keep the old doubled badge until they are published again — the
+  edge worker (`infra/cloudflare/mitrify-apps-worker.js`) serves stored files and is deployed by hand, so it was not changed.
+## 2026-11-26 — Admin Apps → Built apps: sort and filter (admin: "be tarteeb hai, sort karne ka system banao")
+- **Problem:** the list came newest-first only, with no way to see the oldest apps, only failed builds, or only paid/free users' apps.
+- **Built:** Order (newest / oldest — a real Firestore `orderBy('savedAt', asc|desc)`), Last build (passed / failed / no result, read field-masked from the diagnostics store via `getBuildOutcomesMany`), Paid or free user (paid / free / admin / unknown), Live or not. Filters combine.
+- **How a filtered page is found:** the facts live in three other collections, so the server reads apps in order in batches of 48 (at most 8 batches) and keeps matches. The reply says how many apps it looked at; the cursor resumes right after the last app examined — never skipping one it did not look at (`takeMatches`).
+- **Honesty:** a build with no result is never counted as failed; an unknown account is never counted as free.
+- **Sibling class fixed:** the paid/free tier was spelled out twice in `admin.ts` (build reports, All builds) and the apps list would have been a third copy → one `src/server/lib/identityTier.ts` (`tierOfIdentity`) used by all three.
+- **Tests:** `tests/adminAppsSortAndFilter.test.ts` (10; reversion-proven: the cursor rule and unknown≠failed fail when broken). Re-pointed guards in `everyBuiltAppHasAPreview`, `paidUserFilter`, `BuiltAppsPanel.render`.
+- Registry statuses (Banned / Held / Paused / Unpublished) keep their own list and ignore the other filters, with a note on screen.
 ## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
 - Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
 - Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.

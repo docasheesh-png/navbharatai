@@ -785,7 +785,7 @@ export async function listUserWorkspaceAppsResult(
  * two differently, because "no built apps" on a moderation screen over a failed read is the exact lie
  * that screen exists to avoid.
  */
-export async function listWorkspaceAppsPage(opts: { limit: number; afterDocId?: string | null }): Promise<{
+export async function listWorkspaceAppsPage(opts: { limit: number; afterDocId?: string | null; order?: 'desc' | 'asc' }): Promise<{
   ok: boolean;
   apps: UserWorkspaceApp[];
   /** The raw last document id of the page, to resume from; null when the collection is exhausted. */
@@ -808,7 +808,9 @@ export async function listWorkspaceAppsPage(opts: { limit: number; afterDocId?: 
     // Refill at most three times: a page of twelve among a handful of snapshot keys fills on the first
     // read; a pathological stretch of empties is bounded rather than scanned to the end.
     for (let round = 0; round < 3 && apps.length < size && !exhausted; round++) {
-      let q = col.orderBy('savedAt', 'desc').limit(size);
+      // Newest first by default; 'asc' is the admin's "oldest first" (2026-11-26). Both ride the same automatic
+      // single-field index, so neither can FAILED_PRECONDITION.
+      let q = col.orderBy('savedAt', opts.order === 'asc' ? 'asc' : 'desc').limit(size);
       if (after) q = q.startAfter(after);
       const snap = await q.get();
       if (snap.docs.length < size) exhausted = true;

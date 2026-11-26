@@ -121,6 +121,16 @@ const NOT_THE_OBJECT = [
   // player DRIVE AN AIRCRAFT ("The player drives: a aircraft") while the hero contract asked for an air vehicle. A plane
   // of geometry — ground, floor, base, grid, water, clipping, image — or three.js's PlaneGeometry is not an aeroplane.
   /\b(?:ground|floor|base|flat|grid|water|xz|horizontal|clipping|image|focal|near|far)\s*-?\s*planes?\b|\bplane\s*-?\s*(?:geometry|mesh)\b|\bPlaneGeometry\b/gi,
+  // 🔴 failedbr #2523 (Q-3468, 2026-11-26): "a gun, enemies, … crosshair, score counter, health system" was handed a TABLE
+  // spec ("counter" is a worktop) and a HUMAN spec ("first-person" is a camera). The class is a HUD or screen sense of a
+  // catalogue word: a counter that counts, a score table, a fire BUTTON, a splash SCREEN, a text/dialog/hit BOX, a
+  // first- or third-person VIEW. A shop counter, a dining table, a campfire, a wooden box and a person stay objects.
+  /\b(?:score|kills?|ammo|coins?|laps?|steps?|hits?|points?|lives|life|health|deaths?|bullets?|shots?|combo|frames?|fps|clicks?|words?|characters?|moves?|turns?|rounds?|waves?|levels?|enemies|enemy|items?|stars?|gems?|visitors?|views?|likes?|downloads?|calorie|calories|rep|reps|time|timer)\s*-?\s*counters?\b|\bcounters?\s*(?:app|widget|display|ui|hud|component|text|label|value)\b/gi,
+  /\b(?:high\s*-?\s*)?scores?\s*-?\s*tables?\b|\b(?:leader(?:\s*-?\s*boards?)?|ranking|rankings|points?|results?|league|standings?|score)\s*-?\s*tables?\b/gi,
+  /\b(?:fire|shoot|jump|attack|action)\s*-?\s*(?:buttons?|keys?|rate|mode)\b/gi,
+  /\bsplash\s*-?\s*(?:screens?|pages?|art)\b/gi,
+  /\b(?:chat|text|dialog(?:ue)?|check|bounding|hit|input|search|message|combo|list|select|info|tool)\s*-?\s*box(?:es)?\b/gi,
+  /\b(?:first|third|1st|3rd)\s*-?\s*person\b/gi,
 ];
 
 export function withoutNonObjectSenses(text: string): string {

@@ -36,6 +36,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
 import { geometryTier } from '../three/surfaces';
 import { settings } from '../core/settings';
+import { events } from '../core/events';
 import { localLowestY, setGround } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
@@ -70,7 +71,18 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * Clamped to 1 km .. 1000 km; a loop world is never smaller than the spread (sizeMeters is raised to it when needed).
    */
   spreadMeters?: number;
+  /**
+   * 🧱 THE EDGE OF THE MAP (admin 2026-11-25: "boundary nahi hai"). A loop world never ends — its land repeats every 100 km —
+   * so the player could walk away from every place for ever. The play area is a circle around the first place reaching past
+   * the farthest place, land, venue and user map by margin metres (default 500; never under 1.5 km; on an island, inside
+   * its shore). The player — on foot or in a car — is stopped at it and told once in a while. false: no edge.
+   */
+  boundary?: false | { margin?: number };
 }
+
+/** The open country kept around the farthest place inside the edge of the map, and the smallest play area, in metres. */
+export const PLAY_AREA_MARGIN = 500;
+export const PLAY_AREA_MIN = 1500;
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
 export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom' | 'venue';
@@ -299,6 +311,8 @@ export interface OpenWorld {
    * EVERY place on the map, built or not, in the order listed. regions holds the places whose city has been built so far:
    * the first at once, the others as the player comes near (so a map of a hundred places starts as fast as a map of one).
    */
+  /** The edge of the map (OpenWorldOptions.boundary): a circle in WORLD metres the player cannot leave, or null for none. */
+  readonly playArea: { x: number; z: number; r: number } | null;
   readonly places: ReadonlyArray<{ id: string; kind: RegionKind; centre: { x: number; z: number }; radius: number; /** Its streets and blocks, in CITY metres around centre (built or not). */ readonly plan: CityPlan; readonly built: boolean }>;
   /** The place the player is in or nearest to, and how far its centre is. null in a world with no places. */
   nearestRegion(): { region: OpenWorldCity; distance: number } | null;
@@ -399,7 +413,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, boundary, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -1154,7 +1168,15 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   towns.forEach((t, i) => { roots[i].position.set(t.centre.x - chunks.origin.x, t.centre.y, t.centre.z - chunks.origin.z); roots[i].updateMatrixWorld(true); });
   layGround(spawn.x, spawn.z);
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
-  ctx.player.setWater(map.world.seaLevel);
+  // 🌊 RIVERS AND LAKES ARE WATER (admin 2026-11-25: "bahut dur ja kar jameen me dhansne lagta hai"). Only the sea level was
+  // given to the controller, so in a river or a lake the player walked down the carved bed under the water — the "sinking".
+  // The controller now reads the map's own water where it stands (RENDER metres in, the origin read live): it swims there.
+  ctx.player.setWater((x, z) => {
+    const wx = x + chunks.origin.x, wz = z + chunks.origin.z;
+    const river = map.world.waterAt(wx, wz);
+    if (river) return river.surface;
+    return map.world.heightAt(wx, wz) < map.world.seaLevel ? map.world.seaLevel : null;
+  });
   // 🧭 THE KIT'S GROUND IS THE MAP'S GROUND (admin 2026-11-25: "bahut dur ja kar jameen me dhansne lagta hai"). standOnGround,
   // the enemies (systems/entities.ts), the police cars (systems/dispatch.ts) and every placed object ask the kit's one ground,
   // groundHeightAt(). Nothing in an open world ever told it about the Athree terrain, so it answered 0 everywhere: an object
@@ -1478,11 +1500,36 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const r1 = (v: number) => Math.round(v * 10) / 10;
     return { feet: r1(at.y), land: r1(land), water: Number.isFinite(water) ? r1(water) : null, seated: !!ctx.vehicles.seated };
   };
+  // 🧱 THE PLAY AREA (see OpenWorldOptions.boundary): a circle around the first place, past everything on the map.
+  const playArea = (() => {
+    if (boundary === false) return null;
+    const margin = Math.max(0, Number(boundary?.margin ?? PLAY_AREA_MARGIN) || 0);
+    let reach = 0;
+    const take = (x: number, z: number, r: number) => { const d = Math.hypot(x - spawn.x, z - spawn.z) + r; if (Number.isFinite(d)) reach = Math.max(reach, d); };
+    for (const p of planned) take(p.centre.x, p.centre.z, p.reach);
+    for (const l of landList) take(l.centre.x, l.centre.z, l.radius);
+    for (const v of venueList) take(v.centre.x, v.centre.z, Math.max(v.width, v.depth) / 2);
+    for (const m of userMaps) take(m.centre.x, m.centre.z, m.size / 2);
+    let r = Math.max(PLAY_AREA_MIN, reach + margin);
+    if (!looping) r = Math.min(r, Math.max(200, map.world.sizeMeters / 2 - 150));
+    return { x: spawn.x, z: spawn.z, r };
+  })();
+  let edgeToldAt = -Infinity;
+  /** Keep the player (and the car it drives) inside the play area. */
+  const keepInside = () => {
+    if (!playArea) return;
+    const at = playerWorld(), dx = at.x - playArea.x, dz = at.z - playArea.z, d = Math.hypot(dx, dz);
+    if (!(d > playArea.r)) return;
+    const back = d - playArea.r, ux = dx / d, uz = dz / d;
+    const car = ctx.vehicles.seated;
+    for (const o of car ? [car, ctx.player.object] : [ctx.player.object]) { o.position.x -= ux * back; o.position.z -= uz * back; }
+    if (time - edgeToldAt > 4) { edgeToldAt = time; try { events.emit('HINT', { id: 'world-edge', text: 'This is the edge of the map — turn back.', seconds: 3 }); } catch { /* no Hud */ } }
+  };
   const probeHook = { geometry: geometryReport, standing: standingReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
   if (probeWindow) probeWindow.__nbWorld = probeHook;
   return {
-    map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
+    map, spawn, playerWorld, playArea, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
     venues: venueList.map((v): OpenWorldVenue => ({
       get id() { return v.id; }, get venue() { return v.venue; }, get centre() { return v.centre; }, get width() { return v.width; }, get depth() { return v.depth; },
@@ -1520,6 +1567,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         for (const root of venueRoots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
       }
+      keepInside();
       if (lateEdits && map.world.editCount) {
         const edits = map.world.editCount();
         if (edits !== groundEditsSeen) {

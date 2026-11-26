@@ -103,7 +103,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
 import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists, finalChecksAfterSteer } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
-import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
+import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity, complexityRoutingMessage } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
@@ -477,6 +477,7 @@ import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
 import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff, withLibraryMenuForExistingGame } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt, useAsCharacterPrompt } from '../AgentV3/gameAssets/libraryThumbnails';
+import { expandLibraryMentions } from '../AgentV3/gameAssets/libraryMention';
 import { useAsCarPrompt } from '../AgentV3/carSwap';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
@@ -10793,6 +10794,8 @@ async function noteBuildOutcome(
     // (adversarial review of 303e8a6f: the judge and the repair lanes still read "needs no API key"). The chat
     // history keeps what was typed (`typedPrompt`).
     let prompt = chipPromptForBuild(typedPrompt);
+    // A Game Library pick is a mention (@model:<id>) where the cursor was; read it into what it names (libraryMention.ts).
+    prompt = expandLibraryMentions(prompt);
     if (!prompt) {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
@@ -14858,7 +14861,7 @@ async function noteBuildOutcome(
       // of the prompt, while `analyzeRequest` scores explicit length bands (+5 over 300, +10 over 800)
       // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
       // different number printed as the same fact.
-      try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
+      try { buildDiag.setRequestAnalysis(analysis, complexityDecision); } catch { /* observation only — never a build's problem */ }
       // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
       // a complexity of 60 must explain where the rest came from (autopsy e725e002).
       if (attachmentRead) {
@@ -15316,9 +15319,8 @@ async function noteBuildOutcome(
         // complex and nobody listened". It was the second. Admin-only; names no vendor.
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'COMPLEXITY_ROUTING', autoResolved: true,
-          message: buildIsComplex
-            ? `Complexity: COMPLEX (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's second rung, past the cheap flash opener.`
-            : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung.`,
+          // Q-3466: the same sentence the requestAnalysis block carries — see scoreBandVersusRouting.
+          message: complexityRoutingMessage(complexityDecision, analysis?.startTier),
           detail: complexityDecision.reason,
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }
@@ -15422,7 +15424,7 @@ async function noteBuildOutcome(
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         // failedbr #2408/#2428: a failed Surplus turn's seconds are the engine's waste, not our clock's.
         onSurplusAttemptWasted: (ms) => recordAttemptWasted('SURPLUS', 'error', ms),
-        onFailOpen: (reason, diag) => {
+        onFailOpen: (reason, diag, nextRung) => {
           const dropped = surplusSession;
           surplusSession = undefined;
           if (dropped) setAdmittedSurplusScope(dropped, false);
@@ -15433,7 +15435,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
-              message: surplusFallbackMessage(reason),
+              message: surplusFallbackMessage(reason, nextRung), // names the engine that runs next (Q-3467)
               // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
               detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });
@@ -24918,7 +24920,7 @@ async function noteBuildOutcome(
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
-          keepPictures: gameProofKeeper({ buildId, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363
+          keepPictures: gameProofKeeper({ buildId, verifiedOwnerUid: verified?.uid, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363, filed by the VERIFIED owner (Q-3410)
         }, gamePlayKeep);
         if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }
       };

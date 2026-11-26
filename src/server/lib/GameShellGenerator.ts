@@ -96,6 +96,27 @@ export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant
  * and neither is.
  */
 /** A finger is the main pointer (a phone or a tablet). */
+/**
+ * 🔫 A GUN IN THE HAND FIRES (admin 2026-11-26: "hanth me gun to hoti hai, par punch marta hai character"). A character that
+ * holds a firearm (PLAYER.holds, a library subject) gets a gun the shell fires by itself: the Attack button becomes Fire, a
+ * press (or a hold, for an automatic) shoots where the crosshair is (ctx.aim) and the hit is announced (SHOT_HIT) for
+ * whatever can be hurt. A game that reads the attack button itself (its own Weapon) keeps its own and this stays out of it.
+ */
+export interface HandGun { kind: string; rate: number; damage: number; auto: boolean; cooldown: number }
+const HAND_GUNS: ReadonlyArray<[RegExp, Omit<HandGun, 'cooldown'>]> = [
+  [/sniper/i, { kind: 'sniper', rate: 0.8, damage: 90, auto: false }],
+  [/shot\s*gun/i, { kind: 'shotgun', rate: 1.2, damage: 60, auto: false }],
+  [/rifle|smg|carbine|assault|ak\s*-?\s*47|uzi|m4|machine\s*gun|blaster/i, { kind: 'rifle', rate: 9, damage: 18, auto: true }],
+  [/pistol|revolver|handgun|\bgun\b|bandook|banduk|tamancha/i, { kind: 'pistol', rate: 4, damage: 25, auto: false }],
+];
+export function handGunFor(choice: PlayerChoice | undefined): HandGun | null {
+  for (const held of [choice?.holds?.right, choice?.holds?.left]) {
+    if (typeof held !== 'string' || !held.trim()) continue;
+    for (const [re, spec] of HAND_GUNS) if (re.test(held)) return { ...spec, cooldown: 0 };
+  }
+  return null;
+}
+
 function touchDevice(): boolean {
   try { return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches; } catch { return false; }
 }
@@ -271,6 +292,8 @@ export interface GameContext {
    * own systems tick through it (Entities, systems/entities.ts), so a system cannot be forgotten in update().
    */
   onStep: (fn: (delta: number) => void) => () => void;
+  /** Where Restart / Menu stand the player again (the open world sets it); default: where setup() left it. */
+  setRespawn: (fn: (() => void) | null) => void;
   /**
    * The default player body (createHumanoid), or null when the game brought its own or is first-person. It already
    * plays the action poses for the buttons (see actionPoses); call ctx.hero.act('kick') yourself for anything else
@@ -351,6 +374,9 @@ export class Game {
   private seated: THREE.Object3D | null = null;
   /** Use was pressed at speed: brake to a stop, then get out. */
   private leaving = false;
+  /** Restart / Menu: the open world's own way back to the start (ctx.setRespawn), else where setup() left the player. */
+  private respawnFn: (() => void) | null = null;
+  private startPoint: THREE.Vector3 | null = null;
   /** Every axis object ctx.input.axis() has handed out — how a driveVehicle() call is known to be the player's. */
   private readonly playerAxes = new WeakSet<object>();
   private setupDone = false;
@@ -361,6 +387,8 @@ export class Game {
   private playerModel: PlayerBody | null = null;
   /** A gun fired / a sword swung during this step — what an 'auto' attack pose becomes. */
   private firedThisStep = false;
+  /** The gun the player holds (PLAYER.holds), fired by the shell — see handGunFor. */
+  private readonly handGun: HandGun | null;
   private swungThisStep = false;
   /** The attack button is down or went down this step (read before the game's update). */
   private attackHeldThisStep = false;
@@ -413,6 +441,7 @@ export class Game {
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
     this.playerChoice = resolvePlayerChoice(options.player);
+    this.handGun = handGunFor(this.playerChoice);
     const look = { height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) };
     // The kit's own body sizes the walking capsule from its proportions; a game's own body keeps the default capsule.
     const kitBody = !(options.playerBody && typeof options.playerBody === 'object') && options.playerBody !== false && !firstPerson;
@@ -479,7 +508,9 @@ export class Game {
     this.touchLayoutIsOurs = !touchOptions.buttons && !touchOptions.layout;
     if (options.touchControls !== false) {
       // The player's own layout (Settings → Edit controls) is saved per game, under the same id as its leaderboard.
-      const touch = new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions });
+      // A gun in the hand: the Attack button is the Fire button (the layout stays the kit's own).
+      const buttons = this.handGun && this.touchLayoutIsOurs ? DEFAULT_TOUCH_BUTTONS.map((b) => (b.action === 'attack' ? { ...b, label: 'Fire' } : b)) : undefined;
+      const touch = new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions, ...(buttons ? { buttons } : {}) });
       this.touch = touch;
       this.disposers.push(() => touch.dispose());
     }
@@ -609,6 +640,7 @@ export class Game {
     // The map's edge from the options first, so setup() can still change it (ctx.world.setBounds).
     if (options.bounds) this.boundary.set(options.bounds, options.bounds);
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
+    this.startPoint = this.player.object.position.clone();
     this.setupDone = true;
     this.syncTouchLayout();
     if (Array.isArray(colliders)) setSceneColliders(this.scene, colliders);
@@ -675,6 +707,7 @@ export class Game {
         });
       },
       onStep: (fn) => { game.stepHooks.add(fn); return () => { game.stepHooks.delete(fn); }; },
+      setRespawn: (fn) => { game.respawnFn = typeof fn === 'function' ? fn : null; },
       world: {
         get bounds() { return game.boundary.bounds; },
         setBounds: (area, o) => game.boundary.set(area, o),
@@ -837,9 +870,6 @@ export class Game {
         this.hero.root.visible = !this.chased;
       }
       this.playerModel?.update(delta);
-      // Any action the game plays on the player (performAction: pick-up, open-door, eat, or one NavBharatAI made), after the
-      // body has posed itself, so the action's pose is the one drawn.
-      updateActions(this.context, delta);
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
@@ -850,7 +880,12 @@ export class Game {
       for (const fn of [...this.stepHooks]) {
         try { this.asGame(() => fn(delta)); } catch (error) { this.stepHooks.delete(fn); console.error('[game] a step hook failed and was stopped', error); }
       }
+      this.fireHandGun(delta);
       this.poseActionButtons();
+      // Any action the game plays (performAction — on the player, an NPC, or every NPC of a kind: jump, kick-car, dance,
+      // salute, or one NavBharatAI made) runs LAST, after the player's body, every character's walk (the step hooks above)
+      // and the button poses, so the action's pose is the one drawn on every character.
+      updateActions(this.context, delta);
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
       groundScene(this.scene);
@@ -956,6 +991,20 @@ export class Game {
     if (this.hero && !this.chased) this.hero.act(pose);
   }
 
+  /** The held gun (handGunFor): Fire shoots along the crosshair; the hit is SHOT_HIT for whatever can be hurt. */
+  private fireHandGun(delta: number): void {
+    const g = this.handGun;
+    if (!g) return;
+    g.cooldown = Math.max(0, g.cooldown - delta);
+    if (this.seated || state.status !== 'playing' || this.firedThisStep || this.gameReadActions.has('attack')) return;
+    const wants = g.auto ? this.input.isDown('attack') : this.input.wasPressed('attack');
+    if (!wants || g.cooldown > 0) return;
+    g.cooldown = 1 / g.rate;
+    const a = this.context.aim({ range: 300 });
+    events.emit('WEAPON_FIRED', { kind: g.kind, ownerId: 'player', position: { x: a.muzzle.x, y: a.muzzle.y, z: a.muzzle.z }, direction: { x: a.shot.x, y: a.shot.y, z: a.shot.z } });
+    if (a.hit) events.emit('SHOT_HIT', { object: a.hit, point: { x: a.point.x, y: a.point.y, z: a.point.z }, damage: g.damage, byPlayer: true });
+  }
+
   /**
    * Every action button the player pressed this step plays its pose (actionPoses). Runs AFTER the game's update, so
    * an 'auto' attack knows whether that press fired a gun (recoil), swung a sword (sweep) or neither (a punch).
@@ -1057,7 +1106,7 @@ export class Game {
     if (this.disposed) return;
     resetRun();
     this.feel.reset();
-    this.player.reset();
+    this.putPlayerAtStart();
     this.loop.setPaused(true);
     // resetRun() already put the status back to 'menu' WITHOUT announcing it, so setStatus('menu') would say nothing:
     // GAME_MENU (the start-screen music, the race overlay clearing) never happened on Menu.
@@ -1204,9 +1253,30 @@ export class Game {
   restart(): void {
     resetRun();
     this.feel.reset();
-    this.player.reset();
+    this.putPlayerAtStart();
     this.loop.setPaused(false);
     setStatus('playing');
+  }
+
+  /**
+   * Out of any vehicle, then back at the start on its ground: the game's own respawn (ctx.setRespawn) when it set one, else
+   * where setup() left the player. reset() alone stood the player at (0, 0, 0) — inside the terrain or the sea of a big map,
+   * where it was stuck (admin 2026-11-26).
+   */
+  private putPlayerAtStart(): void {
+    if (this.seated) {
+      const seat = this.seats.get(this.seated);
+      if (seat) seat.state = { ...seat.state, speed: 0 };
+      if (this.playerVehicle === this.seated) this.playerVehicle = null;
+      this.seated = null;
+      this.leaving = false;
+      this.syncTouchLayout();
+    }
+    if (this.respawnFn) {
+      try { this.respawnFn(); return; } catch (err) { console.error('[game] the respawn the game set failed; standing the player where it started.', err); }
+    }
+    const p = this.startPoint;
+    if (p) this.player.reset(p.x, p.y, p.z); else this.player.reset();
   }
 
   /**
@@ -4040,7 +4110,7 @@ import * as THREE from 'three';
 import { Game } from './Game';
 import { events } from './core/events';
 import { state } from './core/state';
-import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
+import { createCar, createTrackStream, createVehicleState, driveVehicle, projectRoadPlan, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState, type VehicleTuning } from './three/objects';
 import { createRace, type Race } from './three/race';
 import { applyCarChoice, loadModelTrack, loadWorldRace, projectRaceChoices, type CarChoice, type CarModelHandle, type ModelTrack, type TrackChoice, type WorldRaceHandle, type WorldRaceModule } from './play/raceCustom';
 
@@ -4111,7 +4181,8 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
               try { worldRace = worldMod.startWorldRace(ctx, { car, opponents, finishKm }); tuning.ground = worldRace.groundAt; }
               catch (error) { worldRace = null; setNotice('This race cannot run on the world (' + (error instanceof Error ? error.message : 'the world could not be made') + '), so it runs on the road library.'); }
             }
-            if (!custom && !worldRace) stream = createTrackStream(config.current.plan, { detail: 'lite' });
+            // No plan given: this game's own road (projectRoadPlan: its start map and land, from src/game/gameSeed.ts).
+            if (!custom && !worldRace) stream = createTrackStream(config.current.plan ?? projectRoadPlan(), { detail: 'lite' });
             const start = worldRace ? worldRace.startPose : custom ? custom.startPose : stream!.startPose;
             car = car ?? createCar({ color: carChoice?.color ?? 0xb42b2b, detail: 'lite' });
             car.position.set(start.x, start.y, start.z);
@@ -4247,7 +4318,7 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null, 
   return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
     <div ref={host} style={{ position: 'absolute', inset: 0 }} />
     <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
-      <div ref={hud}>{trackChoice?.model ? 'Your track' : '01/12 · Highway Straight · 0/10 km · Loop 1'}</div>
+      <div ref={hud}>{trackChoice?.model ? 'Your track' : 'Road library · Loop 1'}</div>
       <small>W/S or arrows: gas/brake · A/D: steer · Touch controls on phones</small>
     </div>
     <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {
@@ -5144,7 +5215,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       'controller and VFX layers — render it and you have a running game.\n' +
       (files[GAME_BOUNDARY_PATH] ? 'THE MAP HAS AN EDGE: pass bounds: { minX, maxX, minZ, maxZ } in the options (or ctx.world.setBounds in setup) — the player, the car they drive and every character stay inside behind real walls (walls: "invisible" when mountains or sea are the visible edge); never let anyone drive or walk off the map.\n' : '') +
       (files[GAME_AIM_PATH] ? 'EVERY GUN AIMS WITH ctx.aim(): const a = ctx.aim(); gun.update(dt, fire, a.muzzle, a.shot, bullets) — the crosshair point from the real muzzle; never a hand-written direction (a constant one fires the same way whatever the aim).\n' : '') +
-      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
+      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES, ON ANY CHARACTER (jump, kick the car, swim, open the car door, fire, dance, salute — the player, the police, the villagers, a bot) is played with performAction(ctx, name, who?) from ./game/play/actions: no who = the player; \'police\' / \'villager\' / any kind = every character of that kind; \'all\' = everyone; an entity\'s object = one. The kit has 120+ moves (MOVES in that file; Hindi names work); for any other, run_recipe({ name: "compose_action" }) makes it. Loops and stances end with stopAction(ctx, who). Never tell the user a character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +
       (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +

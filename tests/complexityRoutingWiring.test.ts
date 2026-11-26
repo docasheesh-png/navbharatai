@@ -94,7 +94,9 @@ describe('🔒 the route HANDS the verdict to the chain builder — the wiring t
     // A report with 83 flash calls on a score-63 app could not say whether the router had spoken.
     expect(code).toContain("code: 'COMPLEXITY_ROUTING'");
     const at = code.indexOf("code: 'COMPLEXITY_ROUTING'");
-    expect(code.slice(at, at + 600)).toContain('complexityDecision.source');
+    // Q-3466: the line is built by the shared helper, which names the decision's source.
+    expect(code.slice(at, at + 600)).toContain('complexityRoutingMessage(complexityDecision');
+    expect(readFileSync(resolve(__dirname, '../src/server/AgentV3/complexityRouting.ts'), 'utf8')).toMatch(/score \$\{decision\.score\}, \$\{decision\.source\}/);
   });
 
   it('and the flag still reaches the chain builder\'s own signature', () => {

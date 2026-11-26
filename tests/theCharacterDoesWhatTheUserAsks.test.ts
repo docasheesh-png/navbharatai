@@ -132,6 +132,7 @@ describe('the data is checked, never guessed', () => {
 });
 
 describe('compose_action: library first, then one model call', () => {
+  // 2026-11-26: "climb ladder" joined the move library, so the example of a move the kit LACKS is now juggling.
   it('a kit action asks no model', async () => {
     let asked = 0;
     expect(await composeAction('pick up', '', async () => { asked++; return null; })).toEqual({ kind: 'library', name: 'pick-up' });
@@ -139,18 +140,18 @@ describe('compose_action: library first, then one model call', () => {
   });
   it('🔴 an action the kit lacks is designed by the model and written as a file the kit reads', async () => {
     let prompt = '';
-    const reply = 'Here: {"name":"climb","seconds":1,"keys":[{"t":0,"pose":{}},{"t":0.5,"pose":{"leftUpperArm":[0.2,1,0]}},{"t":1,"pose":{}}]} done';
-    const made = await composeAction('climb ladder', 'hands over hands', async (p) => { prompt = p; return { text: reply }; });
-    expect(prompt).toMatch(/Action: climb-ladder/);
+    const reply = 'Here: {"name":"juggle","seconds":1,"keys":[{"t":0,"pose":{}},{"t":0.5,"pose":{"leftUpperArm":[0.2,1,0]}},{"t":1,"pose":{}}]} done';
+    const made = await composeAction('juggle balls', 'three balls in the air', async (p) => { prompt = p; return { text: reply }; });
+    expect(prompt).toMatch(/Action: juggle-balls/);
     expect(made.kind).toBe('made');
     if (made.kind !== 'made') return;
-    expect(made.def.name).toBe('climb-ladder');
-    expect(made.path).toBe('src/game/actions/climb-ladder.ts');
+    expect(made.def.name).toBe('juggle-balls');
+    expect(made.path).toBe('src/game/actions/juggle-balls.ts');
     expect(made.source).toMatch(/export const ACTION: ActionDef =/);
   });
   it('no answer, or an answer that does not validate, is refused honestly', async () => {
-    expect((await composeAction('climb', '', async () => null)).kind).toBe('refused');
-    expect((await composeAction('climb', '', async () => ({ text: 'I cannot' }))).kind).toBe('refused');
+    expect((await composeAction('juggle', '', async () => null)).kind).toBe('refused');
+    expect((await composeAction('juggle', '', async () => ({ text: 'I cannot' }))).kind).toBe('refused');
     expect(firstJson('x {"a":{"b":1}} y')).toEqual({ a: { b: 1 } });
     expect(actionPrompt('x', '')).not.toMatch(/undefined/);
   });

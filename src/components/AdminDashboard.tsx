@@ -4773,6 +4773,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           </span>
                           <span className="text-[10px] font-mono text-muted">{f.ruleId}</span>
                           <span className="text-[10px] text-faint">· {f.surface}</span>
+                          {/* Q-3561: raised only by a word that is innocent alone ("hardcore mode"); the rules no longer raise it. */}
+                          {f.falseAlarmFixed && (
+                            <span className="text-[10px] font-bold text-success">· False alarm: the current rules allow this message</span>
+                          )}
                           <span className="text-[10px] text-faint">· {new Date(f.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
                           {/* One flag is a maybe; six from one account is a pattern. Counting rows by
                               hand is how a reviewer misses the second kind. */}

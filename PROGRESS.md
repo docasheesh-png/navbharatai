@@ -6275,3 +6275,6 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Fixed on the way:** `ribbon` kept any sample more than 6 cm from the body at its own point, which is right for the pallu's hanging end. Between a strap's waypoints, that made the curve arch into the air. Now `freeBeyond` is a parameter, and a strap passes `Infinity`; the pallu keeps the old value, so the saree file is unchanged.
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
+
+## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
+- Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.

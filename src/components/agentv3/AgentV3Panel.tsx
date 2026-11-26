@@ -97,7 +97,7 @@ import { acceptZipPick, notZipMessage, isHtmlPagePick, shouldImportAttachedPage 
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { showColdStart } from './coldStartPolicy';
-import { loadDraft, saveDraft } from './composerDraft';
+import { insertAtCursor, loadDraft, saveDraft } from './composerDraft';
 import { USE_CASE_PROMPT_KEY } from '../../lib/useCaseEntry';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
@@ -5977,7 +5977,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       {gameLibraryOpen && (
                         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
                           <GameLibraryPicker
-                            onPick={(text) => { setPrompt(text); setGameLibraryOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
+                            onPick={(mention) => { const el = composerRef.current; const next = insertAtCursor(prompt, mention, el?.selectionStart ?? null, el?.selectionEnd ?? null); setPrompt(next.text); setGameLibraryOpen(false); setModeMenuOpen(false); setTimeout(() => { const c = composerRef.current; if (c) { c.focus(); c.setSelectionRange(next.caret, next.caret); } }, 0); }}
                           />
                         </div>
                       )}

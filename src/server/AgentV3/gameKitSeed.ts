@@ -69,6 +69,7 @@ import { gameLanguageForRequest, gameLanguageHandoff } from './gameLanguage';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 import { world2dIntent } from './world2dIntent';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
+import { PLACES_LINE_PREFIX, placesLine, worldRegionsFor, worldSettingFrom, worldSettingRule } from './worldSetting';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d' | 'generate_game_systems'
@@ -167,8 +168,6 @@ export function openWorldOnFoot(prompt: string | null | undefined): boolean {
   return profile === 'open-world' || profile === 'battle-royale' || profile === 'explore';
 }
 
-/** Hinglish for a city and its streets — the contract's subject list reads the English words. */
-const CITY_HINGLISH = /\b(?:sheh?a?r|shahar|nagar|sadak\w*|sadke\w*|galiy?\w*|imarat\w*)\b/i;
 
 /**
  * Does the game's world have a CITY in it — streets, buildings, traffic? Read from the same contract the builder is handed
@@ -178,12 +177,9 @@ const CITY_HINGLISH = /\b(?:sheh?a?r|shahar|nagar|sadak\w*|sadke\w*|galiy?\w*|im
 export function openWorldWantsCity(prompt: string | null | undefined): boolean {
   const text = String(prompt ?? '');
   if (hasLine(text, CITY_LINE)) return true;
-  try {
-    const c = buildGameContract(text);
-    if ((c.subjects ?? []).some((s) => s === 'building' || s === 'road')) return true;
-    if (namesGtaTitle(text)) return true;   // the ONE GTA reader ("gta5", "gtaa", "g.t.a" too)
-  } catch { /* no contract: the words below still decide */ }
-  return CITY_HINGLISH.test(text);
+  // The user's own places decide (worldSetting.ts, admin 2026-11-26: "village bole to city nahi"): houses or roads in a named
+  // village never make it a city; with no place named, buildings / roads / a GTA reference still give one.
+  return worldSettingFrom(text).places.some((p) => p.kind === 'city');
 }
 
 /**
@@ -212,7 +208,7 @@ export function gameKitOwnsTheBuild(prompt: string | null | undefined, framework
 function withoutPlatformLines(text: string): string {
   return text.split(/\r?\n/).filter((l) => {
     const t = l.trim();
-    return t !== ON_FOOT_LINE && t !== CITY_LINE && t !== GAME_MILESTONE_LINE && !t.startsWith('The user\'s game needs a big map') && !t.startsWith('The game the user named:');
+    return t !== ON_FOOT_LINE && t !== CITY_LINE && t !== GAME_MILESTONE_LINE && !t.startsWith(PLACES_LINE_PREFIX) && !t.startsWith('The user\'s game needs a big map') && !t.startsWith('The game the user named:');
   }).join('\n');
 }
 
@@ -303,7 +299,11 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
   // city when the game's world has one.
-  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request) };
+  if (recipe === 'generate_open_world') {
+    const setting = worldSettingFrom(request);
+    const regions = worldRegionsFor(setting);
+    return { mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request), ...(regions.length ? { regions } : {}) };
+  }
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
   // a weak builder toward the wrong genre. Without a request (a caller that cannot say), the whole shell, as before.
@@ -719,6 +719,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     has('generate_game_runtime') ? TUNING_RULE : '',
     // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
     has('generate_game_runtime') || has('generate_game_shell') ? gameLanguageHandoff(gameLanguageForRequest(opts.request)) : '',
+    // The places are the user's own words (admin 2026-11-26: "village bole to city nahi").
+    has('generate_open_world') || has('generate_athree_map') ? worldSettingRule(worldSettingFrom(opts.request)) : '',
     has('generate_game_2d')
       ? '🕹️ THE 2D GAME KIT IS ALREADY IN src/game/2d/: build the game ON it — Tilemap.fromRows(...) for the level,'
         + ' PlatformerController + createBody for the player (coyote time, jump buffer, no tunnelling — NEVER a hand-written'
@@ -940,6 +942,9 @@ export function gameIdentityLines(original: string): string[] {
   // 3D scene …") can never lose them — the same reason the game marker and the big-map line travel.
   if (openWorldOnFoot(original)) out.push(ON_FOOT_LINE);
   if (openWorldWantsCity(original)) out.push(CITY_LINE);
+  // The places themselves travel too (worldSetting.ts): a milestone that says "build the map" still gets the user's village.
+  const places = placesLine(worldSettingFrom(original));
+  if (places) out.push(places);
   return out;
 }
 

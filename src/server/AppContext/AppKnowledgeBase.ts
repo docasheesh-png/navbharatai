@@ -944,6 +944,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['realistic', 'real graphics', 'real 3d', 'hd graphics', 'high graphics', 'asli jaisa', 'graphics achhe', 'better graphics', 'shadows', 'reflection'],
   },
   {
+    id: 'game_online_multiplayer',
+    name: 'Play a game with friends online, on your own Supabase project',
+    path: 'NavBharatAI Pro → chat → ask for an online multiplayer 3D game (for example "dosto ke saath online khelne wala game")',
+    description: 'A 3D game you build can be played with friends online through your own Supabase project (no NavBharatAI server): the game shows a room code, a friend types it to join the same room, each player sees the others move, and events like a shot or a goal reach everyone; players who leave disappear. It needs your Supabase project URL and anon public key (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) — NavBharatAI asks for them while building. Until they are saved the game says so in red on the screen instead of pretending to find players.',
+    howToUse: 'Ask for an online multiplayer game, then paste your Supabase project URL and anon key when asked (Supabase dashboard → Project Settings → API). Share the room code with a friend.',
+    relatedFeatures: ['game_play_basics'],
+    keywords: ['multiplayer', 'online game', 'dosto ke saath', 'friends ke saath', 'room code', 'online khelna', 'pvp', 'co-op', 'supabase realtime', 'मल्टीप्लेयर'],
+  },
+  {
     id: 'game_genre_kits',
     name: 'Fighting games and tower-defense games with real rules',
     path: 'NavBharatAI Pro → chat → ask for the game (for example "tekken jaisa fighting game banao", "kushti wala game", "tower defense game banao, qila bachao")',

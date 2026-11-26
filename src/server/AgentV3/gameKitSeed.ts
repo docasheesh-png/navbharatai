@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { onlineMultiplayerWanted, ROOMS_HANDOFF } from '../lib/GameRoomsGenerator';
 import { realGraphicsWanted } from '../lib/GameRealismGenerator';
 import { enemyRequestFrom } from '../lib/GameEnemiesFeature';
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
@@ -766,6 +767,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
         + ' carrom, cricket, match-3 and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
         + ' move, and announce what happened. Card games are points or pretend chips only, never real money.'
       : '',
+    // 🌐 Online play with friends (admin 2026-11-26 #10) runs on the user's own Supabase, never a fake lobby (GameRoomsGenerator.ts).
+    has('generate_game_3d') && onlineMultiplayerWanted(opts.request) ? ROOMS_HANDOFF : '',
     has('generate_genre_kits')
       ? '🥊 THE GENRE\'S RULES ARE ALREADY IN src/game/genres/: a FIGHTING game is fighting.ts (createMatch, then stepMatch every frame:'
         + ' frames, hit-stun, combos, blocking, throws, specials, rounds, the computer opponent) and a TOWER DEFENSE is towerDefense.ts'

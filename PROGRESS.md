@@ -6462,3 +6462,7 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 ## 2026-11-26 — Q-3514 (#20): real 3D graphics when the user asks
 
 three/realism.ts (GameOptions.graphics 'real'): image-based lighting and soft shadows everywhere; GTAO + subtle bloom + output pass on a capable device only. Stacked on the car-ground branch. tests/realGraphicsWhenAsked.test.ts.
+
+## 2026-11-26 — Q-3513 (#10): play with friends online on the user's own Supabase
+
+three/rooms.ts: joinRoom on the user's Supabase Realtime (raw websocket, Phoenix protocol, no package), remotePlayers, showRoomNotice (RED line until VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are saved). The 3D handoff asks the builder to request the keys. Q-3490 (NavBharatAI-hosted rooms) is separate and stays open. tests/friendsPlayOnTheUsersOwnBackend.test.ts.

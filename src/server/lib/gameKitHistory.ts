@@ -833,6 +833,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a4eab150c392d6bbe183fbd647c080a6025334fc43f3952e67999ba68cf6b18f",
     "fe280baa5b2469cacf2ac9d3bab6881ab872e387f127b32d544749ab4b4a993f"
   ],
+  "src/game/three/rooms.ts": [
+    "3677c69776d8b41c9073a5e1bee41f4bc79f86084984bae0c30651cd40ac65f0"
+  ],
   "src/game/three/splitscreen.ts": [
     "f3d3cd253e6e20134507928f6db8f71f8bbd2d9436f8dc4f806c4945632ec6de"
   ],

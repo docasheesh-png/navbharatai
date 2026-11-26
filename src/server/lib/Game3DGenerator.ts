@@ -31,6 +31,7 @@
 import { GAME_DENTS, GAME_DENTS_PATH } from './GameDentsGenerator';
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
 import { GAME_REALISM, GAME_REALISM_PATH } from './GameRealismGenerator';
+import { GAME_ROOMS, GAME_ROOMS_PATH } from './GameRoomsGenerator';
 import { GAME_CITY } from './GameCityGenerator';
 import { GAME_CITY_TRAFFIC } from './GameCityTrafficGenerator';
 import { GAME_CITY_PEOPLE } from './GameCityPeopleGenerator';
@@ -7297,6 +7298,7 @@ const FILES: Record<string, string> = {
   [GAME_DENTS_PATH]: GAME_DENTS,
   'src/game/three/buildings.ts': GAME_BUILDINGS,
   [GAME_REALISM_PATH]: GAME_REALISM,
+  [GAME_ROOMS_PATH]: GAME_ROOMS,
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
   'src/game/three/materials.ts': MATERIALS,
@@ -7332,7 +7334,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'realism', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics', 'dents',
+  'buildings', 'realism', 'rooms', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics', 'dents',
 ];
 
 /**

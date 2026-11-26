@@ -156,6 +156,8 @@ describe('the page and the deletion code do not drift apart', () => {
       zip_uploads: /\.zip archives/i,
       agentv3_sheet_files: /spreadsheets you gave to a build/i,
       shares: /share links/i,
+      // Added 2026-11-26 (Q-3702): the native build rows, erased after their files.
+      mobile_native_builds: /phone app builds.*\.apk \/ \.aab/i,
       pwa_apps: /instantly-hosted apps/i,
       user_referrals: /referral record/i,
       /** Said with its limit, because half of this one is not ours to do. */

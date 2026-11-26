@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { enemyRequestFrom } from '../lib/GameEnemiesFeature';
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { GAME_COLLISION_RULE } from './gameCollisionRule';
 import { hardConstraintLines } from '../lib/megaRoadmap';
@@ -304,7 +305,11 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
   // city when the game's world has one.
-  if (recipe === 'generate_open_world') return { mount: true, city: openWorldWantsCity(request), ...(wantsSwimming(request) ? { swim: true } : {}) };
+  // Enemies the request asks for go in with the first build (GameEnemiesFeature.ts), not in a later "enemy banao" turn.
+  if (recipe === 'generate_open_world') {
+    const enemies = enemyRequestFrom(request);
+    return { mount: true, city: openWorldWantsCity(request), ...(wantsSwimming(request) ? { swim: true } : {}), ...(enemies ? { enemies } : {}) };
+  }
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
   // a weak builder toward the wrong genre. Without a request (a caller that cannot say), the whole shell, as before.

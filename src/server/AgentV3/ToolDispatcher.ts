@@ -403,6 +403,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
+import { enemyRequestOf, enemyFeatureSource, featuresIndexWith, ENEMIES_FEATURE_PATH } from '../lib/GameEnemiesFeature';
 import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
@@ -10631,7 +10632,16 @@ export class ToolDispatcher {
             try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!listed) {
-              const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX, { agent, source: 'generate_open_world' });
+              // Enemies the first request asked for are in the first build: their feature, listed (GameEnemiesFeature.ts).
+              const enemyReq = enemyRequestOf(owRec.enemies);
+              let indexSource = GAME_FEATURES_INDEX;
+              if (enemyReq) {
+                const enemiesFile = await this.guardedWrite(ENEMIES_FEATURE_PATH, enemyFeatureSource(enemyReq), { agent, source: 'generate_open_world' });
+                this.state?.recordFileChange({ path: ENEMIES_FEATURE_PATH, kind: enemiesFile.kind }, agent);
+                getWorkspaceMemory(this.workspaceId).indexFile(ENEMIES_FEATURE_PATH, enemiesFile.content);
+                indexSource = featuresIndexWith(GAME_FEATURES_INDEX, 'enemies') ?? GAME_FEATURES_INDEX;
+              }
+              const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, indexSource, { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_FEATURES_INDEX_PATH, index.content);
             }

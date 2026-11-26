@@ -6373,3 +6373,7 @@ villagers / bot", and "jo move library me nahi hai, NavBharatAI khud API call se
   to juggling.
 - **Honest limits:** data moves look simpler than hand-animated clips; humanoid bodies only (four-legged needs its own limb
   map); NPC library-model clips are not used (no mixer access) — they play the data pose.
+- **Correction (same day):** NPC library-model clips ARE now used. `three/assetModels` exposes `root.userData.playRole`
+  (the handle's `play`), and `play/actions.ts` plays an NPC model's own clip for a move it has (falling back to the data pose),
+  returning it to `idle` after. The game's `handle.update(dt)` keeps advancing it. Locked in `anyCharacterDoesAnyMove`
+  (reversion-proven). Remaining honest limits: data moves look simpler than clips; humanoid bodies only.

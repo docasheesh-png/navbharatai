@@ -233,8 +233,9 @@ export const GAME_ACTIONS = String.raw`// ANY ACTION THE USER ASKS FOR, ON ANY C
 // updateActions every step; nothing to wire.
 //
 // A character is the player, or anything systems/entities.ts spawned (its object carries userData.actor). It plays on
-// whatever body is shown: the kit person (its joints) or a model (its skeleton's bones, found by name). When the PLAYER's
-// own model has a real clip for the move (a jump, a punch, a swim), that clip plays instead of the data pose.
+// whatever body is shown: the kit person (its joints) or a model (its skeleton's bones, found by name). When the character's
+// own model has a real clip for the move (a jump, a punch, a swim) — the player's chosen model or an NPC's library model —
+// that clip plays instead of the data pose.
 import * as THREE from 'three';
 import type { GameContext } from '../Game';
 import { events } from '../core/events';
@@ -507,6 +508,19 @@ function meets(ctx: GameContext, a: Actor, def: ActionDef): boolean {
 }
 
 /**
+ * The character's OWN animation for the move, when its model has one: the player's chosen model (playerBody), or an NPC's
+ * library model (three/assetModels sets model.userData.playRole). True when that clip is now playing — the data pose then
+ * stands aside so the two never fight. A move's steps (the strike, the shot) still happen on time either way.
+ */
+function ownClip(ctx: GameContext, a: Actor, name: string): boolean {
+  const move = CLIP_MOVE[name];
+  if (a.isPlayer) return !!move && playMove(ctx, move);
+  const play = a.info.model && a.info.model.userData.playRole;
+  if (typeof play !== 'function') return false;
+  try { return (move ? play(move) === true : false) || play(name) === true; } catch { return false; }
+}
+
+/**
  * Play an action on the player (no 'whom'), on every character of a kind ('police', 'villager', 'bot'), on every
  * character ('all'), or on one (its object or entity). True when at least one character started it; false (said once)
  * when the game has no such action, nobody matches, or it cannot happen where they stand.
@@ -526,8 +540,7 @@ export function performAction(ctx: GameContext, name: string, whom?: Who): boole
     if (!meets(ctx, a, def)) continue;
     const before = runs.get(a.object);
     if (before) end(ctx, before, false);
-    const move = a.isPlayer ? CLIP_MOVE[def.name] : undefined;
-    const clip = !!move && playMove(ctx, move);
+    const clip = ownClip(ctx, a, def.name);
     runs.set(a.object, { def, actor: a, t: 0, done: new Set(), cycle: 0, real: { forward: 0, side: 0, turn: 0 }, clip, holding: false });
     a.object.userData.acting = true;
     events.emit('ACTION_STARTED', { name: def.name, who: who(a) });
@@ -555,6 +568,11 @@ export function heldItem(ctx: GameContext, whom?: Who): THREE.Object3D | null {
 function end(ctx: GameContext, r: Running, announce: boolean): void {
   runsOf(ctx).delete(r.actor.object);
   r.actor.object.userData.acting = false;
+  // An NPC model that played its own clip goes back to standing.
+  if (r.clip && !r.actor.isPlayer) {
+    const play = r.actor.info.model && r.actor.info.model.userData.playRole;
+    if (typeof play === 'function') { try { play('idle'); } catch { /* a model without idle keeps its last clip */ } }
+  }
   const { frame } = limbsOf(ctx, r.actor);
   const pivot = frame && frame.parent && frame.parent.userData.actionPivot ? frame.parent : null;
   if (pivot) { pivot.position.set(0, 0, 0); pivot.quaternion.identity(); }

@@ -21,6 +21,7 @@ import { GAME_ACTIONS, GAME_ACTIONS_PATH, LIBRARY_ACTIONS, actionKey, validateAc
 import { MOVE_ALIASES, MOVE_LIBRARY, mirrorPose } from '../src/server/lib/gameMoveLibrary';
 import { actionPrompt } from '../src/server/AgentV3/gameAssets/composeAction';
 import { GAME_PHYSICS } from '../src/server/lib/GamePhysicsGenerator';
+import { generateGameAssetRuntime } from '../src/server/lib/GameAssetRuntimeGenerator';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const DIR = join(__dirname, `.tmp-any-move-${process.pid}`);
@@ -296,5 +297,38 @@ describe('a move NavBharatAI makes has the same vocabulary', () => {
   it('🔒 a physics body takes a kick as a real impulse, and only the hook physics installed is removed with it', () => {
     expect(GAME_PHYSICS).toContain('mesh.userData.onStruck = struck');
     expect(GAME_PHYSICS).toContain('if (ownStruck.get(mesh) === mesh.userData.onStruck) delete mesh.userData.onStruck;');
+  });
+});
+
+describe("a character's OWN animation comes first", () => {
+  /** An NPC whose body is a library model: a visible mesh, and the clips it has (as three/assetModels exposes them). */
+  function modelNpc(npcs: any, clips: string[]) {
+    const body = new THREE.Group();
+    body.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 0.3), new THREE.MeshBasicMaterial()));
+    const played: string[] = [];
+    body.userData.playRole = (role: string) => { played.push(role); return clips.includes(role); };
+    const npc = npcs.spawn({ kind: 'bot', x: 2, z: 2, hostile: false, body });
+    return { npc, played };
+  }
+
+  it("🔴 an NPC library model with a jump clip plays THAT clip, and goes back to idle after", () => {
+    const { ctx, npcs, step } = world();
+    const { npc, played } = modelNpc(npcs, ['idle', 'jump', 'punch']);
+    expect(ACT.performAction(ctx, 'kood', npc.object)).toBe(true);
+    expect(played[0]).toBe('jump');
+    step(1.2);
+    expect(played.at(-1)).toBe('idle');
+  });
+
+  it('a move the model has no clip for still plays — as the data pose', () => {
+    const { ctx, npcs } = world();
+    const { npc, played } = modelNpc(npcs, ['idle']);
+    expect(ACT.performAction(ctx, 'salute', npc.object)).toBe(true);
+    expect(played).toEqual(['salute']);
+    expect(ACT.currentAction(ctx, npc.object)).toBe('salute');
+  });
+
+  it('🔒 a library model exposes its clip player on its root, as a function (cloning never copies the mixer)', () => {
+    expect(generateGameAssetRuntime()).toContain("root.userData.playRole = (role: string) => handle.play?.(role) ?? false;");
   });
 });

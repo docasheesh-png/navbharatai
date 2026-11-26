@@ -6297,3 +6297,21 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **What it does NOT fix:**
   - A game the playtest never plays gets no page read (Q-3332, owned elsewhere).
   - The admin's existing city game keeps its hand-made enemies until a turn moves them onto Entities. With this change, the next turn's playtest says so, and the builder is told the fix.
+
+## 2026-11-26 — Q-3402 (BR2532): a repair pass never breaks a file that was clean
+
+- **Report:** admin, "isme game ban gaya par enemy aa hi nahi rahe". The game built, but no enemy appeared.
+- **What happened:**
+  - The builder wrote `src/game/features/monsters.ts`. The write-time typecheck said that file was clean, with 3 errors left in old kit files.
+  - After the summary, the typecheck-gate repair pass was shown every written file and asked to fix those 3 errors. It rewrote `monsters.ts` with APIs that do not exist (`world.scene`, `controller.position`).
+  - The re-check failed, and the pass's writes were kept. No monster reached the scene, and the production build named the monsters.ts errors.
+  - The builder's summary blamed old kit files.
+- **Root cause:** a model repair's writes were kept even when they made the project worse. The typecheck-gate pass reverted nothing. The agentic endgame reverted only when the TOTAL error count rose, so 3 errors fixed in one file plus 3 new ones in another passed.
+- **Also:** the turn was an edit, and an edit turn records no game contract. So the playtest never looked for the asked-for enemies.
+- **Fix:**
+  - `repairBreakage.ts` holds one pure rule. A touched file that gained its first error goes back. A raised total puts back every touched file.
+  - `buildPhases/typecheckGateRepair.ts` (moved out of the route) snapshots, writes, re-checks, puts back what the rule names, records `REPAIR_REVERTED`, and re-checks.
+  - `EndgameRepair` applies the same per-file rule beside its count rule.
+  - `asksForEnemies` (gameIntent.ts) reads enemies from the turn's own words (English, Hinglish, Hindi; a declined sentence and "chatbot" do not count). The playtest uses it when there is no contract.
+- **Proof:** `tests/aRepairNeverBreaksACleanFile.test.ts`, 9 tests, replaying BR2532 on the real helper and the real endgame. Three reversions each made it fail: the rule, the endgame rule, the Hindi words. The related suites pass: 774 tests in 45 files.
+- **Watch:** the next game edit that asks for enemies. `REPAIR_REVERTED` shows if a repair broke a file; `MISSING_ENEMIES` shows if none is on screen.

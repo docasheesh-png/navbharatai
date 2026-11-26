@@ -130,7 +130,7 @@ describe('MISSING_ENEMIES — said to the builder only when enemies were asked f
     const none = page({ spawned: 0, failed: 0, hostiles: 0 });
     expect(pagePlaceholderFindings(null, none, null).some((f) => f.kind === 'MISSING_ENEMIES')).toBe(false);
     expect(pagePlaceholderFindings(null, { ...none, meshes: 1 }, null, { enemies: true })[0].kind).toBe('MISSING_ENEMIES');
-    expect(readFileSync('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts', 'utf8')).toMatch(/\{ enemies: !!p\.contract\?\.requiredFeatures\.includes\('enemies'\) \}/);
+    expect(readFileSync('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts', 'utf8')).toMatch(/\{ enemies: !!p\.contract\?\.requiredFeatures\.includes\('enemies'\) \|\| asksForEnemies\(p\.request\) \}/);
   });
   it('the builder is told to put enemies where the hero is', () => {
     expect(readFileSync('src/server/AgentV3/systemPrompt.ts', 'utf8')).toMatch(/ENEMIES GO WHERE THE HERO IS: npcs\.spawnAround/);

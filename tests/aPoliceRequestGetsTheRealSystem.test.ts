@@ -29,8 +29,10 @@ describe('the police request, end to end through the contract', () => {
   });
   it('a game that calls the dispatch system has police', () => {
     const c = buildGameContract(ASK);
-    const real = { 'src/game/Game.tsx': 'const npcs = new Entities(ctx); const wanted = new Wanted(ctx, npcs, new Dispatch(ctx, npcs));' };
+    // A real project (Q-3360): the systems kit on disk and an entry that loads the game.
+    const real = { 'src/game/systems/dispatch.ts': 'export class Dispatch {}', 'src/main.tsx': "import './game/Game';", 'src/game/Game.tsx': 'const npcs = new Entities(ctx); const wanted = new Wanted(ctx, npcs, new Dispatch(ctx, npcs));' };
     expect(scopeMatch(c, real).present).toContain('police');
+    expect(scopeMatch(c, { 'src/game/Game.tsx': real['src/game/Game.tsx'] }).notVerified).toContain('police'); // no kit, no entry: a call to nothing
   });
   it('"police" mentioned only in a comment does not count', () => {
     const c = buildGameContract(ASK);

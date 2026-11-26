@@ -63,11 +63,31 @@ function stripMultilineTemplates(src: string): string {
 
 const REGISTRATION = /^[ \t]*(?:app|router|r)\.(?:get|post|put|delete|patch|use|all)\(\s*['"`]([^'"`]+)['"`]/gm;
 
+/**
+ * A ROUTE REGISTERED THROUGH A CONSTANT IS STILL A ROUTE.
+ *
+ * 🔴 THE BLIND SPOT, found 2026-11-25 by this sweep failing on a path that genuinely exists. Several
+ * routes name their path once and register it by that name — `export const PREVIEW_ASK_PATH =
+ * '/api/app-ai/preview-ask'` then `app.post(PREVIEW_ASK_PATH, …)` — which is exactly the drift-proof
+ * style the rest of the repo asks for, and the literal-only matcher above could not see ANY of them.
+ * So the sweep's verdict on such a path was "the server does not have it", which was false: the guard
+ * was telling the truth about its own regex and not about the server. It now resolves a constant
+ * declared in the same file, so the honest style stops being the one it flags.
+ */
+const PATH_CONST = /(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*(?::\s*string\s*)?=\s*['"`](\/[^'"`]+)['"`]/g;
+const CONST_REGISTRATION = /^[ \t]*(?:app|router|r)\.(?:get|post|put|delete|patch|use|all)\(\s*([A-Z][A-Z0-9_]*)\s*,/gm;
+
 function registeredPaths(): string[] {
   const files = [join(process.cwd(), 'server.ts'), ...walk(join(process.cwd(), 'src/server')).filter((f) => f.endsWith('.ts'))];
   const paths = new Set<string>();
   for (const file of files) {
     const src = stripComments(readFileSync(file, 'utf8'));
+    // Resolve `app.post(SOME_PATH, …)` against a `const SOME_PATH = '/api/…'` in the same file.
+    const byName = new Map([...src.matchAll(PATH_CONST)].map((m) => [m[1], m[2]] as const));
+    for (const m of [...src.matchAll(CONST_REGISTRATION)]) {
+      const resolved = byName.get(m[1]);
+      if (resolved) paths.add(resolved);
+    }
     // A file that mounts its own `router` at a prefix (`app.use('/api/x', router)`) serves every
     // `router.<verb>('/y')` at `/api/x/y` — compose them so mounted sub-routes are seen too.
     const mounts = [...src.matchAll(/app\.use\(\s*['"`](\/[^'"`]+)['"`]\s*,\s*router\s*\)/g)].map((m) => m[1]);
@@ -126,6 +146,15 @@ describe('the client never calls an endpoint the server does not have', () => {
   it('finds the routes and the calls at all', () => {
     expect(routes.length).toBeGreaterThan(300);
     expect(clientCalls().length).toBeGreaterThan(100);
+  });
+
+  it('🔒 sees a route registered through a CONSTANT, not only a literal', () => {
+    // The blind spot above, locked. These three are declared as `export const X = '/api/…'` and
+    // registered as `app.post(X, …)`; before 2026-11-25 the sweep could not see one of them, so a real
+    // client call to a real route was reported as dead.
+    for (const path of ['/api/app-ai/free-key', '/api/app-ai/preview-ask', '/api/app-ai/preview-image']) {
+      expect(routes, path).toContain(path);
+    }
   });
 
   it('every fetched path resolves to a registered route', () => {

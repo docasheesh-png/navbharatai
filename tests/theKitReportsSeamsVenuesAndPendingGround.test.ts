@@ -51,7 +51,7 @@ describe('🔎 the kit answers seams, venues and pending ground', () => {
   }, 120_000);
 
   it('opposite class — a pad laid under the player after the first frame, without lateEdits: the drawn chunks there are pending, and it is said', () => {
-    const { world, ctx } = make([{ id: 'main', kind: 'city', city: small }]);
+    const { world, ctx } = make([{ id: 'main', kind: 'city', city: small }], { lateEdits: false });   // the open world redraws by default (failedbr #2499)
     frames(world, ctx, 30);
     expect(g.window.__nbWorld.geometry().pending.dirty).toBe(0);                     // nothing changed yet
     const at = world.playerWorld();

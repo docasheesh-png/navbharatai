@@ -13,6 +13,7 @@ import { planSurplusDispatchCandidate, type SurplusRequestFloorContract } from '
 import { isSurplusReceiptDecision } from './receiptPolicy';
 import { createProductionSurplusAdapter } from './productionAdapter';
 import type { Reviews, Snapshot, Workload } from './types';
+import { isSurplusMarketRefusal, recordSurplusPairRefusal, recordSurplusPairServed, surplusPairRefused } from './surplusPairRefusals';
 
 export const SURPLUS_BUILD_POLICY = 'surplus-build-10x-official-cap-v1';
 /**
@@ -106,6 +107,8 @@ export async function createSurplusBuildSession(options: {
     const offers = state.snapshot.offers.filter(offer => {
       if ((selectedModel && offer.model !== selectedModel) || excluded.has(offer.model)
           || (options.tier === 'weak' && /claude|sonnet|opus/i.test(offer.model))) return false;
+      // A pair the router could not fill a moment ago is skipped for every build (surplusPairRefusals.ts).
+      if (surplusPairRefused(offer.model, offer.providerId, at)) return false;
       try { capability(state, offer, at, workload); return true; } catch { return false; }
     });
     // THE SHARED RULE'S FILTER (modelChoice.ts, admin 2026-11-18): Surplus keeps its own reviewed, price-objective
@@ -153,11 +156,13 @@ export async function createSurplusBuildSession(options: {
       /** Failed attempts already reported by the per-attempt handler, so the stay-alive loop never counts one twice. */
       let attemptNotices = 0;
       const authorizedFallbacks = new WeakSet<object>();
+      const marketRefusedPermits = new WeakSet<object>();
       async function authorize(params: RunTurnParams, previous?: SurplusTurnPermit) {
           if (terminalPolicyFailure) throw terminalPolicyFailure;
           const workload = estimate(params), state = await adapter.readState(), at = now();
           // A winning model stays sticky. Only a durably resolved safe failed turn may change it.
-          const excluded = previous ? new Set([...(failedModels.get(previous) ?? []), previous.model]) : new Set<string>();
+          // After a market refusal only the PAIR is out (surplusPairRefusals): the same model on another seller stays eligible.
+          const excluded = previous ? new Set([...(failedModels.get(previous) ?? []), ...(marketRefusedPermits.has(previous) ? [] : [previous.model])]) : new Set<string>();
           for (const m of benchedModels) excluded.add(m);
           let snapshot = eligibleSnapshot(state, workload, at, previous ? undefined : model, excluded);
           let plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
@@ -249,9 +254,13 @@ export async function createSurplusBuildSession(options: {
         async onFailure(raw, permit, _error, failure) {
           // Refusal cannot be downgraded into generic poisoned-session availability on a later turn.
           if (failure?.reason === 'content_filter') terminalPolicyFailure = publicBuildEngineError('policy_refusal');
+          // Recorded first: a retried attempt returns from inside the try below, and its retry must already skip the pair.
+          const marketRefusal = isSurplusMarketRefusal(failure?.engineCode);
+          if (marketRefusal) { recordSurplusPairRefusal(permit.model, permit.providerId, now()); marketRefusedPermits.add(permit); }
           const result: TurnResult = { text: '', toolUses: [], rawContent: [], stopReason: null, model: permit.model,
             // A FAILED attempt (Q-2920): it did not answer, so it is not "a provider that returned no usage".
             usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, measured: false, failedAttempt: true } };
+          let retry = false;
           try {
             if (failure && adapter.failure) {
               const resolution = await adapter.failure(raw, permit, result, failure);
@@ -259,10 +268,10 @@ export async function createSurplusBuildSession(options: {
                 result.usage.surplusReceipt = resolution.receipt;
                 callbacks.onTurnComplete?.(result, 'SURPLUS');
               }
-              if (resolution.canRetry === true && failure.attempt < 3) {
-                authorizedFallbacks.add(permit);
-                return { retry: true as const, receiptDurablyRecorded: true as const };
-              }
+              // A retried attempt used to RETURN here, skipping the bench decision and the notice below — so a retried
+              // refusal never reached the report (the Q-3019 class, on the adapter path production uses). It now falls
+              // through and returns the retry at the end.
+              if (resolution.canRetry === true && failure.attempt < 3) { authorizedFallbacks.add(permit); retry = true; }
             } else {
               result.usage.surplusReceipt = await adapter.receipt(raw, permit, result);
               callbacks.onTurnComplete?.(result, 'SURPLUS');
@@ -272,9 +281,12 @@ export async function createSurplusBuildSession(options: {
             console.warn(`[SURPLUS] failure receipt unavailable (non-fatal, absorbed): ${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`);
           }
           finally { release(permit); }
-          const failures = (failuresByModel.get(permit.model) ?? 0) + 1;
+          // A market refusal is about this (model, provider) PAIR, not the model: remember the pair and let the
+          // selector pick the next one. Benching the model on it put a model that had just served 12 turns out of
+          // the build (BR2525) and, pair by pair, killed sessions the market could still fill.
+          const failures = (failuresByModel.get(permit.model) ?? 0) + (marketRefusal ? 0 : 1);
           failuresByModel.set(permit.model, failures);
-          const bench = !terminalPolicyFailure && (failures >= SURPLUS_FAILURES_BEFORE_BENCH || refusedOutright(failure?.httpStatus));
+          const bench = !terminalPolicyFailure && !marketRefusal && (failures >= SURPLUS_FAILURES_BEFORE_BENCH || refusedOutright(failure?.httpStatus));
           if (bench) {
             benchedModels.add(permit.model);
             if (model === permit.model) {
@@ -286,9 +298,10 @@ export async function createSurplusBuildSession(options: {
           // slower "ok" call — the report said no engine wasted any time. It is now said, with codes only.
           attemptNotices++;
           notifyAttemptFailed(callbacks, { model: permit.model, stage: failure?.stage ?? 'dispatch', reason: failure?.reason ?? 'dispatch_failed',
-            attempt: failure?.attempt ?? 1, ...(typeof failure?.httpStatus === 'number' ? { httpStatus: failure.httpStatus } : {}), benched: bench, ...(bench && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure ? { sameModelRetry: true } : {}) });
+            attempt: failure?.attempt ?? 1, ...(typeof failure?.httpStatus === 'number' ? { httpStatus: failure.httpStatus } : {}), ...(failure?.engineCode ? { engineCode: failure.engineCode } : {}), benched: bench, ...(bench && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure ? { sameModelRetry: true } : {}) });
+          if (retry) return { retry: true as const, receiptDurablyRecorded: true as const };
         },
-        onProviderUsed: permit => { model = permit.model; try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
+        onProviderUsed: permit => { model = permit.model; recordSurplusPairServed(permit.model, permit.providerId, now()); try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
         onTurnComplete(result, used) {
           try { callbacks.onTurnComplete?.(result, used); }
           finally { if (result.usage.surplusReceipt?.callId) {
@@ -366,6 +379,8 @@ export interface SurplusAttemptFailure {
   nextModel?: string;
   /** The attempt's HTTP status when the engine answered with one (Q-3234). A refused request (not 2xx) is said as such. */
   httpStatus?: number;
+  /** The engine's own code for a refusal (`no_sellers_for_model`, `minimum_discount_not_met`) — code-shaped only. */
+  engineCode?: string;
   /** First failure of this model in the session: the retry stays on it, cache warm (Q-3019). */
   sameModelRetry?: boolean;
 }
@@ -387,7 +402,7 @@ export const SURPLUS_FAILURES_BEFORE_BENCH = 2;
 export function describeSurplusAttemptFailure(f: SurplusAttemptFailure): string {
   // An answer that was never a completion is not an "invalid completion": a refused request is named by its status.
   const refused = typeof f.httpStatus === 'number' && (f.httpStatus < 200 || f.httpStatus >= 300);
-  const parts = [`Surplus attempt ${f.attempt} on ${f.model} failed (${f.stage}: ${refused ? `the engine refused the request, HTTP ${f.httpStatus}` : f.reason})`];
+  const parts = [`Surplus attempt ${f.attempt} on ${f.model} failed (${f.stage}: ${refused ? `the engine refused the request, HTTP ${f.httpStatus}${f.engineCode ? ` (code ${f.engineCode})` : ''}` : f.reason})`];
   if (typeof f.elapsedMs === 'number') parts.push(`after ${Math.round(f.elapsedMs / 100) / 10}s`);
   if (f.benched) parts.push(f.nextModel ? `— ${f.model} is benched for this build; the next turn moves to ${f.nextModel}, whose cache is cold` : `— ${f.model} is benched for this build`);
   if (f.sameModelRetry) parts.push(`— retried on the same model (its cache stays warm); a second failure benches it`);

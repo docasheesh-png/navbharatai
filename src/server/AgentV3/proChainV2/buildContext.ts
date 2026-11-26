@@ -116,7 +116,7 @@ export class ProChainV2Build {
       escapeSurplusScope: (fn) => runWithSurplusBuild(false, fn),
       ...(req.onSurplusError ? { onSurplusError: req.onSurplusError } : {}),
       onSurplusHealthy: () => recordSurplusAdmitProbeSuccess(),
-      onFirstSurplusDrop: (reason) => { recordSurplusMidBuildDeath(reason); },
+      onFirstSurplusDrop: (reason, httpStatus) => { if (typeof httpStatus === 'number') recordSurplusMidBuildDeath(reason, Date.now(), { httpStatus }); else recordSurplusMidBuildDeath(reason); },
       onEvent: this.onEvent,
       secrets: [...(req.routerOneSecrets ?? []), ...String(this.env.QUBAX_API_KEY ?? '').split(/[\s,]+/), ...String(this.env.MITRIFY_API_KEY ?? '').split(/[\s,]+/)],
       env: this.env,

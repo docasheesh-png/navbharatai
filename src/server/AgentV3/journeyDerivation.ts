@@ -25,7 +25,7 @@
 // PURE. The runner script is a STRING built here and executed by the caller in the sandbox's pre-baked
 // browser — no I/O, no clock, no model call in this module.
 
-import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport, noPointerLockInstall } from './sandboxBrowserScript';
 import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
@@ -1905,6 +1905,9 @@ for (const j of journeys) {
   // told us nothing about the app, and reporting that as a defect would be an invented alarm.
   const out = { id: j.id, kind: j.kind, route: j.route, verdict: 'unreachable', step: 'load', note: '', errors: [] };
   const page = await browser.newPage(j.pageOpts);
+  // No pointer lock under automation (Q-3380): a journey clicks the app, and a game that locks the pointer on that
+  // click would flood this headless page with synthetic input. The shared stub, before any app code runs.
+  ${noPointerLockInstall('page')}
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
   try {

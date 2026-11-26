@@ -203,7 +203,8 @@ describe('1 — one decision, no other billing point', () => {
     // Census of every debitWalletForBuild caller, with its feature. A new caller must be added here
     // deliberately, which is where the question "does it bill a stopped build?" gets asked.
     const callers: Array<[string, RegExp]> = [
-      ['src/server/routes/mobileShip.ts', /feature: 'mobile-build'/],
+      // The ₹1 built-file charge, shared by the GitHub and Native Cloud Android builds (2026-11-25).
+      ['src/server/lib/mobileBuildCharge.ts', /feature: 'mobile-build'/],
       ['src/server/sonic/sonicWs.ts', /feature: 'voice'/],
       ['src/server/lib/navStoreRemixPurchase.ts', /debitWalletForBuild\(d, buyerUid/],
     ];

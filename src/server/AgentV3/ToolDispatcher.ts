@@ -277,6 +277,7 @@ import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient
 import { kitLibraryRewriteRefusal } from './kitLibraryGuard';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, ownLandFindings, ownLandNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { missingGroundContact } from './groundContactRule';
+import { heldSubjects, missingHeldModels, PLAYER_FILE_PATH } from './heldItemRule';
 import { missingEnterableHouses } from './enterableHouseRule';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
@@ -5268,6 +5269,15 @@ export class ToolDispatcher {
       vehicle += missingGroundContact(this._groundContactIndex);
       vehicle += missingEnterableHouses(this.userRequest ?? '', this._groundContactIndex);
     } catch { /* a note is best-effort */ }
+    // ✋ PLAYER.holds names a model the game has not saved (BR #2535): attached on every write of player.ts until it is.
+    if (typeof files[PLAYER_FILE_PATH] === 'string' && heldSubjects(files[PLAYER_FILE_PATH]).length > 0) {
+      try {
+        const saved = typeof files[ASSET_MODELS_PATH] === 'string'
+          ? files[ASSET_MODELS_PATH]
+          : await this.actuator.readFile(this.workspaceId, ASSET_MODELS_PATH).catch(() => '');
+        vehicle += missingHeldModels(files[PLAYER_FILE_PATH], saved);
+      } catch { /* a note is best-effort */ }
+    }
     // 🌱 A feature that lays its own map-scale land in an OPEN WORLD (failedbr #2495) — only when src/game/world.ts exists,
     // looked up once, and only after the scan above found such a plane. Its own flag: the ground note above is untouched.
     if (!this._ownLandNoted) {

@@ -5334,6 +5334,24 @@ Map-request routing (`src/server/AgentV3/mapGrowthIntent.ts`, map expansion item
 
 A race on the world's city roads (`src/server/AgentV3/raceWorld.ts`, map expansion item 8). Only `on` (or 1/true/yes) enables it. When enabled, a road-library race (`<RacingRoadGame>`) asked for cities gets ONE question from the builder (mapGrowthIntent.ts) telling the user to reply "race shehar me karo". Only on that yes (or the same said plainly: "race ko shehar ki sadkon par le jao", "move the race onto city roads"; never a negation, a question, or a new-game request) does the platform add the world race files (`src/game/play/worldRace.ts`, `worldCourse.ts`) and the open-world layers they import by the kit's own rules, and set `TRACK.world = true` in `src/game/track.ts`, last. It refuses and changes nothing for a race on the user's own track model, a hand-edited race starter, an edited kit file the race would need names from, or a different file already at those paths. Unset or `off`: the race stays on the road library and the builder says cities on the route are not available yet (as before). No cost: no model call.
 
+## 2026-11-25 — Dual Android build providers: Native Cloud Build keys (code only; NONE set in Cloud Run yet)
+
+Names only. Full design, owner steps and rollback: `MOBILE_NATIVE_BUILD.md` §6.
+
+- `MOBILE_NATIVE_BUILD_ENABLED` — code default **OFF**. `on` offers Native Cloud Build in the two-option sheet. Turning it
+  off never touches the GitHub option. Read at call time (`providerRegistry.ts`).
+- `MOBILE_NATIVE_BUILD_TEMPLATE` — alias of the E2B worker template built from `infra/e2b/e2b-android-native.Dockerfile`
+  (workflow input `template_kind: android-native`, default alias `navbharat-android-native`). **Not** the older
+  `ANDROID_E2B_TEMPLATE_ID` idea, which named the Bubblewrap/TWA template and is still unused.
+- `MOBILE_BUILD_ARTIFACT_BUCKET` — private bucket for native `.apk`/`.aab` files; falls back to `FIREBASE_STORAGE_BUCKET`.
+- `MOBILE_GITHUB_BUILD_ENABLED` — code default **ON**. `off` greys out the GitHub option and makes `/api/mobile-ship/setup`
+  and `/api/mobile-ship/trigger` answer 503 `provider-disabled`.
+- `MOBILE_NATIVE_BUILD_MAX_ACTIVE_PER_USER` (default 1, 1–5), `MOBILE_NATIVE_BUILD_MAX_ACTIVE` (default 4, 1–50),
+  `MOBILE_NATIVE_BUILD_TIMEOUT_MIN` (default 25, 5–55), `MOBILE_NATIVE_BUILD_RETENTION_DAYS` (default 30, 1–365).
+- Reused, already set: `E2B_API_KEY` (machines), `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (upload keys are sealed with
+  it; without it only `.apk` is offered natively), `APK_CHARGE_INR` (the one build price for both providers — this name
+  was missing from this registry before; default 1, `off`/`0` = free).
+
 ### AGENTV3_ONLINE_MATCH (code default: OFF; not set in Cloud Run) — 2026-11-25
 
 The online Royale match service (`src/server/lib/royaleOnline/`, admin "sab karo" 2026-11-25). A server-authoritative 2–4 player match over a WebSocket at `/api/royale-online/ws` on `navbharat-ai-prod`, for games opened from the NavBharatAI App Store: movement validated (speed budget, arena bounds, cover), shots, loot, the zone, elimination and the single winner all decided on the server; reconnect within 15 s; empty seats filled by bots that are labelled as bots. Only `on` (or 1/true/yes) enables it. **Off (the default)** ⇒ a connecting game is told "Online matches are switched off right now" and the socket is closed; no session, room or tick exists. Practice is unaffected.
@@ -5366,3 +5384,7 @@ unrelated and unchanged. The vault name the owner's key is stored under is `ZAI_
 (widened to all of their apps only from Keys & Secrets, by them). The builder may never ask for it mid-build
 (`AI_MODEL_KEY_NAMES` in `secretRequest.ts`), and a built app calling `api.z.ai` from its own page is caught by
 `browserAiKeyScan.ts`.
+
+### AGENTV3_GAME_PROOF_KEEP (code default: ON; not set in Cloud Run) — 2026-11-26
+
+Keeps the game playtest's proof pictures (`src/server/AgentV3/gameProofPictures.ts`, Q-3363, admin option A). Unset means ON. When on, up to three 480 px JPEGs per played game build are copied from the sandbox into the **existing private workspace-asset bucket**, the one `workspaceAssetBucketName` resolves (`WORKSPACE_ASSETS_BUCKET` → `NAV_STORE_BUCKET` → `FIREBASE_STORAGE_BUCKET`). They go under `game-proof-v1/<YYYY-MM-DD>/<buildId>/`, at most 40 KB each and 120 KB a build. They stay 30 days; a delete-after sweep removes each day folder after that. The server never sets bucket lifecycle rules. An optional console rule (delete, age 30, prefix `game-proof-v1/`) is a backup only. Only the admin can see them, through `GET /api/admin/game-proof-picture` (admin token). They are never public and never signed. `off` keeps the pictures in the sandbox, and GAME_PROOF says why. With no bucket configured, nothing is stored and GAME_PROOF says so.

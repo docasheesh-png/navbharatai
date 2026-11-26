@@ -6056,6 +6056,27 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
+## 2026-11-25 — Dual Android build providers: NavBharatAI Native Cloud Build + the existing GitHub Actions build
+
+**Admin task:** one "Build Android App" button → exactly two genuine providers. Full design: `MOBILE_NATIVE_BUILD.md`.
+
+- **UI:** `AndroidBuildProviders.tsx` (the button + two-option sheet; the last choice is pre-selected, never auto-switched) wraps the
+  UNCHANGED `StoreBuildPanel` (GitHub) and the new `NativeBuildPanel` (native). Wired in `APKBuilder.tsx`.
+- **No second recipe:** the native worker runs the app's own generated GitHub workflow, translated step by step
+  (`workflowScript.ts`, census-tested for every step of both lanes on Capacitor 5–8; unknown actions / GitHub expressions throw).
+- **No duplicate preparation or charge:** `/api/mobile-ship/setup`'s GitHub-independent body moved verbatim into
+  `prepareMobileProject.ts`; the ₹ charge moved into `mobileBuildCharge.ts`; both providers call them. Source guards re-pointed, not weakened.
+- **Stateless native driver:** detached build in a disposable E2B machine, Firestore job row, `advanceNativeBuild` under a transactional lease
+  (a read-then-write lease race was caught by a test and fixed; the test Firestore double now models contention retries).
+- **Trust split:** untrusted build machine (no env, restricted egress) → fresh network-less signing machine (fixed script, key files deleted by trap)
+  → private bucket (md5-verified) → completed → charged once (`native_<id>`). Upload keys sealed with `secrets.ts`, consent recorded, every use audited.
+- **Real verification in this container:** real Gradle APK + signed/validated AAB from NavBharatAI-assembled projects; real keytool checks for
+  PKCS12/JKS; the whole orchestrator end to end (`tests/nativeCloudBuildRealGradle.test.ts`, opt-in).
+- **Defaults:** native OFF (`MOBILE_NATIVE_BUILD_ENABLED`), GitHub ON (`MOBILE_GITHUB_BUILD_ENABLED`).
+- **OPEN (owner-side, not code):** build the worker template (`template_kind: android-native`) — the image has never been built (no Docker
+  daemon here); set `MOBILE_NATIVE_BUILD_TEMPLATE` + `MOBILE_BUILD_ARTIFACT_BUCKET`; pin Temurin digests; bucket lifecycle rule; a first
+  live native build and a real-device install.
+- **OPEN (admin decision):** whether a native build whose paid balance cannot cover ₹1 should withhold the download (GitHub cannot; native could).
 ## 2026-11-25 — The first online Royale match: server-authoritative, 2–4 players, quota-bound (admin "sab karo")
 
 - **What was asked:** an external audit's order, approved by the admin — first a small, complete online match for the original Royale game, then scale. Until now only the offline Practice (PR #4217) existed.
@@ -6300,6 +6321,25 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
+## 2026-11-26 — Game full screen: only the button, and it fills the screen (admin iPhone screenshot)
+
+- Q-3440: `Game.play()` no longer goes full screen on a phone; the Full screen button is the only way in (builder prompt
+  updated). Locked by a census (only Game.ts asks the browser; the only other caller is the button).
+- Q-3441: root of the "two-thirds screen": `createRenderer` wrote the window size in px onto a canvas Game.ts sizes at 100%,
+  and container-mode `handleResize` never touches the style, so the canvas never grew with its box. A page-sized canvas
+  now keeps its style. Locked by running the real generated renderer.ts into a grown box.
+- Q-3442 🟡: the HUD under the status bar inside the app's preview frame (iOS gives an iframe 0 safe-area insets) — needs
+  the page to pass its insets in; recorded with a recommendation.
+## 2026-11-26 — Q-3363: game proof pictures kept privately for 30 days, admin-only (#4557, not merged)
+
+The admin approved option A. What changed:
+- **Stored:** the playtest's start / moved / far JPEGs are copied out of the sandbox into the existing private workspace-asset bucket (`workspaceAssetBucketName`) under `game-proof-v1/<YYYY-MM-DD>/<buildId>/<view>-<id>.jpg` (`src/server/AgentV3/gameProofPictures.ts`). Each picture is checked first: a JPEG, at most 40 KB, at most 3 a build, and its bytes must hash to the id the playtest printed. The copy is bounded to 15 s. No new bucket, no ACL.
+- **Expiry:** a delete-after sweep, not a bucket lifecycle rule, because the server does not change bucket configuration. The day folder is the expiry: the sweep deletes folders older than 30 days (at most every 6 h per instance), and the admin route refuses an expired key with 410.
+- **Viewing:** `GET /api/admin/game-proof-picture?key=…` (`src/server/routes/gameProofPicturesAdmin.ts`) behind `verifyAdminToken`, streamed with `no-store`. Admin → Apps → "v" shows the latest build's pictures (`src/components/admin/GameProofPictures.tsx`).
+- **Report:** GAME_PROOF's `looks.taken[].stored` holds each key, and the line says how many were kept, or why none were.
+- **Kill switch:** `AGENTV3_GAME_PROOF_KEEP=off`.
+- **Proof:** `tests/gameProofPicturesAreKeptPrivately.test.ts` (20 tests). Seven separate reversions each fail it: no admin middleware, no hash check, no size cap, no count cap, no path guard, no `stored` key, a shifted expiry.
+- **Open:** Q-3410 (account erasure does not reach these pictures before the 30 days are up).
 ## 2026-11-26 — Asked-for enemies are put where the hero is, and the playtest proves they are on screen (Q-3401)
 
 The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attack kare, to builder pura kam kar deta hai … par real game me enemies show hi nahi hote".
@@ -6358,3 +6398,8 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
 - Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
 - KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.
+## 2026-11-26 — Q-3380: one no-pointer-lock stub on every platform browser that sends input (#4568)
+- **Problem:** a game that calls `requestPointerLock` floods a headless platform browser with synthetic input (108,052 messages in 3 s, 1–4 fps on #4552). #4553 stubbed it in the playtest's desktop context and the click explorer with two hand-written copies.
+- **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
+- **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
+- **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.

@@ -106,6 +106,24 @@ export interface WebStoreApp {
    * which is the whole point of marking it.
    */
   contentClass?: 'general' | 'adult';
+  /**
+   * HELD FOR A PERSON (admin 2026-11-26). The sexual/illegal text check flagged this version, so it is
+   * served to NOBODY but its owner and a store admin — not even by its direct link — until an admin
+   * lists it (which clears this) or removes it. Set on every publish (true or false), so a version
+   * that comes back clean is honestly unheld. ADMIN/OWNER-ONLY, like `safetyFindings`.
+   */
+  heldForReview?: boolean;
+}
+
+/**
+ * May THIS caller be served this app? The one rule for every route that serves a web app's page,
+ * metadata, code or social surface. A removed app serves nobody; a HELD app serves only its owner and a
+ * store admin; everything else serves anyone (a private app's password is checked separately). PURE.
+ */
+export function webAppServableTo(a: Pick<WebStoreApp, 'status' | 'uid' | 'heldForReview'>, viewer: { uid?: string | null; isStoreAdmin?: boolean }): boolean {
+  if (a.status === 'removed') return false;
+  if (!a.heldForReview) return true;
+  return !!viewer.isStoreAdmin || (!!viewer.uid && viewer.uid === a.uid);
 }
 
 /** What a viewer may see. No uid, no password material, no internals. */

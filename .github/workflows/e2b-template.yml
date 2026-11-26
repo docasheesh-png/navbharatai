@@ -33,6 +33,7 @@ on:
         options:
           - default
           - android
+          - android-native
           - fullstack
         default: 'default'
       template_name:
@@ -64,7 +65,14 @@ jobs:
       - name: Resolve build parameters for the chosen template kind
         id: params
         run: |
-          if [ "${{ github.event.inputs.template_kind }}" = "android" ]; then
+          if [ "${{ github.event.inputs.template_kind }}" = "android-native" ]; then
+            # Native Cloud Build worker (2026-11-25): Capacitor + Gradle + both JDKs + signing tools.
+            # 4 vCPU / 8 GB — Gradle's own heap is pinned to 4 GB by the generated build (mobileShipKit.ts).
+            DOCKERFILE=e2b-android-native.Dockerfile
+            DEFAULT_NAME=navbharat-android-native
+            CPU_COUNT=4
+            MEMORY_MB=8192
+          elif [ "${{ github.event.inputs.template_kind }}" = "android" ]; then
             DOCKERFILE=e2b-android.Dockerfile
             DEFAULT_NAME=navbharat-android-builder
             CPU_COUNT=4
@@ -114,7 +122,11 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Kind:** \`$KIND\`  ·  **Template alias:** \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$KIND" = "android" ]; then
+          if [ "$KIND" = "android-native" ]; then
+            echo "The alias is usable directly as the template id. Next (MOBILE_APK_PIPELINE.md → Native Cloud Build):" >> "$GITHUB_STEP_SUMMARY"
+            echo "1. Set Cloud Run env \`MOBILE_NATIVE_BUILD_TEMPLATE=$NAME\` and \`MOBILE_BUILD_ARTIFACT_BUCKET\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "2. Set \`MOBILE_NATIVE_BUILD_ENABLED=on\` once a test build has passed." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$KIND" = "android" ]; then
             echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
             echo "1. Set Cloud Run env \`ANDROID_E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
             echo "2. Run the Bubblewrap/APK-build code-wiring PR (not built yet — see infra/e2b/README.md)." >> "$GITHUB_STEP_SUMMARY"

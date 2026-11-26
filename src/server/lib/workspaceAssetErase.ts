@@ -41,7 +41,8 @@ function liveDeps(): WorkspaceAssetEraseDeps {
 /**
  * Erase completed spills written with a verified owner, even after their Firestore pointer is gone.
  * Legacy workspace-id prefixes are ambiguous and never supply ownership proof for deletion.
- * Legacy objects, bucket history, uploads still in flight and ZIP chunks need separate reconciliation.
+ * Legacy objects, bucket history and uploads still in flight need separate reconciliation. ZIP upload chunks are
+ * erased by `eraseUserZipUploadChunks` (zipUploadStore.ts, Q-3613).
  */
 export async function eraseUserWorkspaceAssetObjects(
   uid: string,

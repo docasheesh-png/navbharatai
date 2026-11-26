@@ -2873,6 +2873,33 @@ export function openAiCompatRunners(
  * alone, so the gateway's 2nd and 3rd models really are tried when its 1st times out or is rate-limited
  * (gatewayModelRungs.ts). Same runner as `openAiCompatRunners`, same key pool.
  */
+/**
+ * The engines a Weak build tries BEFORE its tier ladder, in order — the one list the chain is built from AND the report
+ * names (Q-3467, failedbr #2525: SURPLUS_FALLBACK said "continuing on the Weak ladder" while the build went on on
+ * ENGINE_R1, which the printed ladder does not contain). Owner order: Router One → Qubax → BluesMinds → Moyi.
+ */
+export function weakEnginesBeforeLadder(): NamedRunner[] {
+  return [
+    ...(routerOneWeakFallbackEnabled() ? gatewayRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
+    ...qubaxBuilderRungs(gatewayRunners),
+    ...bluesmindsBuilderRungs(gatewayRunners),
+    ...moyiBuilderRungs(gatewayRunners),
+  ];
+}
+
+/** The TIER_LADDER line's note of the engines a Weak build tries before the ladder printed (Q-3467); '' when none. */
+export function weakChainBeforeLadderNote(level: PowerLevel): string {
+  if (level !== 'weak') return '';
+  const names = weakEnginesBeforeLadder().map((r) => `${r.reportAs ?? r.name}${r.modelId ? `(${r.modelId})` : ''}`);
+  return names.length ? `Before this ladder, a Weak build tries: ${[...new Set(names)].join(' → ')}.` : '';
+}
+
+/** "ENGINE_R1 (deepseek-v4.1-flash)" for the first engine a Weak build takes after Surplus, or '' when it goes straight to the ladder. */
+export function weakChainHead(): string {
+  const first = weakEnginesBeforeLadder()[0];
+  return first ? `${first.reportAs ?? first.name}${first.modelId ? ` (${first.modelId})` : ''}` : '';
+}
+
 export function gatewayRunners(label: string, apiKeyRaw: string | undefined, baseURL: string, models: string[]): NamedRunner[] {
   return independentModelRungs(label, models, (model) => openAiCompatRunners(label, apiKeyRaw, baseURL, [model]));
 }
@@ -3905,11 +3932,7 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   // Owner 2026-11-17 ("apke sabhi suggestion approved"): Qubax is third, right after Router One and before BluesMinds —
   // its tool calling is checked against its own catalogue and its price is its own (proChainV2/qubaxBuilder.ts).
   const runners = [
-    ...(level === 'weak' && routerOneWeakFallbackEnabled()
-      ? gatewayRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
-    ...(level === 'weak' ? qubaxBuilderRungs(gatewayRunners) : []),
-    ...(level === 'weak' ? bluesmindsBuilderRungs(gatewayRunners) : []),
-    ...(level === 'weak' ? moyiBuilderRungs(gatewayRunners) : []),
+    ...(level === 'weak' ? weakEnginesBeforeLadder() : []),
     // Owner 2026-11-17: on Normal and Strong, DiscountedTokens (up to three of its models) sits right before the first
     // Sonnet/Opus rung (discountedTokensBuilder.ts). Weak never gets it.
     ...ladderRunners(level === 'weak' ? rungs : rungs.slice(0, beforeFirstClaudeRung(rungs))),
@@ -15296,6 +15319,7 @@ async function noteBuildOutcome(
           code: 'TIER_LADDER', autoResolved: !parsedLadder.rejected,
           message: `${tierDisplayName(toPowerLevel(powerLevelReqEffective))} ladder (${parsedLadder.source}): ${describeLadder(parsedLadder.rungs)}`,
           detail: [
+            weakChainBeforeLadderNote(toPowerLevel(powerLevelReqEffective)),
             keyless.length ? `Keyless rungs skipped: ${describeLadder(keyless)} (set ${[...new Set(keyless.map((r) => keyEnvFor(r.provider)))].join(', ')}).` : 'Every rung has a key.',
             parsedLadder.rejected ? `Override refused: ${parsedLadder.rejected}` : '',
             // A MISREAD FLAG BELONGS WHERE THE ADMIN LOOKS, not only in a server log. Autopsy
@@ -15428,7 +15452,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
-              message: surplusFallbackMessage(reason),
+              message: surplusFallbackMessage(reason, weakChainHead()),
               // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
               detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });

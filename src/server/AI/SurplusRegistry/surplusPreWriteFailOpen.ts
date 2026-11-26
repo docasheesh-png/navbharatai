@@ -210,9 +210,12 @@ export function wrapSurplusRunnerPreWriteFailOpen(
  * The report line for a mid-build fail-open, true to WHEN it fired. PURE. The line used to say "before any user
  * file" for every reason, including `mid_build_after_write` — false on exactly the builds #4050 rescued.
  */
-export function surplusFallbackMessage(reason: SurplusPreWriteFailOpenReason): string {
+export function surplusFallbackMessage(reason: SurplusPreWriteFailOpenReason, next = ''): string {
   const when = reason === 'mid_build_after_write' ? 'after the builder had written files' : 'before any user file';
-  return `Surplus unavailable mid-build ${when} — continuing the same turn on the Weak ladder (reason: ${reason}).`;
+  // Q-3467 (failedbr #2525): name the engine that actually takes the turn — the Weak chain's off-ladder engines come
+  // before its tier ladder, so "the Weak ladder" was false whenever one of them is configured.
+  const on = next ? `on ${next}, the next engine of the Weak chain` : 'on the Weak ladder';
+  return `Surplus unavailable mid-build ${when} — continuing the same turn ${on} (reason: ${reason}).`;
 }
 
 /** Narrow a mid-build reason to the admission SafeSurplusAdmissionReason union when recording diags. */

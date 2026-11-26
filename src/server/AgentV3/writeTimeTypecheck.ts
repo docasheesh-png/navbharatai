@@ -198,6 +198,56 @@ export function splitByRemedy(
 const fmt = (e: TscError) => `${e.file}(${e.line},${e.col}): ${e.code} ${e.message}`;
 
 /**
+ * A TEST FILE'S ERROR DOES NOT FAIL THE RELEASE BUILD WHEN THE RELEASE CONFIG LEAVES TESTS OUT (failedbr #2525, Q-3462,
+ * 2026-11-26). The note told the builder that `src/game/controls.test.ts(6,38): TS2307 Cannot find module 'vitest'`
+ * "fail[s] the production build" — while the build script was `tsc -p tsconfig.build.json && vite build` and that config
+ * excludes every test file (the 2026-08-11 APK incident). The class: every "the production build fails" sentence was
+ * said of every error, whatever file it was in. The notes now split shipped files from test files, and say which blocks
+ * the release only when the project's own config proves it.
+ *
+ * The globs are the platform's own `tsconfig.build.json` exclusions (ViteReactProviderContents.ts `tsconfigBuild`); a
+ * test locks the two together. PURE.
+ */
+export function isTestOnlyFile(path: string): boolean {
+  const p = normalizePath(String(path ?? ''));
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(p) || /(?:^|\/)__(?:tests|mocks)__\//.test(p);
+}
+
+/**
+ * Does this project's RELEASE build leave test files out of its compile? `true` only when package.json's build script
+ * runs `tsc -p <config>` (or `vite build` alone, which compiles only what the app imports) and that config's `exclude`
+ * names `*.test.*`; `null` when it cannot be told. Precision-first: unknown is never said as "does not block". PURE.
+ */
+export function releaseBuildExcludesTests(packageJson: string | null | undefined, buildTsconfig: string | null | undefined): boolean | null {
+  let script = '';
+  try {
+    const s = (JSON.parse(String(packageJson ?? '')) as { scripts?: Record<string, unknown> })?.scripts?.build;
+    script = typeof s === 'string' ? s : '';
+  } catch { return null; }
+  if (!script) return null;
+  if (/\b(?:next\s+build|nuxt|vue-tsc|svelte-check|ng\s+build|remix|astro\s+check)\b/.test(script)) return false;
+  if (!/\btsc\b/.test(script)) return /\bvite\s+build\b/.test(script) ? true : null;
+  const m = /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(script);
+  if (!m) return false; // a bare `tsc` / `tsc -b` compiles the project's own tsconfig.json, tests included
+  if (typeof buildTsconfig !== 'string') return null;
+  const ex = /"exclude"\s*:\s*\[([\s\S]*?)\]/.exec(buildTsconfig);
+  return !!ex && /["'][^"']*\*\.test\.[^"']*["']/.test(ex[1]);
+}
+
+/** What these errors do to the release, in one parenthetical/sentence the notes share. PURE. */
+export function releaseConsequence(errors: readonly TscError[], releaseExcludesTests: boolean | null | undefined): { blocksRelease: boolean; text: string } {
+  const testOnly = errors.length > 0 && errors.every((e) => isTestOnlyFile(e.file));
+  if (testOnly && releaseExcludesTests === true) {
+    return {
+      blocksRelease: false,
+      text: 'they are in test files, which the release build (tsconfig.build.json) leaves out, so they do not block publishing — '
+        + 'the project typecheck and the test run still fail on them',
+    };
+  }
+  return { blocksRelease: true, text: 'the production build fails until they are gone' };
+}
+
+/**
  * The note for a write after which the whole project compiled with NO output at all.
  *
  * 🔴 AUTOPSY dfd81a3a (2026-09-30). A clean run used to append nothing, so the model could not tell "we
@@ -229,6 +279,8 @@ export function writeTypecheckNote(
   written: string[],
   sources: Readonly<Record<string, string>> = {},
   renames: readonly ContractRename[] = contractRenamesInSources(sources),
+  /** Q-3462: whether the release build leaves test files out (`releaseBuildExcludesTests`); unknown ⇒ today's wording. */
+  opts: { releaseExcludesTests?: boolean | null } = {},
 ): string {
   // 🔴 AN ERROR IN THIS FILE IS NOT ALWAYS AN ERROR OF THIS FILE (autopsy 2a7fa4b0). `BottomNav.tsx`
   // imported `Screen` from `../App` before App.tsx was rewritten to export it, and this note told the
@@ -244,7 +296,7 @@ export function writeTypecheckNote(
     const more = fixHere.length > MAX_OWN_ERRORS_QUOTED ? `\n…and ${fixHere.length - MAX_OWN_ERRORS_QUOTED} more in the same file(s).` : '';
     parts.push(
       `⛔ TYPECHECK after this write: ${fixHere.length} error(s) in ${files} — fix them NOW, in this turn, before writing the next file `
-      + `(the production build fails until they are gone):\n${quoted.join('\n')}${more}`,
+      + `(${releaseConsequence(fixHere, opts.releaseExcludesTests).text}):\n${quoted.join('\n')}${more}`,
     );
     // ONE RENAME, EVERY PLACE (autopsy a5b661c8): tsc named `scheduledAt` for `scheduledDate` at two
     // lines, and the file was edited five times, one occurrence per turn. Said as one instruction.
@@ -286,7 +338,7 @@ export function writeTypecheckNote(
     parts.push(
       `⏳ TYPECHECK after this write: ${waiting.length} error(s) in ${files} are fixed in ANOTHER file — ${targets.join(', ')} — `
       + `not in ${files}. Do NOT rewrite ${files} for them; write or update ${targets.join(', ')} next `
-      + `(the production build fails until you do):\n${quoted.join('\n')}${more}${nearNote}`,
+      + `(${releaseConsequence(waiting, opts.releaseExcludesTests).blocksRelease ? 'the production build fails until you do' : releaseConsequence(waiting, opts.releaseExcludesTests).text}):\n${quoted.join('\n')}${more}${nearNote}`,
     );
   }
   if (others.length > 0) {
@@ -294,7 +346,7 @@ export function writeTypecheckNote(
     const more = others.length > MAX_OTHER_ERRORS_NAMED ? `, …and ${others.length - MAX_OTHER_ERRORS_NAMED} more` : '';
     parts.push(
       own.length === 0
-        ? `ℹ️ TYPECHECK after this write: ${files} is clean, but ${others.length} error(s) remain elsewhere (${named}${more}). They fail the production build — fix them before you finish.`
+        ? `ℹ️ TYPECHECK after this write: ${files} is clean, but ${others.length} error(s) remain elsewhere (${named}${more}). ${releaseConsequence(others, opts.releaseExcludesTests).blocksRelease ? 'They fail the production build' : `Not a release blocker: ${releaseConsequence(others, opts.releaseExcludesTests).text}`} — fix them before you finish.`
         : `Also ${others.length} error(s) elsewhere (${named}${more}).`,
     );
   }

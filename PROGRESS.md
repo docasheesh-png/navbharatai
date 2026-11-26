@@ -6424,6 +6424,34 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Sibling hunt:** a census of every server module that touches Cloud Storage (`tests/accountDeletionReachesGameProofPictures.test.ts`). Each must say which eraser removes its objects, why they belong to nobody, or which queue row owns the gap. Three gaps found and recorded: Q-3611 (large share HTML `shares/<token>.html` orphaned when the `shares` docs are erased), Q-3612 (never-public App Store APK bytes left when the listing is deleted), Q-3613 (abandoned zip-upload chunks left when the `zip_uploads` record is erased).
 - **The census paid for itself at once:** merging main brought #4564's `mobileBuild/nativeArtifactStore.ts` (owner-hashed native build files that no eraser deletes); the census failed until it was registered, and it is recorded as Q-3614.
 - **Proof by reversion:** six reversions, each fails: eraser not called by the route (2 fail), eraser deletes whole day folders (1), key filed by build id only (7), route passes the claimed uid (2), admin view accepts only v1 (1), a new unregistered storage writer (1).
+
+## 2026-11-26 — Moves separated from characters: 120+ moves on ANY character, plus NavBharatAI-made moves
+
+**Admin task:** "sabhi characters ke moves ko character se alag kar do … sirf hero nahi kisi bhi character par … police /
+villagers / bot", and "jo move library me nahi hai, NavBharatAI khud API call se bana sake".
+
+- **Was:** library model clips belong to one rig (never retargeted); the data action system (2026-11-24) had 9 moves and
+  played only on the player.
+- **Library:** `src/server/lib/gameMoveLibrary.ts` — 120+ moves as data (shared pose pieces, mirrored sides), plus English /
+  Hindi / Hinglish aliases. The kit gets the SAME library and alias table injected as JSON (the old kit copy of the alias
+  table was a hand-typed duplicate of the server's — drift class removed; census test holds it).
+- **Vocabulary v2** (`GameActionsGenerator.ts`): whole-body motion (rise / pitch / roll / yaw shown on a pivot; forward /
+  side / turn real travel), `loop`, `hold`, `requires` (water, vehicle, seated, item), and world-touching steps: strike,
+  push, fire, throw, enterVehicle, exitVehicle.
+- **Any character:** `performAction(ctx, name, who?)` — no who = the player; a kind ('police', 'villagers'); 'all'; or one
+  entity's object. `stopAction`, `currentAction(ctx, who)`, `heldItem(ctx, who)`. Entities expose `userData.actor` and stand
+  still while acting; physics bodies take a strike as an impulse (`userData.onStruck`, removed only if physics installed it);
+  the shell runs `updateActions` after every character has animated. The player's own model clip wins where it exists.
+- **compose_action v2:** the prompt teaches the same vocabulary; the tool and the shell handoff say any character.
+- **Tests:** `tests/anyCharacterDoesAnyMove.test.ts` (21, real kit) — reversion-proven for the actor hook, stand-still and
+  the water rule. `theCharacterDoesWhatTheUserAsks` example of a missing move moved from "climb ladder" (now in the library)
+  to juggling.
+- **Honest limits:** data moves look simpler than hand-animated clips; humanoid bodies only (four-legged needs its own limb
+  map); NPC library-model clips are not used (no mixer access) — they play the data pose.
+- **Correction (same day):** NPC library-model clips ARE now used. `three/assetModels` exposes `root.userData.playRole`
+  (the handle's `play`), and `play/actions.ts` plays an NPC model's own clip for a move it has (falling back to the data pose),
+  returning it to `idle` after. The game's `handle.update(dt)` keeps advancing it. Locked in `anyCharacterDoesAnyMove`
+  (reversion-proven). Remaining honest limits: data moves look simpler than clips; humanoid bodies only.
 ## 2026-11-26 — PR A of the admin's 18-point game list: restart, a gun that fires, drowning, the map's edge, library ids
 
 - Q-3516 (was Q-3500; renumbered at merge — #4563 had taken it) Restart / Menu stand the player at the start (ctx.setRespawn; open world sets its own), out of any car.

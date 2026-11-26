@@ -10444,11 +10444,11 @@ export class ToolDispatcher {
         const made = await composeAction(name, description, askStandIn, supplied);
         if (made.kind === 'refused') refuse(made.reason);
         if (made.kind === 'library') {
-          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger). It plays on the character the user chose. Nothing was written.`;
+          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger) — on the player; add a third argument for other characters: 'police' (every police character), 'villager', 'all', or one entity's object. It plays on any body. Nothing was written.`;
         }
         const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
         this.scheduleCheckpoint('character action');
-        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it; it plays on the character the user chose, whatever model it is. Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
+        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it — on the player, or with a third argument on other characters ('police', 'villager', 'all', or one entity's object); it plays on any body, whatever model it is.${made.def.loop || made.def.hold ? ` It ${made.def.loop ? 'loops' : 'holds its last pose'} until stopAction(ctx, who).` : ''} Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
       }
 
       case 'compose_rule': {

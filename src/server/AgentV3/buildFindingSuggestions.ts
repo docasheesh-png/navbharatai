@@ -427,7 +427,7 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     code: 'ENEMIES_NOT_LISTED',
     title: 'Add the enemies',
     detail: 'You asked for enemies, but the game\'s list of parts was not in its usual shape, so NavBharatAI could not add them by itself.',
-    prompt: 'The user asked for enemies in this open world. Add ONE feature that spawns enemies near the hero with the kit\'s Entities (spawnAround) and lets them attack with damagePlayer, and list it in the game\'s features list. Change nothing else.',
+    prompt: 'The user asked for enemies in this open world. Create ONE feature that spawns enemies near the hero (Entities.spawnAround from the game engine) and lets them attack with damagePlayer, and list it in the game\'s features list. Change nothing else.',
     withEvidence: true,
   },
   {

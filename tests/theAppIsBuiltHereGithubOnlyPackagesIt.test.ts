@@ -695,6 +695,9 @@ describe('the workflows cache what they download, so a retry after a repair does
 
 describe('the wiring — read out of the source, so a refactor cannot quietly undo it', () => {
   const setup = codeOnly(read('src/server/routes/mobileSetup.ts'));
+  // 2026-11-25: the GitHub-independent preparation (gates, prebuild, assembly) is ONE shared function
+  // both Android providers call; the route calls it after the lock and before the repository write.
+  const prep = codeOnly(read('src/server/lib/mobileBuild/prepareMobileProject.ts'));
   const autofix = codeOnly(read('src/server/routes/mobileShip.ts'));
   const panel = codeOnly(read('src/components/ide/StoreBuildPanel.tsx'));
   const prebuiltSrc = codeOnly(read('src/server/lib/mobileShipPrebuilt.ts'));
@@ -709,11 +712,12 @@ describe('the wiring — read out of the source, so a refactor cannot quietly un
   });
 
   it('the setup route hands the built app to the assembler, records the ship, and answers `prebuilt`', () => {
-    expect(setup).toContain("prebuilt: prebuild.kind === 'built' ? prebuild.prebuilt : undefined,");
+    expect(prep).toContain("prebuilt: prebuild.kind === 'built' ? prebuild.prebuilt : undefined,");
+    expect(setup).toContain('const { project, kit, prebuild } = prepared;');
     expect(setup).toContain("void recordShip(project.prebuilt ? 'prebuilt' : 'source', prebuild.kind === 'skip' ? prebuild.reason : null);");
     expect(setup).toContain('prebuilt: project.prebuilt,');
     // The missing-asset gate is the SOURCE ship's; the bundle already resolved every import.
-    expect(setup).toContain('const missingAssets = project.prebuilt ? [] : findMissingImportedAssets(appFiles, Object.keys(appAssets));');
+    expect(prep).toContain('const missingAssets = project.prebuilt ? [] : findMissingImportedAssets(appFiles, Object.keys(appAssets));');
   });
 
   it('the setup route removes ONLY what an earlier push of ours RECORDED under www/ — never a folder it merely found', () => {
@@ -724,13 +728,17 @@ describe('the wiring — read out of the source, so a refactor cannot quietly un
   });
 
   it('the screens gate runs BEFORE the production build, so a server-only project never wakes a machine to be refused with the wrong reason', () => {
-    expect(setup.indexOf('const noUi = apkRefusalForProject(appFiles);')).toBeLessThan(setup.indexOf('const prebuild = await prebuildForShip('));
+    expect(prep.indexOf('const noUi = apkRefusalForProject(appFiles);')).toBeGreaterThan(-1);
+    expect(prep.indexOf('const noUi = apkRefusalForProject(appFiles);')).toBeLessThan(prep.indexOf('const prebuild = await prebuildForShip('));
   });
 
   it('one prepare per app at a time — a second setup while one is building answers 409, never a second build in the same machine', () => {
     expect(setup).toContain("code: 'already-preparing'");
     expect(setup).toContain('PREPARING.add(workspaceId);');
-    expect(setup.indexOf('PREPARING.has(workspaceId)')).toBeLessThan(setup.indexOf('const prebuild = await prebuildForShip('));
+    // The lock is taken before the shared preparation (which runs the production build) is called.
+    expect(prep).toContain('const prebuild = await prebuildForShip(');
+    expect(setup.indexOf('PREPARING.has(workspaceId)')).toBeGreaterThan(-1);
+    expect(setup.indexOf('PREPARING.has(workspaceId)')).toBeLessThan(setup.indexOf('await prepareMobileProject('));
   });
 
   it('🔒 reversion guards: the local-actuator guard, the in-flight guard, the stale marker, and the sentinel through the constant', () => {

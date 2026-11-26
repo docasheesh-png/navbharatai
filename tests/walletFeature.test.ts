@@ -162,7 +162,8 @@ describe('🔒 every path that takes money now names itself', () => {
   it('each of the nine spending paths passes one', () => {
     const expected: Array<[string, string]> = [
       ['src/server/routes/agentv3.ts', "feature: 'build'"],
-      ['src/server/routes/mobileShip.ts', "feature: 'mobile-build'"],
+      // The ₹1 built-file charge, shared by the GitHub and Native Cloud Android builds (2026-11-25).
+      ['src/server/lib/mobileBuildCharge.ts', "feature: 'mobile-build'"],
       ['src/server/lib/navStoreRemixPurchase.ts', "feature: 'remix'"],
       ['src/server/lib/hostingPlan.ts', "feature: 'hosting-plan'"],
       ['src/server/lib/hostingAddonLedger.ts', "feature: 'hosting-addon'"],

@@ -593,6 +593,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { hasHeadroom, headroomMs, playtestReserveMs } from '../AgentV3/buildPhases/buildHeadroom';
 import { type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
 import { runGamePlaytestPhase } from '../AgentV3/buildPhases/gamePlaytestPhase';
+import { gameProofKeeper } from '../AgentV3/gameProofPictures';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -24897,6 +24898,7 @@ async function noteBuildOutcome(
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
+          keepPictures: gameProofKeeper({ buildId, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363
         });
         if (played) {
           gameProof = played.proof;

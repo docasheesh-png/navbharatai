@@ -8,7 +8,8 @@ import {
   ArrowDown,
 } from 'lucide-react';
 import { AppTargetPicker, useUserApps, useAppFiles } from './AppTargetPicker';
-import { StoreBuildPanel } from './StoreBuildPanel';
+// ONE "Build Android App" button, two real providers: Native Cloud Build or the unchanged GitHub flow.
+import { AndroidBuildProviders } from './AndroidBuildProviders';
 import { MyBuiltApps } from './MyBuiltApps';
 import { readIconFile, readIconFromClipboard } from '../../lib/appIcon';
 import { panelWidth, type DeviceMode } from '../../lib/panelWidth';
@@ -393,7 +394,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
         {/* THE BUILD — a real Android app, built on real machines, downloaded here. It uses the App
             Information above (name, package, icon, background colour). */}
         <div className="mb-2">
-          <StoreBuildPanel
+          <AndroidBuildProviders
             sessionId={targetSession}
             appName={info.appName}
             // Hand the build the NORMALISED id — exactly the value previewed above — so what the user was

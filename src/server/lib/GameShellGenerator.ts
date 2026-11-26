@@ -207,7 +207,7 @@ export interface GameOptions {
    */
   startScreen?: false | { title?: string; subtitle?: string; controls?: { touch?: string; keyboard?: string } };
   /**
-   * How a PHONE holds this game. Default 'landscape': going full screen (the Full screen button, or Play on a phone)
+   * How a PHONE holds this game. Default 'landscape': going full screen (the Full screen button — the only way in)
    * also locks the screen sideways where the browser allows it. 'portrait' locks upright; 'any' never locks.
    */
   orientation?: 'landscape' | 'portrait' | 'any';
@@ -1120,12 +1120,14 @@ export class Game {
     // start-screen music (GAME_MENU) would never begin.
     if (state.status === 'menu') events.emit('GAME_MENU'); else setStatus('menu');
   }
-  /** Leave the start screen and begin the round. On a phone it also goes full screen (the tap is the permission). */
+  /**
+   * Leave the start screen and begin the round. It never goes full screen by itself: full screen is the player's own
+   * choice, made only with the Full screen button (admin 2026-11-26: "bas button se honi chahiye").
+   */
   play(): void {
     if (this.disposed || state.status !== 'menu') return;
     audio.unlock();
     this.capturePointer();
-    if (touchDevice() && !this.isFullscreen) void this.toggleFullscreen();
     this.loop.setPaused(false);
     setStatus('playing');
     this.playIntro();

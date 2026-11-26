@@ -6396,3 +6396,16 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+### 2026-11-26 (same branch, #4562) — enemies in every open world (Q-3480…Q-3484)
+Admin: *"kitna bhi prompt de! par open world game me enemy ban hi nahi rahe hai … enemy aye, fire kare, punch kare … sabhi
+possible cause aur root cause dhundo"*. Evidence: the code, plus failedbr #2510–#2532 (9 reports read in full).
+- Kit only on a NEW build; an "enemy banao" edit turn got nothing (#2510, #2514, #2518/#2519) → `enemiesTurn.ts` (Q-3480).
+- `async setup()` → host ran update before the monsters existed (#2531) → the host waits for it (Q-3481).
+- A throwing feature was silent → GAME_FEATURE_OFF from the playtest (Q-3482).
+- Street enemies punch-only, slow to arrive, immune to the hero's gun → fill at once, gunmen fire visibly, the hero's shot hits (Q-3483).
+- Enemy bodies hidden before their model loaded (#2518/#2519) → OPEN (Q-3484).
+- Already fixed by #4560 (merged 11:32): enemies far from the hero (`spawnAround`), no on-screen enemy check
+  (`window.__nbEntities`, MISSING_ENEMIES), a repair that rewrote a clean `monsters.ts` into a broken one (#2532).
+- Also seen: a server loss before any enemy was written (#2520, Q-3354); a turn spent on an unrelated warning (#2511), now covered by the platform acting itself.
+

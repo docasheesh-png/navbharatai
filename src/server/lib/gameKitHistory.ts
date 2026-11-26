@@ -540,7 +540,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/play/features.ts": [
     "e09a02029b1467748dedfd26bcf67f94980bbb61362f0059c5dcf03dc3c7512c",
-    "fd40eb887e5f50e9d7a3d626fcde471826f29930a1966edfe7e876baf21a5b2f"
+    "fd40eb887e5f50e9d7a3d626fcde471826f29930a1966edfe7e876baf21a5b2f",
+    "83b15e14f6673ed67132355c3fac5abfda09ef839f34bb3dac1841a88daa44d4"
   ],
   "src/game/play/motor.ts": [
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",

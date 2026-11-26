@@ -4687,25 +4687,58 @@ export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W
     console.error('[feature ' + f.id + '] switched off — ' + reason);
     try { events.emit('FEATURE_FAILED', { id: f.id, reason }); } catch { /* a listener must not undo the isolation */ }
   };
+  // ⏳ AN ASYNC setup() IS WAITED FOR (failedbr #2531, 2026-11-25: a monsters feature with "async setup()" handed the host a
+  // Promise; the host ran its update() at once, before the monsters existed, and they "stood where they were" for the whole
+  // game). A setup that returns a Promise (it loads a model first) is now a feature that STARTS when that Promise settles:
+  // its update() runs only from then on, its value is what the Promise resolves to, a rejection switches it off with the
+  // reason, and a feature that needs it waits for it. Nothing changes for an ordinary setup().
+  const starting = new Set<string>();
+  let disposed = false;
+  let pending: GameFeature<W>[] = [];
+  const isPromise = (v: unknown): v is PromiseLike<unknown> => !!v && typeof (v as { then?: unknown }).then === 'function';
+  const drain = (ctx: GameContext, world: W): void => {
+    // In the order of the list, but a feature waits for the ones it needs.
+    let progressed = true;
+    while (pending.length && progressed) {
+      progressed = false;
+      for (let i = 0; i < pending.length; i++) {
+        const f = pending[i];
+        const needs = f.needs || [];
+        const missing = needs.find((id) => !seen.has(id) || off.has(id));
+        if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
+        if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
+        pending.splice(i--, 1); progressed = true;
+        try {
+          const value = f.setup ? f.setup(ctx, world, api) : undefined;
+          if (isPromise(value)) {
+            starting.add(f.id);
+            Promise.resolve(value).then((v) => {
+              starting.delete(f.id);
+              if (disposed) { try { f.dispose?.(); } catch { /* it never ran */ } return; }
+              if (off.has(f.id)) return;
+              running.push(f); if (v !== undefined) shared.set(f.id, v);
+              drain(ctx, world);                                             // the features that waited for it start now
+            }, (error) => { starting.delete(f.id); if (!disposed) { fail(f, 'setup', error); drain(ctx, world); } });
+            continue;
+          }
+          running.push(f); if (value !== undefined) shared.set(f.id, value);
+        } catch (error) { fail(f, 'setup', error); }
+      }
+    }
+    // Still waiting for an async setup that one of them needs: they start when it does. Otherwise their needs form a circle.
+    if (starting.size) return;
+    for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+    pending = [];
+  };
+  const status = () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const }));
+  // 🔎 NavBharatAI's playtest reads which features are switched off and why (a feature that throws was silent before:
+  // one console line, so "the enemies never came" had no reason anywhere). Read-only.
+  const hosts = typeof window !== 'undefined' ? ((window as unknown as { __nbFeatureHosts?: Array<() => unknown> }).__nbFeatureHosts ??= []) : null;
   return {
     setup(ctx, world) {
-      // In the order of the list, but a feature waits for the ones it needs.
-      const pending = [...all];
-      let progressed = true;
-      while (pending.length && progressed) {
-        progressed = false;
-        for (let i = 0; i < pending.length; i++) {
-          const f = pending[i];
-          const needs = f.needs || [];
-          const missing = needs.find((id) => !seen.has(id) || off.has(id));
-          if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
-          if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
-          pending.splice(i--, 1); progressed = true;
-          try { const value = f.setup ? f.setup(ctx, world, api) : undefined; running.push(f); if (value !== undefined) shared.set(f.id, value); }
-          catch (error) { fail(f, 'setup', error); }
-        }
-      }
-      for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+      pending = [...all];
+      if (hosts && !hosts.includes(status)) hosts.push(status);
+      drain(ctx, world);
     },
     update(ctx, world, delta) {
       for (const f of [...running]) {
@@ -4714,8 +4747,10 @@ export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W
         try { f.update(ctx, world, delta, api); } catch (error) { fail(f, 'update', error); }
       }
     },
-    status: () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const })),
+    status,
     dispose() {
+      disposed = true;
+      if (hosts) { const at = hosts.indexOf(status); if (at >= 0) hosts.splice(at, 1); }
       for (const f of running.splice(0).reverse()) { try { f.dispose?.(); } catch (error) { console.error('[feature ' + f.id + '] dispose: ' + String(error)); } }
       shared.clear();
     },

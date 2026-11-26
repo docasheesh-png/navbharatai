@@ -1895,10 +1895,12 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
 export const GAME_STREET_DANGER_PATH = 'src/game/features/streetDanger.ts';
 export const GAME_STREET_DANGER_FEATURE = String.raw`// STREET DANGER — enemies who come for the hero, people who can be hurt, and the police who answer a crime.
 // Written by NavBharatAI for this game. It is YOUR file: change the numbers below, the kinds of enemy, or the whole idea.
-// · Enemies spawn near the player, chase and attack (they hurt the player's health on the HUD). Beat one: score.
+// · Enemies are there from the first second, near the player: some punch, some carry guns and FIRE (a flash, a tracer and
+//   the shot's sound). They hurt the player's health on the HUD. Beat one with a punch or a shot from your gun: score.
 // · Bystanders walk around. Punching one is a crime: wanted stars rise, a police car drives in with sirens, officers pursue
 //   and arrest you; from 3 stars they fight.
 // · Losing a life, or an arrest, puts the player back at the start with the stars cleared.
+import * as THREE from 'three';
 import { defineFeature } from '../play/features';
 import type { OpenWorld } from '../play/openWorld';
 import { Entities, type Entity } from '../systems/entities';
@@ -1916,6 +1918,10 @@ export const STREET_DANGER = {
   leaveBeyond: 90,     // metres: people farther than this leave the game
   punchDamage: 34,     // three punches beat an enemy
   enemyDamage: 8,
+  gunmen: 0.4,         // share of enemies who carry a gun and fire from a distance (0 = all punch)
+  shotDamage: 6,       // one enemy bullet
+  playerShot: 40,      // one shot of the player's own gun on an enemy in front (within gunRange)
+  gunRange: 60,
   scorePerEnemy: 100,
 };
 
@@ -1924,7 +1930,7 @@ let run: { update(dt: number): void; dispose(): void } | null = null;
 
 export default defineFeature<OpenWorld>({
   id: 'street-danger',
-  about: ['enemy', 'enemies', 'dushman', 'gang', 'goon', 'police', 'cop', 'sipahi', 'wanted', 'crime', 'fight', 'punch', 'health'],
+  about: ['enemy', 'enemies', 'dushman', 'gang', 'goon', 'police', 'cop', 'sipahi', 'wanted', 'crime', 'fight', 'punch', 'health', 'gun', 'goli', 'fire', 'shoot', 'attack', 'hamla'],
   setup(ctx, world) {
     const npcs = new Entities(ctx, { onAttack: (_e, damage) => damagePlayer(damage), playerRadius: 0.4 });
     const dispatch = new Dispatch(ctx, npcs);
@@ -1942,7 +1948,30 @@ export default defineFeature<OpenWorld>({
       events.on('ENTITY_DIED', (p: { kind?: string; byPlayer?: boolean }) => { if (p?.kind === 'enemy' && p.byPlayer) addScore(STREET_DANGER.scorePerEnemy); }),
     ];
     const mine = new Set<Entity>();
-    let clock = 0, next = 2;
+    const gunmen = new Map<string, Entity>();
+    let clock = 0, next = 0, filled = false;
+    // An enemy's shot is SEEN and HEARD: a short tracer to the player, and the kit's WEAPON_FIRED (its flash and sound).
+    const tracerLook = new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.9 });
+    /** The shot's line, from the gunman's chest to the player's. */
+    const tracerOf = (e: Entity) => {
+      const from = e.object.position.clone(); from.y += 1.3;
+      const to = ctx.player.object.position.clone(); to.y += 1.1;
+      return { line: new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), tracerLook), from };
+    };
+    const tracers: Array<{ line: ReturnType<typeof tracerOf>['line']; left: number }> = [];
+    offs.push(events.on('ENTITY_ATTACKED', (p: { id?: string }) => {
+      const e = p?.id ? gunmen.get(p.id) : undefined;
+      if (!e || !e.alive) return;
+      const { line, from } = tracerOf(e);
+      ctx.scene.add(line); tracers.push({ line, left: 0.08 });
+      events.emit('WEAPON_FIRED', { position: { x: from.x, y: from.y, z: from.z }, kind: 'pistol', ownerId: e.id });
+    }));
+    // The player's OWN gun (any kit Weapon) hits the enemy in front — no wiring needed in the gun's feature.
+    offs.push(events.on('WEAPON_FIRED', (p: { ownerId?: unknown } | undefined) => {
+      if (p && p.ownerId !== undefined && p.ownerId !== 'player') return;
+      const yaw = ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y;
+      npcs.melee(ctx.player.object.position, yaw, STREET_DANGER.playerShot, { range: STREET_DANGER.gunRange, arc: 0.25, only: 'first', byPlayer: true, attacker: ctx.player.object });
+    }));
     /** One person in the spawn ring around the player, on the map's own ground, kept through origin shifts. */
     const bring = (kind: 'enemy' | 'villager') => {
       const pp = ctx.player.object.position, pw = world.playerWorld();
@@ -1950,16 +1979,29 @@ export default defineFeature<OpenWorld>({
       const x = pp.x + Math.sin(a) * r, z = pp.z + Math.cos(a) * r;
       const wx = x + (pw.x - pp.x), wz = z + (pw.z - pp.z);
       if (!Number.isFinite(world.heightAt(wx, wz))) return;
+      const armed = kind === 'enemy' && Math.random() < STREET_DANGER.gunmen;
       const e = npcs.spawn(kind === 'enemy'
-        ? { x, z, kind: 'enemy', hostile: true, ai: Math.random() < 0.3 ? 'flanker' : 'melee', damage: STREET_DANGER.enemyDamage, health: 100 }
+        ? { x, z, kind: 'enemy', hostile: true, ai: armed ? 'ranged' : Math.random() < 0.3 ? 'flanker' : 'melee', damage: armed ? STREET_DANGER.shotDamage : STREET_DANGER.enemyDamage, health: 100 }
         : { x, z, kind: 'villager', hostile: false, patrolRadius: 8, health: 60 });
       if (!e) return;
       world.place(e.object, wx, wz, 0.05);
       mine.add(e);
+      if (armed) gunmen.set(e.id, e);
     };
     run = {
       update(dt: number) {
         clock += dt;
+        for (let i = tracers.length - 1; i >= 0; i--) {
+          tracers[i].left -= dt;
+          if (tracers[i].left <= 0) { ctx.scene.remove(tracers[i].line); tracers[i].line.geometry.dispose(); tracers.splice(i, 1); }
+        }
+        // The first frame fills the street: every enemy and bystander is there at once, not one every few seconds.
+        if (!filled) {
+          filled = true;
+          for (let i = 0; i < STREET_DANGER.enemies; i++) bring('enemy');
+          for (let i = 0; i < STREET_DANGER.bystanders; i++) bring('villager');
+          next = clock + STREET_DANGER.spawnEvery;
+        }
         // The punch: the Attack button (F / J, or Attack on a phone) lands on whoever is in front of the hero.
         if (ctx.input.wasPressed('attack')) {
           const yaw = ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y;
@@ -1969,7 +2011,7 @@ export default defineFeature<OpenWorld>({
         for (const e of [...mine]) {
           if (!e.alive || e.object.position.distanceTo(pp) > STREET_DANGER.leaveBeyond) {
             if (e.alive) e.remove();
-            world.release(e.object); mine.delete(e);
+            world.release(e.object); mine.delete(e); gunmen.delete(e.id);
           }
         }
         if (clock >= next) {
@@ -1978,7 +2020,13 @@ export default defineFeature<OpenWorld>({
           if (npcs.alive('villager').length < STREET_DANGER.bystanders) bring('villager');
         }
       },
-      dispose() { for (const off of offs) off(); for (const e of mine) world.release(e.object); wanted.dispose(); dispatch.dispose(); npcs.dispose(); },
+      dispose() {
+        for (const off of offs) off();
+        for (const t of tracers) { ctx.scene.remove(t.line); t.line.geometry.dispose(); }
+        tracerLook.dispose();
+        for (const e of mine) world.release(e.object);
+        wanted.dispose(); dispatch.dispose(); npcs.dispose();
+      },
     };
     // Shared with other features (api.get('street-danger')): a mission can read who is wanted, or spawn through the same Entities.
     return { npcs, dispatch, wanted };

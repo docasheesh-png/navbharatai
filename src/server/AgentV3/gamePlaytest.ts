@@ -1291,6 +1291,10 @@ try {
     // read back from the kit (window.__nbKit.attacks). Before the rules, which may end the round.
     const fired = await fireProbe(page);
     if (fired) { out.rules = out.rules || []; out.rules.push(fired); }
+    // The game's features that are SWITCHED OFF, and why (a feature that throws, or an async setup that failed) — the kit's
+    // feature host lists them on window.__nbFeatureHosts; before this a crashed enemies feature left no reason anywhere.
+    out.featuresOff = await page.evaluate(() => (window.__nbFeatureHosts || []).flatMap((f) => { try { return f(); } catch (e) { return []; } })
+      .filter((x) => x && x.state === 'off').slice(0, 10).map((x) => ({ id: String(x.id).slice(0, 60), reason: String(x.reason || '').slice(0, 200) }))).catch(() => null);
     // The rules the user named, proved by playing (see PROBED_RULES): last, so no other measure sees what they change.
     if (Array.isArray(cfg.rules) && cfg.rules.length) {
       out.rules = out.rules || [];
@@ -1570,6 +1574,8 @@ export interface PlaytestRun {
   kitScoreStart?: number | null;
   /** The rules the user named, proved by playing (PROBED_RULES). */
   rules?: RuleProbe[];
+  /** The game's features switched off while it was played (the kit's feature host), with the reason. */
+  featuresOff?: Array<{ id: string; reason: string }> | null;
   kitScoreEnd?: number | null;
   /** What the kit game's last frame asked of the GPU (window.__nbKit.load) — null for a game that does not report it. */
   load?: { calls: number; triangles: number; geometries: number; textures: number } | null;

@@ -78,6 +78,7 @@ import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
 import { noteServerMemory } from '../AgentV3/buildPhases/serverMemoryPulse';
+import { enemiesAtTurnStart } from '../AgentV3/buildPhases/enemiesTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
 import { raceWorldAtTurnStart } from '../AgentV3/raceWorld';
@@ -19583,6 +19584,10 @@ async function noteBuildOutcome(
       // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
       buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
+      // 🦹 "ENEMY BANAO" ON AN OPEN WORLD THAT EXISTS: the platform lays the kit, writes and lists street danger (enemiesTurn.ts).
+      buildPrompt = withPlatformHandoff(await enemiesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
+        runRecipe: async (name) => !(await dispatcher.dispatch({ id: `enemies-${name}`, name: 'run_recipe', input: { name } }, 'architect', { signal: abort.signal })).is_error }), buildPrompt);
       // 🏁 "RACE SHEHAR ME KARO" — the user's yes moves a road-library race onto the world's city roads (raceWorld.ts, map
       // expansion item 8): the platform writes the switch itself, last, after the files it needs. OFF unless AGENTV3_RACING_WORLD=on.
       buildPrompt = withPlatformHandoff(await raceWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),

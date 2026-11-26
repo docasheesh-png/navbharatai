@@ -19,7 +19,7 @@ import { gameGotWorse, gameMeasureFromIssues, gameUndoMessage, versionBeforeTurn
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage } from '../gameGeometryProbe';
 import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage } from '../gamePlaceholderProbe';
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from './gameFixVerdict';
-import { reportRuleProbes } from './gameRuleProbes';
+import { reportRuleProbes, reportFeaturesOff } from './gameRuleProbes';
 import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
 
 /** What decides whether the game can be played now. All true ⇒ played; otherwise the reason is said. */
@@ -100,6 +100,7 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
     const playStartedAt = Date.now();
     const playRun = parsePlaytest((await p.play()).stdout);
     reportRuleProbes(playRun.rules, p.fix); // the user's named rules, proved by playing (gameRuleProbes.ts)
+    reportFeaturesOff(playRun.featuresOff, p.fix); // a feature the game switched off (it threw) — with its reason
     const ranMs = Date.now() - playStartedAt; // GAME_PROOF (d): the playtest's own wall time in the sandbox
     const playedFiles = await withKitLayersFromDisk(p.files, p.readFile);
     const verdict = playtestVerdict(playRun, replayFromCode(playedFiles));

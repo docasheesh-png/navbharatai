@@ -21,12 +21,14 @@ beforeAll(() => {
   mkdirSync(dirname(join(DIR, GAME_STREET_DANGER_PATH)), { recursive: true });
   writeFileSync(join(DIR, GAME_STREET_DANGER_PATH), GAME_STREET_DANGER_FEATURE);
   writeFileSync(join(DIR, GAME_FEATURES_INDEX_PATH), GAME_FEATURES_INDEX_WITH_DANGER);
+  // three.js ships no types in this repo: the shim makes THREE `any` for every file alike (the kit files import it too).
+  writeFileSync(join(DIR, 'src/three-shim.d.ts'), "declare module 'three';\n");
 }, 120_000);
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
 describe('the street-danger feature is real kit code', () => {
   it('compiles strictly against the real kit (entities, dispatch, state, the open world, the feature host)', () => {
-    const files = [join(DIR, GAME_STREET_DANGER_PATH), join(DIR, GAME_FEATURES_INDEX_PATH)];
+    const files = [join(DIR, GAME_STREET_DANGER_PATH), join(DIR, GAME_FEATURES_INDEX_PATH), join(DIR, 'src/three-shim.d.ts')];
     const program = ts.createProgram(files, {
       strict: true, noUnusedLocals: true, target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
       jsx: ts.JsxEmit.ReactJSX, noEmit: true, skipLibCheck: true, esModuleInterop: true, allowImportingTsExtensions: false,

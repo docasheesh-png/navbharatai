@@ -407,6 +407,30 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     withEvidence: true,
   },
   {
+    // A feature the kit's host switched off while the game was played (it threw, or its async setup failed) — admin
+    // 2026-11-26 ("enemy ban hi nahi rahe"): before, this left one console line and nothing else.
+    code: 'GAME_FEATURE_OFF',
+    title: 'Fix the part of the game that switched off',
+    detail: 'NavBharatAI played your game and a part of it switched itself off because of an error, so it does nothing on screen.',
+    prompt: 'NavBharatAI played this game and the feature(s) named below switched themselves off because they threw an error (the reason is named). Fix each one at its root in its own file under the game\'s features folder: use only the game kit\'s real APIs (read the kit file before calling it), do not call a method the kit does not have, and keep it listed. Change nothing else.',
+    withEvidence: true,
+  },
+  {
+    // The user asked for enemies in an open world and the platform could not add its own (enemiesTurn.ts).
+    code: 'ENEMIES_KIT_NOT_LAID',
+    title: 'Add the enemies',
+    detail: 'You asked for enemies, but NavBharatAI could not add the game parts they need this time.',
+    prompt: 'The user asked for enemies in this open world. Add the game kit\'s systems (run the game systems recipe), then one feature that spawns enemies near the hero with the kit\'s Entities (spawnAround) and lets them attack with damagePlayer, and list it in the features list. Change nothing else.',
+    withEvidence: true,
+  },
+  {
+    code: 'ENEMIES_NOT_LISTED',
+    title: 'Add the enemies',
+    detail: 'You asked for enemies, but the game\'s list of parts was not in its usual shape, so NavBharatAI could not add them by itself.',
+    prompt: 'The user asked for enemies in this open world. Add ONE feature that spawns enemies near the hero with the kit\'s Entities (spawnAround) and lets them attack with damagePlayer, and list it in the game\'s features list. Change nothing else.',
+    withEvidence: true,
+  },
+  {
     // A rule the user named was sent as the kit's own event while the game was played, and nothing happened
     // (gamePlaytest.ts rule probes, admin 2026-11-24). The measured line travels with the fix.
     code: 'GAME_RULE_BROKEN',

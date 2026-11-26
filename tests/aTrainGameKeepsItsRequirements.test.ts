@@ -121,12 +121,14 @@ describe('🔒 the route feeds the playtest into the gate on EVERY way the playt
     expect(phase.match(/gate: 'not-run' \}/g)?.length).toBe(3);
     expect(phase).toMatch(/if \(domKind\) \{[\s\S]{0,500}gate: 'not-run' \}/);
     expect(route).toContain('gateEvidence.game = played.gate;');
-    const repairedStart = route.indexOf('if (outcome.kept && outcome.after) {');
-    expect(repairedStart).toBeGreaterThan(0);
-    const repaired = route.slice(repairedStart, route.indexOf('if (gameCompleteGateEnabled())', repairedStart));
-    expect(repaired).toMatch(/if \(outcome.proof\) \{\s+gameProof = \{ \.\.\.outcome\.proof \};\s+gateEvidence\.game = gameProof\.outcome;/);
-    expect(repaired).toMatch(/if \(gameProof\.outcome === 'passed'\) buildDiag\.resolveOnRecheck\('GAME_PLAYTEST_ISSUES'\);/);
-    expect(repaired).not.toMatch(/gateEvidence\.game = 'passed';/);
+    // Re-played after a repair (Q-3374/Q-3365, 2026-11-26): the replay is the phase's own play, and a kept one reaches the
+    // gate through the SAME apply as the first play — never a hand-set 'passed'.
+    expect(route).toContain('if (repairedPlay) applyGamePlayed(repairedPlay);');
+    const apply = route.slice(route.indexOf('const applyGamePlayed = '), route.indexOf('const runGamePlaytest = async'));
+    expect(apply).toContain('gameProof = played.proof;');
+    expect(apply).toContain('gateEvidence.game = played.gate;');
+    expect(phase).toMatch(/if \(outcome\.result\.proof\.outcome === 'passed'\) \{ try \{ r\.resolveOnRecheck\('GAME_PLAYTEST_ISSUES'\)/);
+    expect(route).not.toMatch(/gateEvidence\.game = 'passed';/);
   });
 });
 

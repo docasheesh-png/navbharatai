@@ -61,6 +61,7 @@ import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
 import { wantsSwimming, citizensWanted, runOverWanted, cinematicsWanted, openBuildingsWanted } from '../lib/GameOpenWorldGenerator';
+import { genreKitsFor } from '../lib/GameGenreKitsGenerator';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
 import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
@@ -71,10 +72,11 @@ import { gameLanguageForRequest, gameLanguageHandoff } from './gameLanguage';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 import { world2dIntent } from './world2dIntent';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
+import { PLACES_LINE_PREFIX, placesLine, worldRegionsFor, worldSettingFrom, worldSettingRule } from './worldSetting';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d' | 'generate_game_systems'
-  | 'generate_game_2d' | 'generate_board_games' | 'generate_athree_map' | 'generate_open_world';
+  | 'generate_game_2d' | 'generate_board_games' | 'generate_genre_kits' | 'generate_athree_map' | 'generate_open_world';
 
 // 2D games that MOVE a body on screen get the 2D kit (sprites, platformer physics, camera, tilemap, particles): MOVING_2D_GENRES,
 // in gameIntent beside the big-world rule that reads it.
@@ -120,6 +122,14 @@ function combatKit(text: string): GameKitRecipe[] {
   } catch { return []; }
 }
 
+/**
+ * 🥊 THE GENRE'S RULES ARE LAID DOWN TOO (game-maker audit 2026-11-26): a fighting or a tower-defense game had no kit at all,
+ * so its rules were written from memory. genreKitsFor (GameGenreKitsGenerator.ts) is the one reader. PURE.
+ */
+function genreKit(text: string): GameKitRecipe[] {
+  try { return genreKitsFor(text, buildGameContract(text).genre).length ? ['generate_genre_kits'] : []; } catch { return []; }
+}
+
 export function gameKitPlan(prompt: string | null | undefined, framework?: string | null): GameKitRecipe[] {
   const text = String(prompt ?? '');
   if (!text.trim() || !gameKitFrameworkSupported(framework)) return [];
@@ -136,12 +146,12 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
     // A game played on foot on the big map gets the open-world starter after the shell: a player standing on the map,
     // mounted in src/App.tsx, playable before the first model call. A race or a flight has its own vehicle to stand on.
     const onFoot: GameKitRecipe[] = map.length && openWorldOnFoot(text) ? ['generate_open_world'] : [];
-    return ['generate_game_runtime', 'generate_game_3d', ...map, ...combatKit(text), 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
+    return ['generate_game_runtime', 'generate_game_3d', ...map, ...combatKit(text), ...genreKit(text), 'generate_game_vfx', 'generate_melody', 'generate_game_shell', ...onFoot];
   }
   // 🗺️ A 2D game whose user wants a big world (the wish, not one word: world2dIntent → largeWorldIntent, admin 2026-11-19)
   // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
   // platform KNOWS a build needs is not left to the model's optional tool call.
-  const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody', ...combatKit(text)];
+  const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody', ...combatKit(text), ...genreKit(text)];
   if (world2dIntent({ prompt: text, drawnIn3D: false }).use) flat.push('generate_world_2d');
   // 🎮 THE GENRE'S OWN KIT (game audit 2, 2026-11-20): failedbr #2435 ("super Mario Bros game banao") got only the loop,
   // sound and music and hand-wrote its platformer physics, renderer and touch buttons; #2470 (a Monopoly-style "business
@@ -169,8 +179,6 @@ export function openWorldOnFoot(prompt: string | null | undefined): boolean {
   return profile === 'open-world' || profile === 'battle-royale' || profile === 'explore';
 }
 
-/** Hinglish for a city and its streets — the contract's subject list reads the English words. */
-const CITY_HINGLISH = /\b(?:sheh?a?r|shahar|nagar|sadak\w*|sadke\w*|galiy?\w*|imarat\w*)\b/i;
 
 /**
  * Does the game's world have a CITY in it — streets, buildings, traffic? Read from the same contract the builder is handed
@@ -180,12 +188,9 @@ const CITY_HINGLISH = /\b(?:sheh?a?r|shahar|nagar|sadak\w*|sadke\w*|galiy?\w*|im
 export function openWorldWantsCity(prompt: string | null | undefined): boolean {
   const text = String(prompt ?? '');
   if (hasLine(text, CITY_LINE)) return true;
-  try {
-    const c = buildGameContract(text);
-    if ((c.subjects ?? []).some((s) => s === 'building' || s === 'road')) return true;
-    if (namesGtaTitle(text)) return true;   // the ONE GTA reader ("gta5", "gtaa", "g.t.a" too)
-  } catch { /* no contract: the words below still decide */ }
-  return CITY_HINGLISH.test(text);
+  // The user's own places decide (worldSetting.ts, admin 2026-11-26: "village bole to city nahi"): houses or roads in a named
+  // village never make it a city; with no place named, buildings / roads / a GTA reference still give one.
+  return worldSettingFrom(text).places.some((p) => p.kind === 'city');
 }
 
 /**
@@ -214,7 +219,7 @@ export function gameKitOwnsTheBuild(prompt: string | null | undefined, framework
 function withoutPlatformLines(text: string): string {
   return text.split(/\r?\n/).filter((l) => {
     const t = l.trim();
-    return t !== ON_FOOT_LINE && t !== CITY_LINE && t !== GAME_MILESTONE_LINE && !t.startsWith('The user\'s game needs a big map') && !t.startsWith('The game the user named:');
+    return t !== ON_FOOT_LINE && t !== CITY_LINE && t !== GAME_MILESTONE_LINE && !t.startsWith(PLACES_LINE_PREFIX) && !t.startsWith('The user\'s game needs a big map') && !t.startsWith('The game the user named:');
   }).join('\n');
 }
 
@@ -305,12 +310,21 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_game_systems' && !plan.includes('generate_game_3d')) return { include: ['combat', 'ai', 'nav', 'projectile', 'weapon', 'director', 'grenade', 'aimassist'] };
   // The seed mounts the open-world starter in src/App.tsx (the recipe writes it only where no game is mounted yet), with a
   // city when the game's world has one.
+  if (recipe === 'generate_genre_kits' && typeof request === 'string') {
+    let genre = 'unknown';
+    try { genre = buildGameContract(request).genre; } catch { /* the whole pack */ }
+    const include = genreKitsFor(request, genre);
+    return include.length ? { include } : undefined;
+  }
   // Enemies the request asks for go in with the first build (GameEnemiesFeature.ts), not in a later "enemy banao" turn.
   if (recipe === 'generate_open_world') {
+    const setting = worldSettingFrom(request);
+    const regions = worldRegionsFor(setting);
     const enemies = enemyRequestFrom(request);
     const citizens = citizensWanted(request);
     return {
-      mount: true, city: openWorldWantsCity(request),
+      mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request),
+      ...(regions.length ? { regions } : {}),
       ...(wantsSwimming(request) ? { swim: true } : {}),
       ...(enemies ? { enemies } : {}),
       ...(citizens.solid || citizens.hittable ? { citizens } : {}),
@@ -737,6 +751,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     has('generate_game_runtime') ? TUNING_RULE : '',
     // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
     has('generate_game_runtime') || has('generate_game_shell') ? gameLanguageHandoff(gameLanguageForRequest(opts.request)) : '',
+    // The places are the user's own words (admin 2026-11-26: "village bole to city nahi").
+    has('generate_open_world') || has('generate_athree_map') ? worldSettingRule(worldSettingFrom(opts.request)) : '',
     has('generate_game_2d')
       ? '🕹️ THE 2D GAME KIT IS ALREADY IN src/game/2d/: build the game ON it — Tilemap.fromRows(...) for the level,'
         + ' PlatformerController + createBody for the player (coyote time, jump buffer, no tunnelling — NEVER a hand-written'
@@ -747,6 +763,12 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       ? '🎲 THE INDIA GAMES PACK IS ALREADY IN src/game/board/: the rules come from it — Ludo, Snakes & Ladders, chess,'
         + ' carrom, cricket, match-3 and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
         + ' move, and announce what happened. Card games are points or pretend chips only, never real money.'
+      : '',
+    has('generate_genre_kits')
+      ? '🥊 THE GENRE\'S RULES ARE ALREADY IN src/game/genres/: a FIGHTING game is fighting.ts (createMatch, then stepMatch every frame:'
+        + ' frames, hit-stun, combos, blocking, throws, specials, rounds, the computer opponent) and a TOWER DEFENSE is towerDefense.ts'
+        + ' (createTowerDefense from a text map, placeTower / upgradeTower / sellTower, startWave, stepTowerDefense every frame). Draw'
+        + ' them and play the events — NEVER write your own hit detection, combo counter, path, wave or tower logic beside them.'
       : '',
     has('generate_game_systems')
       ? '⚔️ THE COMBAT LAYER IS ALREADY IN src/game/systems/: Health (invulnerable frames, death fires once), enemy AI,'
@@ -958,6 +980,9 @@ export function gameIdentityLines(original: string): string[] {
   // 3D scene …") can never lose them — the same reason the game marker and the big-map line travel.
   if (openWorldOnFoot(original)) out.push(ON_FOOT_LINE);
   if (openWorldWantsCity(original)) out.push(CITY_LINE);
+  // The places themselves travel too (worldSetting.ts): a milestone that says "build the map" still gets the user's village.
+  const places = placesLine(worldSettingFrom(original));
+  if (places) out.push(places);
   return out;
 }
 

@@ -2088,7 +2088,25 @@ export function runOverWanted(prompt: string | null | undefined): boolean {
   return !/\b(?:no|not|don'?t|never|bina|nahi|nahin|mat)\b[^.!?\n]{0,20}\b(?:takkar|run\s*over|kuchal\w*|kill\w*|mare)\b|\b(?:takkar|kuchal\w*|mare)\b[^.!?\n]{0,12}\b(?:nahi|nahin|mat)\b/i.test(t);
 }
 
-export function gameWorldFileSource(options: { city?: boolean; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; openBuildings?: boolean; workspaceId?: string } = {}): string {
+const SEEDABLE_REGION_KINDS = new Set(['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach']);
+/**
+ * The regions the first build lays down, from the places the user named (AgentV3/worldSetting.ts). Anything that is not a
+ * plain { id, kind } of a known place or land is dropped, so a malformed input can never write a broken world.ts. PURE.
+ */
+export function seedRegions(regions: unknown): Array<{ id: string; kind: string }> {
+  if (!Array.isArray(regions)) return [];
+  const out: Array<{ id: string; kind: string }> = [];
+  const ids = new Set<string>();
+  for (const r of regions) {
+    const id = String((r as { id?: unknown })?.id ?? ''), kind = String((r as { kind?: unknown })?.kind ?? '');
+    if (!/^[a-z][a-z0-9-]{0,40}$/.test(id) || !SEEDABLE_REGION_KINDS.has(kind) || ids.has(id)) continue;
+    ids.add(id); out.push({ id, kind });
+  }
+  return out.slice(0, 60);
+}
+
+export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; openBuildings?: boolean; workspaceId?: string } = {}): string {
+  const named = seedRegions(options.regions);
   const seed = options.workspaceId
     ? varietySeed(options.workspaceId, 'world')
     : 7;
@@ -2105,7 +2123,10 @@ export function gameWorldFileSource(options: { city?: boolean; swim?: boolean; c
     'export const WORLD: OpenWorldOptions = {',
     '  seed: ' + seed + ',',
     '  regions: [',
-    ...(options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
+    // The places the user named, in their order (worldSetting.ts); without any, the city the request implied, or open country.
+    ...(named.length
+      ? named.map((r) => `    { id: '${r.id}', kind: '${r.kind}' },`)
+      : options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
     '  ],',
     "  // Water hurts and drowns by default; 'swim' only when the user asks for swimming.",
     "  water: '" + (options.swim ? 'swim' : 'drown') + "',",

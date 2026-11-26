@@ -184,6 +184,7 @@ describe('🔒 census — no reader keeps a private exact-spelling title list', 
     'src/server/AgentV3/unknownName.ts': 'acronyms the catalogue does not hold (NFS, FIFA…); titles route through findGameTitles',
     'src/server/lib/appScopeAnalyzer.ts': 'names catalogue entries by name ({ title: \'PUBG\' })',
     'src/server/lib/realismIntent.ts': 'names catalogue entries by name',
+    'src/server/AgentV3/gameCoverage.ts': 'benchmark prompts written the way users type them (data, read through the shared matcher)',
   };
   const walk = (d: string): string[] => readdirSync(d).flatMap((n) => {
     const p = join(d, n);

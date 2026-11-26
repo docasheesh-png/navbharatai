@@ -46,6 +46,7 @@ import { generateOpenWorld } from './GameOpenWorldGenerator';
 import { generateWorld2D } from './world2d/World2DGenerator';
 import { generateGame2D } from './Game2DGenerator';
 import { generateBoardGames } from './BoardGamesGenerator';
+import { generateGenreKits } from './GameGenreKitsGenerator';
 import { generateObjectForge } from './objectForge/ObjectForgeGenerator';
 import { createHash } from 'node:crypto';
 import { GAME_KIT_HISTORY } from './gameKitHistory';
@@ -75,6 +76,8 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_world_2d: generateWorld2D,
   generate_game_2d: generateGame2D,
   generate_board_games: generateBoardGames,
+  // The rules of the genres the kit had no system for (game-maker audit 2026-11-26): fighting, tower defense.
+  generate_genre_kits: generateGenreKits,
   // The Object Forge kit (src/game/forge/forge.ts). The objects themselves are written per spec by the author_object tool; only the engine is a kit file.
   author_object: generateObjectForge,
 };

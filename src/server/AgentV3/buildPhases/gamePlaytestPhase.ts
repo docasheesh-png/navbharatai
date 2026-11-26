@@ -17,7 +17,12 @@ import {
 import { asksForEnemies, scopeMatch, type GameScopeContract } from '../gameIntent';
 import { gameGotWorse, gameMeasureFromIssues, gameUndoMessage, versionBeforeTurn } from '../gameRegression';
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage } from '../gameGeometryProbe';
-import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage } from '../gamePlaceholderProbe';
+import { GAME_PLACEHOLDER_CODE, PLACEHOLDERS_CLEARED_MESSAGE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage, type PlaceholderFinding } from '../gamePlaceholderProbe';
+import {
+  PLACEHOLDER_REPAIR_TOKEN_CAP, placeholderRepairEligible, placeholderRepairEnabled, placeholderRepairMs, placeholderRepairRecord, runPlaceholderRepair,
+  type PlaceholderMeasure, type PlaceholderRepairOutcome,
+} from '../gamePlaceholderRepair';
+import { gameBackupCleanupCommand, gameBackupCommand, gameRestoreCommand, parseGameBackup, parseGameRestore } from '../gameWorkspaceBackup';
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from './gameFixVerdict';
 import { reportRuleProbes } from './gameRuleProbes';
 import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
@@ -51,6 +56,8 @@ export interface GamePlaytestResult {
    * release gate says them as unproven (external Game Maker audit, 2026-11-25). Absent when none or not played.
    */
   featuresUnverified?: string[];
+  /** What the placeholder look found on this play (gamePlaceholderProbe.ts); absent when it did not look. */
+  placeholders?: PlaceholderFinding[];
 }
 
 export interface PlaytestIssue { phase: 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }
@@ -94,9 +101,13 @@ function playable(f: PlaytestFacts): boolean {
     && !f.platformDone && f.isCanvasGame && f.timeLeft;
 }
 
-/** Play the game when it can be; otherwise say why. Never throws. */
-export async function runGamePlaytestPhase(p: GamePlaytestPorts): Promise<GamePlaytestResult | null> {
+/**
+ * Play the game when it can be; otherwise say why. Never throws. `keep.ports` receives the ports the game was played with,
+ * so a kept repair's replay plays it exactly the same way (replayGamePlaytest).
+ */
+export async function runGamePlaytestPhase(p: GamePlaytestPorts, keep?: { ports?: GamePlaytestPorts }): Promise<GamePlaytestResult | null> {
   try {
+    if (keep) keep.ports = p;
     return playable(p.facts) ? await playIt(p) : notPlayed(p);
   } catch { return null; }
 }
@@ -137,7 +148,9 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         // Enemies are looked for only when the request asked for them (report #2519: asked for, built, never on screen) —
         // the contract, or this turn's own words when an edit turn has no contract (BR2532).
         const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff, { enemies: !!p.contract?.requiredFeatures.includes('enemies') || asksForEnemies(p.request) });
-        const placeholderMsg = placeholderFindingsMessage(combinePlaceholderFindings(fromFiles, fromPage));
+        const placeholders = combinePlaceholderFindings(fromFiles, fromPage);
+        out.placeholders = placeholders;
+        const placeholderMsg = placeholderFindingsMessage(placeholders);
         if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }
       // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
@@ -228,4 +241,159 @@ function recordProof(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest>
     const issue = gameProofIssue(gameProof({ contract: p.contract, run, ranMs, files: p.files, notPlayedWhy, kept }));
     p.record({ phase: 'preview', severity: issue.severity, code: issue.code, message: issue.message, autoResolved: issue.autoResolved, detail: issue.detail });
   } catch { /* observation only */ }
+}
+
+// ── THE REPLAY, AND THE ONE BOUNDED PLACEHOLDER REPAIR (Q-3374 + Q-3365) ─────────────────────────────────────────────────
+
+/** The prefix of every line a KEPT repair's replay adds to the report, so the two plays are never confused. */
+export const REPLAY_PREFIX = 'Replay after the kept placeholder repair: ';
+
+/**
+ * 🎮 PLAY THE GAME AGAIN — the same play, judge and proof as the first (playIt), on the files as they are now (Q-3365).
+ * Its report lines are HELD, not recorded: they describe a game that may yet be put back. The caller flushes them only
+ * when the change is kept, so a kept repair re-records GAME_PROOF and the unverified-feature list, and a discarded one
+ * leaves no line about a game that no longer exists. Nothing is said to the user from a replay. Never throws.
+ */
+export async function replayGamePlaytest(p: GamePlaytestPorts, files: Record<string, string>): Promise<{ result: GamePlaytestResult; issues: PlaytestIssue[] }> {
+  const issues: PlaytestIssue[] = [];
+  const hold = (issue: PlaytestIssue): void => { issues.push(issue); };
+  const result = await playIt({
+    ...p,
+    files,
+    record: hold,
+    fix: { ...p.fix, record: hold, say: () => { /* a replay never narrates */ } },
+  });
+  return { result, issues };
+}
+
+/** What a play measured, read from the phase's own result. PURE. */
+export function playMeasure(r: GamePlaytestResult): PlaceholderMeasure {
+  return {
+    placeholders: r.placeholders ?? [],
+    defects: (r.played?.defects ?? []).map((d) => d.code),
+    score: typeof r.proof.score === 'number' ? r.proof.score : null,
+    scopeMissing: r.played?.scopeMissing ?? [],
+    played: r.proof.outcome !== 'not-run',
+  };
+}
+
+export interface GamePlaceholderRepairPorts {
+  /** The first play of this turn — its ports and what it found — or null when the game was not played. */
+  first: { ports: GamePlaytestPorts; result: GamePlaytestResult } | null;
+  /** The route's facts that allow a repair now (not stopped, a preview, a command runner). */
+  canRun: boolean;
+  headroomMs: number;
+  userPrompt: string;
+  buildSignal: AbortSignal;
+  /** The project as it stands now (turn-start files plus this turn's captured writes). */
+  filesNow: () => Record<string, string>;
+  /** The build's captured writes (the route's `writtenFiles`): read for what the repair wrote, put back when undone. */
+  captured: Map<string, string>;
+  /** May the platform pay for this repair on this build (the free tier's daily allowance)? */
+  allowed: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Run a shell command in the project (the backup and the restore). */
+  runCommand: (command: string) => Promise<{ stdout?: string }>;
+  /** Run the one pass (file tools only, platform-paid, inside this repair's billing phase). Resolves true when finished. */
+  repair: (prompt: string, ctl: { signal: AbortSignal; onTokens: (tokens: number) => void }) => Promise<boolean>;
+  /** Save files to the project's durable store / forget paths there (after a keep or an undo). */
+  persist: (files: Record<string, string>) => Promise<unknown>;
+  forget: (paths: string[]) => Promise<unknown>;
+  resolveOnRecheck: (code: string) => void;
+  record: (issue: PlaytestIssue) => void;
+  /** A unique id for this build's backup. */
+  backupId: string;
+}
+
+/**
+ * 🧸🔧 ONE BOUNDED IN-BUILD REPAIR when the placeholder look found ONLY a missing model and/or an empty map
+ * (gamePlaceholderRepair.ts). Returns the REPLAY's result when the repair was kept — the route applies it exactly as it
+ * applies the first play (proof, gate, unverified features, measured defects) — and null otherwise. Every outcome is
+ * one GAME_PLACEHOLDER_REPAIR line in the report. Never throws.
+ */
+export async function runGamePlaceholderRepairPhase(r: GamePlaceholderRepairPorts): Promise<GamePlaytestResult | null> {
+  try {
+    const first = r.first;
+    const findings = first?.result.placeholders ?? [];
+    if (!first || findings.length === 0) return null; // nothing was found ⇒ nothing to say
+    const say = (o: PlaceholderRepairOutcome<unknown>): void => { try { r.record({ phase: 'preview', ...placeholderRepairRecord(o) }); } catch { /* best-effort */ } };
+    const skip = (reason: string): null => {
+      say({ attempted: false, kept: false, state: 'skipped', reason, kinds: [...new Set(findings.map((f) => f.kind))], before: findings.length, after: null, touched: [], timedOut: false, tokenCapped: false, repairMs: 0 });
+      return null;
+    };
+    if (!placeholderRepairEnabled()) return skip('switched off (AGENTV3_GAME_PLACEHOLDER_REPAIR=off)');
+    if (!placeholderRepairEligible(findings)) return skip('the look found more than a missing model and/or an empty map, and only those two are repaired in the build');
+    if (!r.canRun || first.result.proof.outcome === 'not-run') return skip('the game could not be played again in this build');
+    const repairMs = placeholderRepairMs(r.headroomMs);
+    if (repairMs <= 0) return skip('not enough build time left for a repair, its replay and a way back');
+    const allowed = await r.allowed().catch(() => ({ ok: false as const, reason: 'the repair allowance could not be read' }));
+    if (!allowed.ok) return skip(allowed.reason);
+
+    const before = new Map(r.captured);
+    let digest = '';
+    let tokens = 0;
+    let capped = false;
+    let held: PlaytestIssue[] = [];
+    const outcome = await runPlaceholderRepair<GamePlaytestResult>({
+      findings, before: playMeasure(first.result), userPrompt: r.userPrompt, repairMs, buildSignal: r.buildSignal, tokenCapped: () => capped,
+    }, {
+      backup: async () => {
+        const b = parseGameBackup((await r.runCommand(gameBackupCommand(r.backupId))).stdout);
+        if (b.ok) digest = b.digest;
+        return b;
+      },
+      repair: (prompt, ctl) => r.repair(prompt, {
+        signal: ctl.signal,
+        onTokens: (n) => {
+          tokens += Number.isFinite(n) && n > 0 ? n : 0;
+          if (!capped && tokens >= PLACEHOLDER_REPAIR_TOKEN_CAP) { capped = true; ctl.stop(); }
+        },
+      }),
+      touched: () => [...new Set([...r.captured.keys(), ...before.keys()])].filter((p) => r.captured.get(p) !== before.get(p)),
+      replay: async () => {
+        const again = await replayGamePlaytest(first.ports, r.filesNow());
+        held = again.issues;
+        return { measure: playMeasure(again.result), result: again.result };
+      },
+      restore: async () => {
+        // Checked against the BACKUP's own fingerprint, never against a value the restore reports about itself.
+        const restored = parseGameRestore((await r.runCommand(gameRestoreCommand(r.backupId))).stdout, digest);
+        if (restored.ok) await putCapturedBack(r, first.ports, before);
+        return restored;
+      },
+      cleanup: async () => { await r.runCommand(gameBackupCleanupCommand(r.backupId)); },
+    });
+    say(outcome);
+    if (!outcome.kept || !outcome.result) return null;
+    for (const issue of held) {
+      try { r.record(issue.code === GAME_PLACEHOLDER_CODE ? issue : { ...issue, message: `${REPLAY_PREFIX}${issue.message}` }); } catch { /* best-effort */ }
+    }
+    // None left: said as the LAST placeholder line, so the next turn's builder is not sent after stand-ins that are gone.
+    if (!outcome.result.placeholders?.length) {
+      try { r.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: PLACEHOLDERS_CLEARED_MESSAGE, autoResolved: true }); } catch { /* best-effort */ }
+    }
+    if (outcome.result.proof.outcome === 'passed') { try { r.resolveOnRecheck('GAME_PLAYTEST_ISSUES'); } catch { /* best-effort */ } }
+    try { await r.persist(Object.fromEntries(r.captured)); } catch { /* the end-of-build save carries them too */ }
+    return outcome.result;
+  } catch { return null; }
+}
+
+/**
+ * After a VERIFIED restore: the build's captured writes are exactly what they were before the repair (so the end-of-build
+ * save cannot re-persist what was put back), and the durable store gets each file the repair wrote back as the restored
+ * sandbox holds it, or forgets one the repair created.
+ */
+async function putCapturedBack(r: GamePlaceholderRepairPorts, play: GamePlaytestPorts, before: ReadonlyMap<string, string>): Promise<void> {
+  const touched = [...new Set([...r.captured.keys(), ...before.keys()])].filter((p) => r.captured.get(p) !== before.get(p));
+  r.captured.clear();
+  for (const [path, text] of before) r.captured.set(path, text);
+  const put: Record<string, string> = {};
+  const gone: string[] = [];
+  for (const path of touched) {
+    let text: string | null | undefined;
+    try { text = await play.readFile(path); } catch { text = null; }
+    if (typeof text === 'string') put[path] = text;
+    else gone.push(path);
+  }
+  if (Object.keys(put).length) await r.persist(put).catch(() => undefined);
+  if (gone.length) await r.forget(gone).catch(() => undefined);
 }

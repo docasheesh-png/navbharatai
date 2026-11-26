@@ -9,6 +9,10 @@
 // prove rollback preserves binary, excluded, oversized, unreadable or unlisted files.
 // No environment value re-enables it. Normal building/playtesting and the completion
 // gate remain unchanged. See docs/security/game-auto-repair-suspension.md.
+// The ONE in-build game repair that does run is separate and narrower: the bounded
+// placeholder repair (gamePlaceholderRepair.ts, Q-3374, admin-approved 2026-11-26) —
+// missing model / empty map only, file tools only, a byte-exact verified backup
+// (gameWorkspaceBackup.ts) as its way back. It never calls this module's repair.
 //
 // 🚦 THE GATE defaults on: a game whose final play still shows a HARD defect (blank, ignored input, no touch,
 // stuck start, runtime error, wrong camera, stalled vehicle, or missing game-kit layer) or lacks a feature

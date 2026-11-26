@@ -20,6 +20,7 @@
  * everyone) and the Surplus skip counter above. Everything is injected, so this module is PURE control
  * flow, unit-testable without a key, and portable into the main engine as-is.
  */
+import { addFallbackMs } from '../fallbackTime';
 import { readEngineSafeDiag } from '../../lib/engineSafeDiag';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import type { NamedRunner } from '../providers/MultiProviderTurnRunner';
@@ -171,7 +172,9 @@ export function createProChainV2AgentRunner(o: ProChainV2AgentOptions): TurnRunn
         skippedAtStart = now() < o.state.skipSurplusUntil;
         emit({ kind: 'agent-start', agent: o.agent, surplus: !o.surplus ? 'absent' : surplusUsable() ? 'first' : 'skipped', chain: canonical });
       }
+      let surplusLostMs = 0;
       if (surplusUsable()) {
+        const surplusStartedAt = now();
         try {
           const result = await o.surplus!.runTurn(params);
           try { o.onSurplusHealthy?.(); } catch { /* never block the turn */ }
@@ -195,9 +198,11 @@ export function createProChainV2AgentRunner(o: ProChainV2AgentOptions): TurnRunn
             o.state.skipSurplusUntil = t + tuning.surplusSkipMs;
             emit({ kind: 'surplus-skip-open', agent: o.agent, drops: recent.length, untilMs: o.state.skipSurplusUntil });
           }
+          surplusLostMs = now() - surplusStartedAt;
         }
       }
-      return runTail(params);
+      // Q-3465: the seconds Surplus spent before it was dropped are this turn's fallback time (fallbackTime.ts).
+      return addFallbackMs(await runTail(params), surplusLostMs);
     },
   } as TurnRunner;
 }

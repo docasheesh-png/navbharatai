@@ -15415,7 +15415,7 @@ async function noteBuildOutcome(
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         // failedbr #2408/#2428: a failed Surplus turn's seconds are the engine's waste, not our clock's.
         onSurplusAttemptWasted: (ms) => recordAttemptWasted('SURPLUS', 'error', ms),
-        onFailOpen: (reason, diag) => {
+        onFailOpen: (reason, diag, nextRung) => {
           const dropped = surplusSession;
           surplusSession = undefined;
           if (dropped) setAdmittedSurplusScope(dropped, false);
@@ -15426,7 +15426,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
-              message: surplusFallbackMessage(reason),
+              message: surplusFallbackMessage(reason, nextRung), // names the engine that runs next (Q-3467)
               // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
               detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });

@@ -30,10 +30,18 @@ export const GAME_PLAYER_BODY = String.raw`// WHO THE PLAYER IS — and how it i
 // is never missing. A game with no visible body (first-person, or one that brought its own) says so when a model is asked.
 import * as THREE from 'three';
 import type { GameContext } from '../Game';
-import type { HumanoidOptions } from '../three/humanoid';
+import type { HumanoidAction, HumanoidOptions } from '../three/humanoid';
 import { events } from '../core/events';
 
 export type PlayerMove = 'idle' | 'walk' | 'run' | 'jump' | 'land' | 'swim' | 'dive' | 'punch' | 'kick' | 'block' | 'hit' | 'die' | 'fire' | 'swing' | 'throw' | 'use' | 'slide';
+
+// The kit person's action poses (three/humanoid.ts HumanoidAction) named in the model's own move vocabulary. A Record over
+// every HumanoidAction, so a pose added to the kit person without a move here fails the game's typecheck instead of
+// reaching a model as a move it has no name for (failedbr #2523: 'bat' was a pose, never a move).
+const MOVE_FOR_POSE: Readonly<Record<HumanoidAction, PlayerMove>> = {
+  punch: 'punch', swing: 'swing', fire: 'fire', kick: 'kick', throw: 'throw', jump: 'jump', land: 'land', hit: 'hit', use: 'use',
+  bat: 'swing', dive: 'slide', 'dive-left': 'slide',
+};
 
 export interface PlayerChoice {
   /** The kit person's look: { height, build, skin, hair, shirt, trousers, shoes } (colours as 0xRRGGBB). */
@@ -635,7 +643,7 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
   const loaders: PlayerLoaders = typeof load === 'function' ? { library: load } : load;
   const character = createPlayerCharacter(ctx.player.object, choice, () => { hero.root.scale.setScalar(0.0001); }, loaders);   // the kit person steps aside (the shell still drives it)
   const act = hero.act, die = hero.die, revive = hero.revive;
-  hero.act = (pose, strength) => { act(pose, strength); character.act(pose); };
+  hero.act = (pose, strength) => { act(pose, strength); character.act(MOVE_FOR_POSE[pose]); };
   hero.die = (fromFront) => { die(fromFront); character.act('die'); };
   hero.revive = () => { revive(); character.revive(); };
   const body: PlayerBody = {

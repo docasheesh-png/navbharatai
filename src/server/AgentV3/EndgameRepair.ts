@@ -26,6 +26,7 @@ import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { countTscErrors, tscVerdict } from './TscGate';
 import { reactNamespaceValueUse } from './PostEditReviewer';
 import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreDetail, type SnapshotRestoreOutcome } from './snapshotRestore';
+import { filesTheRepairBroke, normRepairPath } from './repairBreakage';
 import { repairBooleanDiscriminants } from './booleanDiscriminant';
 import { repairStyleRegression } from './repairAcceptance';
 
@@ -741,6 +742,22 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
           finalErrors = errors2;
           llmFilesWritten = 0;
           llmReverted = true;
+        } else {
+          // BR2532: the total did not rise, but a file that compiled cleanly before the repair has errors now — the
+          // repair broke it while fixing another. Only those files go back; the real fixes elsewhere stay.
+          const { revert } = filesTheRepairBroke(errors2, finalErrors, preRepair.keys());
+          if (revert.length > 0) {
+            const subset = new Map([...preRepair].filter(([p]) => revert.includes(normRepairPath(p))));
+            const rollback = await rollbackTouched(io, subset, files);
+            if (!rollback.complete) return incompleteRollbackVerdict(io, {
+              ...unverifiedVerdict(errors1.length, deterministicFixes), errorsAfterDeterministic: errors2.length, errorsAfter: finalErrors.length, llmFilesWritten,
+            }, rollback.outcome);
+            io.log?.(`↩️ The batch repair broke ${subset.size} file(s) that compiled before it (${[...subset.keys()].join(', ')}) — put them back.`);
+            const recheck = await tscChecked(io);
+            if (recheck.verified) finalErrors = recheck.errors;
+            llmFilesWritten -= subset.size;
+            llmReverted = true;
+          }
         }
       }
     }

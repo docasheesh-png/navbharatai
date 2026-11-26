@@ -543,13 +543,26 @@ async function surface(page) {
   });
 }
 
+// 🧮 PICTURE WORK NEVER RUNS ON THE GAME'S PAGE (Kadam 1, measured 2026-11-26 on a 6 fps page: 7 compares took 40.9 s of
+// the 63 s keyboard stage, so the playtest ran out of time on every heavy game — BR2539, BR2540, BR2542, BR2545, "the
+// game was never played"). Decoding two 1280x720 PNGs inside the game's page waits behind every frame the game draws; a
+// slow game starved the very check that measures it. Every decode, compare and resize runs on a blank page of its own in
+// the same browser context ("the bench"), so its speed no longer depends on the game's. One bench per context.
+const benches = new WeakMap();
+async function bench(page) {
+  const ctx = page.context();
+  let b = benches.get(ctx);
+  if (!b || b.isClosed()) { b = await ctx.newPage(); benches.set(ctx, b); }
+  return b;
+}
+
 // One proof picture from a screenshot already taken (PNG, base64): scaled to cfg.proof.width, written as a JPEG in the
 // sandbox, and described by its size, path, a content id and how it looks. The PNG is kept only in memory, for the
 // near/far and start/moved comparisons. Never throws: a picture that could not be kept says why.
 async function proofPicture(page, png, view) {
   if (!cfg.proof || !cfg.proof.dir || !png) return null;
   try {
-    const small = await page.evaluate(async ([b64, W, q]) => {
+    const small = await (await bench(page)).evaluate(async ([b64, W, q]) => {
       const blob = await (await fetch('data:image/png;base64,' + b64)).blob();
       const bmp = await createImageBitmap(blob);
       const H = Math.max(1, Math.round((W * bmp.height) / Math.max(1, bmp.width)));
@@ -582,7 +595,7 @@ async function shot(page, box) {
 // image's spread of brightness (a single flat colour has none) and its mean brightness (0–255) — recorded so a
 // picture too dark to play can be measured, not argued about (Q-980, found beside Q-913).
 async function compare(page, a, b) {
-  return page.evaluate(async ([a, b]) => {
+  return (await bench(page)).evaluate(async ([a, b]) => {
     const px = async (b64) => {
       const blob = await (await fetch('data:image/png;base64,' + b64)).blob();
       const bmp = await createImageBitmap(blob);
@@ -605,7 +618,7 @@ async function compare(page, a, b) {
 // S4 (admin 2026-11-24): HOW THE PICTURE LOOKS — decoded at 96x54: how many distinct colours (4 bits a channel) and how
 // much of it is an edge (neighbours whose brightness differs by more than 24). A flat or grey box has few of both.
 async function looks(page, b) {
-  return page.evaluate(async (b64) => {
+  return (await bench(page)).evaluate(async (b64) => {
     const blob = await (await fetch('data:image/png;base64,' + b64)).blob();
     const bmp = await createImageBitmap(blob);
     const W = 96, H = 54;
@@ -1330,7 +1343,10 @@ try {
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
   enter('playing it with touch controls on a phone');
-  const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  // 🧮 deviceScaleFactor 1, not a real phone's 2 (Kadam 1, measured 2026-11-26): the layout, the touch targets and every
+  // CSS pixel are the same, but a software renderer draws four times the pixels at 2 — each phone screenshot of a 6 fps
+  // game took 11–14 s, so the phone check ran out of the budget instead of being made. A real phone's GPU is not this one.
+  const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
   // The phone taps the canvas too, and a tap is a click to the game: the same stub (Q-3380 — #4553 left this context bare).
   ${noPointerLockInstall('m')}
   if (cfg.placeholders) await m.addInitScript(placeholderHook);

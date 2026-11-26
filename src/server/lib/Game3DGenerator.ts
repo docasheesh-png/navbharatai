@@ -7354,6 +7354,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // City traffic drives the kit's vehicles (objects.ts) on the city's grid (city.ts).
     if (files['src/game/three/citypeople.ts']) files['src/game/three/city.ts'] = FILES['src/game/three/city.ts'];
     if (files['src/game/three/citytraffic.ts']) { files['src/game/three/city.ts'] = FILES['src/game/three/city.ts']; files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts']; }
+    // The city, its traffic and its people read the device's geometry tier (geometryTier, Q-2698) from surfaces.ts.
+    if (files['src/game/three/city.ts']) files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
     if (files['src/game/three/world.ts']) {
       files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
       // The ground is textured in the real tier and reads the detail level, both from surfaces.ts.

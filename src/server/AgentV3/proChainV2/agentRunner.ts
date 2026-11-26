@@ -22,7 +22,7 @@
  */
 import { readEngineSafeDiag } from '../../lib/engineSafeDiag';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
-import type { NamedRunner } from '../providers/MultiProviderTurnRunner';
+import { withEarlierFallback, type NamedRunner } from '../providers/MultiProviderTurnRunner';
 import { isBuildStoppedError } from '../stopSignal';
 import { proChainV2Tuning } from './policy';
 import { redactSecrets } from './redact';
@@ -171,7 +171,9 @@ export function createProChainV2AgentRunner(o: ProChainV2AgentOptions): TurnRunn
         skippedAtStart = now() < o.state.skipSurplusUntil;
         emit({ kind: 'agent-start', agent: o.agent, surplus: !o.surplus ? 'absent' : surplusUsable() ? 'first' : 'skipped', chain: canonical });
       }
+      let surplusLostMs = 0;
       if (surplusUsable()) {
+        const surplusStartedAt = now();
         try {
           const result = await o.surplus!.runTurn(params);
           try { o.onSurplusHealthy?.(); } catch { /* never block the turn */ }
@@ -180,6 +182,7 @@ export function createProChainV2AgentRunner(o: ProChainV2AgentOptions): TurnRunn
           try { o.onSurplusError?.(err); } catch { /* observer must never alter the turn */ }
           // A stop, an abort, a policy/maintenance/spend refusal is never "try another engine".
           if (isBuildStoppedError(err) || params.signal?.aborted || !o.surplusRecoverable(err)) throw err;
+          surplusLostMs = now() - surplusStartedAt;
           const reason = (() => { try { return o.surplusReason?.(err) ?? 'mid_build_engine_unavailable'; } catch { return 'mid_build_engine_unavailable'; } })();
           surplusDropped = true;
           const t = now();
@@ -197,7 +200,8 @@ export function createProChainV2AgentRunner(o: ProChainV2AgentOptions): TurnRunn
           }
         }
       }
-      return runTail(params);
+      // The seconds Surplus lost ride out with the answer that replaced it (Q-3465).
+      return withEarlierFallback(await runTail(params), surplusLostMs);
     },
   } as TurnRunner;
 }

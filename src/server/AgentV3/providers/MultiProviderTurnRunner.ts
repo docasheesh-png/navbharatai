@@ -42,6 +42,18 @@ import {
   type SlowRungState,
 } from '../slowRungBench';
 
+/**
+ * The answer of a runner that took over after an engine failed, carrying the time lost on that engine as `fallbackMs`
+ * (Q-3465, failedbr #2525: Surplus spent ~79 s failing, deepseek then answered in 4.4 s, and the row said fallbackMs 0 —
+ * the Surplus wrappers sit OUTSIDE this chain, so the chain's own per-attempt sum never saw it). Every wrapper that hands
+ * a turn to a second runner adds its lost time through here, the same way the chain does: added to the inner value. PURE.
+ */
+export function withEarlierFallback<T extends { fallbackMs?: number }>(result: T, lostMs: number): T {
+  const lost = Number.isFinite(lostMs) && lostMs > 0 ? lostMs : 0;
+  if (lost === 0) return result;
+  return { ...result, fallbackMs: lost + (result.fallbackMs ?? 0) };
+}
+
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
    *  so two rungs that must fail INDEPENDENTLY (e.g. two GLM API keys in a rotation pool) MUST carry

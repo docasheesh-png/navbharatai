@@ -6378,3 +6378,8 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
   - **Fix:** `weakEnginesBeforeLadder()` builds the chain, and both report lines name the engines from it.
   - **Test:** `tests/theFallbackNamesTheEngineThatRuns.test.ts`.
 - **Proof:** each test was reverted and failed.
+- **Q-3465 (same PR):** in the report, the first deepseek call showed fallbackMs 0 after Surplus had failed for about 79 s.
+  - **Why:** both Surplus wrappers sit outside the multi-provider chain. Only the chain fills in fallbackMs.
+  - **Fix:** `withEarlierFallback` adds the lost time at both wrappers.
+  - **Test:** `tests/theSecondsSurplusLostAreOnTheRow.test.ts`, failed when the fix was reverted.
+  - **Still open:** Q-2073 and Q-2116, which are about a failed final call.

@@ -21,6 +21,7 @@
  * Messaging honesty (#3959) and user-facing "high demand" copy (#3956) are separate;
  * this module recovers the build.
  */
+import { withEarlierFallback } from '../../AgentV3/providers/MultiProviderTurnRunner';
 import {
   PublicBuildEngineError,
   PUBLIC_BUILD_ENGINE_UNAVAILABLE,
@@ -200,7 +201,9 @@ export function wrapSurplusRunnerPreWriteFailOpen(
         try { hooks.onSurplusError?.(error); } catch { /* observer must never alter the turn */ }
         if (!params.signal?.aborted) { try { hooks.onSurplusAttemptWasted?.(Date.now() - startedAt); } catch { /* telemetry only */ } }
         if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error, { allowAfterWrite: true })) throw error;
-        return getWeak().runTurn(params);
+        // The seconds Surplus lost ride out with the answer that replaced it (Q-3465).
+        const lostMs = Date.now() - startedAt;
+        return withEarlierFallback(await getWeak().runTurn(params), lostMs);
       }
     },
   };

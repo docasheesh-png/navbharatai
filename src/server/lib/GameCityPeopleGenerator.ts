@@ -12,12 +12,13 @@
  */
 export const GAME_CITY_PEOPLE = String.raw`import * as THREE from 'three';
 import { CITY_KERB, CITY_ROAD_Y, CITY_ZEBRA, type City, type CityPlan } from './city';
-import { geometryTier, type GeometryTier } from './surfaces';
+import { geometryTier, mergeGeometries, type GeometryTier } from './surfaces';
 
 /** What the walkers need from city traffic (createCityTraffic returns it): the lights and where the cars are. */
 export interface TrafficLike {
   lightAt(i: number, j: number, axis: 'x' | 'z', ahead?: number): string;
-  cars: Array<{ object: THREE.Object3D }>;
+  /** Each vehicle, its length along its heading (a bus is 10 m; a crossing is judged by the whole body, not its centre). */
+  cars: Array<{ object: THREE.Object3D; length?: number }>;
 }
 
 export interface CityPeopleOptions {
@@ -92,12 +93,19 @@ export interface CityPeople {
    */
   hitAt(point: { x: number; y: number; z: number }, radius?: number): number;
   /**
-   * Keep a position (the scene's frame, e.g. the player's) out of every standing person; moves it in place and says whether
-   * it moved. Does nothing unless the crowd is solid.
+   * Keep a position, or the player object, out of every standing person. A Vector3 is moved in place (and does nothing unless
+   * the crowd is solid). An Object3D is pushed out in its parent's frame (always — nobody walks through a person).
    */
-  pushOut(position: THREE.Vector3, radius?: number): boolean;
+  pushOut(target: THREE.Vector3 | THREE.Object3D, radius?: number): boolean;
+  /**
+   * The nearest standing person in front of origin (WORLD position, facing yaw) falls down. Returns where they fell, or null.
+   */
+  hit(origin: THREE.Vector3, yaw: number, range?: number, arc?: number): THREE.Vector3 | null;
   dispose(): void;
 }
+
+/** How long a punched person lies on the ground, in seconds. */
+export const DOWN_SECONDS = 4;
 
 /** How fast people cross a road, at least (m/s). */
 export const CROSS_SPEED = 1.4;
@@ -183,17 +191,33 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   const pave = CITY_ROAD_Y + CITY_KERB;
   const root = new THREE.Group();
   root.name = 'City people';
-  const bodyGeo = new THREE.CylinderGeometry(0.2, 0.24, 1.15, light ? 6 : 8);
-  bodyGeo.translate(0, 0.78, 0);
-  const headGeo = light ? new THREE.SphereGeometry(0.15, 6, 4) : new THREE.SphereGeometry(0.15, 10, 8);
-  headGeo.translate(0, 1.55, 0);
+  // 🧍 A PERSON, NOT A CYLINDER WITH A BALL (admin 2026-11-25, open-world problem #7: "villeges human jaise nahi … gol cylinder
+  // ke upar ek ball"). A low-poly person in three instanced parts — shirt (torso and arms), trousers (two legs), skin (neck,
+  // head and hands) — each part one draw call for the whole crowd, so a city full of people costs what the old shapes did.
+  const part = (w: number, h: number, d: number, x: number, y: number, z = 0) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; };
+  /** One geometry from its pieces; the pieces are freed at once. */
+  const merged = (list: THREE.BufferGeometry[]) => { const g = mergeGeometries(list); for (const x of list) x.dispose(); return g; };
+  const bodyGeo = merged([
+    part(0.4, 0.56, 0.22, 0, 1.12),                                       // torso, shoulders at 1.4 m
+    part(0.1, 0.52, 0.11, -0.26, 1.12), part(0.1, 0.52, 0.11, 0.26, 1.12), // arms
+  ]);
+  const legGeo = merged([
+    part(0.15, 0.8, 0.17, -0.1, 0.44), part(0.15, 0.8, 0.17, 0.1, 0.44),  // legs, feet at the pavement
+    part(0.16, 0.06, 0.24, -0.1, 0.03, 0.03), part(0.16, 0.06, 0.24, 0.1, 0.03, 0.03), // shoes
+  ]);
+  const head = light ? new THREE.SphereGeometry(0.12, 6, 4) : new THREE.SphereGeometry(0.12, 10, 8);
+  head.translate(0, 1.6, 0);
+  const headGeo = merged([head, part(0.09, 0.08, 0.09, 0, 1.44), part(0.08, 0.1, 0.09, -0.26, 0.81), part(0.08, 0.1, 0.09, 0.26, 0.81)]);
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+  const legMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
   const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 });
   const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
+  const legs = new THREE.InstancedMesh(legGeo, legMat, count);
   const heads = new THREE.InstancedMesh(headGeo, headMat, count);
-  bodies.name = 'people'; heads.name = 'people heads';
+  bodies.name = 'people'; legs.name = 'people legs'; heads.name = 'people heads';
   const shirts = [0xd62828, 0x1d4ed8, 0xf59e0b, 0x15803d, 0x7c3aed, 0xf3f4f6, 0x0f766e, 0xbe185d, 0x374151];
   const skins = [0x8d5524, 0xc68642, 0xe0ac69, 0x6b3e26, 0xf1c27d];
+  const trousers = [0x1f2937, 0x334155, 0x1e3a8a, 0x78350f, 0x111827, 0x57534e, 0xf5f5f4];
   const colour = new THREE.Color();
   const walkers: Walker[] = [];
   for (let k = 0; k < count; k++) {
@@ -204,27 +228,31 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
     walkers.push({ block, s, dir: rand() < 0.5 ? 1 : -1, speed: baseSpeed * (0.8 + rand() * 0.4), state: 'walk', x: p.x, z: p.z, heading: 0, crossing: null, waited: 0, body: new THREE.Object3D() });
     bodies.setColorAt(k, colour.setHex(shirts[Math.floor(rand() * shirts.length)]));
     heads.setColorAt(k, colour.setHex(skins[Math.floor(rand() * skins.length)]));
+    // From the index, never from rand(): the look must not change the crowd's walks (the same seed, the same crossings).
+    legs.setColorAt(k, colour.setHex(trousers[(k * 5 + 2) % trousers.length]));
   }
-  root.add(bodies, heads);
+  root.add(bodies, legs, heads);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
   const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   const solid = options.solid === true, hittable = options.hittable === true;
   const local = new THREE.Vector3();
+  const tmp = new THREE.Vector3();
   let clock = 0;
 
   const draw = () => {
     walkers.forEach((w, k) => {
       const moving = w.state === 'walk' || w.state === 'toCrossing' || w.state === 'cross' || w.state === 'leave';
       const bob = moving ? Math.abs(Math.sin(clock * 7 + k)) * 0.04 : 0;
-      const y = (w.state === 'cross' || (w.state === 'down' && w.upTo === 'cross') ? CITY_ROAD_Y : pave) + bob;
+      const y = (w.state === 'cross' || (w.state === 'down' && (w.upTo === 'cross' || (!w.upTo && w.crossing))) ? CITY_ROAD_Y : pave) + bob;
       q.setFromAxisAngle(up, w.heading);
       if (w.state === 'down') q.multiply(lying);           // flat on the ground, along the way they faced
       m.compose(at.set(w.x, y, w.z), q, one);
-      bodies.setMatrixAt(k, m); heads.setMatrixAt(k, m);
+      bodies.setMatrixAt(k, m); legs.setMatrixAt(k, m); heads.setMatrixAt(k, m);
       w.body.position.set(w.x, y, w.z);
     });
-    bodies.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
+    bodies.instanceMatrix.needsUpdate = true; legs.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+    if (legs.instanceColor) legs.instanceColor.needsUpdate = true;
     if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
   };
 
@@ -235,9 +263,11 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       for (let t = 0; t <= crossTime + 1; t += 0.5) if (traffic.lightAt(c.node[0], c.node[1], c.axis, t) !== 'red') return false;
       const mx = (c.ax + c.bx) / 2, mz = (c.az + c.bz) / 2;
       const p = new THREE.Vector3();
+      // 🚌 The whole BODY, not its centre (Q-3547: a 10 m bus pulled out of the junction and stopped across the zebra; judged
+      // by its centre it was "far", and the person walked through it).
       for (const car of traffic.cars) {
         inCity(car.object, p);
-        if (Math.hypot(p.x - mx, p.z - mz) < plan.road / 2 + 4) return false;
+        if (Math.hypot(p.x - mx, p.z - mz) - (car.length ?? 4.5) / 2 < plan.road / 2 + 4) return false;
       }
     }
     return true;
@@ -253,6 +283,18 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       const ahead = (p.x - w.x) * fx + (p.z - w.z) * fz;
       const side = Math.abs((p.x - w.x) * fz - (p.z - w.z) * fx);
       if (ahead > 0 && ahead < 1.2 && side < 0.6) return true;
+    }
+    return false;
+  };
+  /** A vehicle's body (its length along its heading, 2.4 m wide with a margin) is where a crossing person must not step. */
+  const inACar = (x: number, z: number): boolean => {
+    if (!traffic) return false;
+    const p = new THREE.Vector3();
+    for (const car of traffic.cars) {
+      inCity(car.object, p);
+      const h = car.object.rotation.y, fx = Math.sin(h), fz = Math.cos(h);
+      const along = (x - p.x) * fx + (z - p.z) * fz, side = (x - p.x) * fz - (z - p.z) * fx;
+      if (Math.abs(along) < (car.length ?? 4.5) / 2 + 0.4 && Math.abs(side) < 1.2) return true;
     }
     return false;
   };
@@ -276,9 +318,10 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
         if (w.state === 'down') {
           w.downFor = (w.downFor ?? 0) - dt;
           if (w.downFor <= 0) {
-            // Hit mid-road: finish crossing. On the pavement: walk on.
-            const next: WalkerState = w.upTo === 'cross' && w.crossing ? 'cross' : 'leave';
-            w.state = next; w.downFor = 0;
+            w.downFor = 0;
+            const resumeCross = w.upTo ? w.upTo === 'cross' && !!w.crossing : !!w.crossing;
+            const next: WalkerState = resumeCross ? 'cross' : 'leave';
+            w.state = next; w.upTo = undefined;
             if (next === 'leave') w.s = loopPosition(plan, w.block[0], w.block[1], w.x, w.z);
           }
           continue;
@@ -321,6 +364,9 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
           const c = w.crossing;
           const fx = c.bx - c.ax, fz = c.bz - c.az, fl = Math.hypot(fx, fz) || 1;
           if (blocked(w, avoid, fx / fl, fz / fl)) continue;
+          // Never into a vehicle on the zebra: wait at the edge of its body until it has gone (Q-3547).
+          const stride = Math.max(w.speed, CROSS_SPEED) * dt + 0.3;
+          if (inACar(w.x + (fx / fl) * stride, w.z + (fz / fl) * stride)) continue;
           // People cross briskly (at least CROSS_SPEED), as they do on a real zebra.
           if (moveToward(w, c.bx, c.bz, Math.max(w.speed, CROSS_SPEED) * dt)) {
             w.block = c.to; w.state = 'leave';
@@ -346,14 +392,33 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       if (fell) draw();
       return fell;
     },
-    pushOut: (position, radius = PERSON_RADIUS) => {
-      if (!solid) return false;
+    pushOut: (target, radius) => {
       root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      const object = (target as THREE.Object3D).isObject3D ? target as THREE.Object3D : null;
+      if (object) {
+        if (!object.parent) return false;
+        const reach = radius ?? 0.4;
+        inCity(object, tmp);
+        let pushed = false;
+        for (const w of walkers) {
+          if (w.state === 'down') continue;
+          const dx = tmp.x - w.x, dz = tmp.z - w.z, d = Math.hypot(dx, dz), min = reach + 0.25;
+          if (d >= min - 1e-4) continue;
+          const ux = d > 1e-6 ? dx / d : Math.sin(w.heading + Math.PI / 2), uz = d > 1e-6 ? dz / d : Math.cos(w.heading + Math.PI / 2);
+          tmp.x = w.x + ux * min; tmp.z = w.z + uz * min;
+          pushed = true;
+        }
+        if (pushed) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
+        return pushed;
+      }
+      if (!solid) return false;
+      const position = target as THREE.Vector3;
+      const reach = radius ?? PERSON_RADIUS;
       local.copy(position).applyMatrix4(toCity);
       let moved = false;
       for (const w of walkers) {
         if (w.state === 'down') continue;
-        const dx = local.x - w.x, dz = local.z - w.z, d = Math.hypot(dx, dz), min = radius + PERSON_RADIUS;
+        const dx = local.x - w.x, dz = local.z - w.z, d = Math.hypot(dx, dz), min = reach + PERSON_RADIUS;
         if (d >= min) continue;
         const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
         local.x = w.x + nx * min; local.z = w.z + nz * min; moved = true;
@@ -361,10 +426,30 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       if (moved) position.copy(local.applyMatrix4(root.matrixWorld));
       return moved;
     },
+    hit: (origin, yaw, range = 1.6, arc = Math.PI * 0.6) => {
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      const o = tmp.copy(origin).applyMatrix4(toCity);
+      const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).transformDirection(toCity);
+      let best: Walker | null = null, bestD = Infinity;
+      for (const w of walkers) {
+        if (w.state === 'down') continue;
+        const dx = w.x - o.x, dz = w.z - o.z, d = Math.hypot(dx, dz);
+        if (d > range || d >= bestD) continue;
+        if (d > 0.05 && Math.acos(Math.max(-1, Math.min(1, (dx * f.x + dz * f.z) / d))) > arc / 2) continue;
+        best = w; bestD = d;
+      }
+      if (!best) return null;
+      if (best.state !== 'cross') best.crossing = null;
+      best.upTo = best.state === 'cross' ? 'cross' : 'leave';
+      best.state = 'down'; best.downFor = DOWN_SECONDS;
+      best.heading = Math.atan2(best.x - o.x, best.z - o.z);
+      draw();
+      return root.localToWorld(new THREE.Vector3(best.x, pave, best.z));
+    },
     dispose: () => {
       root.removeFromParent();
-      bodyGeo.dispose(); headGeo.dispose(); bodyMat.dispose(); headMat.dispose();
-      bodies.dispose(); heads.dispose();
+      bodyGeo.dispose(); legGeo.dispose(); headGeo.dispose(); bodyMat.dispose(); legMat.dispose(); headMat.dispose();
+      bodies.dispose(); legs.dispose(); heads.dispose();
     },
   };
 }

@@ -9,7 +9,8 @@
  * WHAT THIS DOES.
  *  - `keepProofPictures` copies each picture the playtest reported out of the sandbox into NavBharatAI's EXISTING private
  *    bucket (the workspace-asset bucket, `workspaceAssetBucketName` — no new bucket, no public ACL), under
- *    `game-proof-v1/<YYYY-MM-DD>/<buildId>/<view>-<id>.jpg`. Every picture is checked before it is stored: a JPEG, at
+ *    `game-proof-v2/<YYYY-MM-DD>/<owner>/<buildId>/<view>-<id>.jpg` (`<owner>` is the build's VERIFIED uid, encoded
+ *    by the one shared `verifiedOwnerKeySegment`; a build with no verified owner keeps no pictures). Every picture is checked before it is stored: a JPEG, at
  *    most MAX_PICTURE_BYTES, and its bytes hash to the content id the playtest printed (so the stored picture is the one
  *    the report describes, never a truncated or swapped file). At most three a build (MAX_BUILD_BYTES in all).
  *  - 30 DAYS, BY A DELETE-AFTER SWEEP. A bucket lifecycle rule is bucket configuration, and the server deliberately
@@ -24,14 +25,25 @@
  *    picture is not stored and GAME_PROOF says why. A build is never held or failed by this.
  *
  * Privacy: these are screenshots of the USER'S OWN app. They are seen by the admin only, never shared, never shown to
- * another user, and deleted after 30 days.
+ * another user, and deleted after 30 days — or sooner, when the user deletes their account.
+ *
+ * FILED BY VERIFIED OWNER, SO DELETING AN ACCOUNT DELETES THEM (Q-3410). The first layout (#4557,
+ * `game-proof-v1/<day>/<buildId>/…`) carried the build id and no owner, so the account eraser had nothing to search by and
+ * a deleted user's pictures lived out their 30 days. The owner now sits in the key itself, written from the uid the build
+ * route VERIFIED (never a client-claimed one), and `eraseUserProofPictures` — called by DELETE /api/profile — deletes
+ * `game-proof-v2/<day>/<owner>/` in every day folder. The day stays FIRST so the 30-day sweep is still one delete per day.
+ * Old `game-proof-v1` pictures cannot be attributed to anyone and are not guessed at: they still expire by day 30 (the
+ * sweep and the admin route handle both layouts), and the eraser reports that limitation while any of them remain.
  */
 import { createHash } from 'node:crypto';
 import * as admin from 'firebase-admin';
-import { workspaceAssetBucketName } from '../lib/workspaceAssetStorage';
+import { verifiedOwnerKeySegment, workspaceAssetBucketName } from '../lib/workspaceAssetStorage';
 import { PROOF_PICTURES, type ProofShot } from './gamePlaytest';
 
-export const PROOF_PICTURE_PREFIX = 'game-proof-v1';
+/** Where new pictures go: day first (for the sweep), then the verified owner (for the account eraser). */
+export const PROOF_PICTURE_PREFIX = 'game-proof-v2';
+/** The first layout (#4557): no owner in the key. Read and swept until its last day expires, never written again. */
+export const LEGACY_PROOF_PICTURE_PREFIX = 'game-proof-v1';
 /** How long a picture is kept. The admin's decision (Q-3363): 30 days. */
 export const PROOF_PICTURE_RETAIN_DAYS = 30;
 /**
@@ -49,7 +61,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const VIEW = '(start|moved|far)';
 const SANDBOX_PATH = new RegExp(`^${PROOF_PICTURES.dir.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}/${VIEW}-([a-f0-9]{12})\\.jpg$`);
 const BUILD_ID = /^[A-Za-z0-9_-]{1,80}$/;
-const KEY = new RegExp(`^${PROOF_PICTURE_PREFIX}/(\\d{4}-\\d{2}-\\d{2})/([A-Za-z0-9_-]{1,80})/${VIEW}-([a-f0-9]{12})\\.jpg$`);
+const DAY = '(\\d{4}-\\d{2}-\\d{2})';
+/** A verified owner segment: base64url of a workspace uid (1–64 chars) is 2–86 chars and never contains `/`. */
+const OWNER = '([A-Za-z0-9_-]{2,86})';
+const FILE = `([A-Za-z0-9_-]{1,80})/${VIEW}-([a-f0-9]{12})\\.jpg`;
+const KEY = new RegExp(`^${PROOF_PICTURE_PREFIX}/${DAY}/${OWNER}/${FILE}$`);
+const LEGACY_KEY = new RegExp(`^${LEGACY_PROOF_PICTURE_PREFIX}/${DAY}/${FILE}$`);
+const DAY_FOLDER = new RegExp(`^(?:${PROOF_PICTURE_PREFIX}|${LEGACY_PROOF_PICTURE_PREFIX})/${DAY}/$`);
+const OWNER_FOLDER = new RegExp(`^${PROOF_PICTURE_PREFIX}/${DAY}/${OWNER}/$`);
+const dayOfKey = (key: string): string | undefined => (KEY.exec(key) ?? LEGACY_KEY.exec(key))?.[1];
 
 /** Is the kill switch on? Default ON; `AGENTV3_GAME_PROOF_KEEP=off` stops pictures leaving the sandbox. */
 export function proofPictureKeepEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -61,9 +81,10 @@ export interface ProofPictureStore {
   save(key: string, bytes: Buffer, meta: Record<string, string>): Promise<void>;
   /** The bytes, or null when the object does not exist. Throws when storage could not answer. */
   read(key: string, maxBytes: number): Promise<Buffer | null>;
-  /** The day folders under the prefix (`game-proof-v1/YYYY-MM-DD/`). */
+  /** The day folders under BOTH layouts (`game-proof-v2/YYYY-MM-DD/` and the legacy `game-proof-v1/YYYY-MM-DD/`). */
   listDays(): Promise<string[]>;
-  deleteDay(dayPrefix: string): Promise<void>;
+  /** Delete one day folder (the sweep) or one owner's folder inside a day (the account eraser). Nothing else. */
+  deletePrefix(prefix: string): Promise<void>;
 }
 
 /** The private workspace-asset bucket, or null when none is configured (the pictures then stay in the sandbox). */
@@ -81,7 +102,7 @@ export function privateProofPictureStore(env: NodeJS.ProcessEnv = process.env): 
       });
     },
     async read(key, maxBytes) {
-      if (!KEY.test(key)) return null;
+      if (!isProofPictureKey(key)) return null;
       const stream = bucket().file(key).createReadStream({ validation: 'crc32c' });
       const timer = setTimeout(() => stream.destroy(new Error('Proof picture read timed out')), 10_000);
       timer.unref?.();
@@ -99,33 +120,42 @@ export function privateProofPictureStore(env: NodeJS.ProcessEnv = process.env): 
       } finally { clearTimeout(timer); stream.destroy(); }
     },
     async listDays() {
-      const [, , api] = await bucket().getFiles({ prefix: `${PROOF_PICTURE_PREFIX}/`, delimiter: '/', autoPaginate: false, maxResults: 1000 });
-      const prefixes = (api as { prefixes?: unknown } | undefined)?.prefixes;
-      return Array.isArray(prefixes) ? prefixes.filter((p): p is string => typeof p === 'string') : [];
+      const out: string[] = [];
+      for (const root of [PROOF_PICTURE_PREFIX, LEGACY_PROOF_PICTURE_PREFIX]) {
+        const [, , api] = await bucket().getFiles({ prefix: `${root}/`, delimiter: '/', autoPaginate: false, maxResults: 1000 });
+        const prefixes = (api as { prefixes?: unknown } | undefined)?.prefixes;
+        if (Array.isArray(prefixes)) out.push(...prefixes.filter((p): p is string => typeof p === 'string'));
+      }
+      return out;
     },
-    async deleteDay(dayPrefix) {
-      if (!/^game-proof-v1\/\d{4}-\d{2}-\d{2}\/$/.test(dayPrefix)) throw new Error('Refusing to delete outside the proof prefix');
-      await bucket().deleteFiles({ prefix: dayPrefix, force: true });
+    async deletePrefix(prefix) {
+      if (!DAY_FOLDER.test(prefix) && !OWNER_FOLDER.test(prefix)) throw new Error('Refusing to delete outside the proof prefix');
+      await bucket().deleteFiles({ prefix, force: true });
     },
   };
 }
 
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** The object key for one picture, or null when any part is not what the playtest writes. PURE. */
-export function proofPictureKey(buildId: string, view: string, id: string, nowMs: number): string | null {
-  const key = `${PROOF_PICTURE_PREFIX}/${dayOf(nowMs)}/${buildId}/${view}-${id}.jpg`;
+/**
+ * The object key for one picture, or null when any part is not what the playtest writes or the build has no verified
+ * owner. `verifiedOwnerUid` must come from the build route's verified token, never from the request body. PURE.
+ */
+export function proofPictureKey(verifiedOwnerUid: string | null | undefined, buildId: string, view: string, id: string, nowMs: number): string | null {
+  const owner = verifiedOwnerKeySegment(verifiedOwnerUid);
+  if (!owner) return null;
+  const key = `${PROOF_PICTURE_PREFIX}/${dayOf(nowMs)}/${owner}/${buildId}/${view}-${id}.jpg`;
   return BUILD_ID.test(buildId) && KEY.test(key) ? key : null;
 }
 
-/** Is this a key this module writes? The admin route serves nothing else. PURE. */
+/** Is this a key this module writes (or wrote, in the legacy layout)? The admin route serves nothing else. PURE. */
 export function isProofPictureKey(key: unknown): key is string {
-  return typeof key === 'string' && KEY.test(key);
+  return typeof key === 'string' && (KEY.test(key) || LEGACY_KEY.test(key));
 }
 
 /** Is the picture past its 30 days (by the day in its key)? A key that cannot be read counts as expired. PURE. */
 export function proofPictureExpired(key: string, nowMs: number, retainDays = PROOF_PICTURE_RETAIN_DAYS): boolean {
-  return dayExpired(KEY.exec(key)?.[1], nowMs, retainDays);
+  return dayExpired(dayOfKey(key), nowMs, retainDays);
 }
 
 /** Is a `YYYY-MM-DD` day past the retention? The whole of the 30th day after it is still kept. PURE. */
@@ -175,6 +205,8 @@ async function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> 
  */
 export async function keepProofPictures(input: {
   buildId: string | undefined;
+  /** The uid the build route VERIFIED. No verified owner, no pictures kept — they could never be erased with the account. */
+  verifiedOwnerUid: string | null | undefined;
   shots: ProofShot[];
   read: SandboxPictureReader;
   store: ProofPictureStore | null;
@@ -189,13 +221,14 @@ export async function keepProofPictures(input: {
   if (input.enabled === false) return all('keeping pictures is switched off (AGENTV3_GAME_PROOF_KEEP=off)');
   if (!input.store) return all('no private storage bucket is configured on this server');
   if (!input.buildId || !BUILD_ID.test(input.buildId)) return all('this build has no id to file the pictures under');
+  if (!verifiedOwnerKeySegment(input.verifiedOwnerUid)) return all('this build has no verified owner to file the pictures under, so they could not be deleted with the account');
   let timedOut = false;
   const work = (async () => {
     let total = 0;
     for (const [i, s] of shots.entries()) {
       if (timedOut) return true; // past the budget: nothing more is stored, so nothing is stored that the report omits
       if (i >= MAX_PICTURES_PER_BUILD) { out.notKept.push({ view: s.view, why: `over the ${MAX_PICTURES_PER_BUILD}-picture cap for one build` }); continue; }
-      const key = proofPictureKey(input.buildId!, s.view, s.id, nowMs);
+      const key = proofPictureKey(input.verifiedOwnerUid, input.buildId!, s.view, s.id, nowMs);
       if (!key || !SANDBOX_PATH.test(s.path)) { out.notKept.push({ view: s.view, why: 'the picture is not one the playtest writes' }); continue; }
       const bytes = await input.read(s.path);
       if (!bytes || bytes.length === 0) { out.notKept.push({ view: s.view, why: 'it could not be read from the sandbox' }); continue; }
@@ -220,15 +253,64 @@ export async function keepProofPictures(input: {
   return { kept: [...out.kept], notKept: [...out.notKept], retainDays: out.retainDays };
 }
 
-/** Delete every day folder older than RETAIN_DAYS. Returns the folders deleted. Throws only when listing fails. */
+/** Delete every day folder (both layouts) older than RETAIN_DAYS. Returns the folders deleted. Throws only when listing fails. */
 export async function sweepExpiredProofPictures(store: ProofPictureStore, nowMs = Date.now()): Promise<string[]> {
   const deleted: string[] = [];
   for (const day of await store.listDays()) {
-    const m = /^game-proof-v1\/(\d{4}-\d{2}-\d{2})\/$/.exec(day);
+    const m = DAY_FOLDER.exec(day);
     if (!m || !dayExpired(m[1], nowMs)) continue;
-    try { await store.deleteDay(day); deleted.push(day); } catch { /* the next sweep tries again; reads refuse it anyway */ }
+    try { await store.deletePrefix(day); deleted.push(day); } catch { /* the next sweep tries again; reads refuse it anyway */ }
   }
   return deleted;
+}
+
+export interface ProofPictureEraseReport {
+  attempted: boolean;
+  /** Every owner folder this user has in the owner-filed layout was deleted. */
+  ownerPicturesRemoved: boolean;
+  /** The `game-proof-v2/<day>/<owner>/` prefixes deleted (one per day folder present, at most ~31). */
+  foldersDeleted: number;
+  failures: string[];
+  limitations: string[];
+}
+
+/** Said while any legacy (owner-less) day folder is still inside its 30 days. */
+export const LEGACY_PROOF_PICTURE_LIMITATION =
+  'Game proof pictures kept before they were filed by owner cannot be attributed to an account; they are deleted when their 30 days end.';
+
+/**
+ * DELETE /api/profile's step for the game proof pictures (Q-3410): deletes `game-proof-v2/<day>/<owner>/` in every day
+ * folder, for the owner named by `verifiedUid` (the deletion route's VERIFIED token). Legacy owner-less pictures are
+ * reported as a limitation, never guessed at. No bucket configured ⇒ a failure that says so, never a claimed removal.
+ * Never throws.
+ */
+export async function eraseUserProofPictures(
+  verifiedUid: string,
+  store: ProofPictureStore | null = privateProofPictureStore(),
+  nowMs = Date.now(),
+): Promise<ProofPictureEraseReport> {
+  const report: ProofPictureEraseReport = { attempted: false, ownerPicturesRemoved: false, foldersDeleted: 0, failures: [], limitations: [] };
+  const owner = verifiedOwnerKeySegment(verifiedUid);
+  if (!owner) return { ...report, failures: ['No usable account id: game proof pictures could not be selected for removal.'] };
+  if (!store) return { ...report, failures: ['Game proof picture storage is not configured; removal could not be confirmed.'] };
+  let days: string[];
+  try { days = await store.listDays(); } catch {
+    return { ...report, attempted: true, failures: ['Game proof picture storage could not be listed; removal could not be confirmed.'] };
+  }
+  report.attempted = true;
+  let failed = 0;
+  for (const day of days) {
+    const m = DAY_FOLDER.exec(day);
+    if (!m) continue;
+    if (day.startsWith(`${LEGACY_PROOF_PICTURE_PREFIX}/`)) {
+      if (!dayExpired(m[1], nowMs) && !report.limitations.includes(LEGACY_PROOF_PICTURE_LIMITATION)) report.limitations.push(LEGACY_PROOF_PICTURE_LIMITATION);
+      continue;
+    }
+    try { await store.deletePrefix(`${day}${owner}/`); report.foldersDeleted++; } catch { failed++; }
+  }
+  if (failed) report.failures.push(`${failed} day folder(s) of game proof pictures could not be confirmed removed.`);
+  report.ownerPicturesRemoved = failed === 0;
+  return report;
 }
 
 let lastSweepAt = 0;
@@ -263,13 +345,15 @@ export async function readProofPicture(store: ProofPictureStore | null, key: unk
  */
 export function gameProofKeeper(opts: {
   buildId: string | undefined;
+  /** The uid the build route VERIFIED from the token — never `req.body.userId`. */
+  verifiedOwnerUid: string | null | undefined;
   run: ((command: string) => Promise<{ exitCode?: number; stdout: string }>) | undefined;
   env?: NodeJS.ProcessEnv;
 }): (shots: ProofShot[]) => Promise<KeepResult> {
   return async (shots) => {
     const env = opts.env ?? process.env;
     const store = proofPictureKeepEnabled(env) ? privateProofPictureStore(env) : null;
-    const result = await keepProofPictures({ buildId: opts.buildId, shots, read: sandboxPictureReader(opts.run), store, enabled: proofPictureKeepEnabled(env) });
+    const result = await keepProofPictures({ buildId: opts.buildId, verifiedOwnerUid: opts.verifiedOwnerUid, shots, read: sandboxPictureReader(opts.run), store, enabled: proofPictureKeepEnabled(env) });
     if (result.kept.length) maybeSweepProofPictures(store);
     return result;
   };

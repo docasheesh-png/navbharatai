@@ -21,7 +21,10 @@ import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 import { workaroundCountOf } from '../../lib/healIssue';
 import { GREEN_RESTORE_UNCHECKED_DETAIL } from './GreenGuard';
 import { PLATFORM_DONE_TURN_CODE } from './etaHistory';
-import { isOrphanedReport, settleOrphanedReport } from './orphanedBuildReport';
+import { isOrphanedReport, settleOrphanedReport, isAbandonedReport } from './orphanedBuildReport';
+import { workspaceBuildIsLive, workspaceLeaseEnabled, type BuildLeaseStore } from './workspaceBuildLease';
+import { BoundedCache } from '../lib/boundedCache';
+import { deadBuildHandoff, buildEndedUnrecorded } from './deadBuildHandoff';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -711,6 +714,115 @@ export async function settleOrphanedBuildReports(workspaceId: string, newBuildSt
 }
 
 /**
+ * SETTLE A DEAD BUILD WITHOUT WAITING FOR THE NEXT ONE (failedbr #2523, Q-3463). The admission settle above runs only when
+ * a new build starts — #2523 stayed "running" for 922 s because the user started nothing sooner. These two doors settle
+ * an in-progress report as soon as it is provably dead (`isAbandonedReport`: silent for two heartbeat intervals AND its
+ * workspace lease lapsed): the client's own status poll (the workspace it asks about), and a two-minute sweep over every
+ * in-progress report. Best-effort and bounded; a failure leaves the reports as they were. Never throws.
+ */
+export async function settleAbandonedBuildReports(workspaceId: string, nowMs: number, leaseLive: boolean | null): Promise<number> {
+  if (!workspaceId || leaseLive !== false || !Number.isFinite(nowMs)) return 0;
+  if (process.env.VITEST) return 0; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const snap = await db.collection('workspace_diagnostics_v3').doc(workspaceId).collection('history')
+      .where('inProgress', '==', true).limit(5).get();
+    let settled = 0;
+    for (const doc of snap.docs) {
+      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || !isAbandonedReport(report, nowMs, leaseLive)) continue;
+      await commitDiagnosticsHistory(db, workspaceId, settleOrphanedReport(report, { newBuildStartedAt: nowMs, foundBy: 'sweep' }), Date.now(), false);
+      settled += 1;
+    }
+    if (settled) console.warn(`[DIAGNOSTICS] settled ${settled} abandoned build report(s) in ${workspaceId}: lease lapsed, no work recorded for two heartbeats.`);
+    return settled;
+  } catch (err) {
+    console.error(`[DIAGNOSTICS] abandoned-report settle failed (workspace=${workspaceId}): ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
+}
+
+/** One status-poll settle per workspace per minute per instance — the poll can arrive every few seconds. */
+export const STATUS_SETTLE_EVERY_MS = 60_000;
+const lastStatusSettle = new BoundedCache<string, true>({ maxEntries: 5_000, ttlMs: STATUS_SETTLE_EVERY_MS });
+
+/**
+ * Called by `/api/agentv3/status` with the lease answer it already read. Fire-and-forget: never delays the poll, never
+ * throws. Only a definite `false` (the lease lapsed) can settle anything.
+ */
+export function settleAbandonedReportsOnStatus(workspaceId: string | null | undefined, leaseLive: boolean | null, nowMs = Date.now()): void {
+  if (!workspaceId || leaseLive !== false) return;
+  if (lastStatusSettle.get(workspaceId, nowMs)) return;
+  lastStatusSettle.set(workspaceId, true, nowMs);
+  void settleAbandonedBuildReports(workspaceId, nowMs, leaseLive).catch(() => 0);
+}
+
+/** When the sweep last logged a failure (one line an hour at most). */
+let lastSweepErrorLogAt = 0;
+
+/**
+ * The sweep (server.ts, every two minutes, one instance): in-progress reports across workspaces, a bounded batch per
+ * run (the next run takes the rest). A report is settled only when its own workspace's lease answers `false`. Returns
+ * how many were settled. Never throws.
+ */
+export async function sweepAbandonedBuildReports(nowMs: number = Date.now(), limit = 25): Promise<number> {
+  if (process.env.VITEST || !workspaceLeaseEnabled()) return 0; // no lease ⇒ nothing proves a build dead
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const snap = await db.collectionGroup('history').where('inProgress', '==', true).limit(limit).get();
+    let settled = 0;
+    for (const doc of snap.docs) {
+      const workspaceDoc = doc.ref.parent.parent;
+      if (!workspaceDoc || workspaceDoc.parent.id !== 'workspace_diagnostics_v3') continue;
+      const report = doc.data()?.report as BuildDiagnosticsReport | undefined;
+      // The cheap test first: a report that recorded something recently needs no lease read at all.
+      if (!report || !isAbandonedReport(report, nowMs, false)) continue;
+      const leaseLive = await workspaceBuildIsLive(db as unknown as BuildLeaseStore, workspaceDoc.id, nowMs);
+      if (!isAbandonedReport(report, nowMs, leaseLive)) continue;
+      await commitDiagnosticsHistory(db, workspaceDoc.id, settleOrphanedReport(report, { newBuildStartedAt: nowMs, foundBy: 'sweep' }), Date.now(), false);
+      settled += 1;
+    }
+    if (settled) console.warn(`[DIAGNOSTICS] liveness sweep settled ${settled} abandoned build report(s).`);
+    return settled;
+  } catch (err) {
+    // The sweep's collection-group index ships in firestore.indexes.json, whose deploy step may fail without holding a
+    // release (cloudbuild.yaml). Until it exists the query fails every run; said once an hour, not every two minutes —
+    // the status-poll door above needs no such index and keeps settling the workspaces users are looking at.
+    const now = Date.now();
+    if (now - lastSweepErrorLogAt >= 60 * 60_000) {
+      lastSweepErrorLogAt = now;
+      console.error(`[DIAGNOSTICS] liveness sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return 0;
+  }
+}
+
+/**
+ * THE HAND-OFF FROM A DEAD BUILD (failedbr #2525, Q-3470). The newest earlier report of this workspace, read once at the
+ * next build's start; when its build ended without recording an end, the block `deadBuildHandoff` writes from it, else
+ * ''. Bounded to three documents. Never throws.
+ */
+export async function loadDeadBuildHandoff(workspaceId: string, beforeStartedAt: number, nowMs: number = Date.now()): Promise<string> {
+  if (!workspaceId || !Number.isFinite(beforeStartedAt)) return '';
+  if (process.env.VITEST) return '';
+  const db = getDb();
+  if (!db) return '';
+  try {
+    // Newest first through the one index-safe reader (newestHistoryRefs — a descending document-id sort has no index).
+    const refs = await newestHistoryRefs(db.collection('workspace_diagnostics_v3').doc(workspaceId), 3);
+    for (const ref of refs) {
+      const report = (await ref.get()).data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || typeof report.startedAt !== 'number' || report.startedAt >= beforeStartedAt) continue;
+      // Only the build immediately before this one: an older dead build was already followed by another turn.
+      return buildEndedUnrecorded(report) ? deadBuildHandoff(report, { nowMs }) : '';
+    }
+    return '';
+  } catch { return ''; }
+}
+
+/**
  * The same listing, but it says whether the READ ITSELF worked.
  *
  * 🔒 THE DEFECT THIS EXISTS FOR (admin 2026-08-27, verbatim: "user ne 1,2,3…10 edit kiye aur 10th par
@@ -1008,6 +1120,31 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
   } catch {
     return [];
   }
+}
+
+/** The last build's result for one workspace: passed (ok), failed, or unknown (cut off, still running, or no report). */
+export type BuildOutcome = 'passed' | 'failed' | 'unknown';
+
+/**
+ * The LAST build's result for a set of workspaces, in ONE read (admin 2026-11-26: the built-apps list sorted and filtered
+ * by "fail / pass"). The stored report is up to 900 KB, so only `report.ok` is fetched (a field mask). The SAME reading
+ * the All-builds chips use (`statusCounts`): `ok === true` passed, `ok === false` failed, anything else unknown — never
+ * folded into either. A workspace with no report is absent from the map (unknown). Never throws.
+ */
+export async function getBuildOutcomesMany(workspaceIds: string[]): Promise<Map<string, BuildOutcome>> {
+  const out = new Map<string, BuildOutcome>();
+  const db = getDb();
+  const ids = [...new Set(workspaceIds.filter((id) => typeof id === 'string' && id.length > 0 && !id.includes('/')))].slice(0, 100);
+  if (!db || ids.length === 0) return out;
+  try {
+    const snaps = await db.getAll(...ids.map((id) => db.collection(COLLECTION).doc(id)), { fieldMask: ['report.ok'] });
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const ok = (s.data()?.report as { ok?: unknown } | undefined)?.ok;
+      out.set(s.id, ok === true ? 'passed' : ok === false ? 'failed' : 'unknown');
+    }
+  } catch { /* the list degrades to "unknown" outcomes, never to no list */ }
+  return out;
 }
 
 /** One page of `listAllDiagnostics` at a time. */

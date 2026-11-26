@@ -374,6 +374,8 @@ export class Wanted {
     }
   }
 
+  /** Back to no stars (a respawn, an arrest served): the police on their way stand down. */
+  clear(why = 'cleared'): void { this.set(0, why); }
   dispose(): void { for (const off of this.offs) off(); this.offs.length = 0; }
 
   private set(level: number, why: string): void {

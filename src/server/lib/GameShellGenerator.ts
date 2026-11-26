@@ -614,7 +614,10 @@ export class Game {
       if (typeof p.fraction === 'number' && Number.isFinite(p.fraction)) job.fraction = p.fraction;
       modelJobs.set(p.id, job);
     }));
-    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
+    // The player's own shots and swings (owner undefined or 'player', the attack key held), counted from the kit's events —
+    // the playtest presses fire and reads this to prove a gun really shoots (build reports #2526–#2530: a gun that never fired).
+    const attacks = { fired: 0, swung: 0 };
+    const hook = { status: () => state.status, attacks: () => ({ ...attacks }), score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
       // How much the last frame asked of the GPU — what decides whether a cheap phone keeps up (the playtest's budget check).
       load: () => { const i = this.renderer.info; return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures }; },
       models: () => { const now = performance.now(); let stuck = 0; for (const j of modelJobs.values()) if (j.fraction <= 0 && now - j.since > 20000) stuck++; return { pending: modelJobs.size, stuck }; },
@@ -637,8 +640,8 @@ export class Game {
       const owner = (payload as { ownerId?: unknown } | null)?.ownerId;
       return (owner === undefined || owner === 'player') && this.attackHeldThisStep;
     };
-    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { this.firedThisStep = true; this.heroAct('fire'); } }));
-    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { this.swungThisStep = true; this.heroAct('swing'); } }));
+    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { attacks.fired++; this.firedThisStep = true; this.heroAct('fire'); } }));
+    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { attacks.swung++; this.swungThisStep = true; this.heroAct('swing'); } }));
     this.disposers.push(events.on('PLAYER_JUMPED', () => this.heroAct('jump')));
     this.disposers.push(events.on('PLAYER_DAMAGED', () => this.heroAct('hit')));
 
@@ -898,9 +901,6 @@ export class Game {
         this.hero.root.visible = !this.chased;
       }
       this.playerModel?.update(delta);
-      // Any action the game plays on the player (performAction: pick-up, open-door, eat, or one NavBharatAI made), after the
-      // body has posed itself, so the action's pose is the one drawn.
-      updateActions(this.context, delta);
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
@@ -914,6 +914,10 @@ export class Game {
       this.fireHandGun(delta);
       this.zoomScope();
       this.poseActionButtons();
+      // Any action the game plays (performAction — on the player, an NPC, or every NPC of a kind: jump, kick-car, dance,
+      // salute, or one NavBharatAI made) runs LAST, after the player's body, every character's walk (the step hooks above)
+      // and the button poses, so the action's pose is the one drawn on every character.
+      updateActions(this.context, delta);
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
       groundScene(this.scene);
@@ -4903,25 +4907,58 @@ export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W
     console.error('[feature ' + f.id + '] switched off — ' + reason);
     try { events.emit('FEATURE_FAILED', { id: f.id, reason }); } catch { /* a listener must not undo the isolation */ }
   };
+  // ⏳ AN ASYNC setup() IS WAITED FOR (failedbr #2531, 2026-11-25: a monsters feature with "async setup()" handed the host a
+  // Promise; the host ran its update() at once, before the monsters existed, and they "stood where they were" for the whole
+  // game). A setup that returns a Promise (it loads a model first) is now a feature that STARTS when that Promise settles:
+  // its update() runs only from then on, its value is what the Promise resolves to, a rejection switches it off with the
+  // reason, and a feature that needs it waits for it. Nothing changes for an ordinary setup().
+  const starting = new Set<string>();
+  let disposed = false;
+  let pending: GameFeature<W>[] = [];
+  const isPromise = (v: unknown): v is PromiseLike<unknown> => !!v && typeof (v as { then?: unknown }).then === 'function';
+  const drain = (ctx: GameContext, world: W): void => {
+    // In the order of the list, but a feature waits for the ones it needs.
+    let progressed = true;
+    while (pending.length && progressed) {
+      progressed = false;
+      for (let i = 0; i < pending.length; i++) {
+        const f = pending[i];
+        const needs = f.needs || [];
+        const missing = needs.find((id) => !seen.has(id) || off.has(id));
+        if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
+        if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
+        pending.splice(i--, 1); progressed = true;
+        try {
+          const value = f.setup ? f.setup(ctx, world, api) : undefined;
+          if (isPromise(value)) {
+            starting.add(f.id);
+            Promise.resolve(value).then((v) => {
+              starting.delete(f.id);
+              if (disposed) { try { f.dispose?.(); } catch { /* it never ran */ } return; }
+              if (off.has(f.id)) return;
+              running.push(f); if (v !== undefined) shared.set(f.id, v);
+              drain(ctx, world);                                             // the features that waited for it start now
+            }, (error) => { starting.delete(f.id); if (!disposed) { fail(f, 'setup', error); drain(ctx, world); } });
+            continue;
+          }
+          running.push(f); if (value !== undefined) shared.set(f.id, value);
+        } catch (error) { fail(f, 'setup', error); }
+      }
+    }
+    // Still waiting for an async setup that one of them needs: they start when it does. Otherwise their needs form a circle.
+    if (starting.size) return;
+    for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+    pending = [];
+  };
+  const status = () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const }));
+  // 🔎 NavBharatAI's playtest reads which features are switched off and why (a feature that throws was silent before:
+  // one console line, so "the enemies never came" had no reason anywhere). Read-only.
+  const hosts = typeof window !== 'undefined' ? ((window as unknown as { __nbFeatureHosts?: Array<() => unknown> }).__nbFeatureHosts ??= []) : null;
   return {
     setup(ctx, world) {
-      // In the order of the list, but a feature waits for the ones it needs.
-      const pending = [...all];
-      let progressed = true;
-      while (pending.length && progressed) {
-        progressed = false;
-        for (let i = 0; i < pending.length; i++) {
-          const f = pending[i];
-          const needs = f.needs || [];
-          const missing = needs.find((id) => !seen.has(id) || off.has(id));
-          if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
-          if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
-          pending.splice(i--, 1); progressed = true;
-          try { const value = f.setup ? f.setup(ctx, world, api) : undefined; running.push(f); if (value !== undefined) shared.set(f.id, value); }
-          catch (error) { fail(f, 'setup', error); }
-        }
-      }
-      for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+      pending = [...all];
+      if (hosts && !hosts.includes(status)) hosts.push(status);
+      drain(ctx, world);
     },
     update(ctx, world, delta) {
       for (const f of [...running]) {
@@ -4930,8 +4967,10 @@ export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W
         try { f.update(ctx, world, delta, api); } catch (error) { fail(f, 'update', error); }
       }
     },
-    status: () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const })),
+    status,
     dispose() {
+      disposed = true;
+      if (hosts) { const at = hosts.indexOf(status); if (at >= 0) hosts.splice(at, 1); }
       for (const f of running.splice(0).reverse()) { try { f.dispose?.(); } catch (error) { console.error('[feature ' + f.id + '] dispose: ' + String(error)); } }
       shared.clear();
     },
@@ -5325,7 +5364,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       'controller and VFX layers — render it and you have a running game.\n' +
       (files[GAME_BOUNDARY_PATH] ? 'THE MAP HAS AN EDGE: pass bounds: { minX, maxX, minZ, maxZ } in the options (or ctx.world.setBounds in setup) — the player, the car they drive and every character stay inside behind real walls (walls: "invisible" when mountains or sea are the visible edge); never let anyone drive or walk off the map.\n' : '') +
       (files[GAME_AIM_PATH] ? 'EVERY GUN AIMS WITH ctx.aim(): const a = ctx.aim(); gun.update(dt, fire, a.muzzle, a.shot, bullets) — the crosshair point from the real muzzle; never a hand-written direction (a constant one fires the same way whatever the aim).\n' : '') +
-      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES (pick up the gun on the road, open the gate and go in, eat, climb…) is played on the player\'s chosen character with performAction(ctx, name) from ./game/play/actions (kit: pick-up, drop, eat, drink, open-door, wave, point, raise-hands, bow); for any other, run_recipe({ name: "compose_action" }) makes it. Never tell the user the character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
+      (files[GAME_ACTIONS_PATH] ? 'ANY ACTION THE USER NAMES, ON ANY CHARACTER (jump, kick the car, swim, open the car door, fire, dance, salute — the player, the police, the villagers, a bot) is played with performAction(ctx, name, who?) from ./game/play/actions: no who = the player; \'police\' / \'villager\' / any kind = every character of that kind; \'all\' = everyone; an entity\'s object = one. The kit has 120+ moves (MOVES in that file; Hindi names work); for any other, run_recipe({ name: "compose_action" }) makes it. Loops and stances end with stopAction(ctx, who). Never tell the user a character lacks a move. Mark a pickup with object.userData.pickup = true. ANY other character (an NPC, an enemy) holds an item with holdInHand(character, item) from ./game/play/playerBody — a library model by its hand bone, a kit person by its grip. ANY visual effect the user imagines (fire tornado, rainbow trail, magic): run_recipe({ name: \"compose_effect\" }), then ctx.particles.burst(name, x, y, z).\n' : '') +
       'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       (files[RACE_CUSTOM_PATH] ? 'The player\'s CAR and TRACK are the user\'s to change: RacingRoadGame reads src/game/car.ts (export const CAR: CarChoice — color, tuning, or a 3D model sized to the car) and src/game/track.ts (export const TRACK: TrackChoice — race laps on the user\'s own track model) by itself when they exist; see src/game/play/raceCustom.ts.\n' : '') +
       (files['src/game/LaneRunnerGame.tsx'] ? 'For an endless runner, render <LaneRunnerGame title="…" /> from ./game/LaneRunnerGame: three lanes, obstacles to dodge, jump and slide under (a row always has a way through), coins, rising speed, swipes and keys, and the kit\'s start screen, pause, game over with Play again, settings and language. Change the theme (colours, title, lanes, speed) through its props, or build your own scene with createLaneRunnerScene(); never hand-write the runner\'s rules, lanes or swipes.\n' : '') +

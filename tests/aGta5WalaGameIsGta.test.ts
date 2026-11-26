@@ -49,6 +49,7 @@ describe('BR1966: a glued gta5 title is GTA, like spaced "gta 5"', () => {
       'generate_game_runtime',
       'generate_game_3d',
       'generate_athree_map', // an open-world game gets the big map, laid down by the platform (failedbr #2478)
+      'generate_game_systems', // …and the fight kit its street danger runs on (admin's open-world problem #4, 2026-11-25)
       'generate_game_vfx',
       'generate_melody',
       'generate_game_shell',

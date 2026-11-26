@@ -168,7 +168,8 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
-  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote,
+  isTestOnlyFile, releaseBuildExcludesTests, releaseConsequence } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { hollowFeatureWriteNote } from './hollowFeature';
@@ -407,7 +408,7 @@ import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
 import { enemyRequestOf, enemyFeatureSource, featuresIndexWith, ENEMIES_FEATURE_PATH } from '../lib/GameEnemiesFeature';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_STREET_DANGER_FEATURE, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -1307,7 +1308,7 @@ export class ToolDispatcher {
     if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
     let rel = path;
     try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
-    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown });
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown, filesAtTurnStart: this.growthBaseline });
     if (verdict.allow) return;
     this.growthRefused.add(rel);
     try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }
@@ -3881,6 +3882,21 @@ export class ToolDispatcher {
    */
   private _tsProject: TsProjectVerdict = 'unknown';
   private _tsProbeAttempts = 0;
+  /**
+   * Does the release build leave test files out (Q-3462)? Read once, and only when a typecheck has an error in a test
+   * file — the only time the answer changes a note. A read that fails stays unknown and is asked again next time.
+   */
+  private _releaseExcludesTests: boolean | null = null;
+  private async releaseExcludesTests(errors: ReadonlyArray<{ file: string }>): Promise<boolean | null> {
+    if (this._releaseExcludesTests !== null || !errors.some((e) => isTestOnlyFile(e.file))) return this._releaseExcludesTests;
+    try {
+      const pkg = await this.actuator.readFile(this.workspaceId, 'package.json');
+      const config = /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(String(pkg ?? ''))?.[1]?.replace(/^\.\//, '').replace(/["']/g, '');
+      const tsconfig = config ? await this.actuator.readFile(this.workspaceId, config).catch(() => null) : null;
+      this._releaseExcludesTests = releaseBuildExcludesTests(typeof pkg === 'string' ? pkg : null, typeof tsconfig === 'string' ? tsconfig : null);
+    } catch { /* unknown stays unknown — the note keeps its cautious wording */ }
+    return this._releaseExcludesTests;
+  }
 
   /** The write-time typecheck's own numbers, for the build report (`WRITE_TIME_TYPECHECK`). */
   writeTypecheckStats(): WriteTypecheckStats {
@@ -4659,8 +4675,10 @@ export class ToolDispatcher {
       }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
-      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);
+      // Q-3462: a test file's error is said as a release blocker only when the release build compiles test files.
+      const releaseExcludesTests = await this.releaseExcludesTests(errors);
+      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, { releaseExcludesTests }) + members;
+      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, { releaseExcludesTests });
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
@@ -8558,7 +8576,11 @@ export class ToolDispatcher {
               // this tool holds no file content, and reading one back would put I/O in a hot path for a
               // sharper wording. The sourceless form still names both causes in order and still says not
               // to rewrite the file, which is the loop that had to break.
-              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
+              // Q-3462 sibling: errors only in test files the release build leaves out are not a failed production build.
+              const release = releaseConsequence(tscErrs, await this.releaseExcludesTests(tscErrs));
+              tscHeader = release.blocksRelease
+                ? `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`
+                : `TYPE ERROR(S) in test files only — ${release.text}. Fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscStatus = 'clean';
             }
@@ -10445,11 +10467,11 @@ export class ToolDispatcher {
         const made = await composeAction(name, description, askStandIn, supplied);
         if (made.kind === 'refused') refuse(made.reason);
         if (made.kind === 'library') {
-          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger). It plays on the character the user chose. Nothing was written.`;
+          return `The kit already has the "${made.name}" action: call performAction(ctx, '${made.name}') from src/game/play/actions.ts when the game should do it (a key, a button, a trigger) — on the player; add a third argument for other characters: 'police' (every police character), 'villager', 'all', or one entity's object. It plays on any body. Nothing was written.`;
         }
         const written = await this.writeRecipeFiles({ [made.path]: made.source }, agent);
         this.scheduleCheckpoint('character action');
-        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it; it plays on the character the user chose, whatever model it is. Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
+        return `The "${made.def.name}" action is at ${written[0] ?? made.path}${made.fromModel ? ' (designed by NavBharatAI)' : ''}. Call performAction(ctx, '${made.def.name}') from src/game/play/actions.ts when the game should do it — on the player, or with a third argument on other characters ('police', 'villager', 'all', or one entity's object); it plays on any body, whatever model it is.${made.def.loop || made.def.hold ? ` It ${made.def.loop ? 'loops' : 'holds its last pose'} until stopAction(ctx, who).` : ''} Its steps: ${(made.def.steps ?? []).map((st) => st.do + (st.event ? ' ' + st.event : '')).join(', ') || 'none'}. React to its events with events.on(...) in the game. Never tell the user the character cannot do it.`;
       }
 
       case 'compose_rule': {
@@ -10689,6 +10711,7 @@ export class ToolDispatcher {
             await this.ensurePlayerFile(agent, 'generate_open_world');
             // The game's own list of features: created once, never replaced (it is the user's game from then on).
             let listed = false;
+            let danger = false;
             try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!listed) {
@@ -10699,7 +10722,19 @@ export class ToolDispatcher {
                 const enemiesFile = await this.guardedWrite(ENEMIES_FEATURE_PATH, enemyFeatureSource(enemyReq), { agent, source: 'generate_open_world' });
                 this.state?.recordFileChange({ path: ENEMIES_FEATURE_PATH, kind: enemiesFile.kind }, agent);
                 getWorkspaceMemory(this.workspaceId).indexFile(ENEMIES_FEATURE_PATH, enemiesFile.content);
-                indexSource = featuresIndexWith(GAME_FEATURES_INDEX, 'enemies') ?? GAME_FEATURES_INDEX;
+                indexSource = featuresIndexWith(indexSource, 'enemies') ?? indexSource;
+              }
+              // A game with a fight in it (the seed passes danger: true when it laid the systems kit) starts with street
+              // danger — enemies, bystanders and police (Q-3521) — only when those systems are really in the project.
+              if (owRec.danger === true) {
+                const has = async (p: string) => { try { await this.actuator.readFile(this.workspaceId, p); return true; } catch { return false; } };
+                if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {
+                  const feature = await this.guardedWrite(GAME_STREET_DANGER_PATH, GAME_STREET_DANGER_FEATURE, { agent, source: 'generate_open_world' });
+                  this.state?.recordFileChange({ path: GAME_STREET_DANGER_PATH, kind: feature.kind }, agent);
+                  getWorkspaceMemory(this.workspaceId).indexFile(GAME_STREET_DANGER_PATH, feature.content);
+                  danger = true;
+                  indexSource = featuresIndexWith(indexSource, 'streetDanger') ?? indexSource;
+                }
               }
               const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, indexSource, { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
@@ -10710,7 +10745,8 @@ export class ToolDispatcher {
             const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
             this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
             getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
-            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.'
+              + (danger ? ' The game ALREADY has its fight: src/game/features/streetDanger.ts (listed in FEATURES) spawns enemies who chase and attack, bystanders who can be hurt, and the police with wanted stars on a crime; the punch lands. Change THAT file for anything about enemies, police or fighting — never add a second set.' : '');
           }
         }
         this.scheduleCheckpoint('open world starter');

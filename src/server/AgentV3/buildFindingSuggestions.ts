@@ -407,12 +407,36 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     withEvidence: true,
   },
   {
+    // A feature the kit's host switched off while the game was played (it threw, or its async setup failed) — admin
+    // 2026-11-26 ("enemy ban hi nahi rahe"): before, this left one console line and nothing else.
+    code: 'GAME_FEATURE_OFF',
+    title: 'Fix the part of the game that switched off',
+    detail: 'NavBharatAI played your game and a part of it switched itself off because of an error, so it does nothing on screen.',
+    prompt: 'NavBharatAI played this game and the feature(s) named below switched themselves off because they threw an error (the reason is named). Fix each one at its root in its own file under the game\'s features folder: use only the game kit\'s real APIs (read the kit file before calling it), do not call a method the kit does not have, and keep it listed. Change nothing else.',
+    withEvidence: true,
+  },
+  {
+    // The user asked for enemies in an open world and the platform could not add its own (enemiesTurn.ts).
+    code: 'ENEMIES_KIT_NOT_LAID',
+    title: 'Add the enemies',
+    detail: 'You asked for enemies, but NavBharatAI could not add the game parts they need this time.',
+    prompt: 'The user asked for enemies in this open world. Add the game kit\'s systems (run the game systems recipe), then one feature that spawns enemies near the hero with the kit\'s Entities (spawnAround) and lets them attack with damagePlayer, and list it in the features list. Change nothing else.',
+    withEvidence: true,
+  },
+  {
+    code: 'ENEMIES_NOT_LISTED',
+    title: 'Add the enemies',
+    detail: 'You asked for enemies, but the game\'s list of parts was not in its usual shape, so NavBharatAI could not add them by itself.',
+    prompt: 'The user asked for enemies in this open world. Create ONE feature that spawns enemies near the hero (Entities.spawnAround from the game engine) and lets them attack with damagePlayer, and list it in the game\'s features list. Change nothing else.',
+    withEvidence: true,
+  },
+  {
     // A rule the user named was sent as the kit's own event while the game was played, and nothing happened
     // (gamePlaytest.ts rule probes, admin 2026-11-24). The measured line travels with the fix.
     code: 'GAME_RULE_BROKEN',
     title: 'Make the game follow your rules',
-    detail: 'NavBharatAI played your game and a rule you asked for (for example, killing an enemy raises the score) did not happen.',
-    prompt: 'NavBharatAI played this game and checked the rules the user asked for, and at least one did not happen (named below). Wire each one to the game kit\'s own events so it really happens in play: give every enemy the kit\'s Health (it announces ENEMY_DIED once) and listen for ENEMY_DIED to raise the score there with the kit\'s addScore; give the player a Health whose death event is PLAYER_DIED, and end the round on it. Keep the score, the round status and the health in the kit\'s game state so the rules can be checked again. Change nothing else.',
+    detail: 'NavBharatAI played your game and a rule you asked for (for example, killing an enemy raises the score) or the gun firing did not happen.',
+    prompt: 'NavBharatAI played this game and checked the rules the user asked for, and at least one did not happen (named below). Wire each one to the game kit\'s own events so it really happens in play: give every enemy the kit\'s Health (it announces ENEMY_DIED once) and listen for ENEMY_DIED to raise the score there with the kit\'s addScore; give the player a Health whose death event is PLAYER_DIED, and end the round on it. If the player\'s gun did not fire, call that gun\'s weapon.update(dt, ctx.input.isDown(\'attack\'), muzzle, aim, projectiles) every step from a feature that is in the game\'s features list, with no ownerId (the player\'s own shot), and call projectiles.update(dt, targets) as well so the shots travel and hit — the attack keys are F, J and a click. Keep the score, the round status and the health in the kit\'s game state so the rules can be checked again. Change nothing else.',
     withEvidence: true,
   },
   {
@@ -589,6 +613,10 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  * the admin on 2026-10-11 (Q-380, closed): leave it — a crashed build stays free and NavBharatAI absorbs it.
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
+  // housesTurn.ts (2026-11-26): the user asked to walk into the houses, and this game's copy of the engine is too old to make
+  // city houses enterable. The answer is the engine update (the kit refresh), not a prompt — a prompt would only tempt a
+  // painted door that "opens". The message says plainly that the game needs the update.
+  'HOUSES_NOT_ENTERABLE',
   // gameRegression.ts (admin 2026-11-21): this turn made the game worse. Its answer is not a prompt to send but the one-tap
   // "Go back" card (the ❗️ list row, gameUndo.ts) that restores the saved version from just before the turn — a new prompt would build
   // on top of the broken game.

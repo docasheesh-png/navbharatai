@@ -77,6 +77,9 @@ import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint
 import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
+import { noteServerMemory } from '../AgentV3/buildPhases/serverMemoryPulse';
+import { enemiesAtTurnStart } from '../AgentV3/buildPhases/enemiesTurn';
+import { housesAtTurnStart } from '../AgentV3/buildPhases/housesTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
 import { raceWorldAtTurnStart } from '../AgentV3/raceWorld';
@@ -86,7 +89,7 @@ import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../Age
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
 import { offerBugHunt, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
-import { isKitFile as isGameKitFile } from '../AgentV3/growthGuard';
+import { isKitFile as isGameKitFile, growthRequestFor } from '../AgentV3/growthGuard';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -100,7 +103,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
 import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists, finalChecksAfterSteer } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
-import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
+import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity, complexityRoutingMessage } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
@@ -238,7 +241,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive,
+  claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive, workspaceLeaseEnabled,
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { zTestFreeBilling } from '../lib/zTestAccount';
@@ -807,7 +810,7 @@ import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEt
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { rateIsConfigured } from '../AgentV3/sandboxRate';
 import { refuseUnusableBuildPrompt } from '../AgentV3/platformNoticePrompt';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { settleAbandonedReportsOnStatus, loadDeadBuildHandoff, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess, summaryAfterRescue } from '../AgentV3/renderRescue';
@@ -4111,14 +4114,9 @@ function noteBuildAccepted(diag: BuildDiagnostics): BuildDiagnostics {
   return diag;
 }
 
-/**
- * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
- * second build in the same workspace (autopsy eed79815 — see workspaceBuildLease.ts). Default ON;
- * `AGENTV3_WORKSPACE_LEASE=off` reverts to the in-memory lock alone, with no deploy.
- */
-export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off';
-}
+// `workspaceLeaseEnabled` moved beside the lease it switches (workspaceBuildLease.ts), so the liveness sweep reads the
+// same flag (Q-3463); re-exported here for every existing caller.
+export { workspaceLeaseEnabled };
 
 /**
  * The PLAN runner for a tier: its plan rung first (glm-5.3-flash / kimi-k2.7-code / Sonnet), then the
@@ -4631,7 +4629,10 @@ export function registerAgentV3Routes(app: Express): void {
     // build that really ended.
     let buildHeldElsewhere = false;
     if (!buildRunningHere && workspaceId && workspaceLeaseEnabled()) {
-      buildHeldElsewhere = (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true;
+      const leaseLive = await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId);
+      buildHeldElsewhere = leaseLive === true;
+      // Q-3463: a lapsed lease on a report still marked running is a dead build — settle it now, not at the next build.
+      settleAbandonedReportsOnStatus(workspaceId, leaseLive);
     }
     // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
@@ -14377,6 +14378,7 @@ async function noteBuildOutcome(
     // See progressEta.ts for why measurement beats every constant we could tune here.
     let etaPlannedFiles = 0;
     let etaFirstFileAt = 0;
+    const memoryPulse = { band: 0, since: Date.now() };   // serverMemoryPulse.ts — the highest memory band this build has recorded
     /**
      * Files the PLATFORM laid down before the builder's first call (the game-kit seed, gameKitSeed.ts —
      * build 46e2d74b). They sit in `writtenFiles` so they are saved, but they are not progress on the
@@ -14580,6 +14582,7 @@ async function noteBuildOutcome(
       }
       // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
       // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
+      noteServerMemory(memoryPulse, { record: (issue) => buildDiagRef?.record(issue) }, Date.now() - memoryPulse.since); // Q-3354: the server's memory before a loss
       etaTick += 1;
       if (!abort.signal.aborted && etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
@@ -14856,7 +14859,7 @@ async function noteBuildOutcome(
       // of the prompt, while `analyzeRequest` scores explicit length bands (+5 over 300, +10 over 800)
       // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
       // different number printed as the same fact.
-      try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
+      try { buildDiag.setRequestAnalysis(analysis, complexityDecision); } catch { /* observation only — never a build's problem */ }
       // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
       // a complexity of 60 must explain where the rest came from (autopsy e725e002).
       if (attachmentRead) {
@@ -15314,9 +15317,8 @@ async function noteBuildOutcome(
         // complex and nobody listened". It was the second. Admin-only; names no vendor.
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'COMPLEXITY_ROUTING', autoResolved: true,
-          message: buildIsComplex
-            ? `Complexity: COMPLEX (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's second rung, past the cheap flash opener.`
-            : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung.`,
+          // Q-3466: the same sentence the requestAnalysis block carries — see scoreBandVersusRouting.
+          message: complexityRoutingMessage(complexityDecision, analysis?.startTier),
           detail: complexityDecision.reason,
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }
@@ -15420,7 +15422,7 @@ async function noteBuildOutcome(
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         // failedbr #2408/#2428: a failed Surplus turn's seconds are the engine's waste, not our clock's.
         onSurplusAttemptWasted: (ms) => recordAttemptWasted('SURPLUS', 'error', ms),
-        onFailOpen: (reason, diag) => {
+        onFailOpen: (reason, diag, nextRung) => {
           const dropped = surplusSession;
           surplusSession = undefined;
           if (dropped) setAdmittedSurplusScope(dropped, false);
@@ -15431,7 +15433,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
-              message: surplusFallbackMessage(reason),
+              message: surplusFallbackMessage(reason, nextRung), // names the engine that runs next (Q-3467)
               // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
               detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });
@@ -17749,7 +17751,7 @@ async function noteBuildOutcome(
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
         // 🧱 GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when the turn began, and the user's own words.
-        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, prompt); } catch { /* the end-of-turn lock still holds */ }
+        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, growthRequestFor(prompt, checksRequest)); } catch { /* the end-of-turn lock still holds */ }
         try {
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
@@ -18840,6 +18842,10 @@ async function noteBuildOutcome(
         }
       } catch { /* project context is best-effort — never blocks a build */ }
 
+      // 🪦 THE BUILD BEFORE THIS ONE DIED (failedbr #2525, Q-3470): its saved report says what it wrote and what its last
+      // typecheck found, so this build does not re-read the project to learn it. '' unless that build ended unrecorded.
+      const deadBuildNote = await promptSteps.step('dead-build hand-off', () => loadDeadBuildHandoff(workspaceId, buildStartedAt));
+      buildPrompt = [deadBuildNote, buildPrompt].filter(Boolean).join('\n\n---\n\n');
       // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript
       // for THIS workspace from the durable conversation store and prepend a short "User: … / You: …"
       // recap, so the model remembers what was discussed/done (not just the files). This is what
@@ -19584,6 +19590,13 @@ async function noteBuildOutcome(
       // 🏙️📏 "SHEHAR BADA KARO" AND "MAP 40KM*40KM" ARE DONE BY THE PLATFORM ITSELF (worldTurn.ts, Q-3302/Q-3303 — failedbr #2495):
       // a city grows by joined tiles, a named size is laid out; where it is not clear, nothing changes and the builder asks.
       buildPrompt = withPlatformHandoff(await worldWishAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
+      // 🦹 "ENEMY BANAO" ON AN OPEN WORLD THAT EXISTS: the platform lays the kit, writes and lists street danger (enemiesTurn.ts).
+      buildPrompt = withPlatformHandoff(await enemiesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
+        runRecipe: async (name) => !(await dispatcher.dispatch({ id: `enemies-${name}`, name: 'run_recipe', input: { name } }, 'architect', { signal: abort.signal })).is_error }), buildPrompt);
+      // 🚪 "GHAR KE ANDAR JAANA HAI": every city house becomes one you can walk into (housesTurn.ts).
+      buildPrompt = withPlatformHandoff(await housesAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
       // 🏁 "RACE SHEHAR ME KARO" — the user's yes moves a road-library race onto the world's city roads (raceWorld.ts, map
       // expansion item 8): the platform writes the switch itself, last, after the files it needs. OFF unless AGENTV3_RACING_WORLD=on.
@@ -21792,7 +21805,7 @@ async function noteBuildOutcome(
       // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
       // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
       if (!abort.signal.aborted && !initialTerminalDecline) {
-        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
+        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: growthRequestFor(prompt, checksRequest), read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
           platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
           refused: dispatcher.growthRefusedThisTurn(), written: [...writtenFiles.keys()], record: (issue) => buildDiag.record(issue),
@@ -23953,7 +23966,7 @@ async function noteBuildOutcome(
             try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
           }
           const adServingPlayer = (await adFactsNow()).players.length > 0;
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer });
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt: checksRequest, appSource, adServingPlayer });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's
@@ -24909,7 +24922,7 @@ async function noteBuildOutcome(
           versions: () => buildHistoryStore.list(restorePointKey(workspaceId, null)),
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
-          keepPictures: gameProofKeeper({ buildId, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363
+          keepPictures: gameProofKeeper({ buildId, verifiedOwnerUid: verified?.uid, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363, filed by the VERIFIED owner (Q-3410)
         }, gamePlayKeep);
         if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }
       };
@@ -26125,6 +26138,7 @@ async function noteBuildOutcome(
           // claim a typecheck happened when it did not.
           // …or a write-time compile that really looked at the project (Q-3249: "no typecheck ran" beside 5 write-time runs).
           typecheckRan: gateEvidence.typecheck !== 'not-run' || writeTimeTypecheckRan(dispatcher.writeTypecheckStats()),
+          prodBuildFailed: prodBuildOutcome === 'failed', // "game build clean hai" over a failed production build (#2526)
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
           // "707 km × 707 km, 12 regions" over a map put back as it began; "all conditions met" over an unset 40 km (Q-3305).

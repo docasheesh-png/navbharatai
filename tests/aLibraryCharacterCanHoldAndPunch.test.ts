@@ -27,7 +27,9 @@ function rigged(withArm = true) {
     const tip = new THREE.Bone(); tip.name = 'mixamorig:RightHandIndex1'; tip.position.set(0, -0.1, 0);
     arm.add(fore); fore.add(hand); hand.add(tip); scene.add(arm);
   }
-  return { scene, animations: [] as THREE.AnimationClip[] };
+  // One idle clip (2026-11-26): a model with NO clips at all gets the single "NavBharatAI animates its moves for it" line
+  // instead of one line per made move (tests/theUsersCharacterJoinsEveryGame), so the per-move lines are read on this one.
+  return { scene, animations: [new THREE.AnimationClip('Idle', 1, [])] };
 }
 vi.mock('three/addons/loaders/GLTFLoader.js', () => ({ GLTFLoader: class { async loadAsync(url: string) { return rigged(!url.includes('statue')); } } }));
 
@@ -80,10 +82,14 @@ describe('🔴 a library character with no punch clip punches, made from its ske
     expect(world(hand).distanceTo(rest)).toBeLessThan(1e-3);
     expect(hints.some((h) => /no punch move of its own, so NavBharatAI animates one from its skeleton/.test(h.text))).toBe(true);
   });
-  it('a model with no arm bones keeps the honest line and returns false', async () => {
+  // PIN UPDATED 2026-11-26 (admin: "mujhe aisa app maker chahiye jo movement khud bana le"): a model with no arm bones no
+  // longer stands still under a "not animated" line — it punches with its whole body (RIGID_MOVES,
+  // tests/aCharacterMakesItsOwnMoves.test.ts), and says so.
+  it('a model with no arm bones punches with its whole body, and says so', async () => {
     const c = PB.createPlayerCharacter(new THREE.Group(), { file: '/models/statue.glb' });
     await settle();
-    expect(c.act('punch')).toBe(false);
+    expect(c.act('punch')).toBe(true);
+    expect(hints.some((h) => /no punch move of its own, so NavBharatAI animates one with its whole body/.test(h.text))).toBe(true);
   });
 });
 

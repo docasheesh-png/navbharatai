@@ -57,6 +57,12 @@ export interface MeasuredFacts {
    */
   typecheckRan?: boolean;
   /**
+   * The production build (prodBuildGate.ts) ran and FAILED on this build. Build report #2526 (2026-11-25): the summary said
+   * "4 purane TypeScript error bhi theek kar diye (game build clean hai)" while PROD_BUILD_FAILED, in the same report, quoted
+   * two TypeScript errors that would fail Publish and the APK. `undefined` / false: no accusation.
+   */
+  prodBuildFailed?: boolean;
+  /**
    * The fake features fakeFeatureScan.ts found in the delivered app (admin 2026-10-04, NO FAKE BUTTON):
    * 'login' | 'oauth-button' | 'payment' | 'otp' | 'email' | 'sms' | 'upload'. A summary that sells one of
    * them as working ("✅ Login with Google", "Payments are integrated") is contradicted by the app itself.
@@ -198,7 +204,7 @@ export interface WorldFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored' | 'visual-fix-unseen' | 'deploy-claimed' | 'github-claimed';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated' | 'world-size-claimed' | 'region-count-claimed' | 'world-size-ignored' | 'visual-fix-unseen' | 'deploy-claimed' | 'github-claimed' | 'build-clean-but-failed';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -334,6 +340,17 @@ const TYPECHECK_CLEAN = new RegExp([
   /\b(?:type[\s-]?check(?:s|ing|ed)?|tsc|typescript)\b[^.!\n]{0,40}?\b(?:passes?|passed|passing|clean|cleanly|succeeds?|succeeded|no errors?)\b/,
   /\b(?:no|zero)\s+(?:[\w-]+\s+){0,3}?type\s+errors?\b/,
   /\b(?:compiles?|compiled)\s+(?:cleanly|successfully|without errors?)\b/,
+].map((r) => r.source).join('|'), 'i');
+
+/**
+ * "The build is clean" in the words a builder uses — English and Hinglish (build report #2526: "game build clean hai").
+ * Read beside TYPECHECK_CLEAN: either one stated over a FAILED production build is a contradiction.
+ */
+const BUILD_CLEAN = new RegExp([
+  /\b(?:production\s+|prod\s+|game\s+|app\s+|the\s+)?build\s+(?:is\s+|ab\s+|bhi\s+)?(?:clean|saaf|green|passes|passed|passing|succeeds?|succeeded|successful|ok|theek|thik|sahi)\b/,
+  /\b(?:builds?|built)\s+(?:cleanly|successfully|without\s+(?:any\s+)?errors?)\b/,
+  /\b(?:no|zero|koi)\s+(?:typescript\s+|ts\s+|build\s+|type\s+)?errors?\s+(?:left|nahi|nahin|bacha|baaki|remain\w*)\b/,
+  /\b(?:typescript|ts|type)\s+errors?\s+(?:bhi\s+)?(?:theek|thik|fix)\s+(?:kar|kiye|kiya|ho)\w*/,
 ].map((r) => r.source).join('|'), 'i');
 
 /**
@@ -632,6 +649,14 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'typecheck-clean',
       claimed: 'that the project type-checks cleanly',
       measured: 'no typecheck ran on this build, so nothing was compiled to find out',
+    });
+  }
+  // "Build clean" over a production build that failed (build report #2526). Only when it really ran and failed.
+  if (facts.prodBuildFailed === true && (BUILD_CLEAN.test(text) || TYPECHECK_CLEAN.test(text))) {
+    out.push({
+      kind: 'build-clean-but-failed',
+      claimed: 'that the build is clean',
+      measured: 'the production build failed on this build (Publish and the APK use it), with the errors in the report',
     });
   }
   // A SIZE NOBODY MEASURED (Q-248, admin 2026-10-11: "(c) only"). "44×44 buttons" and "fits any phone" were

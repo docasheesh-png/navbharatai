@@ -34,6 +34,8 @@ import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../th
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
+import { geometryTier } from '../three/surfaces';
+import { settings } from '../core/settings';
 import { localLowestY } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
@@ -481,7 +483,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         widest = Math.max(widest, t.r, t.box ? Math.max(t.x - t.box.x0, t.box.x1 - t.x, t.z - t.box.z0, t.box.z1 - t.z) : 0);
       },
       /** Whether any entry passes the test — the same entries the test would pass over the whole list, in list order. */
-      some(x: number, z: number, extra: number, test: (t: { x: number; z: number; r: number }) => boolean): boolean {
+      some(x: number, z: number, extra: number, test: (t: TakenSpot) => boolean): boolean {
         const reach = widest + extra;
         if (!(reach >= 0) || !Number.isFinite(reach) || !Number.isFinite(x) || !Number.isFinite(z) || reach > CELL * 40) return all.some(test);
         const cx0 = Math.floor((x - reach) / CELL), cx1 = Math.floor((x + reach) / CELL), cz0 = Math.floor((z - reach) / CELL), cz1 = Math.floor((z + reach) / CELL);
@@ -905,13 +907,17 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   /** Build one planned place's city now (buildings, traffic, people, parked cars) and put it on the map. */
   const buildPlace = (p: PlannedPlace): OpenWorldCity => {
     const { traffic: trafficOption, people: peopleOption, parkedCars = p.preset.parkedCars } = p.region.city || {};
-    const city = createCity(p.cityOptions);
+    // 🏙️ The geometry tier (queue Q-2698), read as each place is built: the device decides, the player's Settings override it
+    // (Auto quality off + Graphics low = light), and a place a game gave its own tier keeps it. The light tier stands the same
+    // streets, buildings and colliders with fewer draw calls and triangles; a device with a real GPU draws exactly what it did.
+    const tier = geometryTier(settings.get());
+    const city = createCity({ tier, ...p.cityOptions });
     const plan = city.plan;
     const root = new THREE.Group(); root.name = 'Region ' + p.region.id;
     root.add(city.root);
-    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: p.preset.traffic, ...(trafficOption || {}) });
+    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: p.preset.traffic, tier: city.tier, ...(trafficOption || {}) });
     if (traffic) root.add(traffic.root);
-    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, ...(peopleOption || {}) });
+    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, tier: city.tier, ...(peopleOption || {}) });
     if (people) root.add(people.root);
     const local = new THREE.Object3D(); root.add(local);
     // Built again after it was freed: the same cars, where they were (never a second set handed to ctx.vehicles).

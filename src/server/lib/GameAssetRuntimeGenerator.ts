@@ -328,8 +328,19 @@ async function readOwnedModel(url: URL, maxBytes: number, signal?: AbortSignal, 
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes;
 }
+// The model's bytes as an ArrayBuffer holding exactly them — what crypto.subtle.digest and GLTFLoader.parseAsync take.
+// A Uint8Array's .buffer is ArrayBufferLike (TypeScript 5.7+ refuses it for both: failedbr #2523), and for a view with an
+// offset it also holds bytes that are not the model's. The instanceof test narrows the type on every TypeScript version;
+// only a view that does not span its whole buffer is copied.
+function exactBuffer(bytes: Uint8Array): ArrayBuffer {
+  const whole = bytes.buffer;
+  if (whole instanceof ArrayBuffer && bytes.byteOffset === 0 && bytes.byteLength === whole.byteLength) return whole;
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return copy;
+}
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', exactBuffer(bytes)));
   return Array.from(digest, n => n.toString(16).padStart(2, '0')).join('');
 }
 
@@ -408,7 +419,7 @@ async function mountGameAsset(
       if (url.startsWith('blob:' + location.origin + '/')) return url;
       throw Error('External model reference refused');
     });
-    const gltf = await new GLTFLoader(manager).parseAsync(bytes.buffer, '');
+    const gltf = await new GLTFLoader(manager).parseAsync(exactBuffer(bytes), '');
     loaded = gltf.scene;
     if (textureFailed) throw Error('Texture load failed');
     signal?.throwIfAborted();

@@ -499,7 +499,7 @@ import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
 import type { CommandTiming, ActuatorCommandTiming } from './commandTiming';
-import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
+import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue, scanProjectSecurityConfig } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
 import { scanPortBinding, portBindingSummary, type PortBindingIssue } from './PortBindingAnalysis';
@@ -3329,6 +3329,8 @@ export class ToolDispatcher {
       if (!CODE.test(path) || SKIP.test(path)) continue;
       issues.push(...scanSecurityConfig(path, content));
     }
+    // Project-wide rules (a rate limiter usually lives in a different file from the routes it guards).
+    issues.push(...scanProjectSecurityConfig(sources.filter((f) => typeof f.content === 'string') as Array<{ path: string; content: string }>));
     return issues;
   }
 

@@ -180,7 +180,9 @@ describe('the rule is enforced where money moves, not only where it is read', ()
   it('a remix and the ₹1 app file are purchases — paid money only', () => {
     expect(src('src/server/lib/navStoreRemixPurchase.ts')).toContain("spends: 'paid-only'");
     expect(src('src/server/lib/navStoreRemixPurchase.ts')).toContain('checkPlanPayable(');
-    expect(src('src/server/routes/mobileShip.ts')).toContain("spends: 'paid-only'");
+    // The ₹1 app file's debit is the shared charge both Android providers use (2026-11-25).
+    expect(src('src/server/lib/mobileBuildCharge.ts')).toContain("spends: 'paid-only'");
+    expect(src('src/server/routes/mobileShip.ts')).toContain('chargeMobileBuild(');
   });
 });
 

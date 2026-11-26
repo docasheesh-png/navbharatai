@@ -100,7 +100,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
 import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists, finalChecksAfterSteer } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
-import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
+import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity, complexityRoutingMessage } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
@@ -14852,7 +14852,7 @@ async function noteBuildOutcome(
       // of the prompt, while `analyzeRequest` scores explicit length bands (+5 over 300, +10 over 800)
       // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
       // different number printed as the same fact.
-      try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
+      try { buildDiag.setRequestAnalysis(analysis, complexityDecision); } catch { /* observation only — never a build's problem */ }
       // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
       // a complexity of 60 must explain where the rest came from (autopsy e725e002).
       if (attachmentRead) {
@@ -15310,9 +15310,8 @@ async function noteBuildOutcome(
         // complex and nobody listened". It was the second. Admin-only; names no vendor.
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'COMPLEXITY_ROUTING', autoResolved: true,
-          message: buildIsComplex
-            ? `Complexity: COMPLEX (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's second rung, past the cheap flash opener.`
-            : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung.`,
+          // Q-3466: the same sentence the requestAnalysis block carries — see scoreBandVersusRouting.
+          message: complexityRoutingMessage(complexityDecision, analysis?.startTier),
           detail: complexityDecision.reason,
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }

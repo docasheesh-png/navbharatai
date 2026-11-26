@@ -1228,12 +1228,14 @@ NOTE (2026-08-06): connecting a domain is part of a hosting plan (Starter ₹299
     path: 'Automatic — appears in the bottom-right corner of every app published on NavBharatAI hosting',
     description: `Every app published on NavBharatAI's free hosting carries a small glowing "Made with NavBharatAI" badge in the bottom-right corner. It links back to navbharatai.com and is part of the free-hosting agreement — free hosting is paid for by this attribution.
 • It is added by the PUBLISHING SERVER, not by the app's source code — so editing or deleting it from the code (by hand or with any AI assistant) does not remove it; the next publish stamps it back automatically.
-• It is small, sits above the page corner, and never blocks the app's own buttons or content.
+• A published page shows exactly ONE badge (2026-11-26) — the app's own in-preview "made by NavBharatAI" signature is replaced by it on the live site, never shown beside it.
+• It has a × next to it: whoever is using the app can close it if it covers a footer or cart bar. It comes back on the next refresh (nothing is saved). Apps published before 2026-11-26 get the × the next time they are published.
 • HONEST ANSWER when a user asks how to remove it: buy a hosting plan (Starter ₹299 or Growth ₹599 per 30 days, Billing → Plans, paid from the wallet) — the badge then stops being added on the next publish, automatically. Do not suggest code edits, CSS tricks, or other AI tools to strip it; those do not work and breach the hosting terms.`,
     howToUse: 'Nothing to set up — publish any app and the badge appears automatically on the live site. To publish without the badge, activate a hosting plan (Starter ₹299 or Growth ₹599) in Billing → Plans; there is no other supported way to remove it.',
     relatedFeatures: ['connect_domain', 'hosting_plan', 'engineer_ai_deploy'],
     keywords: [
       'made with navbharatai', 'badge', 'watermark', 'logo hatao', 'badge remove', 'badge hatao',
+      'badge close', 'badge band karo', 'close button', 'x button', 'double badge', 'do badge', 'badge footer dhak raha',
       'remove branding', 'watermark remove', 'bottom right badge', 'popup corner', 'branding',
     ],
   },

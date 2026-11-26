@@ -20,6 +20,7 @@
  * everyone) and the Surplus skip counter above. Everything is injected, so this module is PURE control
  * flow, unit-testable without a key, and portable into the main engine as-is.
  */
+import { readEngineSafeDiag } from '../../lib/engineSafeDiag';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import type { NamedRunner } from '../providers/MultiProviderTurnRunner';
 import { isBuildStoppedError } from '../stopSignal';
@@ -80,7 +81,8 @@ export interface ProChainV2AgentOptions {
   escapeSurplusScope?: <T>(fn: () => Promise<T>) => Promise<T>;
   onSurplusError?: (err: unknown) => void;
   onSurplusHealthy?: () => void;
-  onFirstSurplusDrop?: (reason: string) => void;
+  /** httpStatus: the engine's own HTTP status for the drop, when it gave one (an outright refusal parks Surplus longer). */
+  onFirstSurplusDrop?: (reason: string, httpStatus?: number) => void;
   onEvent?: (e: ProChainV2Event) => void;
   /** Exact key values to strip from any failure reason (shape-based redaction applies regardless). */
   secrets?: readonly string[];
@@ -185,7 +187,7 @@ export function createProChainV2AgentRunner(o: ProChainV2AgentOptions): TurnRunn
           emit({ kind: 'surplus-dropped', agent: o.agent, reason });
           if (!o.state.firstDropRecorded) {
             o.state.firstDropRecorded = true;
-            try { o.onFirstSurplusDrop?.(reason); } catch { /* best-effort */ }
+            try { const st = readEngineSafeDiag(err)?.status; if (typeof st === 'number') o.onFirstSurplusDrop?.(reason, st); else o.onFirstSurplusDrop?.(reason); } catch { /* best-effort */ }
           }
           const recent = o.state.surplusDrops.filter((x) => t - x <= tuning.surplusSkipMs);
           o.state.surplusDrops = recent;

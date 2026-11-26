@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // THE OPEN-WORLD STARTER (failedbr #2485, 2026-11-21 — admin: "is game me to map aya hi nahi, bas ek character aya … jo
 // joystick se hawa me move kar raha hai … library ka use kyu nahi ho raha, hona chahiye").
 //
@@ -26,7 +28,7 @@ import type { GameContext } from '../Game';
 import { markWorldCollider } from '../three/collision';
 import { createAthreeMap, type AthreeMap, type AthreeMapOptions } from '../athree';
 import type { LandBiome } from '../athree/world';
-import { createCity, planCity, type City, type CityOptions } from '../three/city';
+import { createCity, planCity, type City, type CityOptions, type CityPlan } from '../three/city';
 import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
 import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
 import { createCar } from '../three/objects';
@@ -64,7 +66,7 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
   /**
    * HOW FAR THE PLACES SPREAD, in metres (admin 2026-11-22, failedbr #2495: "map ko 40km*40km banao"). The places and lands
    * that do not name a distance are laid across a square this many metres wide around the first place, instead of next to
-   * each other — open country between them, joined by highways. Left out: they stand a journey apart, close together.
+   * each other — open country between them, joined by highways. Left out: each place stands close to the others (PLACE_GAP).
    * Clamped to 1 km .. 1000 km; a loop world is never smaller than the spread (sizeMeters is raised to it when needed).
    */
   spreadMeters?: number;
@@ -100,6 +102,11 @@ export function isLandKind(kind: unknown): kind is LandKind { return typeof kind
 export const MAX_REGIONS = 1000;
 /** A planned place's city is built when the player comes this many metres from its edge. */
 export const BUILD_AHEAD = 1500;
+/**
+ * The open country kept between two places, edge to edge, in metres (failedbr #2499: "maps thode pas pas rahe, aur beech me
+ * road ho"): a village keeps about 150 m, a big city up to 300 m — a short drive on the road between them.
+ */
+export const PLACE_GAP = { min: 150, max: 300 } as const;
 /** How many cities stand built at once, by the map's quality tier (owner decision 2026-11-23: phone 2, mid 5, desktop 8). */
 export const LIVE_CITIES = { phone: 2, mid: 5, desktop: 8 } as const;
 /** A standing city is freed for a nearer one only when it is this many metres farther from the player — never back and forth. */
@@ -129,7 +136,7 @@ export interface WorldRegion {
   kind: RegionKind;
   /** Which way from the first place. Left out: the places spread around by themselves. */
   toward?: Compass;
-  /** How far from the first place, in metres. Left out: far enough to be a journey, near enough to reach. */
+  /** How far from the first place, in metres. Left out: the nearest free spot beside the places already there, a short drive away. */
   distance?: number;
   /** Change this place: { blocksX, blocksZ, style, maxFloors, traffic: { count }, people: { count }, parkedCars }. */
   city?: RegionCity;
@@ -191,11 +198,68 @@ export interface OpenWorldVenue {
   toWorld(x: number, z: number): { x: number; y: number; z: number };
 }
 const COMPASS: Record<Compass, number> = { north: 0, 'north-east': Math.PI / 4, east: Math.PI / 2, 'south-east': (3 * Math.PI) / 4, south: Math.PI, 'south-west': (5 * Math.PI) / 4, west: (3 * Math.PI) / 2, 'north-west': (7 * Math.PI) / 4 };
+/**
+ * 🧭 A DIRECTION AS A REGION MAY WRITE IT ('north-east', 'northeast', 'North East', 'NE') — or undefined when it is none.
+ * failedbr #2499: a direction outside the list made COMPASS[toward] undefined, the place's spot NaN, and its NaN pad made the
+ * map's ground NaN everywhere — every city hung in the sky as a flat layer over the sea. Read once, where the list enters.
+ */
+const COMPASS_ALIASES: Record<string, Compass> = {
+  n: 'north', north: 'north', ne: 'north-east', northeast: 'north-east', e: 'east', east: 'east', se: 'south-east', southeast: 'south-east',
+  s: 'south', south: 'south', sw: 'south-west', southwest: 'south-west', w: 'west', west: 'west', nw: 'north-west', northwest: 'north-west',
+};
+export function compassOf(value: unknown): Compass | undefined {
+  return typeof value === 'string' ? COMPASS_ALIASES[value.toLowerCase().replace(/[^a-z]/g, '')] : undefined;
+}
+/** A region as the kit reads it: its direction one of the eight (or left out, and said), its distance a finite number of metres (or left out, and said). */
+export function cleanRegion(region: WorldRegion): WorldRegion {
+  if (!region || typeof region !== 'object') return region;
+  let out = region;
+  if (region.toward !== undefined) {
+    const way = compassOf(region.toward);
+    if (way !== region.toward) {
+      const { toward: _bad, ...rest } = out;
+      out = way ? { ...rest, toward: way } : rest;
+      if (!way) console.error('[world] "' + String(region.id) + '" asks to lie toward "' + String(region.toward) + '", which is not a direction (north, north-east, east, south-east, south, south-west, west, north-west); it was laid without one.');
+    }
+  }
+  if (region.distance !== undefined) {
+    const far = Number(region.distance);
+    if (!(Number.isFinite(far) && far >= 0)) {
+      const { distance: _bad, ...rest } = out;
+      out = rest;
+      console.error('[world] "' + String(region.id) + '" asks for a distance of "' + String(region.distance) + '", which is not a number of metres; it was laid without one.');
+    } else if (far !== region.distance) out = { ...out, distance: far };
+  }
+  return out;
+}
 const REGION_PRESETS: Record<'city' | 'town' | 'village', { city: CityOptions; traffic: number; people: number; parkedCars: number }> = {
   city: { city: { blocksX: 4, blocksZ: 4, style: 'mixed' }, traffic: 12, people: 30, parkedCars: 4 },
   town: { city: { blocksX: 3, blocksZ: 3, style: 'town', maxFloors: 4 }, traffic: 6, people: 16, parkedCars: 3 },
   village: { city: { blocksX: 2, blocksZ: 2, style: 'town', maxFloors: 2, parks: 0.3 }, traffic: 2, people: 8, parkedCars: 1 },
 };
+/** The seed every map had before each game got its own (WORLD.seed: 7). A map with it keeps exactly the places it had. */
+export const LEGACY_WORLD_SEED = 7;
+/**
+ * 🎲 A PLACE'S OWN LOOK, FIXED BY THE MAP (external Game Maker audit, 2026-11-25: six new games must not all stand in the
+ * same city). Every place used to get seed 11 + 17n whatever the map, so every game's first city had the same buildings on
+ * the same lots. Now the place's seed (its lots, buildings and traffic paint) and, for a city that asks for no style, its
+ * style (mixed or downtown) come from the map's own seed (WORLD.seed, written once into the game's src/game/world.ts) and
+ * the place's position in the list — the same map always has the same places, so an edit never changes them, and a map on
+ * the old seed 7 keeps exactly what it had. PURE.
+ */
+export function placeLook(worldSeed: unknown, kind: RegionKind, n: number): { seed: number; style?: CityOptions['style'] } {
+  const base = 11 + n * 17;
+  const s = Math.floor(Number(worldSeed));
+  if (!Number.isFinite(s) || s === LEGACY_WORLD_SEED) return { seed: base };
+  const mixed = (Math.imul((s ^ (s >>> 16)) >>> 0, 0x45d9f3b) + Math.imul(base, 0x9e3779b1)) >>> 0;
+  return { seed: (mixed % 999999937) + 1, ...(kind === 'city' ? { style: (mixed >>> 7) % 2 ? 'downtown' as const : 'mixed' as const } : {}) };
+}
+/** How far along the parked-car paints a map starts (0 on the old seed 7, so old maps keep their cars). PURE. */
+export function parkedPaintShift(worldSeed: unknown, paints: number): number {
+  const s = Math.floor(Number(worldSeed));
+  if (!Number.isFinite(s) || s === LEGACY_WORLD_SEED || paints < 1) return 0;
+  return (Math.imul((s ^ (s >>> 13)) >>> 0, 0x2c1b3c6d) >>> 0) % paints;
+}
 
 /** The city standing on the map. Its own numbers (plan, routes, lots) are in CITY metres: use toWorld() to leave it. */
 export interface OpenWorldCity {
@@ -235,7 +299,7 @@ export interface OpenWorld {
    * EVERY place on the map, built or not, in the order listed. regions holds the places whose city has been built so far:
    * the first at once, the others as the player comes near (so a map of a hundred places starts as fast as a map of one).
    */
-  readonly places: ReadonlyArray<{ id: string; kind: RegionKind; centre: { x: number; z: number }; radius: number; readonly built: boolean }>;
+  readonly places: ReadonlyArray<{ id: string; kind: RegionKind; centre: { x: number; z: number }; radius: number; /** Its streets and blocks, in CITY metres around centre (built or not). */ readonly plan: CityPlan; readonly built: boolean }>;
   /** The place the player is in or nearest to, and how far its centre is. null in a world with no places. */
   nearestRegion(): { region: OpenWorldCity; distance: number } | null;
   /** Where the player starts: WORLD metres. */
@@ -346,7 +410,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const looping = mapMode === 'loop' || (mapMode !== 'bounded' && (mapOptions as { profile?: unknown }).profile !== 'battle-royale');
   const sized = looping && spread > loopSize ? { sizeMeters: spread } : {};
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
-  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, three: THREE } as AthreeMapOptions);
+  // 🧱 LATE GROUND EDITS ARE REDRAWN BY DEFAULT here (lateEdits: false opts out). The kit lays every pad, land and road before
+  // the first draw, but a game feature that levels ground later used to leave the drawn terrain at the old height while the
+  // player walked on the new one — one place on two layers. Nothing is redrawn while nothing changes, so it costs nothing then.
+  const lateEdits = options.lateEdits !== false;
+  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, lateEdits, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   if (!looping && spread > map.world.sizeMeters) console.error('[world] this map is an island of ' + Math.round(map.world.sizeMeters / 1000) + ' km and is never made bigger; the size asked (' + Math.round(spread / 1000) + ' km) is not used — the places stand on the island\'s dry land.');
@@ -387,7 +455,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // BEFORE any terrain is drawn, and stands on it. The list grows one entry at a time; the first is where the player starts.
   const wanted: WorldRegion[] = [
     ...(cityOption ? [{ id: 'city', kind: 'city' as const, ...(cityOption === true ? {} : { city: cityOption }) }] : []),
-    ...(regionList || []),
+    ...(Array.isArray(regionList) ? regionList : []).map(cleanRegion),
   ];
   const towns: OpenWorldCity[] = [];
   // One root per BUILT PLACE, in step with towns[] and locals[] (index i is the same place in all three). A user's map has its
@@ -400,14 +468,19 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // The ground already given to a place, a land or a user map. Kept in 1 km cells as well as in order, so "is anything here?"
   // looks only at the cells near the spot — the same answer as asking every entry (the cells reach as far as the widest one),
   // in a few steps instead of a thousand.
+  // Each entry may also carry its exact box (a city and the tiles that will join it) and the open ground it keeps (gap); left
+  // out, its box is the square of r and its gap PLACE_GAP.min. The compact planner (nearestFreeSpot) reads those.
+  type TakenSpot = { x: number; z: number; r: number; box?: { x0: number; x1: number; z0: number; z1: number }; gap?: number };
   const taken = (() => {
-    const all: Array<{ x: number; z: number; r: number }> = [], cells = new Map<string, number[]>(), CELL = 1000;
+    const all: TakenSpot[] = [], cells = new Map<string, number[]>(), CELL = 1000;
     let widest = 0;
     return {
-      push(t: { x: number; z: number; r: number }): void {
+      /** Every entry, in order. */
+      list(): ReadonlyArray<TakenSpot> { return all; },
+      push(t: TakenSpot): void {
         const i = all.push(t) - 1, key = Math.floor(t.x / CELL) + ',' + Math.floor(t.z / CELL);
         (cells.get(key) || cells.set(key, []).get(key)!).push(i);
-        widest = Math.max(widest, t.r);
+        widest = Math.max(widest, t.r, t.box ? Math.max(t.x - t.box.x0, t.box.x1 - t.x, t.z - t.box.z0, t.box.z1 - t.z) : 0);
       },
       /** Whether any entry passes the test — the same entries the test would pass over the whole list, in list order. */
       some(x: number, z: number, extra: number, test: (t: { x: number; z: number; r: number }) => boolean): boolean {
@@ -427,12 +500,21 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const userMaps: Array<{ id: string; model: string; centre: { x: number; y: number; z: number }; size: number; status: OpenWorldUserMap['status']; reason?: string; root?: THREE.Object3D }> = [];
   const venueList: Array<{ id: string; venue: VenueKind; centre: { x: number; y: number; z: number }; width: number; depth: number; scale: number; joinedTo?: string; root?: THREE.Group }> = [];
   const colours = [0xc8102e, 0x1d4ed8, 0xf59e0b, 0x111827, 0xe5e7eb, 0x15803d];
+  const worldSeed = (mapOptions as { seed?: unknown }).seed, paintShift = parkedPaintShift(worldSeed, colours.length);
   // 🌌 A UNIVERSE OF PLACES (admin 2026-11-22: "mujhe chahiye 10—100 maps jod kar bahut bada universe bhi bana sake"). Up to
   // MAX_REGIONS places and lands. Every place is PLANNED up front — its spot on the map and its levelled ground, which are cheap
   // and must exist before the first terrain is drawn — but its CITY (buildings, traffic, people, parked cars) is built only when
   // the player comes within BUILD_AHEAD metres of it, one place per frame, so a hundred places cost what the nearest few cost.
-  // The places spread out on a golden-angle spiral (the n-th one about √n spacings from the first), never stacked, always
-  // reachable; a place asked to lie toward a direction keeps that direction.
+  //
+  // 🏘️ PLACES CLOSE TOGETHER (admin 2026-11-22, failedbr #2499: "maine kaha map me 4 village/city add karo, to add huye hi
+  // nahi" — then "maps thode pas pas rahe, aur beech me road ho"). The four new places WERE planned — 2.6 to 3.2 km out, on a
+  // spiral whose distance grew with the square root of each place's position in the list, so the newest place was always the
+  // farthest, out of sight and unbuilt from the start. 🧬 THE CLASS: a place's distance came from WHEN it was added, not from
+  // where there was room. Now every place, land, user map and venue takes the NEAREST free spot to the first place that keeps a
+  // short stretch of open country (PLACE_GAP: 150 to 300 m, edge to edge, bigger for a bigger place) from everything already
+  // there, on dry ground; the map grows outward as a cluster, every place a short drive from its neighbours. A place asked to lie
+  // toward a direction is laid that way; a distance that was asked is kept; a size the user asked for (spreadMeters) still
+  // spreads the places across it. A place with no dry ground on its ray still waits for the rescue below (never in the sea).
   interface PlannedPlace { region: WorldRegion; preset: (typeof REGION_PRESETS)['city']; cityOptions: CityOptions; centre: { x: number; y: number; z: number }; reach: number; built: number;
     /** Its parked cars, made the first time it is built and kept when it is freed (each stays where the player left it). */
     parked?: THREE.Object3D[];
@@ -442,8 +524,93 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const AXIS: Record<string, [number, number]> = { north: [0, -1], 'north-east': [1, -1], east: [1, 0], 'south-east': [1, 1], south: [0, 1], 'south-west': [-1, 1], west: [-1, 0], 'north-west': [-1, -1] };
   let growSeed = 0x9e3779b9;
   const nextRandom = (): number => { growSeed = (Math.imul(growSeed ^ (growSeed >>> 15), 2246822519) + 0x6d2b79f5) | 0; return ((growSeed >>> 0) % 10000) / 10000; };
+  /** A footprint around a centre, in metres: how far it reaches west (x0, negative), east (x1), north (z0, negative), south (z1). */
+  interface Footprint { x0: number; x1: number; z0: number; z1: number }
+  const square = (r: number): Footprint => ({ x0: -r, x1: r, z0: -r, z1: r });
+  const boxAt = (x: number, z: number, f: Footprint): Footprint => ({ x0: x + f.x0, x1: x + f.x1, z0: z + f.z0, z1: z + f.z1 });
+  const placeGap = (reach: number): number => Math.min(PLACE_GAP.max, Math.max(PLACE_GAP.min, 100 + reach * 0.8));
+  const slab = (o: number, u: number, a0: number, a1: number): [number, number] => {
+    if (Math.abs(u) < 1e-9) return o > a0 && o < a1 ? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY] : [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+    const s0 = (a0 - o) / u, s1 = (a1 - o) / u;
+    return s0 < s1 ? [s0, s1] : [s1, s0];
+  };
+  /** Whether a place may be laid compact (the nearest free spot): no distance and no map size was asked. */
+  const isCompact = (region: WorldRegion): boolean => region.distance === undefined && spread === 0;
+  /**
+   * THE NEAREST FREE SPOT to the first place for a footprint: along each of 32 directions (only the asked one, with toward), the
+   * first distance where it keeps its gap (and every neighbour's own gap) of open ground to everything already given out —
+   * worked out exactly, from the stretches of the ray each spot blocks — and, where ground() is given, where the ground is usable
+   * (Infinity: water or a road; else a small cost for uneven land). The smallest distance plus cost wins; the same list always
+   * gives the same map. null: no usable ground on any ray (a place then waits for the rescue below).
+   */
+  const nearestFreeSpot = (f: Footprint, gap: number, n: number, toward: Compass | undefined, ground?: (x: number, z: number) => number): { x: number; z: number } | null => {
+    const base = planned[0]?.centre ?? spawn;
+    // Before the first place is planned (a land or a user's map listed first), the start is kept for it.
+    const around: TakenSpot[] = planned.length ? [...taken.list()] : [...taken.list(), { x: spawn.x, z: spawn.z, r: 130, gap: PLACE_GAP.max }];
+    const angles = toward !== undefined ? [COMPASS[toward]] : Array.from({ length: 32 }, (_, i) => n * 2.399963 + (i * Math.PI) / 16);
+    let best: { x: number; z: number; score: number } | null = null;
+    for (const angle of angles) {
+      const ux = Math.sin(angle), uz = -Math.cos(angle);
+      const blocked: Array<[number, number]> = [];
+      for (const t of around) {
+        const b = t.box ?? boxAt(t.x, t.z, square(t.r)), g = Math.max(gap, t.gap ?? PLACE_GAP.min);
+        const [a0, a1] = slab(base.x, ux, b.x0 - f.x1 - g, b.x1 - f.x0 + g), [b0, b1] = slab(base.z, uz, b.z0 - f.z1 - g, b.z1 - f.z0 + g);
+        const lo = Math.max(a0, b0), hi = Math.min(a1, b1);
+        if (hi > lo && hi > 0) blocked.push([lo, hi]);
+      }
+      blocked.sort((p, q) => p[0] - q[0]);
+      const freeFrom = (at0: number): number => { let at = at0; for (const [lo, hi] of blocked) if (lo < at && hi > at) at = hi + 1; return at; };
+      let s = freeFrom(0);
+      for (let tries = 0; tries < 40 && s < 60000 && (!best || s < best.score); tries++) {
+        const x = base.x + ux * s, z = base.z + uz * s, cost = ground ? ground(x, z) : 0;
+        if (Number.isFinite(cost)) { if (!best || s + cost < best.score) best = { x, z, score: s + cost }; break; }
+        s = freeFrom(s + 40);
+      }
+    }
+    return best ? { x: best.x, z: best.z } : null;
+  };
+  // THE TILES OF EVERY GROWN CITY, worked out from the list before anything is placed: a tile's cell depends only on the tiles
+  // before it (and the same seeded draws, in the same order), never on where its city stands. So a place laid close to a city
+  // leaves room for the tiles that will join it later in the list, and each tile below takes exactly the cell worked out here.
+  const tileCells = new Map<string, { root: string; cell: [number, number] }>();
+  {
+    const seen = new Set<string>(); let count = 0;
+    for (const region of wanted) {
+      if (!region || typeof region.id !== 'string' || !region.id || seen.has(region.id) || count >= MAX_REGIONS) continue;
+      seen.add(region.id);
+      if (region.kind === 'custom' && !String(region.model || '').trim()) continue;
+      count++;
+      if (region.kind === 'custom' || region.kind === 'venue' || isLandKind(region.kind)) continue;
+      const base = typeof region.joinTo === 'string' ? tileCells.get(region.joinTo) : undefined;
+      if (!base) { tileCells.set(region.id, { root: region.id, cell: [0, 0] }); continue; }
+      const tiles = [...tileCells.values()].filter((t) => t.root === base.root);
+      const used = new Set(tiles.map((t) => t.cell.join(',')));
+      let cell: [number, number] | null = null;
+      if (region.toward !== undefined) {
+        const [dx, dz] = AXIS[region.toward]; let [gx, gz] = base.cell;
+        do { gx += dx; gz += dz; } while (used.has(gx + ',' + gz));
+        cell = [gx, gz];
+      } else {
+        const free: Array<[number, number]> = [];
+        for (const t of tiles) { const [gx, gz] = t.cell; for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = (gx + dx) + ',' + (gz + dz); if (!used.has(k) && !free.some((q) => q.join(',') === k)) free.push([gx + dx, gz + dz]); } }
+        cell = free[Math.floor(nextRandom() * free.length)] ?? null;
+      }
+      tileCells.set(region.id, cell ? { root: base.root, cell } : { root: region.id, cell: [0, 0] });
+    }
+  }
+  /** A place's footprint with every tile that will join it: the whole grown city, so nothing is laid where it will grow. */
+  const clusterFootprint = (id: string, plan: CityPlan): Footprint => {
+    const hx = plan.width / 2 + 8, hz = plan.depth / 2 + 8, stepX = plan.width - plan.road, stepZ = plan.depth - plan.road;
+    const f: Footprint = { x0: -hx, x1: hx, z0: -hz, z1: hz };
+    for (const t of tileCells.values()) {
+      if (t.root !== id) continue;
+      f.x0 = Math.min(f.x0, t.cell[0] * stepX - hx); f.x1 = Math.max(f.x1, t.cell[0] * stepX + hx);
+      f.z0 = Math.min(f.z0, t.cell[1] * stepZ - hz); f.z1 = Math.max(f.z1, t.cell[1] * stepZ + hz);
+    }
+    return f;
+  };
   // With a spread, the k-th of the M places that stand on their own (not a tile of a city) is laid about sqrt(k / (M - 1)) of the
-  // way to the edge of the square, on the same golden-angle spiral: the places fill the whole area instead of crowding the start.
+  // way to the edge of the square, on a golden-angle spiral: the places fill the whole area instead of crowding the start.
   const ownPlaces = wanted.filter((r) => r && typeof r.id === 'string' && !(typeof r.joinTo === 'string' && r.joinTo));
   const spreadFar = (region: WorldRegion): number => {
     const k = ownPlaces.indexOf(region);
@@ -560,6 +727,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (!at) console.error('[world] the venue "' + region.id + '" could not stand beside "' + id + '" (' + (region.toward ? 'the ' + region.toward + ' side is' : 'every side is') + ' water, a road or another place); it was laid on its own instead.');
       }
     }
+    if (!at && isCompact(region)) {
+      // Close to the others, like every place: the nearest free spot on dry, level-enough ground off the map's roads.
+      at = nearestFreeSpot({ x0: -hw - 8, x1: hw + 8, z0: -hd - 8, z1: hd + 8 }, PLACE_GAP.min, n, region.toward, (x, z) => groundCost(x, z) * 8);
+    }
     if (!at) {
       // Spread like a place: the way it was asked (toward, distance), else around the first place; a little further out, and a
       // little to either side, before giving up.
@@ -583,7 +754,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       at = best;
     }
     const y = map.world.levelGround(at.x, at.z, hw + 8, hd + 8, 60, level);
-    taken.push({ x: at.x, z: at.z, r: vr });
+    taken.push({ x: at.x, z: at.z, r: vr, box: boxAt(at.x, at.z, { x0: -hw - 8, x1: hw + 8, z0: -hd - 8, z1: hd + 8 }) });
     venueList.push({ id: region.id, venue, centre: { x: at.x, y, z: at.z }, width: hw * 2, depth: hd * 2, scale, ...(joinedTo ? { joinedTo } : {}) });
   };
   let overCap = 0;
@@ -605,7 +776,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
       let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 200, (size + 400) * Math.sqrt(n), region.distance === undefined ? spreadFar(region) : 0);
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
-      for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+      const near = isCompact(region) ? nearestFreeSpot(square(r), PLACE_GAP.min, n, region.toward) : null;
+      if (near) at = near;
+      else for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
       sayIfWet('map', region.id, at, r);
@@ -633,7 +806,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const angle = region.toward !== undefined ? COMPASS[region.toward] : (n * 2.399963);
       let far = Math.max(region.distance ?? 0, (planned[0]?.reach ?? 0) + r + 300, (r * 2 + 400) * Math.sqrt(n), region.distance === undefined ? spreadFar(region) : 0);
       let at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
-      for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
+      // As close as its own radius allows (a land may reach the shore: it is not built on).
+      const near = isCompact(region) ? nearestFreeSpot(square(r), PLACE_GAP.min, n, region.toward) : null;
+      if (near) at = near;
+      else for (let tries = 0; tries < 8 && taken.some(at.x, at.z, r + 100, (t) => Math.hypot(at.x - t.x, at.z - t.z) < t.r + r + 100); tries++) {
         far += r; at = { x: base.x + Math.sin(angle) * far, z: base.z - Math.cos(angle) * far };
       }
       sayIfWet('land', region.id, at, r);
@@ -646,38 +822,29 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     // randomly add kar kar ke bada map ban jaye"). A tile that joins a city stands EDGE TO EDGE with it on the city's own grid:
     // the same block size (so the streets carry straight on — the shared edge street is one street), the same ground level, a new
     // set of buildings. Tile by tile, a city becomes as big as asked; with no direction it grows on a free side at random.
+    // Its cell was worked out before anything was placed (tileCells), and its room was kept when its city was laid.
     const joinBase = typeof region.joinTo === 'string' ? planned.find((q) => q.region.id === region.joinTo) : undefined;
-    if (joinBase) {
-      const rootId = joinBase.cluster?.root ?? joinBase.region.id;
+    const pre = tileCells.get(region.id);
+    const rootOfBase = joinBase ? joinBase.cluster?.root ?? joinBase.region.id : '';
+    if (joinBase && pre && pre.root !== region.id && pre.root === rootOfBase) {
+      const rootId = rootOfBase;
       const root = planned.find((q) => q.region.id === rootId)!;
       const rootPlan = planCity(root.cityOptions);
       const stepX = rootPlan.width - rootPlan.road, stepZ = rootPlan.depth - rootPlan.road;
-      const tiles = planned.filter((q) => (q.cluster?.root ?? q.region.id) === rootId);
-      const cellOf = (q: PlannedPlace): [number, number] => (q.cluster ? [q.cluster.gx, q.cluster.gz] : [0, 0]);
-      const used = new Set(tiles.map((q) => cellOf(q).join(',')));
-      let cell: [number, number] | null = null;
-      if (region.toward !== undefined) {
-        const [dx, dz] = AXIS[region.toward]; let [gx, gz] = cellOf(joinBase);
-        do { gx += dx; gz += dz; } while (used.has(gx + ',' + gz));
-        cell = [gx, gz];
-      } else {
-        const free: Array<[number, number]> = [];
-        for (const q of tiles) { const [gx, gz] = cellOf(q); for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = (gx + dx) + ',' + (gz + dz); if (!used.has(k) && !free.some((f) => f.join(',') === k)) free.push([gx + dx, gz + dz]); } }
-        cell = free[Math.floor(nextRandom() * free.length)] ?? null;
-      }
+      const cell: [number, number] | null = pre.cell;
       if (cell) {
         const own = region.city || {};
-        const cityOptions: CityOptions = { ...root.cityOptions, ...(own.style ? { style: own.style } : {}), ...(own.maxFloors ? { maxFloors: own.maxFloors } : {}), seed: 11 + planned.length * 17 };
+        const cityOptions: CityOptions = { ...root.cityOptions, ...(own.style ? { style: own.style } : {}), ...(own.maxFloors ? { maxFloors: own.maxFloors } : {}), seed: placeLook(worldSeed, root.region.kind, planned.length).seed };
         const x = root.centre.x + cell[0] * stepX, z = root.centre.z + cell[1] * stepZ;
         map.world.levelGround(x, z, rootPlan.width / 2 + 8, rootPlan.depth / 2 + 8, 60, root.centre.y);
-        taken.push({ x, z, r: root.reach });
+        taken.push({ x, z, r: root.reach, box: boxAt(x, z, { x0: -(rootPlan.width / 2 + 8), x1: rootPlan.width / 2 + 8, z0: -(rootPlan.depth / 2 + 8), z1: rootPlan.depth / 2 + 8 }), gap: placeGap(root.reach) });
         planned.push({ region: { ...region, kind: root.region.kind }, preset: root.preset, cityOptions, centre: { x, y: root.centre.y, z }, reach: root.reach, built: -1, cluster: { root: rootId, gx: cell[0], gz: cell[1], stepX, stepZ } });
         continue;
       }
     }
     const preset = REGION_PRESETS[region.kind] || REGION_PRESETS.city;
     const { traffic: _t, people: _p, parkedCars: _c, ...own } = region.city || {};
-    const cityOptions: CityOptions = { ...preset.city, seed: 11 + planned.length * 17, ...own };
+    const cityOptions: CityOptions = { ...preset.city, ...placeLook(worldSeed, region.kind, planned.length), ...own };
     const plan = planCity(cityOptions);
     const hx = plan.width / 2 + 8, hz = plan.depth / 2 + 8, reach = Math.max(hx, hz);
     // Where to look: the first place is at the start; the others go the way they were asked, clear of what is there.
@@ -687,9 +854,28 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     let far = Math.max(region.distance ?? 0, first ? 0 : spacing * Math.max(1, Math.sqrt(n)), first || region.distance !== undefined ? 0 : spreadFar(region));
     let best = { x: spawn.x, z: spawn.z, cost: Number.POSITIVE_INFINITY };
     const samples = first ? 3 : 2;                                                                       // 7×7 for the start, 5×5 after
+    // Room for the tiles that will join this place (none: just its own ground), and the open country it keeps around it.
+    const footprint = pre && pre.root === region.id ? clusterFootprint(region.id, plan) : { x0: -hx, x1: hx, z0: -hz, z1: hz };
+    const gap = placeGap(reach);
+    if (!first && isCompact(region)) {
+      // Close to the others: the nearest free spot on dry ground off the map's roads (uneven ground costs 8 m of distance per
+      // metre of rise). None on any ray: it waits for the rescue below, like a place that pointed at the sea.
+      const groundCost = (cx: number, cz: number): number => {
+        let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY;
+        for (let i = -samples; i <= samples; i++) for (let j = -samples; j <= samples; j++) {
+          const x = cx + (i / samples) * hx, z = cz + (j / samples) * hz, h = map.world.heightAt(x, z);
+          if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) return Number.POSITIVE_INFINITY;
+          low = Math.min(low, h); high = Math.max(high, h);
+        }
+        return high - low;
+      };
+      const at = nearestFreeSpot(footprint, gap, n, region.toward, (x, z) => groundCost(x, z) * 8);
+      if (at) best = { x: at.x, z: at.z, cost: 0 };
+      far = Number.POSITIVE_INFINITY;                                                                    // never the spiral
+    }
     // Water or roads where it was asked: look a little further out (and, for a spread place, a little to either side), before
     // leaving a place out (a map of a hundred places must not lose the ones that happened to point at the sea).
-    for (let attempt = 0; attempt < (first ? 1 : 10) && !Number.isFinite(best.cost); attempt++, far += spacing * 0.5) {
+    for (let attempt = 0; attempt < (first ? 1 : 10) && !Number.isFinite(best.cost) && Number.isFinite(far); attempt++, far += spacing * 0.5) {
     // A place asked to lie toward a direction keeps it; a spread place may also turn a little to find dry ground.
     const turn = region.toward !== undefined ? 0 : (attempt % 2 ? 1 : -1) * Math.ceil(attempt / 2) * 0.35;
     const home = first ? { x: spawn.x, z: spawn.z } : { x: planned[0].centre.x + Math.sin(angle + turn) * far, z: planned[0].centre.z - Math.cos(angle + turn) * far };
@@ -698,6 +884,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const a = (k / 8) * Math.PI * 2, r = ring * reach * 0.9;
       const cx = home.x + Math.cos(a) * r, cz = home.z + Math.sin(a) * r;
       if (taken.some(cx, cz, reach + 140, (t) => Math.hypot(cx - t.x, cz - t.z) < t.r + reach + 140)) continue;   // never on top of another place
+      if (taken.some(cx, cz, Math.max(-footprint.x0, footprint.x1, -footprint.z0, footprint.z1) + 140, (t) => { const b = t.box ?? boxAt(t.x, t.z, square(t.r)); return Math.max(cx + footprint.x0 - b.x1, b.x0 - cx - footprint.x1, cz + footprint.z0 - b.z1, b.z0 - cz - footprint.z1) < 140; })) continue;
       let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
       for (let i = -samples; i <= samples && !wet; i++) for (let j = -samples; j <= samples; j++) {
         const x = cx + (i / samples) * hx, z = cz + (j / samples) * hz, h = map.world.heightAt(x, z);
@@ -713,7 +900,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     // (below) — so the places that did find ground stand exactly where they always stood.
     if (!Number.isFinite(best.cost) && !first) { waiting.push({ region, preset, cityOptions, hx, hz, reach, angle }); continue; }
     const y = map.world.levelGround(best.x, best.z, hx, hz, 60);
-    taken.push({ x: best.x, z: best.z, r: reach });
+    taken.push({ x: best.x, z: best.z, r: reach, box: boxAt(best.x, best.z, footprint), gap });
     planned.push({ region, preset, cityOptions, centre: { x: best.x, y, z: best.z }, reach, built: -1 });
   }
   if (overCap) console.error('[world] the map holds ' + MAX_REGIONS + ' places and lands; ' + overCap + ' more in the list were left out.');
@@ -741,7 +928,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const sx = plan.streetsX[(i * 2 + 1) % plan.streetsX.length];
       const zi = i % Math.max(1, plan.streetsZ.length - 1);
       const z0 = plan.streetsZ[zi], z1 = plan.streetsZ[Math.min(plan.streetsZ.length - 1, zi + 1)];
-      const car = createCar({ color: colours[(i + towns.length) % colours.length] });
+      const car = createCar({ color: colours[(i + towns.length + paintShift) % colours.length] });
       car.position.set(sx + (plan.road / 2 - 1.3) * (i % 2 ? 1 : -1), city.heightAt(sx, (z0 + z1) / 2), z0 + (z1 - z0) * (0.3 + 0.4 * ((i * 0.37) % 1)));
       car.rotation.y = i % 2 ? Math.PI : 0;
       root.add(car); parked.push(car); ctx.vehicles.add(car);
@@ -795,8 +982,40 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     return { from: { x: A0.x + ux * ea, z: A0.z + uz * ea }, to: { x: B0.x - ux * eb, z: B0.z - uz * eb } };
   };
   const roads: Array<{ from: { x: number; z: number }; to: { x: number; z: number } }> = [];
+  // 🛣️ A ROAD A CAR CAN CLIMB (failedbr #2499). A road's ends stay on the levelled ground of the places it joins, so two places
+  // on very different levels joined directly would get a climb steeper than a car can take. When the shortest tree has such a
+  // pair, the tree is rebuilt from each stop's nearest neighbours with the steep pairs last: the two places are then joined
+  // through a neighbour on a level between them, and a steep road is laid only where nothing else joins them.
+  const stopY: Array<number | null> = [...planned.map((p) => p.centre.y), ...landList.map(() => null), ...userMaps.map((m) => m.centre.y), ...venueList.map((v) => v.centre.y)];
+  const tooSteep = (a: number, b: number, d: number): boolean => {
+    const ya = stopY[a], yb = stopY[b];
+    if (ya === null || yb === null || ya === undefined || yb === undefined) return false;
+    const road = roadBetween(stops[a], stops[b], d);
+    return !!road && Math.abs(ya - yb) > 0.075 * Math.max(1, Math.hypot(road.to.x - road.from.x, road.to.z - road.from.z));
+  };
+  const highwayTree = (): Array<[number, number, number]> => {
+    const tree = spanningPairs(stops);
+    if (!tree.some(([a, b, d]) => !joinedPairs.has(a + ',' + b) && tooSteep(a, b, d))) return tree;          // the usual case
+    const seen = new Set<string>(), edges: Array<[number, number, number, number]> = [];
+    const add = (a: number, b: number, d: number): void => {
+      const key = Math.min(a, b) + ',' + Math.max(a, b);
+      if (seen.has(key)) return; seen.add(key);
+      edges.push([a, b, d, joinedPairs.has(a + ',' + b) ? -1 : tooSteep(a, b, d) ? 1 : 0]);
+    };
+    for (const [a, b, d] of tree) add(a, b, d);
+    stops.forEach((s, a) => {
+      const near = stops.map((t, b) => [b, Math.hypot(t.x - s.x, t.z - s.z)] as [number, number]).filter(([b]) => b !== a).sort((p, q) => p[1] - q[1] || p[0] - q[0]).slice(0, 8);
+      for (const [b, d] of near) add(a, b, d);
+    });
+    edges.sort((p, q) => p[3] - q[3] || p[2] - q[2] || p[0] - q[0] || p[1] - q[1]);
+    const parent = stops.map((_, i) => i);
+    const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const out: Array<[number, number, number]> = [];
+    for (const [a, b, d] of edges) { const ra = find(a), rb = find(b); if (ra !== rb) { parent[ra] = rb; out.push([a, b, d]); } }
+    return out;
+  };
   if (stops.length > 1) {
-    for (const best of spanningPairs(stops)) {
+    for (const best of highwayTree()) {
       if (joinedPairs.has(best[0] + ',' + best[1])) continue;                                // a joined land touches it
       const road = roadBetween(stops[best[0]], stops[best[1]], best[2]);
       if (road) roads.push(road);
@@ -1000,14 +1219,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       freeGroup(groups, farthest.id);
     }
   };
-  const anchored = new Map<THREE.Object3D, { x: number; z: number }>();
+  const anchored = new Map<THREE.Object3D, { x: number; z: number; lowest: number; lift: number }>();
   let time = 0;
-  // LATE GROUND EDITS (world: { lateEdits: true }, default off): a pad, land or road laid after this point redraws the map's
-  // chunks and plants it touches, and the walkable ground under the player is sampled again at once.
-  const lateEdits = options.lateEdits === true;
+  // LATE GROUND EDITS (on unless world: { lateEdits: false }): a pad, land or road laid after this point redraws the map's
+  // chunks and plants it touches, the walkable ground under the player is sampled again at once, and everything put down with
+  // world.place() inside the changed area stands on the new ground.
   let groundEditsSeen = map.world.editCount ? map.world.editCount() : 0;
-  /** The edit count at the first frame (-1 before it): edits after it, without lateEdits, are never redrawn (the playtest says so). */
-  let editsAtFirstFrame = -1;
+  /**
+   * The edit count when the terrain was FIRST DRAWN (the map.update() above, before any feature's setup ran): edits after it,
+   * without lateEdits, are never redrawn (the playtest says so). It used to be read at the first frame, so an edit a feature
+   * made in its setup() — after the chunks were drawn — was neither redrawn nor reported.
+   */
+  const editsAtFirstFrame = map.world.editCount ? map.world.editCount() : 0;
   const playerWorld = () => {
     const p = ctx.player.object.position;
     return { x: p.x + chunks.origin.x, y: p.y, z: p.z + chunks.origin.z };
@@ -1127,7 +1350,9 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const o = chunks.origin, h = (x: number, z: number) => map.world.heightAt(x, z), r1 = (v: number) => Math.round(v * 10) / 10;
     const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), box = new THREE.Box3();
     // 1. The drawn terrain: a chunk's grid vertices (never its skirt, which hangs below on purpose) against the land there.
-    let samples = 0, off = 0, worst = 0;
+    // A sample that is not a number (the drawn vertex or heightAt) is OFF and is counted on its own: NaN compared false with
+    // every threshold, so a map whose ground had gone NaN everywhere was reported as 0 off (failedbr #2499).
+    let samples = 0, off = 0, worst = 0, notNumber = 0;
     for (const chunk of chunks.group.children.slice(0, 48)) {
       const pos = ((chunk as THREE.Mesh).geometry as THREE.BufferGeometry | undefined)?.getAttribute?.('position') as THREE.BufferAttribute | undefined;
       const n = pos ? Math.round(Math.sqrt(pos.count + 4) - 2) : 0;
@@ -1136,7 +1361,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (let k = 0; k < 9; k++) {
         a.fromBufferAttribute(pos, Math.min(n * n - 1, Math.floor(((k + 0.5) / 9) * n * n))).applyMatrix4(chunk.matrixWorld);
         const d = Math.abs(a.y - h(a.x + o.x, a.z + o.z));
-        samples++; if (d > 0.5) off++; worst = Math.max(worst, d);
+        samples++; if (!(d <= 0.5)) off++;
+        if (Number.isFinite(d)) worst = Math.max(worst, d); else notNumber++;
       }
     }
     // 2 and 3. What the GAME added: big flat meshes against the land under them, and road-named meshes' faces.
@@ -1189,6 +1415,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     for (const child of ctx.scene.children) visit(child);
     // 4. The player on foot, on dry land: how far its feet are from the ground (null while driving or swimming).
     const at = playerWorld(), land = h(at.x, at.z);
+    if (!Number.isFinite(land)) notNumber++;
     const player = ctx.vehicles.seated || land < map.world.seaLevel ? null : r1(at.y - land);
     // 5. Seams: where two joined tiles of one grown city meet, the ground 3 m into each side (they share one level by design).
     let seamSamples = 0, seamWorst = 0;
@@ -1235,9 +1462,17 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (stale) dirty++;
       }
     }
-    return { terrain: { samples, off, worst: r1(worst) }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
+    return { terrain: { samples, off, worst: r1(worst), notNumber }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
   };
-  const probeHook = { geometry: geometryReport };
+  // 🔎 Where the player stands, for the placeholder look (gamePlaceholderProbe.ts): the feet, the land under them and the
+  // water over that land (the sea where the land is below sea level, else a river or lake). Read-only.
+  const standingReport = () => {
+    const at = playerWorld(), land = map.world.heightAt(at.x, at.z), river = map.world.waterAt(at.x, at.z);
+    const water = Math.max(land < map.world.seaLevel ? map.world.seaLevel : -Infinity, river ? river.surface : -Infinity);
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    return { feet: r1(at.y), land: r1(land), water: Number.isFinite(water) ? r1(water) : null, seated: !!ctx.vehicles.seated };
+  };
+  const probeHook = { geometry: geometryReport, standing: standingReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
   if (probeWindow) probeWindow.__nbWorld = probeHook;
   return {
@@ -1248,7 +1483,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       get joinedTo() { return v.joinedTo; }, get built() { return !!v.root; },
       toWorld: (x: number, z: number) => ({ x: v.centre.x + x * v.scale, y: v.centre.y, z: v.centre.z + z * v.scale }),
     })),
-    places: planned.map((p) => ({ id: p.region.id, kind: p.region.kind, centre: { x: p.centre.x, z: p.centre.z }, radius: p.reach, get built() { return p.built >= 0; } })),
+    places: planned.map((p) => ({ id: p.region.id, kind: p.region.kind, centre: { x: p.centre.x, z: p.centre.z }, radius: p.reach, get plan() { return planCity(p.cityOptions); }, get built() { return p.built >= 0; } })),
     nearestRegion() {
       const at = playerWorld();
       let found: { region: OpenWorldCity; distance: number } | null = null;
@@ -1262,12 +1497,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       if (!object.parent) ctx.scene.add(object);
       const lowest = object.children.length ? localLowestY(object) : 0;
       object.position.y = restOriginY(map.world.heightAt(x, z), lowest, lift);
-      anchored.set(object, { x, z });
+      anchored.set(object, { x, z, lowest, lift });
     },
     release(object) { anchored.delete(object); },
     frame(_ctx, delta) {
       time += delta;
-      if (editsAtFirstFrame < 0) editsAtFirstFrame = map.world.editCount ? map.world.editCount() : 0;
       const at = playerWorld();
       const shift = map.update(at.x, at.z, time, at.y);
       if (shift) {
@@ -1282,7 +1516,14 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       if (lateEdits && map.world.editCount) {
         const edits = map.world.editCount();
-        if (edits !== groundEditsSeen) { groundEditsSeen = edits; centre.x = Number.NaN; centre.z = Number.NaN; }
+        if (edits !== groundEditsSeen) {
+          const changed = map.world.editsSince ? map.world.editsSince(groundEditsSeen) : [];
+          groundEditsSeen = edits; centre.x = Number.NaN; centre.z = Number.NaN;
+          // What the game put down with place() inside a changed area stands on the new ground, not on the old one.
+          for (const [object, a] of anchored) {
+            if (changed.some((e) => a.x >= e.x0 && a.x <= e.x1 && a.z >= e.z0 && a.z <= e.z1)) object.position.y = restOriginY(map.world.heightAt(a.x, a.z), a.lowest, a.lift);
+          }
+        }
       }
       layGround(at.x, at.z);
       // A place still only planned is built when the player comes near it — at most one per frame, so walking towards a
@@ -1655,7 +1896,10 @@ export { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH };
 
 export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
 /** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
-export function gameWorldFileSource(options: { city?: boolean } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; workspaceId?: string } = {}): string {
+  const seed = options.workspaceId
+    ? createHash('sha256').update('world:' + options.workspaceId).digest().readUInt32BE(0) || 1
+    : 7;
   return [
     '// THIS GAME\'S MAP. The land is NavBharatAI\'s big Athree map; the places on it are the regions list below.',
     '// To make the map BIGGER: add one more region (a city, a town or a village; say which way with toward, or leave it out).',
@@ -1667,7 +1911,7 @@ export function gameWorldFileSource(options: { city?: boolean } = {}): string {
     "import type { OpenWorldOptions } from './play/openWorld';",
     '',
     'export const WORLD: OpenWorldOptions = {',
-    '  seed: 7,',
+    '  seed: ' + seed + ',',
     '  regions: [',
     ...(options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
     '  ],',

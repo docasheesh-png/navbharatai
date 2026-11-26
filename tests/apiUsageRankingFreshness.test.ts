@@ -9,7 +9,8 @@ describe('API usage ranking reports history without inventing chain order', () =
     expect(dashboard).toContain("fetch('/api/admin/analytics', { headers })");
   });
   it('updates freshness only on a successful validated response', () => {
-    expect(dashboard).toContain("if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); setAnalyticsRefreshedAt(Date.now()); }");
+    // (it also records which reads the server could not do — oneFailedReadNeverSinksTheAdminAnalytics)
+    expect(dashboard).toContain("if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); setAnalyticsUnread(analyticsUnreadOf(a.value)); setAnalyticsRefreshedAt(Date.now()); }");
     expect(dashboard).toContain('Last refreshed:');
     expect(dashboard).toContain('Refresh failed. Previously loaded figures may be stale.');
   });

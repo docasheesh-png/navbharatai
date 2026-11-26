@@ -32,7 +32,8 @@ import { AdsPanel } from './admin/AdsPanel';
 import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
 import { ProviderSwitchesPanel } from './admin/ProviderSwitchesPanel';
 import { TrafficControlPanel } from './admin/TrafficControlPanel';
-import { EngineChain, EngineHealthList } from './admin/BuildEngineHealth';
+import { EngineChain, EngineDayDetail, EngineHealthList } from './admin/BuildEngineHealth';
+import { engineDaysOf, type EngineDays } from '../lib/engineDays';
 import { GameAssetLiveCheckPanel } from './admin/GameAssetLiveCheckPanel';
 import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -94,6 +95,7 @@ import { adminFooterItems, type AdminFooterApi } from './admin/adminFooterApi';
 import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
 import { writeFailure, readAnswer, isRecord } from '../lib/serverAnswer';
+import { analyticsUnreadOf, type AnalyticsUnread } from '../lib/analyticsUnread';
 import { playRefundCheckText } from '../lib/playRefundCheckText';
 import { deliverFile, deliveryMessage } from '../lib/downloadFile';
 
@@ -247,6 +249,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [analytics, setAnalytics] = useState<any>(null);
   // Q-680: a refused analytics read is said, never drawn as a platform with 0 users and ₹0 revenue.
   const [analyticsError, setAnalyticsError] = useState('');
+  /** The reads that failed in the last answer (the server names them) — those numbers are not real. */
+  const [analyticsUnread, setAnalyticsUnread] = useState<AnalyticsUnread[]>([]);
   const [analyticsRefreshedAt, setAnalyticsRefreshedAt] = useState<number | null>(null);
   /**
    * Who came to NavBharatAI itself — website visits, app opens and the people who signed in.
@@ -1363,7 +1367,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const r = await fetch('/api/admin/analytics', { headers });
       const a = await readAnswer(r, (b): b is Record<string, unknown> =>
         isRecord(b) && typeof b.totalUsers === 'number' && typeof b.totalRevenue === 'number');
-      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); setAnalyticsRefreshedAt(Date.now()); }
+      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); setAnalyticsUnread(analyticsUnreadOf(a.value)); setAnalyticsRefreshedAt(Date.now()); }
       else setAnalyticsError(a.sentence);
     } catch (e) { console.error(e); setAnalyticsError(e instanceof Error ? e.message : 'Could not reach the server.'); }
     finally { setLoading(false); }
@@ -1465,15 +1469,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // THE REAL BUILD ENGINES — see GET /api/admin/engines for why the old page was fake.
   const [engines, setEngines] = useState<any>(null);
   const [enginesLoading, setEnginesLoading] = useState(false);
+  /** Per-day engine stats, shape-checked at entry (engineDays.ts); undefined = an older server sent none. */
+  const [engineDays, setEngineDays] = useState<EngineDays | undefined>(undefined);
+  const [pickedEngine, setPickedEngine] = useState<string | null>(null);
   const fetchEngines = useCallback(async () => {
     setEnginesLoading(true);
     try {
       const r = await fetch('/api/admin/engines', { headers });
       const d = await r.json();
       setEngines(d && typeof d === 'object' ? d : null);
+      setEngineDays(r.ok ? engineDaysOf(d) : undefined);
     } catch (e) {
       console.error(e);
       setEngines(null);
+      setEngineDays(undefined);
     } finally {
       setEnginesLoading(false);
     }
@@ -2213,6 +2222,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </div>
       )}
 
+      {!analyticsError && analyticsUnread.length > 0 && (
+        <p role="alert" className="mb-4 rounded-xl border border-line bg-card px-4 py-3 text-xs font-semibold text-danger">
+          Some platform numbers could not be read, so these are NOT real: {analyticsUnread.map((u) => `${u.read}${u.code ? ` (${u.code}: ${u.message})` : ` (${u.message})`}`).join('; ')}. Every other number below was read now.
+        </p>
+      )}
       {analyticsError && (
         <p role="alert" className="mb-4 rounded-xl border border-line bg-card px-4 py-3 text-xs font-semibold text-danger">
           Could not read the platform analytics: {analyticsError}{analytics ? ' The numbers below are from the last successful read.' : ' The numbers below are not real until a read succeeds.'}
@@ -2689,7 +2703,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                         {Array.isArray(engines.chains?.[t.level]) && engines.chains[t.level].length > 0 ? (
                           /* The whole chain this tier tries now, leads included, coloured by 24-hour health. */
-                          <EngineChain chain={engines.chains[t.level]} health={engines.health} names={engines.engineNames} />
+                          <EngineChain chain={engines.chains[t.level]} health={engines.health} names={engines.engineNames}
+                            days={engineDays} picked={pickedEngine} onPick={(e) => setPickedEngine((p) => (p === e ? null : e))} />
                         ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           {(t.rungs || []).map((r: any, i: number) => (
@@ -2713,6 +2728,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         )}
                       </div>
                     ))}
+
+                    {pickedEngine && <EngineDayDetail engine={pickedEngine} days={engineDays} names={engines.engineNames} onClose={() => setPickedEngine(null)} />}
 
                     <EngineHealthList health={engines.health} names={engines.engineNames} />
 

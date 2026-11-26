@@ -137,6 +137,24 @@ steps:
         npx --yes firebase-tools@15.35.0 deploy --only storage --project gen-lang-client-0866594388 --non-interactive
         echo "Storage rules deployed to gen-lang-client-0866594388 for $COMMIT_SHA."
 
+  # Step 3c — THE INDEXES SHIP WITH THE QUERIES THAT NEED THEM (Q-3344, admin 2026-11-25).
+  #
+  # 🔴 WHY. `firestore.indexes.json` declared the (paymentStatus, amountPaid) index that the admin analytics'
+  # revenue sum needs, but nothing ever deployed that file — only `firestore:rules` above. Production answered
+  # "9 FAILED_PRECONDITION: The query requires an index" and the admin Home said "total revenue … NOT real".
+  # Optional, like Storage: index creation is additive and asynchronous, and a missing permission here must not
+  # hold a release. Without --force the CLI never deletes an index that exists only in the console.
+  - name: 'node:22.23.4-slim'
+    id: 'deploy-firestore-indexes'
+    allowFailure: true
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        npx --yes firebase-tools@15.35.0 deploy --only firestore:indexes --project gen-lang-client-0866594388 --non-interactive
+        echo "Firestore indexes deployed to gen-lang-client-0866594388 for $COMMIT_SHA."
+
   # Step 4: Deploy the immutable image revision to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'

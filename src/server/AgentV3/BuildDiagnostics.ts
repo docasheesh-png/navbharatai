@@ -48,6 +48,8 @@ import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
 import { commandTimingText, ourCommandLabel, type CommandTiming } from './commandTiming';
+import { engineCodeInMessage, recordEngineDay, type EngineBuildTally } from './engineDayStats';
+import { engineKey } from './engineUseStore';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -161,7 +163,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // Whether OUR game-kit seed laid the engine down before the builder started (gameKitSeed.ts, admin
   // 2026-10-11, build 46e2d74b). A failed seed is a warning about our preparation; the app is judged
   // by what the builder then made, so it is never a mark against the user's game.
-  'GAME_KIT_SEEDED', 'RACE_COURSE_ENDLESS', 'GAME_KIT_NOT_SEEDED', 'GAME_CONTRACT', 'GAME_SCOPE_OK', 'GAME_SCOPE_GAP', 'GAME_DEFECTS', 'GAME_GEOMETRY_FINDINGS', 'GAME_REPAIR_SKIPPED', 'GAME_REPAIRED',
+  'GAME_KIT_SEEDED', 'RACE_COURSE_ENDLESS', 'GAME_KIT_NOT_SEEDED', 'GAME_CONTRACT', 'GAME_SCOPE_OK', 'GAME_SCOPE_GAP', 'GAME_DEFECTS', 'GAME_GEOMETRY_FINDINGS', 'GAME_PLACEHOLDERS', 'GAME_REPAIR_SKIPPED', 'GAME_REPAIRED', 'GAME_PROOF',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_MODULE_FILES_UNDELIVERED', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // The game playtest (gamePlaytest.ts): a pass, or a run that could not look, is never a defect of the app.
   'GAME_PLAYTEST_NOT_RUN', 'GAME_PLAYTEST_OK',
@@ -1133,6 +1135,11 @@ export class BuildDiagnostics {
   /** Which provider actually DELIVERED each build turn (GLM/KIMI/CLAUDE/…) → turn count. Lets the
    *  downloadable report answer "kaun sa reply kis provider se aaya" — the cheap-floor-vs-Claude split. */
   private readonly providerDelivery = new Map<string, number>();
+  /** Per engine FAMILY: measured answer times, failure codes and who carried on (engineDayStats.ts). */
+  private readonly engineAnswerTimes = new Map<string, { n: number; ms: number }>();
+  private readonly engineFailureCodes = new Map<string, Map<string, number>>();
+  private readonly engineCarriedBy = new Map<string, Map<string, number>>();
+  private engineDayRecorded = false;
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   private shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
@@ -1929,6 +1936,12 @@ export class BuildDiagnostics {
       this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs, completedAt);
     }
     this.channelTotals.llmCalls += 1;
+    // The answering engine's own time, per engine (planner and failed calls are not answers of an engine turn).
+    if (rec.ok && rec.planner !== true && rec.provider) {
+      const fam = engineKey(rec.provider);
+      const ms = answerMs ?? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) && rec.latencyMs >= 0 ? rec.latencyMs : undefined);
+      if (fam && ms !== undefined) { const t = this.engineAnswerTimes.get(fam) ?? { n: 0, ms: 0 }; t.n += 1; t.ms += ms; this.engineAnswerTimes.set(fam, t); }
+    }
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
     // "last 40" of a list whose last entries were calls 261–300 of a 312-call build. The end the
@@ -2442,6 +2455,11 @@ export class BuildDiagnostics {
    */
   finish(ok: boolean, summary?: string): void {
     this.endedAt = this.now();
+    // Every finished build, once, adds its engines to the day (engineDayStats.ts). Fire-and-forget: never blocks.
+    if (!this.engineDayRecorded) {
+      this.engineDayRecorded = true;
+      try { void recordEngineDay(this.engineDayTally(), this.endedAt); } catch { /* an observation must never block */ }
+    }
     this.ok = ok;
     if (summary !== undefined) this.summary = summary;
     // If the build ended NOT-ok with tool calls still in-flight, those are EXACTLY what it hung on
@@ -2527,10 +2545,30 @@ export class BuildDiagnostics {
    * reports via its onProviderUsed callback, e.g. 'GLM' | 'KIMI' | 'CLAUDE' | 'CLAUDE_HAIKU'). Counts
    * per provider so the report shows the delivery split. Best-effort — a blank name is ignored.
    */
-  recordProviderTurn(name: string): void {
+  recordProviderTurn(name: string, fellBackFrom?: readonly string[]): void {
     if (!name) return;
     this.providerDelivery.set(name, (this.providerDelivery.get(name) ?? 0) + 1);
+    // Who carried the turn when an engine before it failed — the "why did the fallback happen, and to whom" half.
+    const to = engineKey(name);
+    for (const from of fellBackFrom ?? []) {
+      const f = engineKey(from);
+      if (!f || !to || f === to) continue;
+      const m = this.engineCarriedBy.get(f) ?? new Map<string, number>();
+      m.set(to, (m.get(to) ?? 0) + 1); this.engineCarriedBy.set(f, m);
+    }
     this.notify();
+  }
+
+  /** This build's part of the per-day engine stats (engineDayStats.ts), by engine family. PURE read. */
+  engineDayTally(): Record<string, EngineBuildTally> {
+    const out: Record<string, EngineBuildTally> = {};
+    const row = (fam: string): EngineBuildTally => (out[fam] ??= { answered: 0, failed: 0, timedAnswers: 0, answerMsTotal: 0, reasons: {}, carriedBy: {} });
+    for (const [name, n] of this.providerDelivery) { const f = engineKey(name); if (f) row(f).answered += n; }
+    for (const [name, n] of this.providerFailures) { const f = engineKey(name); if (f) row(f).failed += n; }
+    for (const [f, t] of this.engineAnswerTimes) { const r = row(f); r.timedAnswers += t.n; r.answerMsTotal += t.ms; }
+    for (const [f, m] of this.engineFailureCodes) for (const [code, n] of m) row(f).reasons[code] = (row(f).reasons[code] ?? 0) + n;
+    for (const [f, m] of this.engineCarriedBy) for (const [to, n] of m) row(f).carriedBy[to] = (row(f).carriedBy[to] ?? 0) + n;
+    return out;
   }
 
   /**
@@ -2561,6 +2599,15 @@ export class BuildDiagnostics {
     this.providerFailures.set(name, (this.providerFailures.get(name) ?? 0) + 1);
     if (reason !== undefined) {
       const bucket = classifyProviderFailure(reason);
+      // Per-day engine stats: the engine's OWN refusal code when the message carries one, else the bucket.
+      try {
+        const fam = engineKey(name);
+        if (fam) {
+          const code = engineCodeInMessage(reason instanceof Error ? reason.message : String(reason ?? '')) ?? bucket;
+          const m = this.engineFailureCodes.get(fam) ?? new Map<string, number>();
+          m.set(code, (m.get(code) ?? 0) + 1); this.engineFailureCodes.set(fam, m);
+        }
+      } catch { /* bookkeeping only */ }
       const byBucket = this.providerFailureReasons.get(name) ?? new Map<string, number>();
       byBucket.set(bucket, (byBucket.get(bucket) ?? 0) + 1);
       this.providerFailureReasons.set(name, byBucket);

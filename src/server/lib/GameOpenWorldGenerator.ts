@@ -38,6 +38,7 @@ import { geometryTier } from '../three/surfaces';
 import { settings } from '../core/settings';
 import { localLowestY } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
+import { damagePlayer } from '../core/state';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
 export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
@@ -70,6 +71,19 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * Clamped to 1 km .. 1000 km; a loop world is never smaller than the spread (sizeMeters is raised to it when needed).
    */
   spreadMeters?: number;
+  /**
+   * WATER (admin 2026-11-26: "jab tak user na bole, hero pani me tairna chahiye … tab tak … dubega, health kam hogi aur mar
+   * jayega"). 'drown' (default): in water the player loses health every second until it gets out or dies. 'swim': the player
+   * swims (only when the user asked for swimming).
+   */
+  water?: 'drown' | 'swim';
+  /**
+   * THE MAP'S EDGE (admin 2026-11-26: "har game me ek compulsory game boundary honi chahiye"). Always on: a stone wall that
+   * follows the ground, margin metres beyond the farthest place or land (default 800), that neither the player nor its car
+   * passes. More places push it out by themselves; { margin: 3000 } makes the open country wider ("map bada karo");
+   * { wall: false } keeps the edge without drawing the wall. false removes it (only when the user asks for an endless map).
+   */
+  boundary?: false | { margin?: number; wall?: boolean };
 }
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
@@ -102,6 +116,13 @@ export function isLandKind(kind: unknown): kind is LandKind { return typeof kind
 export const MAX_REGIONS = 1000;
 /** A planned place's city is built when the player comes this many metres from its edge. */
 export const BUILD_AHEAD = 1500;
+/** The map's edge: metres of open country past the farthest place (WORLD.boundary.margin), and never closer than this to the start. */
+export const EDGE_MARGIN = 800;
+export const EDGE_MIN_HALF = 600;
+const EDGE_STEP = 8;
+const EDGE_HEIGHT = 3.2;
+/** Health lost each second in water when the game is not a swimming one (WORLD.water). */
+export const DROWN_PER_SECOND = 20;
 /**
  * The open country kept between two places, edge to edge, in metres (failedbr #2499: "maps thode pas pas rahe, aur beech me
  * road ho"): a village keeps about 150 m, a big city up to 300 m — a short drive on the road between them.
@@ -399,7 +420,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -1150,10 +1171,49 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   map.update(spawn.x, spawn.z, 0, spawn.y);
   // The highways are drawn in WORLD metres: their group sits at minus the origin, and moves back with every origin shift.
   roadGroup.position.set(-chunks.origin.x, 0, -chunks.origin.z); ctx.scene.add(roadGroup);
+  // ⛔ THE MAP'S EDGE (admin 2026-11-26: the player walked on past the last place until the ground ran out or it fell into the
+  // sea). A box in WORLD metres around every place, land, venue and user map, margin metres wider; the player and its car are
+  // held inside it every frame, and a wall that follows the ground marks it. Its group moves with the floating origin like
+  // the highways. More places make the box bigger by themselves.
+  const edgeGroup = new THREE.Group(); edgeGroup.name = 'World edge group';
+  const edge: { minX: number; maxX: number; minZ: number; maxZ: number } | null = (() => {
+    if (edgeOption === false) return null;
+    const margin = Math.max(150, Math.min(50000, Number(edgeOption?.margin) || EDGE_MARGIN));
+    let minX = spawn.x - EDGE_MIN_HALF, maxX = spawn.x + EDGE_MIN_HALF, minZ = spawn.z - EDGE_MIN_HALF, maxZ = spawn.z + EDGE_MIN_HALF;
+    const cover = (x: number, z: number, r: number) => { minX = Math.min(minX, x - r); maxX = Math.max(maxX, x + r); minZ = Math.min(minZ, z - r); maxZ = Math.max(maxZ, z + r); };
+    for (const p of planned) cover(p.centre.x, p.centre.z, p.reach);
+    for (const l of landList) cover(l.centre.x, l.centre.z, l.radius);
+    for (const v of venueList) cover(v.centre.x, v.centre.z, Math.max(v.width, v.depth) / 2);
+    for (const m of userMaps) cover(m.centre.x, m.centre.z, m.size / 2);
+    return { minX: minX - margin, maxX: maxX + margin, minZ: minZ - margin, maxZ: maxZ + margin };
+  })();
+  if (edge && edgeOption !== false && edgeOption?.wall !== false) {
+    // One instanced stone segment every EDGE_STEP metres, each standing on the ground under it: one draw call for the whole edge.
+    const spots: Array<{ x: number; z: number; ry: number }> = [];
+    const run = (x0: number, z0: number, x1: number, z1: number) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(len / EDGE_STEP)), ry = Math.atan2(-(z1 - z0), x1 - x0);
+      for (let i = 0; i < n; i++) { const f = (i + 0.5) / n; spots.push({ x: x0 + (x1 - x0) * f, z: z0 + (z1 - z0) * f, ry }); }
+    };
+    run(edge.minX, edge.minZ, edge.maxX, edge.minZ); run(edge.maxX, edge.minZ, edge.maxX, edge.maxZ);
+    run(edge.maxX, edge.maxZ, edge.minX, edge.maxZ); run(edge.minX, edge.maxZ, edge.minX, edge.minZ);
+    const wall = new THREE.InstancedMesh(new THREE.BoxGeometry(EDGE_STEP + 0.4, EDGE_HEIGHT, 1.2), new THREE.MeshStandardMaterial({ color: 0x8a8378, roughness: 0.95 }), spots.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+    spots.forEach((s, i) => {
+      const y = Math.max(map.world.heightAt(s.x, s.z), map.world.seaLevel) + EDGE_HEIGHT / 2 - 0.3;
+      wall.setMatrixAt(i, m4.compose(new THREE.Vector3(s.x, y, s.z), q.setFromAxisAngle(up, s.ry), one));
+    });
+    wall.instanceMatrix.needsUpdate = true;
+    wall.name = 'World edge';
+    wall.frustumCulled = false;
+    edgeGroup.add(wall);
+  }
+  edgeGroup.position.set(-chunks.origin.x, 0, -chunks.origin.z); ctx.scene.add(edgeGroup);
   // The first place was put on the map before map.update() moved the origin: line it up again.
   towns.forEach((t, i) => { roots[i].position.set(t.centre.x - chunks.origin.x, t.centre.y, t.centre.z - chunks.origin.z); roots[i].updateMatrixWorld(true); });
   layGround(spawn.x, spawn.z);
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
+  // Restart / Menu stand the player at THIS start again, in today's render metres (the origin may have moved since).
+  ctx.setRespawn?.(() => ctx.player.reset(spawn.x - chunks.origin.x, map.world.heightAt(spawn.x, spawn.z) + 0.2, spawn.z - chunks.origin.z));
   ctx.player.setWater(map.world.seaLevel);
 
   // 🏙️ THE NEAREST CITIES LIVE (map expansion item 4; owner decision: phone 2, mid 5, desktop 8). A city — all the tiles of a
@@ -1221,6 +1281,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   };
   const anchored = new Map<THREE.Object3D, { x: number; z: number; lowest: number; lift: number }>();
   let time = 0;
+  let edgeSaid = false;
   // LATE GROUND EDITS (on unless world: { lateEdits: false }): a pad, land or road laid after this point redraws the map's
   // chunks and plants it touches, the walkable ground under the player is sampled again at once, and everything put down with
   // world.place() inside the changed area stands on the new ground.
@@ -1513,7 +1574,22 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         for (const root of userRoots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         for (const root of venueRoots) { root.position.x -= shift.dx; root.position.z -= shift.dz; }
         roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
+        edgeGroup.position.x -= shift.dx; edgeGroup.position.z -= shift.dz;
       }
+      // ⛔ The edge holds: the car the player drives, else the player, is put back inside it (and a car stops).
+      if (edge) {
+        const car = ctx.vehicles.seated;
+        const body = car ?? ctx.player.object;
+        const wx = body.position.x + chunks.origin.x, wz = body.position.z + chunks.origin.z;
+        const cx = Math.min(edge.maxX - 1.5, Math.max(edge.minX + 1.5, wx)), cz = Math.min(edge.maxZ - 1.5, Math.max(edge.minZ + 1.5, wz));
+        if (cx !== wx || cz !== wz) {
+          if (car) { car.position.x = cx - chunks.origin.x; car.position.z = cz - chunks.origin.z; }
+          else ctx.player.reset(cx - chunks.origin.x, Math.max(body.position.y, map.world.heightAt(cx, cz) + 0.05), cz - chunks.origin.z);
+          if (!edgeSaid) { edgeSaid = true; console.info('[world] The map ends here — the edge is margin metres past the farthest place (WORLD.boundary).'); }
+        }
+      }
+      // 🌊 Water hurts unless the user asked for swimming: the player loses health every second it is in water.
+      if (waterMode !== 'swim' && !ctx.vehicles.seated && (ctx.player.swimming || ctx.player.underwater)) damagePlayer(DROWN_PER_SECOND * delta);
       if (lateEdits && map.world.editCount) {
         const edits = map.world.editCount();
         if (edits !== groundEditsSeen) {
@@ -1896,6 +1972,16 @@ export { GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH };
 
 export const GAME_WORLD_FILE_PATH = 'src/game/world.ts';
 /** The game's own map — the user's file (never a kit file): created once, then only ever added to. */
+/**
+ * Did the user ask for swimming ("tairna", "swim", "तैरना")? Water hurts by default (WORLD.water 'drown'); only a request that
+ * names swimming — and does not refuse it — makes the player swim. PURE.
+ */
+export function wantsSwimming(prompt: string | null | undefined): boolean {
+  const t = String(prompt ?? '');
+  if (!/\b(?:swim\w*|tair(?:na|ne|e|ta|ti|o|ega|egi|enge)?|tairak\w*)\b|तैर/i.test(t)) return false;
+  return !/\b(?:no|not|don'?t|never)\s+(?:\w+\s+){0,2}swim|\btair(?:na|ne)?\s+(?:nahi|nahin|mat)\b|(?:nahi|mat)\s+tair|तैर\S*\s+(?:नहीं|मत)/i.test(t);
+}
+
 const SEEDABLE_REGION_KINDS = new Set(['city', 'town', 'village', 'desert', 'jungle', 'mountain', 'snow', 'beach']);
 /**
  * The regions the first build lays down, from the places the user named (AgentV3/worldSetting.ts). Anything that is not a
@@ -1913,7 +1999,7 @@ export function seedRegions(regions: unknown): Array<{ id: string; kind: string 
   return out.slice(0, 60);
 }
 
-export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; workspaceId?: string } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; swim?: boolean; workspaceId?: string } = {}): string {
   const named = seedRegions(options.regions);
   const seed = options.workspaceId
     ? varietySeed(options.workspaceId, 'world')
@@ -1936,6 +2022,10 @@ export function gameWorldFileSource(options: { city?: boolean; regions?: unknown
       ? named.map((r) => `    { id: '${r.id}', kind: '${r.kind}' },`)
       : options.city ? ["    { id: 'main-city', kind: 'city' },"] : []),
     '  ],',
+    "  // Water hurts and drowns by default; 'swim' only when the user asks for swimming.",
+    "  water: '" + (options.swim ? 'swim' : 'drown') + "',",
+    '  // The map\'s edge: a wall this many metres past the farthest place. A bigger map = a bigger margin or more places.',
+    '  boundary: { margin: 800 },',
     '};',
     '',
   ].join('\n');
@@ -1979,6 +2069,10 @@ export function generateOpenWorld(): RecipeOutput {
       'map={{ corner: \'right\' }}; "bada minimap" → map={{ size: 200 }} (80–240 px); "naam mat dikhao" → map={{ names: false }}; "aur door tak',
       'dikhao" → map={{ range: 400 }} (metres); "full map nahi chahiye" → map={{ fullMap: false }}; "map band karo" → map={false}. A place\'s',
       'name on the map is its region name in src/game/world.ts ({ id: \'old-town\', kind: \'town\', name: \'Rampur\' }), else made from its id.',
+      'WATER: WORLD.water is \'drown\' by default (in water the player loses health every second and dies); set \'swim\' only when the user asks',
+      'for swimming ("tairna", "swim"). EDGE: WORLD.boundary keeps a stone wall margin metres past the farthest place — never remove it unless the',
+      'user asks for an endless map; "map / jagah bada karo" → a bigger margin or more regions (it moves out by itself). RESTART puts the player',
+      'back at the start by itself (ctx.setRespawn) — never write your own restart.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

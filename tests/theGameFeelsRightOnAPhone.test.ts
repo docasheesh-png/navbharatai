@@ -193,3 +193,73 @@ describe('📳 a hit is FELT, and the player can turn it off', () => {
     }
   });
 });
+
+// Admin 2026-11-26: "restart button kam nahi kar raha hai … character atak jata hai" and "hanth me gun to hoti hai, par punch
+// marta hai". Restart stood the player at (0, 0, 0); a held gun never fired.
+describe('🔁 restart brings the player back to the start, and 🔫 a held gun fires', () => {
+  const textsOf = (el: FakeEl): string[] => [el.textContent, ...el.children.flatMap(textsOf)].filter(Boolean);
+
+  it('Restart and Menu stand the player where setup left it — never at (0, 0, 0)', () => {
+    const game = new SHELL.Game({ container: new FakeEl('div'), setup: (ctx: any) => { ctx.player.reset(5, 2, 7); return []; } });
+    game.start();
+    game.player.object.position.set(100, -40, 3);
+    game.restart();
+    expect(game.player.object.position.toArray()).toEqual([5, 2, 7]);
+    game.player.object.position.set(-9, -9, -9);
+    game.toMenu();
+    expect(game.player.object.position.toArray()).toEqual([5, 2, 7]);
+    game.dispose();
+  });
+
+  it('a game that sets its own respawn (the open world) is stood there instead', () => {
+    const game = new SHELL.Game({ container: new FakeEl('div'), setup: (ctx: any) => { ctx.player.reset(5, 2, 7); ctx.setRespawn(() => ctx.player.reset(1, 3, 1)); return []; } });
+    game.start();
+    game.restart();
+    expect(game.player.object.position.toArray()).toEqual([1, 3, 1]);
+    game.dispose();
+  });
+
+  it('which held things are guns', () => {
+    expect(SHELL.handGunFor({ holds: { right: 'pistol' } })).toMatchObject({ kind: 'pistol', auto: false });
+    expect(SHELL.handGunFor({ holds: { right: 'assault rifle' } })).toMatchObject({ kind: 'rifle', auto: true });
+    expect(SHELL.handGunFor({ holds: { left: 'sniper' } })).toMatchObject({ kind: 'sniper' });
+    expect(SHELL.handGunFor({ holds: { right: 'sword', left: 'shield' } })).toBeNull();
+    expect(SHELL.handGunFor(undefined)).toBeNull();
+  });
+
+  it('holding a gun: the Attack button is Fire, a press fires once (semi-automatic), a second press fires again', () => {
+    const container = new FakeEl('div');
+    const game = new SHELL.Game({ container, player: { holds: { right: 'pistol' } }, setup: () => [] });
+    expect(textsOf(container)).toContain('Fire');
+    const shots: any[] = [];
+    const off = EV.events.on('WEAPON_FIRED', (p: any) => shots.push(p));
+    game.start();
+    game.input.setVirtualButton('attack', true);
+    game.loop.step(1);
+    game.loop.step(10);
+    expect(shots).toHaveLength(1);
+    expect(shots[0]).toMatchObject({ kind: 'pistol', ownerId: 'player' });
+    expect(shots[0].position).toBeTruthy();
+    game.input.setVirtualButton('attack', false);
+    game.loop.step(20);
+    game.input.setVirtualButton('attack', true);
+    game.loop.step(1);
+    expect(shots).toHaveLength(2);
+    off();
+    game.dispose();
+  });
+
+  it('without a gun nothing fires and the button stays Attack', () => {
+    const container = new FakeEl('div');
+    const game = new SHELL.Game({ container, setup: () => [] });
+    expect(textsOf(container)).not.toContain('Fire');
+    const shots: any[] = [];
+    const off = EV.events.on('WEAPON_FIRED', (p: any) => shots.push(p));
+    game.start();
+    game.input.setVirtualButton('attack', true);
+    game.loop.step(5);
+    expect(shots).toEqual([]);
+    off();
+    game.dispose();
+  });
+});

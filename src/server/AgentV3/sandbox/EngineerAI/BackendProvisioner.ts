@@ -14,9 +14,13 @@ export default pool;
 `;
 
 const AUTH_LIB = `import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 
-const SECRET = process.env.JWT_SECRET ?? 'please-set-JWT_SECRET-env-var';
+// No JWT_SECRET set: a random secret for THIS run only — never a fixed string, which anyone reading the code
+// could use to forge a sign-in. Sign-ins reset when the server restarts; set JWT_SECRET to keep them.
+const SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.JWT_SECRET) console.warn('[auth] JWT_SECRET is not set: using a random secret for this run. Sign-ins reset on restart.');
 
 export const hashPw = (password: string) => bcrypt.hash(password, 10);
 export const checkPw = (password: string, hash: string) => bcrypt.compare(password, hash);

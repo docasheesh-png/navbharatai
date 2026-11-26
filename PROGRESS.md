@@ -6077,6 +6077,87 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
   daemon here); set `MOBILE_NATIVE_BUILD_TEMPLATE` + `MOBILE_BUILD_ARTIFACT_BUCKET`; pin Temurin digests; bucket lifecycle rule; a first
   live native build and a real-device install.
 - **OPEN (admin decision):** whether a native build whose paid balance cannot cover ₹1 should withhold the download (GitHub cannot; native could).
+## 2026-11-25 — The first online Royale match: server-authoritative, 2–4 players, quota-bound (admin "sab karo")
+
+- **What was asked:** an external audit's order, approved by the admin — first a small, complete online match for the original Royale game, then scale. Until now only the offline Practice (PR #4217) existed.
+- **Server (`src/server/lib/royaleOnline/`):** `matchCore.ts` is one room's whole simulation, pure (no sockets, no clock): movement is a SPEED BUDGET (metres earned at 11 m/s, capped at 6.25, spent per accepted move — a per-message allowance would let a client spam tiny moves at one instant and outrun the cap), arena bounds and cover blocks; shots (cooldown, range, cover in the line of fire, armour); loot that changes hands in one place (`claimLoot`, a held crate is never handed out again); the zone on the server clock, collapsing to nothing so every match ends; elimination, placement and ONE frozen result (simultaneous zone deaths: the one with most health before the tick stands). `matchService.ts`: per-app queue (4 ⇒ start now; 2–3 ⇒ after 10 s; alone ⇒ after 30 s; empty seats filled by bots LABELLED bots), signed per-session resume tokens (anonymous store players have no account), 15 s reconnect grace then forfeit, the result reported once (`reported` is the only door), "queue again", hard quotas, `drain()` on SIGTERM. `royaleWs.ts`: the `/api/royale-online/ws` upgrade (wired in `server.ts` after Sonic), the store check (`getWebApp` + `canAccessNavData`, the NavData precedent), per-address socket limits, 512-byte frames, heartbeat, kill switch **`AGENTV3_ONLINE_MATCH`, default OFF** (ENV_REGISTRY).
+- **Kit (`GameRoyaleGenerator.ts`):** `royale/onlineClient.ts` (protocol, 100 ms interpolation, automatic resume, honest states: not on the store / switched off / full / unreachable), `royale/onlineMatch.ts` (the arena with the server's cover blocks, remote humanoids, position sent ~15/s, shots along the camera yaw, server corrections applied), `RoyaleOnline.tsx` (lobby, queue, HUD, eliminated, result, Queue again), `RoyaleGame.tsx` (Practice | Online tabs). The instructions now mount `RoyaleGame`. `characterSwap.ts` recognises it; the tool catalogue describes both modes.
+- **Locks (reversion-proven, each guard put back and its test watched fail):** `tests/anOnlineRoyaleMatchIsPlayedOnTheServer.test.ts` (19, real HTTP server + real WS clients: a three-player match to one winner with the same result for all, four start at once, lone player gets labelled bots, an unfought match still ends, teleport/bounds/garbage refused, tiny-move spam cannot outrun the cap, cover stops a shot, a crate goes to one player, reconnect restores, forged/foreign tokens resume nothing, forfeit after grace with the late returner shown the same result, drain, kill switch, store/private refusals, connection cap, daily cap, message flood, per-address limit, room cap); `tests/theOnlineRoyaleKitTalksToTheRealServer.test.ts` (6: the EMITTED client against the real server — lobby → queue → match → interpolation → server correction → automatic resume → result → queue again; truthful unavailable states; the adapter's send rate and remote bodies). The emitted modules compile under the strict kit census.
+- **Open, recorded in the queue:** Q-3390 🟡 (switching it on is the admin's money decision), Q-3391 🟡 (rooms are per Cloud Run instance; players on different instances do not meet), Q-3392 OPEN (the daily cap counts per instance).
+## 2026-11-25 — NavBharatAI's own Indian clothes (library batch 16); library pictures show characters standing
+
+The admin approved building the garments ourselves: "haan, Indian kapde banana shuru karo". The three downloaded Indian-clothing models (dhoti, kurta, saree) still have no verified licence, and **none of them is used**.
+
+- **What was added:** `scripts/library/buildIndianGarments.mts` makes the garments from geometry on the CC0 batch-7 villager bodies. There are 4 packaged models, live-admitted 4/4 and animated in a browser:
+  - `q16-man-kurta-pajama`: cream kurta, white pajama;
+  - `q16-man-pagdi`: white kurta-pajama with a saffron pagdi;
+  - `q16-man-dhoti`: khadi kurta, white dhoti, white pagdi;
+  - `q16-woman-saree`: maroon saree with a gold border and pallu, green blouse.
+  - Each is about 3.4 MB, with 19–22k triangles and all 16 clips.
+- **How the garments are made:**
+  - **Rings fitted to the body:** at each height (or along an arm), the body's cross-section is measured in 24 directions, smoothed, and given ease.
+  - **Tubes:** the rings become tubes for the torso, sleeves, legs, skirts and pagdi wraps.
+  - **Pallu:** a ribbon laid on the body's surface.
+  - **Weights:** taken from the nearest body vertices.
+  - **Hems:** a skirt, a kurta's skirt and a dhoti's wrap follow the pelvis plus the thigh on their own side, the usual game method for a skirt. Following only the nearest leg dragged the saree with each step. Averaging both legs let a thigh show through the hem in the standing pose.
+  - **Pagdi:** follows the head bone only.
+  - **Changeable by name:** each garment is its own node and material — Kurta, Pajama, Pagdi, Dhoti, Blouse, Saree, Pallu, Border.
+- **Found on the way:**
+  - **The villager had only its head's faces.** Only 1,683 of its 7,281 vertices were used. The base pack's full-body mesh has the same vertices in the same order, so its face list is written back. The fantasy outfit, including the knee-high boots that showed through, is detached; feet are bare.
+  - **Library pictures took the wrong pose.** They used the FIRST clip whose name contained "idle". In the animation library that is "Crouch_Idle_Loop", so every such character was pictured crouching. The 60+ kayquer people have their idle named "parado", so they were pictured in a T-pose. `thumbnailPoseClip` now prefers the entry's own idle role. 120 pictures were re-rendered and 77 changed.
+- **Matching:** Hindi and Hinglish aliases were added, as whole phrases ("dhoti wala aadmi", "पगड़ी वाला आदमी"), so the longest-name rule gives one person rather than "a dhoti man AND a man". The knowledge base has a new `game_indian_clothes` entry.
+- **Test:** `tests/indianGarmentsAreOurOwn.test.ts` checks the bytes, admission, garment nodes and materials, the restored body, skin weights, word matching, and the picture pose.
+- **Still open:**
+  - Saree in a full sprint: the forward leg comes through the front of the skirt. Walking and jogging are clean. Real cloth would need a physics simulation, which is not built.
+  - The kurta still shows a little of the base body's muscle shape.
+  - More colours and outfits (a woman's salwar-kameez, a lungi, a sherwani) can come from the same builder when asked.
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3353…Q-3356)
+## 2026-11-25 — Game proof: a named feature is present only on evidence that ran; four proofs per game build (#4542, Q-3360…Q-3365)
+
+External Game Maker audit, adapted under the external-suggestion rule.
+- **The audit's claim was real.** `scopeMatch` (`src/server/AgentV3/gameIntent.ts`) counted a feature present on a code SIGNAL: in a game without the 3D kit, `WORD_WITHOUT_KIT` accepted the words `traffic|cars`, `swim|water`, `door|interior|inside`, `destroy|break`, `npcs|villagers|people`; every other feature (score, levels, sound…) was a word/identifier match everywhere; and a kit game passed on a kit identifier anywhere — in a file nothing imports, or an import list.
+- **Class:** "present" was decided by text, not by anything that runs. **Fix:** present = a kit call (call syntax) in a file reachable from the entry (`gameCodeReach.ts`), with the kit's 3D or systems layer on disk, or a played action whose state change was observed (`gameProof.ts` `playedFeatureEvidence`: score rose, level rose, a sound started, Play again started a round, the vehicle moved under the accelerator). Anything else the code names is `notVerified` — said in GAME_SCOPE_GAP and in the release gate (unproven list, and named in the green headline). `missing` is unchanged by construction, so the done signal, game repair and complete-gate behave as before.
+- **Four proofs:** one GAME_PROOF info line for every game build the playtest reached — (a) contract, (b) start / after-moving / far pictures kept in the sandbox (size, id, path, measured change; the far view by a one-draw camera pull-back, three.js only; every view not taken said with why, day/night included), (c) every action played with pass/fail and the observed change, (d) wall time against the 90 s budget and idle fps, labelled the sandbox's software renderer, NOT a real phone. About a second; skipped and said with under 25 s of budget left.
+- **Wording:** "A good game" → "Plays well"; the head says "for playability, not graphics"; "Looks" → "Picture detail"; the proof card says "for playability (not a rating of its graphics)". The `Game Quality Score N/100` token the parsers read is kept.
+- **Lock:** `tests/aGameFeatureIsProvenNotNamed.test.ts` (17), proven by reversion (word→present: 7 fail; reach check removed: 2 fail; "A good game" restored: 1 fail; GAME_PROOF recording removed: theBuildRouteIsSplitByPhase fails). Six older tests re-pointed at the stricter meaning. The real-browser playtest suites ran the changed script and passed.
+- **Not done (queue):** Q-3363 🟡 keeping the pictures past the sandbox (a storage decision); Q-3364 🟡 played proof for swimming / houses / inventory / seated vehicle and the day/night pictures need a kit state hook in files #4535 is changing; Q-3365 OPEN — a kept game repair's replay does not re-record GAME_PROOF.
+## 2026-11-25 — External Game Maker audit: new games get their own look and keep it; placeholders are caught (Q-3370 … Q-3374)
+
+- **Variety (Q-3370).** Class: a starting choice the platform makes for a new game was a constant — every race's car 0xb42b2b, every open world WORLD.seed 7, every first city seed 11 + 17n. One rule now (`src/server/lib/projectVariety.ts`): the choice is fixed by the project id over a pool and written ONCE into the project's own file; everything else is derived from that file, so different projects differ and an edit ("ek dukaan jodo") changes nothing.
+  - A race the seed knows is a race gets `src/game/car.ts` with one of seven paints (ToolDispatcher `ensureRaceCarFile`, created once, never replaced; byte-registered in platformAuthored so an untouched car file is ours).
+  - The open world's `src/game/world.ts` seed comes from the workspace id — the SAME hunk #4535 carries, byte-identical, so the two merge cleanly in either order.
+  - The kit (`openWorld.ts`) derives each place's lots/buildings/traffic paint, a city's style (mixed or downtown) and the parked-car paints from WORLD.seed (`placeLook`, `parkedPaintShift`). A map on seed 7 keeps exactly the city it had — no existing game moves.
+  - Lock: `tests/aNewGameGetsItsOwnLookAndKeepsIt.test.ts` (9; real ToolDispatcher recipes and the real kit). Reverted (constant paint / world seed / city seed) → 4 fail.
+  - Not here: the human half (starter appearance presets, REALISTIC_HUMANS outfits) is #4535's (Q-3372); the action town and race road still start the same (Q-3373, waits on #4535's GameBuildingGenerator rewrite).
+- **Placeholders (Q-3371).** Class: no detector looked for a stand-in, so a game showing the code-built object for a missing GLB, a frozen rig, a player in the sea, a blank map or controls off the screen passed every measure. `gamePlaceholderProbe.ts` adds separate deterministic detectors (no change to the playtest's scoring or the release gate): missing model from the files; in the page, failed model/image requests (404 or an HTML answer), broken textures, a 10+-bone rig with an unchanged pose over the round, water over the player's head at the start (new read-only `__nbWorld.standing()`), ≤2 meshes after a round, phone controls laid out but off-screen/transparent/hidden/tiny. One GAME_PLACEHOLDERS line (process-only) and a builder-only repair note on the next game turn; that turn's playtest looks again.
+  - Lock: `tests/aPlaceholderIsCaught.test.ts` (17; the browser hook run against a real three.js scene, the real kit's open world, the real phase). The character GLB removed → fires naming "human", its path and its loader; a healthy kit game → silent. Reverted (phase gate, hook line, file check, comment stripping, standing hook) → each fails.
+  - Open: in-build repair is suspended by the admin, so the repair is on the next game turn (Q-3374, 🟡 BLOCKED on that decision).
+## 2026-11-25 — One ground, never layers: a NaN ground edit can no longer poison the whole map (failedbr #2499, Q-3357…Q-3360)
+
+Admin 2026-11-22, on their GTA-style game: *"mujhe lag raha hai, maps me sabhi city/village ko ek plane me na bana kar vertical
+layers me banaya ja raha hai!"* — screenshots of the hero swimming in the sea under a flat slab with lamps, people and cars on it.
+
+- **Reproduced in Chromium (real kit, vite build, swiftshader).** With valid regions, both the kit at build time (acae9e7c, 11
+  places, admin-like world) and main (20 mixed regions: cities, joinTo tiles, desert/jungle/mountain/snow/beach/grassland, a
+  venue) stand every place, the player and the drawn terrain on one ground: terrain off 0 at every place, pending 0, player
+  0.2–0.6 m over heightAt. With ONE region asked toward `'southwest'` (not one of the eight directions) the spot became NaN, its
+  pad was filed under "every point" in the pad index, and heightAt was NaN EVERYWHERE: no terrain was drawn, the player dropped
+  into the sea, and the cities already planned hung at their pad heights (11 m) — exactly the screenshots. The geometry report
+  said `off: 0` (NaN compares false).
+- **Class:** one bad number poisons the whole ground, silently. **Fix (at the entry):** `levelGround` / `setLand` / `addRoad`
+  refuse a non-finite value and say so (`finiteEdit`, AthreeMapGenerator); the open world reads each region's `toward`
+  (aliases such as `northeast`, `NE`, `North East` mapped; anything else left out and said) and `distance` (metres or left out)
+  before laying it (`cleanRegion`).
+- **Honesty (rule 5):** geometry() counts a non-finite sample as off and as `terrain.notNumber`; `geometryFindings` names it
+  first ("The map's ground is NOT A NUMBER…").
+- **Late edits (builds on #4466 — aedfd171, 896c8ba9, 3df5395d):** the open world now redraws late ground edits by default
+  (`lateEdits: false` opts out; a bare Athree map stays off — the rollout page's two follow-ups do not apply to the open world,
+  which keeps no stored heightfield and whose rivers/roads draw their own heights), re-stands `world.place()` objects on the
+  new ground, and counts edits from the FIRST DRAW, so an edit in a feature's `setup()` is reported when the redraw is off.
+- **Lock:** `tests/oneGroundNeverLayers.test.ts` (9) — every fix reverted on its own and watched fail (guard, cleanRegion,
+  notNumber, default redraw, prop re-stand, first-draw count).
+- **🟡 Q-3360 BLOCKED:** the exact non-finite value in the admin's own game is unknown — the saved report has file hashes, not
+  world.ts / features. Needs those files or one rebuild on the fixed kit (the console then names the refused value).
 ## 2026-11-25 — Autopsy of BR2514–BR2519 (last six builds; all "succeeded", none played)
 
 Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this PR: **Q-3330** kit refresh was all-or-nothing → partial, safe, named (real kit: 0 → 124 of 137 files reach the existing game); **Q-3333** Surplus refusal (HTTP 4xx) parks the engine 30 min instead of costing 80–94 s on every build; evidence fixes for the two classes that had no root cause — **Q-3332** the playtest says each stage's seconds (real-browser proof) and **Q-3337** the kit seed says each recipe's seconds. Already fixed upstream (merged #4532/#4533, after these builds): **Q-3335** the user's repeated asks (enemies, bullets to the sky, walking through bots, knock-back, police). BLOCKED with options: Q-3331 (the shell chain behind an edited playerBody.ts), Q-3334 (why Surplus 404s every model — the provider), Q-3336/3339/3340/3343 (need project files or fuller records), Q-3338 (weak model tier, follows Q-3334), Q-3341 (report storage cap), Q-3342 (charging an unplayed game — a policy decision).
@@ -6108,3 +6189,128 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
   - start reserve off → 1 fails.
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
+
+## 2026-11-25 — "FREE AI CHALU KAREIN": an app's AI, free, in three steps under the ❗ button
+
+Admin, verbatim: *"navbharatai me jab bhi koi user ai banwaye, koi bhi ai. to header me ❗ button me 2
+button dikhe — 1. login … 2. ganerate api … 3. pest api keys … login button se z.ai (glm) ka login page
+open ho, aur api se https://z.ai/manage-apikey/apikey-list … (sab user ki language me)"*, then *"'free ai
+chalu karen' ho to? glm 4.5 flash, glm 4.6v flash glm 4.7 flash — yeh teeno free module hai. yahi use hone
+chahiye only!"*, then *"han yahi bana do!!!!"*.
+
+**What shipped.** One row under the existing ❗ tray ("Turn on free AI"), offered only when the app really
+uses AI and no key of the owner's own is answering. It opens three numbered steps, English first with Hindi
+beside it: open the sign-in page, open the key page, paste the key in the box. The key is saved into the
+owner's own encrypted vault, scoped to that app, through the one shared `saveUserSecrets` write — so nobody
+has to find Settings → Secrets & API Keys at all, which is where the old flow lost people. After that the
+app's assistant answers on the owner's free account: `glm-4.7-flash` by default, `glm-4.5-flash`
+automatically when the first is busy, and the user never picks or sees a model.
+
+**The ✅ is earned, not drawn.** `/api/app-ai/free-key` asks the free model one real question on the pasted
+key BEFORE saving it; a key that is refused is not saved and not ticked, and a busy free tier is reported as
+"wait a few seconds and press Save again" rather than as a broken key. Steps 1 and 2 tick on "you opened
+this page", and the card says so — a browser cannot honestly know whether a sign-in succeeded in another tab.
+
+**The money class, locked.** The key is the USER'S, so a paid model id on it would spend their own balance
+behind a button that said "free". `appFreeAi.ts` therefore holds an explicit three-id ALLOWLIST (the three
+Z.ai prints as Free, already quoted in `providerRates.ts`) and `APP_FREE_AI_MODELS` may only narrow it. A
+matcher on the word "flash" would have been the fourth walk into the trap `providerRates.ts` records:
+`glm-4.7-flashx` and `glm-5.3-flash` both contain "flash" and both cost money.
+
+**Siblings hunted.** `browserAiKeyScan.ts` did not know `api.z.ai` or `*_ZAI_API_KEY` — and the free key is
+exactly what makes that shape reachable, since `ZAI_API_KEY` now really exists in an app's `.env`. Both are
+added, same class as the OpenAI case the module was written for. `secretRequest.ts` now refuses to let a
+build ask for the key in a mid-build popup: the ❗ box owns it, and a popup would be the same thing done
+worse, without the two links that make a key gettable.
+
+**Honest gap, recorded:** the free VISION model (`glm-4.6v-flash`) is unreachable because the app-AI gateway
+carries text only — no image input exists anywhere on that path today. It is **Q-3400** in
+`BUILD_REPORT_QUEUE.md` with what it needs, rather than shipped as a model id with nothing behind it.
+
+Gate: `typecheck`, `noUnusedImports`, `native:guard`, `typecheck:server`, `typecheck:benchmark`,
+`test:coverage`, `build`, `test:bundle`, `boot:check`, `deps:server-gate` — on the final state.
+31 new tests in `tests/freeAiChaluKarein.test.ts`.
+### 2026-11-25 — Q-3334 root-caused live: Surplus 404 is a dead seller PAIR, not the request (PR #4536)
+
+Admin: "surplus app builder me kam nahi kar raha, vaise woh reply de raha hai". Probed /min90 with the builder's own
+shape (provider pin + si_route + tools + reasoning_effort, prompts up to 211k tokens, max_tokens up to 64k, tool history):
+qwen3-coder/bedrock and glm-5.3-flash/mistral → 200 at every size; glm-5.3 and deepseek-v4.1-flash pinned to
+dashscope-cn → 404 `no_sellers_for_model` on every request; glm-5.3/zai → 404 `minimum_discount_not_met` (router 80%,
+market page 99.5%). Over ~260k tokens qwen3-coder also gets `minimum_discount_not_met` (context, expected).
+Class: the selector trusted the public market's `discount_pct` as "the router will fill this pair", and treated a
+pair refusal as a MODEL failure (bench) and — in #4536's first cut — as an ENGINE refusal (30-min park).
+Fix: `surplusPairRefusals.ts` (process-wide pair memory, 20 min / 2 min if recently served), selector skip, same-model
+next-seller retry, no bench on a market refusal, 404 removed from the circuit's immediate open; sibling found and fixed:
+a retried attempt on the adapter path returned before the bench decision and the report notice (Q-3019 class).
+Test: `aDeadSurplusSellerIsSkippedNotTheEngine.test.ts` (reverted ⇒ 3 fail). Open: none in this row; watch the next
+Weak build's Surplus attempts.
+
+### 2026-11-25 — Build Engines: per-day failures + tap-through engine stats; Firestore indexes ship with the code
+
+Admin: "BUILD ENGINES me … inko per day fail response karo! … tap kar ke … kitne request gayi, kitne response aye,
+kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya woh bhi likh kar ana chahiye".
+- The chip's "18 failed" was the engine-health aggregate: a rolling 24 h over the LATEST build of each project only.
+  New `agentv3_engine_day/{UTC day}` (engineDayStats.ts): each finished build adds, per engine family, answered turns,
+  failed attempts, measured answer time, failure codes (the engine's own refusal code when it gives one) and which
+  engine answered the turns it failed. One write per build at `BuildDiagnostics.finish()`.
+- To time each engine, the chain now returns `answeredBy` and AgentRunner's call row carries it as `provider`; the
+  route passes `fellBackFrom` to `recordProviderTurn` (existing lines edited, no new block in the handler).
+- UI: chips say "N failed today" / "OK today" and are buttons; `EngineDayDetail` shows 7 days (requests, answered,
+  failed, avg answer time), reasons in words, and "X answered N turns instead". Body shape-checked (src/lib/engineDays.ts).
+- Limit, stated on screen: a build whose server was lost before `finish()` is not counted (see Q-3354).
+- Q-3344 root: the revenue index was in firestore.indexes.json but Cloud Build deployed only `firestore:rules`;
+  a `deploy-firestore-indexes` step now runs on every merge (optional, no --force).
+- **2026-11-25 update, CI on the merge with #4535:** `libraryBatch14.test.ts` held a 300 MiB snapshot of the library. With #4535's realistic humans, `main` alone was 298.4 MiB.
+  - **Smaller files:** the garment files now drop what nothing references (`pruneGlb`: the detached outfit, its materials and textures, the old head-only face list). Each model went from 3.45 to 2.4 MB, and the four look identical (the same changed-pixel proof at admission).
+  - **Size now:** the catalogue is 307.6 MiB, inside the admin's 320 MiB budget, which stays the only limit. The snapshot line was replaced by a note.
+  - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.
+- **2026-11-26 follow-up (same PR #4544):** CI caught `tests/webSocketSingleSource.test.ts` — the kit opened a socket without a resolver. Not a lint nit: the store player is a srcdoc frame whose base is the PARENT page, which in the Android/iOS app is the local shell, so the online socket would have dialled the phone (the Sonic-on-phones class, 2026-08-13). Fix: the open route writes `window.__NBAI_API_ORIGIN` per response (`src/server/lib/storeApiOrigin.ts`, strict scheme://host[:port] only), and the kit's `resolveWebSocketUrl` prefers it. Locks: `tests/aStoreAppKnowsWhereTheApiIs.test.ts` and the native case in `tests/theOnlineRoyaleKitTalksToTheRealServer.test.ts` (reverted ⇒ fails). Sibling NavData (relative fetch from the same frame) recorded as Q-3393.
+
+## 2026-11-26 — Q-2698: the open world's frame rate in the sandbox, measured to its causes (claude/light-city-tier)
+- **Measured, not assumed.** Playwright + SwiftShader, 1280×720, the open-world starter built from the merged kit. A Chrome trace showed the game's own JS at ~2 ms a frame and the GPU process ~23% busy; the frame was waiting on 36,000 synthetic input messages a second. Cause: the playtest clicks the canvas, the shell asks for pointer lock, and pointer lock in an automated headless browser floods input. Lock stubbed, same build: 4 → 15 fps.
+- **Fix 1 (root):** the shell skips pointer lock when `navigator.webdriver` is set. A person's own browser never sets it, so desktop mouse capture is unchanged.
+- **Fix 2:** a light geometry tier (`geometryTier()` in three/surfaces.ts). It is chosen automatically for a software renderer or a ≤4-core/≤4 GB touch phone; Settings (Auto quality off + Graphics low) force it, and any other Graphics choice with Auto off forces full. It draws one textured facade panel per wall instead of a box per window, road marks as quads, each moving vehicle as one mesh, and at most 6 vehicles and 12 people. The starter place drops from 360 meshes / 84.8k triangles to 163 / 34.0k (on screen: 222–233 draw calls → 146–147). Colliders are identical vertex for vertex (the RNG draws are kept). The full tier is unchanged. `generateGame3D(['city'])` now ships surfaces.ts, which the city imports.
+- **Result:** before 0.2–4.4 fps, after 9.3–11.6 fps. **The ≥ 20 fps target was NOT reached.** The geometry tier alone did not move the fps. The ceiling is software compositing reading the canvas back every frame (Q-3381, blocked: it needs a GPU or a compositor change in the sandbox). The checker-side lock stub for games that do not use the kit shell is Q-3380 (gamePlaytest.ts is being edited by #4541/#4542).
+- **Tests:** `tests/aCityIsLightWithoutAGpu.test.ts`. Mesh and triangle budgets per tier on the real kit, identical colliders, traffic and people working in the light tier, tier selection, the webdriver guard, module-subset imports. Each was proven by reversion.
+- **Not done:** parked (drivable) cars stay whole in both tiers (68 meshes for 4 cars), and no impostors for far cities.
+## 2026-11-26 — No pointer lock in the platform's browsers (Q-3380, follow-up to #4552)
+- gamePlaytest.ts (desktop page) and clickExplorer.ts (every fresh page) stub Element.prototype.requestPointerLock before app code runs, so a game the builder wrote itself (or an older kit copy) can no longer flood the headless page with synthetic input after the playtest clicks its canvas (#4552 measured 4 → 15 fps with the lock stubbed).
+- Test: tests/aPlaytestBrowserNeverLocksThePointer.test.ts (removing the playtest install fails it).
+## 2026-11-26 — One seed rule, not four copies (reconciling #4541 with #4535)
+
+- **What was found:** after #4535 and #4541 both merged, the same per-project pick existed four times: #4535's starter look (`'player:'`), realistic outfit (`'human:'`) and world seed (`'world:'`), each a private `createHash('sha256').update(facet + ':' + id)`, plus #4541's `projectVariety.ts`. This is the same class as the drifted `safeRelPath` copies: duplicates that agree today and can drift tomorrow.
+- **Fix:** all three now call `projectVariety.ts` (`pickVariant` / the new `varietySeed`). The digests are identical, so no existing project's hero, outfit or map changes; a test proves byte-identity against the old formula for several ids.
+- **Lock:** a census in `tests/aNewGameGetsItsOwnLookAndKeepsIt.test.ts` fails when any server file hashes a facet and a project id by itself. Proved by putting back one private copy: the census fails.
+- **Queue:** Q-3370 and Q-3371 were closed by the #4541 merge, and Q-3372 by the #4535 merge. Q-3373 (action town seed) is no longer waiting on #4535; its row now gives the design it needs.
+## 2026-11-26 — The game library's storage budget is 400 MiB (admin decision)
+
+- **Why:** after the Indian clothes (#4540) the catalogue was 307.6 MiB of the 320 MiB budget, leaving about 12 MiB (roughly five animated characters).
+- **Options measured first:**
+  - **Pruning:** removing unused data from all 721 packaged files would save nothing. They are already lean, which corrects my own earlier guess that old characters carried leftover data.
+  - **Dye recolours:** storing them as patches on their base models would free at most 25.8 MiB of their 92.4 MiB, because the recoloured textures are most of each file. It would also need a change to how packaged models are served.
+- **Decision:** asked with the options, the admin chose to raise the budget to 400 MiB. `CATALOGUE_STORAGE_BUDGET_BYTES` changed. The error messages are derived from the constant, so they cannot state a stale number again. `catalogueBudget.test.ts` now asserts 400 MiB (80 × the 5 MiB worst case).
+- **Effect:** the models ship in the server image (Dockerfile `COPY assets/game-models`), so the image can grow by up to about 80 MiB more, to fill the budget.
+- **Not built:** the dye-patch dedupe. It is worth doing only if the library nears 400 MiB again.
+
+## 2026-11-26 — Three more Indian outfits (batch 16 grows to 7)
+
+- **New models:** built from the same `buildIndianGarments.mts`. The four earlier models are byte-identical (same sha256), because the builder is deterministic.
+  - `q16-woman-salwar-kameez`: magenta knee-length kameez, cream salwar, yellow dupatta with a gold border.
+  - `q16-man-lungi`: white baniyan with shoulder straps, blue lungi with a white band.
+  - `q16-man-sherwani`: gold sherwani with a high collar, cream churidar, red safa.
+- **Checks:** all seven were admitted live; the three new thumbnails were rendered.
+- **New builder pieces:** `longTop` (a kameez or sherwani sized to the body's own shoulders and neck), `trousers` (ease set by height), `baniyan`, `lungi` and `dupatta`.
+- **Fixed on the way:** `ribbon` kept any sample more than 6 cm from the body at its own point, which is right for the pallu's hanging end. Between a strap's waypoints, that made the curve arch into the air. Now `freeBeyond` is a parameter, and a strap passes `Infinity`; the pallu keeps the old value, so the saree file is unchanged.
+- **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
+- **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
+
+### 2026-11-26 — Q-3392: the online Royale daily match-start cap is shared across instances (PR #4559)
+
+- **Problem:** the per-app daily cap (300) lived in each Cloud Run instance's memory, so N instances allowed N × 300 starts a day.
+- **Root cause / class:** a quota that bounds NavBharatAI's own bill was counted in process memory. The other online caps are per instance on purpose (rooms live in one instance); this one is a daily total, so it needs one count.
+- **Fix:** `matchService.ts` claims each start on a shared counter before the room opens (one claim per app at a time; the room is built from whoever is queued when the answer arrives). The counter is the durable limiter's own Firestore window — `DurableRateLimit.firestoreRateCounter` was extracted so `consumeDurableRate` and the Royale cap share one implementation (NavData's daily quota is inside a row-total transaction and is not reusable). One `rate_limits_v1` doc per app per UTC day; increment-then-read, so a boundary race refuses early and never lets a start through late; `expireAt` for the TTL policy (Q-809). No sharding: ≤300 accepted writes/app/day plus one refused write per instance per day ("full" is remembered).
+- **Fallback (stated choice):** `consumeWithStore` now marks its fail-open result `unavailable`; an error or a 4 s timeout makes the start use the in-memory cap, logged at most every 5 min, never blocking play.
+- **Tests:** `tests/theOnlineDailyCapIsSharedByEveryInstance.test.ts`. Reverted the claim line ⇒ 6/9 fail; reverted the `unavailable` flag ⇒ 3/9 fail; reverted the production wiring ⇒ 1/9 fails.
+- **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
+## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
+- Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.

@@ -49,7 +49,8 @@ export function libraryMovesOf(id: string, catalogue: ReadonlyArray<{ id: string
 export function characterNotSwappable(files: Readonly<Record<string, string>>): string | null {
   const app = String(files['src/App.tsx'] ?? '');
   if (/<RacingRoadGame\b/.test(app)) return 'this is a racing game, and its player is the car, not a character — a library character cannot be set as the car from here';
-  if (/<RoyalePractice\b/.test(app)) return 'this game is played in first person, so the player has no body on screen to replace';
+  // RoyaleGame is the Practice + Online switcher (2026-11-25); both modes are first-person.
+  if (/<Royale(?:Practice|Game)\b/.test(app)) return 'this game is played in first person, so the player has no body on screen to replace';
   return null;
 }
 

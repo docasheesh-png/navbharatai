@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import * as THREE from 'three';
 import { recipeFilePool } from '../src/server/lib/gameRecipeLayers';
 import { openWorldAppSource, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH, GAME_PLAYER_BODY_PATH, OPEN_WORLD_STARTER_PATH } from '../src/server/lib/GameOpenWorldGenerator';
+import { GAME_PLAYER_FILE_VARIANTS, gamePlayerFileSource } from '../src/server/lib/GamePlayerBodyGenerator';
 import { projectGrowthRules, GAME_PLAYER_RULE, GAME_PLAYER_FILE_PATH_IN_GAME } from '../src/server/AgentV3/gameKitSeed';
 import { useAsCharacterPrompt, addToGamePrompt, mapPlaceRows, libraryBrowseRows } from '../src/server/AgentV3/gameAssets/libraryThumbnails';
 import { parseLibraryResponse } from '../src/components/agentv3/GameLibraryPicker';
@@ -79,6 +80,48 @@ describe('🧍 a library character takes the place of the kit person', () => {
     expect(PB.locomotionRole(7, false)).toBe('jump');
   });
 
+  it('fits the collision capsule to the character and blocks a taller body under a low beam', async () => {
+    const collision = await import(join(DIR, 'src/game/three/collision.ts'));
+    const scene = new THREE.Scene();
+    const ground = new THREE.Mesh(new THREE.BoxGeometry(10, 0.2, 10));
+    ground.position.y = -0.1;
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(4, 0.3, 0.3));
+    beam.position.y = 2;
+    scene.add(collision.markWorldCollider(ground, 'ground'), collision.markWorldCollider(beam));
+    const walk = (height: number, build: number) => {
+      const size = PB.humanoidCollider({height, build});
+      const player = new CH.CharacterController(size);
+      scene.add(player.object);
+      player.setColliders([ground, beam]);
+      player.reset(0, 0, 2);
+      for (let i = 0; i < 90; i++) player.update(1/60, { moveX: 0, moveZ: -1, sprint: false, jumpPressed: false, jumpHeld: false });
+      expect(player.capsuleSize).toEqual(size);
+      return player.object.position.z;
+    };
+    expect(PB.humanoidCollider()).toEqual({height: 1.8, radius: 0.4});
+    expect(walk(1.6, 0.9)).toBeLessThan(-1);
+    expect(walk(2, 1.1)).toBeGreaterThan(0);
+  });
+
+  it('uses controller water state to play swim and dive, then returns to dry locomotion', async () => {
+    const g = game(); const k = knight();
+    const body = PB.applyPlayerChoice(g.ctx, { model: 'knight' }, async () => ({ loadRequestedAsset: async () => k.handle }));
+    await settle();
+    const input = { moveX: 0, moveZ: 0, sprint: false, jumpPressed: false, jumpHeld: false };
+    const check = (surface: number | null, role: string) => {
+      g.player.setWater(surface);
+      g.player.reset(0,0,0);
+      g.player.update(1/60, input);
+      body.update(1/60);
+      expect(k.played.at(-1)).toBe(role);
+    };
+    check(1.2, 'swim');
+    check(3, 'dive');
+    check(null, 'idle');
+    expect(PB.clipForMove(['SwimForward', 'Underwater'], 'swim')).toBe('SwimForward');
+    expect(PB.clipForMove(['SwimForward', 'Underwater'], 'dive')).toBe('Underwater');
+  });
+
   it('a character the game does not have: the kit person stays, and the game says why', async () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {});
     for (const load of [
@@ -145,8 +188,17 @@ describe('📄 one file is the character — the user\'s, written once', () => {
     const src = read('src/server/AgentV3/ToolDispatcher.ts');
     const at = src.indexOf('private async ensurePlayerFile(');
     expect(at).toBeGreaterThan(0);
-    expect(src.slice(at, at + 500)).toMatch(/readFile\(this\.workspaceId, GAME_PLAYER_FILE_PATH\); return false; \}\s*catch \(error\) \{ if \(!isNotFoundError\(error\)\) throw error; \}\s*const playerFile = await this\.guardedWrite\(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE,/);
+    expect(src.slice(at, at + 500)).toMatch(/readFile\(this\.workspaceId, GAME_PLAYER_FILE_PATH\); return false; \}\s*catch \(error\) \{ if \(!isNotFoundError\(error\)\) throw error; \}\s*const playerFile = await this\.guardedWrite\(GAME_PLAYER_FILE_PATH, gamePlayerFileSource\(this\.workspaceId\),/);
     expect(src).toMatch(/await this\.ensurePlayerFile\(agent, 'generate_open_world'\)/);
+  });
+  it('spreads starter projects across seven stable playable looks', () => {
+    expect(new Set(GAME_PLAYER_FILE_VARIANTS).size).toBe(7);
+    const projects = Array.from({length: 48}, (_, i) => 'project-' + i);
+    const sources = projects.map(gamePlayerFileSource);
+    expect(new Set(sources).size).toBe(7);
+    expect(new Set(sources.slice(0, 6)).size).toBeGreaterThan(1);
+    expect(projects.map(gamePlayerFileSource)).toEqual(sources);
+    expect(sources.every(source => source.includes('model: null') && source.includes('file: null'))).toBe(true);
   });
   it('the builder is told where the character lives on every turn of a game that has the file — and never otherwise', () => {
     expect(projectGrowthRules({ [GAME_PLAYER_FILE_PATH]: GAME_PLAYER_FILE })).toContain(GAME_PLAYER_RULE);

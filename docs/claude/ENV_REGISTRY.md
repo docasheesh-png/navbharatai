@@ -5351,3 +5351,36 @@ Names only. Full design, owner steps and rollback: `MOBILE_NATIVE_BUILD.md` §6.
 - Reused, already set: `E2B_API_KEY` (machines), `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (upload keys are sealed with
   it; without it only `.apk` is offered natively), `APK_CHARGE_INR` (the one build price for both providers — this name
   was missing from this registry before; default 1, `off`/`0` = free).
+
+### AGENTV3_ONLINE_MATCH (code default: OFF; not set in Cloud Run) — 2026-11-25
+
+The online Royale match service (`src/server/lib/royaleOnline/`, admin "sab karo" 2026-11-25). A server-authoritative 2–4 player match over a WebSocket at `/api/royale-online/ws` on `navbharat-ai-prod`, for games opened from the NavBharatAI App Store: movement validated (speed budget, arena bounds, cover), shots, loot, the zone, elimination and the single winner all decided on the server; reconnect within 15 s; empty seats filled by bots that are labelled as bots. Only `on` (or 1/true/yes) enables it. **Off (the default)** ⇒ a connecting game is told "Online matches are switched off right now" and the socket is closed; no session, room or tick exists. Practice is unaffected.
+
+**Why default OFF:** it is a new anonymous, public endpoint whose CPU and bandwidth NavBharatAI pays for — the same quota-bound exception as NavData (CLAUDE.md, 2026-08-15), so switching it on is the admin's call (BUILD_REPORT_QUEUE Q-3390). **The quotas ARE the boundary** (`matchService.ts` `QUOTAS`, `royaleWs.ts`), all per Cloud Run instance: 4 players a room; 5 live rooms per app and 50 in all; 16 waiting per app; 300 match starts per app per server-clock day; 400 open connections; 30 messages/s per connection (burst 45; a sustained flood is closed with 4408); 512-byte frames; 12 open sockets and 60 new sockets a minute per address. Over a cap ⇒ an honest `full` message (close code 4429), never a silent drop. Widening them needs the admin's sign-off, like NavData's. **Private apps** need the same capability NavData demands (`navDataAccess.ts`). **Per instance:** rooms live in one instance's memory, so two players on different instances do not meet (Q-3391). A deploy's SIGTERM tells every live player the match ended without a result (`drain()`). The kit's Online tab also needs the generator flag `AGENTV3_ORIGINAL_ROYALE`. Kill switch: unset it or set `off`.
+
+**2026-11-26 (#4559, Q-3392): the daily start cap is now SHARED, not per instance.** Every match start is claimed on one Firestore counter per app per UTC day (`rate_limits_v1`, the durable limiter's window, `src/server/lib/royaleOnline/dailyStartCap.ts`) before its room opens, so 300 is the cap across all instances. If that counter errors or does not answer within 4 s, the start uses the instance's in-memory cap (the old behaviour) and the log says `[royale-online] the shared daily match-start counter did not answer…` — play is never blocked by a store hiccup. The other caps above remain per instance. Old day documents carry `expireAt`; deleting them needs the TTL policy in Q-809.
+
+### AGENTV3_GAME_PLACEHOLDER_PROBE (code default: ON; not set in Cloud Run) — 2026-11-25
+
+The placeholder look (`src/server/AgentV3/gamePlaceholderProbe.ts`). During the game playtest it checks whether the page shows placeholder art (a plain stand-in shape where a real model should be) and reports it, so a placeholder is not called finished. Only `off` (any case) disables it; the playtest then does not run this check. The check is read-only and costs no model call.
+
+### APP_FREE_AI_MODELS (code default: the two free text models; not set in Cloud Run) — 2026-11-25
+
+The text ladder for an app's FREE AI — the owner's own Z.ai key, set up from the ❗ tray in three steps
+(`src/server/lib/appFreeAi.ts`, `src/lib/freeAiSetup.ts`; admin 2026-11-25: *"glm 4.5 flash, glm 4.6v flash
+glm 4.7 flash — yeh teeno free module hai. yahi use hone chahiye only!"*). Unset ⇒ `glm-4.7-flash` first,
+`glm-4.5-flash` when the first is busy or rate-limited (HTTP 429/5xx, or Z.ai's own 429 codes 1302/1305/1308);
+`glm-4.6v-flash` is the image model and is not in a text ladder.
+
+🔒 **It can only NARROW the list, never extend it.** An id outside the three is dropped, and an override that
+leaves nothing falls back to the default order. The reason is money and it is the user's: the key belongs to
+the APP'S OWNER, so a paid id here would spend their own Z.ai balance behind a button that said "free". A
+matcher on the word "flash" would do exactly that — `glm-4.7-flashx` ($0.07/$0.40) and `glm-5.3-flash`
+($0.15/$0.50) both contain it, which is the trap `providerRates.ts` already records being walked into three
+times. `tests/freeAiChaluKarein.test.ts` fails if a paid id can reach the call.
+
+Nothing on this path touches NavBharatAI's own keys, wallet or ladders: `GLM_API_KEY` and the tier ladders are
+unrelated and unchanged. The vault name the owner's key is stored under is `ZAI_API_KEY`, scoped to the one app
+(widened to all of their apps only from Keys & Secrets, by them). The builder may never ask for it mid-build
+(`AI_MODEL_KEY_NAMES` in `secretRequest.ts`), and a built app calling `api.z.ai` from its own page is caught by
+`browserAiKeyScan.ts`.

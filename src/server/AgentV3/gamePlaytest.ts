@@ -37,13 +37,14 @@
 // PURE. The runner is a STRING built here and executed by the caller in the sandbox.
 
 import { missingLayerFiles } from '../lib/gameRecipeLayers';
-import { scopeMatch, type GameScopeContract } from './gameIntent';
+import { scopeMatch, type GameScopeContract, type ScopeMatch } from './gameIntent';
 import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
 import { locatedErrorText } from './runtimeErrorSite';
 import { gameGeometryProbeEnabled, type GeometryRead, type ModelsRead, type HeapRead } from './gameGeometryProbe';
+import { gamePlaceholderProbeEnabled, PLACEHOLDER_PAGE_HOOK, type ControlsRead, type PlaceholderPageRead } from './gamePlaceholderProbe';
 import { withoutComments } from '../lib/codeOnly';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
@@ -53,6 +54,15 @@ export const PLAYTEST_BUDGET_MS = 90_000;
 /** S4: the longest a round is played to see the score or the level move. */
 export const PROGRESS_PLAY_MS = 45_000;
 const LOAD_MS = 15_000;
+/**
+ * 🖼️ GAME_PROOF's PICTURES (external Game Maker audit, 2026-11-25, adapted). The playtest browser keeps up to three small
+ * JPEGs of what the game looked like — the start, after the keyboard moved it, and the same moment with the camera pulled
+ * back (three.js only) — in the SANDBOX at `dir`; stdout carries only their size, path and a content id, so the run's
+ * output stays small. Bounded: 480 px wide at JPEG quality 0.7 (a few tens of KB each), about a second of the 90 s budget,
+ * and skipped (said, never silent) when less than `reserveMs` of the budget is left. Keeping them past the sandbox's life
+ * is not built (a storage decision — BUILD_REPORT_QUEUE.md), so the report says where they were, not that they are kept.
+ */
+export const PROOF_PICTURES = { dir: '/tmp/nbai-playtest-proof', width: 480, quality: 0.7, farPull: 30, reserveMs: 25_000 } as const;
 const TOOLS_DIR = '/home/user/.e-tools';
 
 export function gamePlaytestEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -304,8 +314,12 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     budgetMs: PLAYTEST_BUDGET_MS,
     // S4: how long a round is played to see the score or the level move (stops early once it does).
     progressMs: PROGRESS_PLAY_MS,
+    // GAME_PROOF's pictures (see PROOF_PICTURES): where they are written in the sandbox and how big — false-y dir: none.
+    proof: { ...PROOF_PICTURES },
     // The read-only geometry look (gameGeometryProbe.ts) — false when AGENTV3_GAME_GEOMETRY_PROBE=off.
     geometry: gameGeometryProbeEnabled(env),
+    // The placeholder look (gamePlaceholderProbe.ts) — false when AGENTV3_GAME_PLACEHOLDER_PROBE=off.
+    placeholders: gamePlaceholderProbeEnabled(env),
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
@@ -343,6 +357,11 @@ export function gamePlaytestModule(cfg: Record<string, unknown>, importLine: str
   return `${importLine}
 const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
+// 🖼️ THE PROOF PICTURES (GAME_PROOF, external Game Maker audit 2026-11-25): small JPEGs written in the sandbox, only their
+// size, path and fingerprint go to stdout. The clock below lets the late pictures stand down before the budget runs out.
+const proofT0 = Date.now();
+const { mkdirSync: nbMkdir, writeFileSync: nbWrite } = await import('node:fs');
+const { createHash: nbHash } = await import('node:crypto');
 const noise = new RegExp(cfg.noise, cfg.noiseFlags);
 const intervention = new RegExp(cfg.intervention, cfg.interventionFlags);
 
@@ -351,6 +370,16 @@ const intervention = new RegExp(cfg.intervention, cfg.interventionFlags);
 const seedRandom = (seed) => {
   let a = seed >>> 0;
   Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+};
+
+// 🖱️ NO POINTER LOCK UNDER AUTOMATION (Q-3380, measured on #4552): the playtest clicks the canvas, a game asks for
+// pointer lock, and in an automated headless browser that floods the page with ~36,000 synthetic input messages a
+// second — the game drew 1–4 fps because of OUR browser, not its code (4 → 15 fps with the lock stubbed). The kit
+// shell already skips the lock when navigator.webdriver is set; this covers every game (builder-written, older kit
+// copies). A resolved promise and no pointerlockchange event: the game simply keeps the mouse free.
+const noPointerLock = () => {
+  const stub = function () { return Promise.resolve(); };
+  try { Element.prototype.requestPointerLock = stub; } catch (_e) { /* read-only: leave it */ }
 };
 
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
@@ -391,6 +420,8 @@ const soundCounter = () => {
 // window.__THREE_DEVTOOLS__ at the end of its constructor; wrapping that renderer's render() hands us the scene and the
 // camera it draws with. Positions are STATE — a loaded machine that draws few frames moves them less, never the wrong
 // way — so where a three.js game is found, the camera and steering verdicts read them first and pixels second.
+// The placeholder look's own read-only hook (gamePlaceholderProbe.ts), added after sceneHook on the same hub.
+const placeholderHook = ${PLACEHOLDER_PAGE_HOOK};
 const sceneHook = () => {
   const hub = new EventTarget();
   const seen = { scene: null, camera: null };
@@ -400,6 +431,24 @@ const sceneHook = () => {
     const render = o.render;
     o.render = function (scene, camera) {
       if (scene && scene.isScene && camera && camera.isCamera) { seen.scene = scene; seen.camera = camera; }
+      // THE FAR VIEW (GAME_PROOF): while window.__nbPull is set, the camera is drawn from further back and higher up, for
+      // this draw only — its world matrix is restored straight after, so the game's own camera never moves. A full-screen
+      // pass draws with an orthographic camera and a mesh, never a perspective camera and a scene, so it is left alone.
+      const pull = window.__nbPull;
+      if (pull && scene && scene.isScene && camera && camera.isPerspectiveCamera && camera.matrixWorld) {
+        const saved = camera.matrixWorld.clone();
+        const auto = camera.matrixWorldAutoUpdate;
+        const e = camera.matrixWorld.elements;
+        const len = Math.hypot(e[8], e[9], e[10]) || 1;
+        e[12] += (e[8] / len) * pull; e[13] += (e[9] / len) * pull + pull * 0.5; e[14] += (e[10] / len) * pull;
+        camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+        camera.matrixWorldAutoUpdate = false;
+        try { return render.apply(this, arguments); } finally {
+          camera.matrixWorld.copy(saved);
+          camera.matrixWorldInverse.copy(saved).invert();
+          camera.matrixWorldAutoUpdate = auto;
+        }
+      }
       return render.apply(this, arguments);
     };
   });
@@ -498,6 +547,36 @@ async function surface(page) {
     }
     return best;
   });
+}
+
+// One proof picture from a screenshot already taken (PNG, base64): scaled to cfg.proof.width, written as a JPEG in the
+// sandbox, and described by its size, path, a content id and how it looks. The PNG is kept only in memory, for the
+// near/far and start/moved comparisons. Never throws: a picture that could not be kept says why.
+async function proofPicture(page, png, view) {
+  if (!cfg.proof || !cfg.proof.dir || !png) return null;
+  try {
+    const small = await page.evaluate(async ([b64, W, q]) => {
+      const blob = await (await fetch('data:image/png;base64,' + b64)).blob();
+      const bmp = await createImageBitmap(blob);
+      const H = Math.max(1, Math.round((W * bmp.height) / Math.max(1, bmp.width)));
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      c.getContext('2d').drawImage(bmp, 0, 0, W, H);
+      return { url: c.toDataURL('image/jpeg', q), w: W, h: H };
+    }, [png, cfg.proof.width, cfg.proof.quality]);
+    const buf = Buffer.from(String(small.url).split(',')[1] || '', 'base64');
+    const id = nbHash('sha256').update(buf).digest('hex').slice(0, 12);
+    const path = cfg.proof.dir + '/' + view + '-' + id + '.jpg';
+    nbMkdir(cfg.proof.dir, { recursive: true });
+    nbWrite(path, buf);
+    const lk = await looks(page, png);
+    return { view, id, w: small.w, h: small.h, bytes: buf.length, path, colors: lk ? lk.colors : null, edges: lk ? lk.edges : null, png };
+  } catch (e) { return { view, error: String(e && e.message || e).slice(0, 100) }; }
+}
+// The picture's description for stdout — never the image itself.
+function proofEntry(p) {
+  if (!p) return null;
+  const { png, ...rest } = p;
+  return rest;
 }
 
 async function shot(page, box) {
@@ -890,9 +969,11 @@ const watchdog = setTimeout(async () => {
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
+  await ctx.addInitScript(noPointerLock);
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(soundCounter);
   await ctx.addInitScript(sceneHook);
+  if (cfg.placeholders) await ctx.addInitScript(placeholderHook);
   if (cfg.seed != null) await ctx.addInitScript(seedRandom, cfg.seed);
   const page = await ctx.newPage();
   watch(page);
@@ -941,6 +1022,9 @@ try {
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
   out.looks = await looks(page, b); // S4: colours and edges of the idle picture
+  // GAME_PROOF: the start view is the idle picture just measured — no extra screenshot.
+  const proofStart = await proofPicture(page, b, 'start');
+  out.proofShots = proofStart ? [proofEntry(proofStart)] : [];
   // DOES WHAT IS DRAWN AGREE WITH THE LAND? (2026-11-23, the maps-do-not-join autopsy.) The kit's open world answers once,
   // read-only (window.__nbWorld.geometry, openWorld.ts): drawn terrain against its height, big flat meshes the game added
   // off the ground, road faces pointing down, the player off the ground. Its own 3 s limit; a game without it answers null.
@@ -955,6 +1039,7 @@ try {
     if (typeof heap0 === 'number') out.heap = { start: heap0 };
   }
 
+  if (cfg.placeholders) out.placeholderStart = await page.evaluate(() => (window.__nbPlaceholders ? window.__nbPlaceholders() : null)).catch(() => null);
   enter('timing the controls');
   out.feelMs = await feel(page).catch(() => null); // S4
   enter('driving it with the keyboard');
@@ -1117,6 +1202,32 @@ try {
       out.scene.aim = { straight: vec(before), early: vec(early), late: vec(after) };
     }
   }
+  // ── GAME_PROOF: WHAT IT LOOKED LIKE AFTER MOVING, NEAR AND FAR (external Game Maker audit, 2026-11-25) ─────────────
+  // About a second: one picture after the keyboard stage moved the game, and one with the camera pulled back (three.js
+  // scenes only, see sceneHook). Skipped, and said, when less than cfg.proof.reserveMs of the budget is left.
+  out.proofNotes = {};
+  if (!cfg.proof || !cfg.proof.dir) out.proofNotes.all = 'proof pictures are switched off';
+  else if (Date.now() - proofT0 > (Number(cfg.budgetMs) || 60000) - cfg.proof.reserveMs) {
+    out.proofNotes.moved = out.proofNotes.far = 'not taken: too little of the playtest budget was left';
+  } else {
+    try {
+      const movedPng = await shot(page, box);
+      const proofMoved = await proofPicture(page, movedPng, 'moved');
+      if (proofMoved) out.proofShots.push(proofEntry(proofMoved));
+      if (proofStart && proofStart.png && movedPng) out.proofStartMoved = Math.round((await compare(page, proofStart.png, movedPng)).change * 100) / 100;
+      const hasScene = await page.evaluate(() => !!(window.__nbSnap && window.__nbSnap())).catch(() => false);
+      if (!hasScene) out.proofNotes.far = 'not taken: the game draws no three.js scene, so there is no camera to pull back';
+      else {
+        await page.evaluate((d) => { window.__nbPull = d; }, cfg.proof.farPull);
+        await page.waitForTimeout(400);
+        let farPng = null;
+        try { farPng = await shot(page, box); } finally { await page.evaluate(() => { window.__nbPull = 0; }).catch(() => {}); }
+        const proofFar = await proofPicture(page, farPng, 'far');
+        if (proofFar) out.proofShots.push(proofEntry(proofFar));
+        if (movedPng && farPng) out.proofNearFar = Math.round((await compare(page, movedPng, farPng)).change * 100) / 100;
+      }
+    } catch (e) { out.proofNotes.moved = out.proofNotes.moved || ('not taken: ' + String(e && e.message || e).slice(0, 80)); }
+  }
   // ── SCORE, SOUND AND PLAY AGAIN (2026-11-19 game-gap audit: none of the three was ever checked) ─────────────────
   // MEASURED only; the verdict decides. The round is ended through the kit's own hook — never by guessing a losing
   // move — and the play-again control is found by its words and PRESSED, as a player would.
@@ -1130,6 +1241,7 @@ try {
     // What the last frame asked of the GPU, read from the kit game's own renderer after a round of play (budget check).
     out.load = await page.evaluate(() => (window.__nbKit && window.__nbKit.load ? window.__nbKit.load() : null)).catch(() => null);
     // Models still loading after a round of play, and how many never got past 0% (window.__nbKit.models) — advisory.
+    if (cfg.placeholders) out.placeholderEnd = await page.evaluate(() => (window.__nbPlaceholders ? window.__nbPlaceholders() : null)).catch(() => null);
     if (cfg.geometry) out.models = await page.evaluate(() => (window.__nbKit && window.__nbKit.models ? window.__nbKit.models() : null)).catch(() => null);
     if (cfg.geometry && out.heap) {
       const heap1 = await page.evaluate(() => (performance && performance.memory ? performance.memory.usedJSHeapSize : null)).catch(() => null);
@@ -1188,6 +1300,7 @@ try {
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
   enter('playing it with touch controls on a phone');
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  if (cfg.placeholders) await m.addInitScript(placeholderHook);
   const mp = await m.newPage();
   watch(mp);
   await mp.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
@@ -1209,6 +1322,7 @@ try {
       }
       return n;
     });
+    if (cfg.placeholders) out.controlsOff = await mp.evaluate(() => (window.__nbControlsOff ? window.__nbControlsOff() : null)).catch(() => null);
     const t0 = await shot(mp, mbox);
     await mp.waitForTimeout(600);
     const t1 = await shot(mp, mbox);
@@ -1376,6 +1490,9 @@ export function probeStarvedNote(r: SceneRead | null | undefined, min = PROBE_MI
   return `page starved: ${r!.probeFrames} frames in ${r!.probeMs ?? 0} ms — the steering could not be read`;
 }
 
+/** One GAME_PROOF picture kept in the sandbox (PROOF_PICTURES): its view, size, content id, path and how it looks. */
+export interface ProofShot { view: string; id: string; w: number; h: number; bytes: number; path: string; colors?: number | null; edges?: number | null }
+
 export interface PlaytestRun {
   /** S4: the idle picture at 96×54 — distinct colours (4 bits a channel) and the fraction of it that is an edge. */
   looks?: { colors: number; edges: number } | null;
@@ -1438,6 +1555,10 @@ export interface PlaytestRun {
   models?: ModelsRead | null;
   /** The page's JS heap after the start and at the end of the desktop round (performance.memory) — advisory. */
   heap?: HeapRead | null;
+  /** The placeholder look before and after the desktop round, and the phone's controls (gamePlaceholderProbe.ts). */
+  placeholderStart?: PlaceholderPageRead | null;
+  placeholderEnd?: PlaceholderPageRead | null;
+  controlsOff?: ControlsRead | null;
   /** The play-again probe: the status after the round was ended, the control pressed (null: none found), the status after. */
   restartCheck?: { ended?: string; pressed?: string | null; after?: string; error?: string };
   errors?: string[];
@@ -1446,6 +1567,13 @@ export interface PlaytestRun {
   errorCount?: number;
   /** Browser interventions seen while played (e.g. a passive-listener preventDefault it ignored) — not errors. */
   interventions?: string[];
+  /** GAME_PROOF: the pictures kept in the sandbox (see PROOF_PICTURES) — a description each, never the image. */
+  proofShots?: Array<ProofShot | { view: string; error: string } | null>;
+  /** GAME_PROOF: why a picture was not taken, by view ('moved', 'far', 'all'). */
+  proofNotes?: Record<string, string>;
+  /** GAME_PROOF: how much the picture changed from the start to after moving, and from near to far (0–100). */
+  proofStartMoved?: number | null;
+  proofNearFar?: number | null;
   /** The checking browser's own WebGL: the renderer name, false when it could not create a context, null when not probed. */
   webgl?: string | false | null;
 }
@@ -1772,6 +1900,9 @@ export function phoneUnmeasured(run: PlaytestRun): boolean {
   return run.partial === true && run.ok === true && run.phoneChecked !== true;
 }
 
+/** The words for a game that met every GOOD_SCORE condition — a playability verdict, never a graphics one. */
+export const PLAYS_WELL = 'Plays well';
+
 /** At or above this, with nothing at zero, a game is reported as playable. */
 export const PLAYABLE_SCORE = 75;
 
@@ -1798,7 +1929,7 @@ export interface PlaytestVerdict {
 
 const LABEL: Readonly<Record<Dimension, string>> = {
   runs: 'Runs', responds: 'Controls', mobile: 'Phone', stable: 'Stable', smooth: 'Smooth', alive: 'Alive', replay: 'Replay',
-  feel: 'Feel', progression: 'Progress', visual: 'Looks',
+  feel: 'Feel', progression: 'Progress', visual: 'Picture detail', // colours and edges counted — never a judgement of how realistic it looks
 };
 
 /**
@@ -1949,9 +2080,11 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
     typeof run.kitScoreStart === 'number' && typeof run.kitScoreEnd === 'number' ? ` Score ${run.kitScoreStart} → ${run.kitScoreEnd} while played.` : '',
     rc?.ended === 'gameover' ? (rc.pressed && rc.after === 'playing' ? ` Play again works ("${rc.pressed}").` : ' Play again did NOT start a new round.') : '',
   ].join('');
-  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}${probeNote}${unfinishedNote}`;
+  const head = `Game Quality Score ${score.overall}/100 for playability, not graphics (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}${probeNote}${unfinishedNote}`;
   // "Good" only when measured (S4): said in the head of a passing run, and only then.
-  if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: isGoodGame(score, run.rules) ? `A good game — ${head}` : head };
+  // 🔴 "A good game" read as a verdict on its GRAPHICS (external Game Maker audit, 2026-11-25): the score never judged how
+  // realistic anything looks — only that it runs, answers its controls, plays on a phone and progresses. Said so.
+  if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: isGoodGame(score, run.rules) ? `${PLAYS_WELL} — ${head}` : head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
     : score.cameraInsideVehicle ? `${CAMERA_INSIDE_VEHICLE_FIX} (measured: inside a ${(run.cameraInside ?? []).join(' × ')} m part of it)`
     : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX
@@ -1972,19 +2105,29 @@ export function playtestOutcome(code: string | null | undefined): 'passed' | 'fa
 // played?"; this answers "is it the game that was asked for?" from the code the builder wrote, against the
 // features the request NAMED. Never a gate and never a charge: an info line for the admin timeline.
 export interface GameScopeVerdict { code: 'GAME_SCOPE_OK' | 'GAME_SCOPE_GAP'; severity: 'info'; message: string; autoResolved: true }
-export function gameScopeVerdict(contract: GameScopeContract, files: Record<string, string>): GameScopeVerdict | null {
+/**
+ * 🔴 SINCE THE EXTERNAL GAME MAKER AUDIT (2026-11-25): "OK" only when every named feature is PROVEN — a kit call the running
+ * game reaches, or a played action whose state change was observed (gameProof.ts `gameFeatureEvidence`, handed in as
+ * `match` by the playtest phase). A feature the code only names is said as NOT VERIFIED, never as present. PURE.
+ */
+export function gameScopeVerdict(contract: GameScopeContract, files: Record<string, string>, match?: ScopeMatch | null): GameScopeVerdict | null {
   if (!contract) return null;
-  const m = scopeMatch(contract, files);
+  const m = match ?? scopeMatch(contract, files);
+  const nv = m.notVerified ?? [];
+  const proven = m.present.map((f) => (m.evidence?.[f] ? `${f} (${m.evidence[f]})` : f)).join(', ');
+  const notVerifiedLine = nv.length ? ` Not verified — the code names ${nv.join(', ')}, but no kit call the game reaches and no played action proved ${nv.length === 1 ? 'it' : 'them'}.` : '';
   if (m.unverified?.length) {
     return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true,
       message: `Runner requirements retained but NOT functionally verified by this code scan: ${m.unverified.join(', ')}. `
-        + `Missing ordinary code signals: ${m.missing.join(', ') || 'none'}. This is not a gameplay pass, a repair order or a billing verdict.` };
+        + `Missing ordinary code signals: ${m.missing.join(', ') || 'none'}.${notVerifiedLine} This is not a gameplay pass, a repair order or a billing verdict.` };
   }
   if (contract.requiredFeatures.length === 0) return null;
-  if (m.missing.length === 0) {
-    return { code: 'GAME_SCOPE_OK', severity: 'info', autoResolved: true, message: `Every feature the request named is in the game's code: ${m.present.join(', ')}.` };
+  if (m.missing.length === 0 && nv.length === 0) {
+    return { code: 'GAME_SCOPE_OK', severity: 'info', autoResolved: true, message: `Every feature the request named is proven: ${proven}.` };
   }
-  return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true, message: `The request named ${m.missing.join(', ')}, and the game's own code shows no sign of ${m.missing.length === 1 ? 'it' : 'them'} (found: ${m.present.join(', ') || 'none of the named features'}). Read from code, not played — evidence only.` };
+  const missingLine = m.missing.length ? ` The request named ${m.missing.join(', ')}, and the game's own code shows no sign of ${m.missing.length === 1 ? 'it' : 'them'}.` : '';
+  return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true,
+    message: `Named features proven: ${proven || 'none'}.${notVerifiedLine}${missingLine} Evidence only.` };
 }
 
 // ─── GAME ENGINE ULTRA PHASE 2 — SEED, NON-CANVAS GAMES, STRUCTURED DEFECTS ─────────────────────────────

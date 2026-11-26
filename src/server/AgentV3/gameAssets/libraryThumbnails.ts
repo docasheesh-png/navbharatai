@@ -47,6 +47,17 @@ export function thumbnailAllowed(c: Pick<ReviewedAsset, 'license'>): boolean {
   return c.license.spdx === 'CC0-1.0' || c.license.spdx === 'MIT';
 }
 
+/**
+ * The clip a library picture is taken in. The entry's own idle role wins (it names the standing loop); a name that starts
+ * with "idle" comes next; any other "idle" clip only last. The picture used to take the FIRST clip whose name held "idle",
+ * and in the Universal Animation Library that is "Crouch_Idle_Loop" — every such character's picture was a crouch
+ * (found 2026-11-25 on the new Indian-clothes characters; the batch-7 villagers and rangers had it too).
+ */
+export function thumbnailPoseClip(clipNames: readonly string[], idleRole?: string): string | null {
+  if (idleRole && clipNames.includes(idleRole)) return idleRole;
+  return clipNames.find((n) => /^idle/i.test(n)) ?? clipNames.find((n) => /idle/i.test(n) && !/crouch|sit|prone|lie/i.test(n)) ?? clipNames.find((n) => /idle/i.test(n)) ?? null;
+}
+
 export function libraryThumbPath(sha256: string, cwd = process.cwd()): string | null {
   if (!HASH.test(sha256) || !REVIEWED_GAME_ASSETS.some((c) => c.sha256 === sha256 && thumbnailAllowed(c))) return null;
   const path = join(cwd, LIBRARY_THUMB_DIR, `${sha256}.webp`);

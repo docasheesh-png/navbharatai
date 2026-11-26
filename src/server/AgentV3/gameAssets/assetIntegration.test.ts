@@ -11,6 +11,11 @@ import { externalGameAssetsEnabled, gameAssetRequirements } from './assetPlan';
 import { materializeAssets } from '../WorkspaceAssetStore';
 import { contentTypeFor } from '../bucketPublish';
 
+import { gamePlayerFileSource, GAME_PLAYER_FILE_PATH } from '../../lib/GamePlayerBodyGenerator';
+import { REALISTIC_HUMANS } from './realisticHumans';
+import { downloadReviewedAsset } from './assetTransport';
+import { validateGlb } from './assetPolicy';
+
 function rig(bytes = syntheticGlb(), candidate = syntheticCandidate(bytes)) {
   const objects = new Map<string, Uint8Array>(); const binary = new Map<string, string>(); const texts = new Map<string, string>();
   const disk = new Map<string, string>();
@@ -28,6 +33,30 @@ function rig(bytes = syntheticGlb(), candidate = syntheticCandidate(bytes)) {
 }
 
 describe('L3 acquisition, durable restore and bundle contract (synthetic)', () => {
+  it('equips a durably saved rigged starter through the new-game seed', async () => {
+    const r = rig();
+    const workspaceId = 'fixture-workspace';
+    const opts = {
+      workspaceId, prompt: 'a realistic third-person adventure with a human', starterPlayerSource: gamePlayerFileSource(workspaceId),
+      signal: new AbortController().signal, workspace: r.workspace, persistence: r.persistence, catalogue: REALISTIC_HUMANS,
+      dependencies: { ...r.deps, providers: createAssetProviders(REALISTIC_HUMANS), download: downloadReviewedAsset },
+    };
+    const result = await prepareGameAssets(opts);
+    const ready = result.outcomes.find(item => item.outcome.kind === 'model');
+    expect(ready).toBeDefined();
+    expect(result.files[GAME_PLAYER_FILE_PATH]).toContain("model: '" + ready!.subject + "'");
+    expect(r.texts.get(GAME_PLAYER_FILE_PATH)).toBe(result.files[GAME_PLAYER_FILE_PATH]);
+    expect((await prepareGameAssets({...opts, starterPlayerSource: '// custom player'})).files[GAME_PLAYER_FILE_PATH]).toBeUndefined();
+  });
+  it('ships seven distinct packaged rigs with locomotion clips under the game asset limits', async () => {
+    expect(new Set(REALISTIC_HUMANS.map(c => c.sha256)).size).toBe(7);
+    for (const c of REALISTIC_HUMANS) {
+      const bytes = await downloadReviewedAsset(c, new AbortController().signal);
+      const checked = validateGlb(bytes);
+      expect(checked.animations).toEqual(expect.arrayContaining(['walk', 'run', 'jump', 'land']));
+      expect(checked.triangles).toBeGreaterThan(10000);
+    }
+  });
   it('ships the full MIT permission notice with an MIT model (admin decision 2026-11-19)', async () => {
     const bytes = syntheticGlb(); const base = syntheticCandidate(bytes);
     const mit = { ...base, license: { ...base.license, spdx: 'MIT' as const, attribution: 'Copyright (c) 2023 Kenney' } };

@@ -32,7 +32,8 @@ import { AdsPanel } from './admin/AdsPanel';
 import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
 import { ProviderSwitchesPanel } from './admin/ProviderSwitchesPanel';
 import { TrafficControlPanel } from './admin/TrafficControlPanel';
-import { EngineChain, EngineHealthList } from './admin/BuildEngineHealth';
+import { EngineChain, EngineDayDetail, EngineHealthList } from './admin/BuildEngineHealth';
+import { engineDaysOf, type EngineDays } from '../lib/engineDays';
 import { GameAssetLiveCheckPanel } from './admin/GameAssetLiveCheckPanel';
 import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -1468,15 +1469,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // THE REAL BUILD ENGINES — see GET /api/admin/engines for why the old page was fake.
   const [engines, setEngines] = useState<any>(null);
   const [enginesLoading, setEnginesLoading] = useState(false);
+  /** Per-day engine stats, shape-checked at entry (engineDays.ts); undefined = an older server sent none. */
+  const [engineDays, setEngineDays] = useState<EngineDays | undefined>(undefined);
+  const [pickedEngine, setPickedEngine] = useState<string | null>(null);
   const fetchEngines = useCallback(async () => {
     setEnginesLoading(true);
     try {
       const r = await fetch('/api/admin/engines', { headers });
       const d = await r.json();
       setEngines(d && typeof d === 'object' ? d : null);
+      setEngineDays(r.ok ? engineDaysOf(d) : undefined);
     } catch (e) {
       console.error(e);
       setEngines(null);
+      setEngineDays(undefined);
     } finally {
       setEnginesLoading(false);
     }
@@ -2697,7 +2703,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                         {Array.isArray(engines.chains?.[t.level]) && engines.chains[t.level].length > 0 ? (
                           /* The whole chain this tier tries now, leads included, coloured by 24-hour health. */
-                          <EngineChain chain={engines.chains[t.level]} health={engines.health} names={engines.engineNames} />
+                          <EngineChain chain={engines.chains[t.level]} health={engines.health} names={engines.engineNames}
+                            days={engineDays} picked={pickedEngine} onPick={(e) => setPickedEngine((p) => (p === e ? null : e))} />
                         ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           {(t.rungs || []).map((r: any, i: number) => (
@@ -2721,6 +2728,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         )}
                       </div>
                     ))}
+
+                    {pickedEngine && <EngineDayDetail engine={pickedEngine} days={engineDays} names={engines.engineNames} onClose={() => setPickedEngine(null)} />}
 
                     <EngineHealthList health={engines.health} names={engines.engineNames} />
 

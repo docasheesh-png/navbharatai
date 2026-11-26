@@ -61,6 +61,15 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   house: ['house', 'houses', 'hut', 'घर', 'मकान', 'झोपड़ी', 'casa'], well: ['water well', 'village well', 'कुआँ', 'कुआं', 'pozo'],
   'red kurta': ['red kurta', 'red kurta style', 'maroon kurta'],
   'saffron kurta': ['saffron kurta', 'kesari kurta', 'केसरिया कुर्ता'],
+  // 2026-11-25 library batch 16: NavBharatAI's own Indian garments. Whole phrases ("dhoti wala aadmi") are listed so the
+  // longest name wins over the bare "aadmi"/"aurat" inside them — one person in a dhoti, not a dhoti man AND a man.
+  'man in kurta pajama': ['man in kurta pajama', 'man in kurta', 'kurta pajama wala', 'kurta pajama wala aadmi', 'kurta wala aadmi', 'कुर्ता पजामा', 'कुर्ता पायजामा', 'कुर्ता पजामा वाला आदमी'],
+  'man in pagdi': ['man in pagdi', 'man in pagri', 'pagdi', 'pagri', 'safa', 'pagdi wala', 'pagdi wala aadmi', 'pagri wala aadmi', 'पगड़ी', 'साफा', 'पगड़ी वाला', 'पगड़ी वाला आदमी'],
+  'man in dhoti': ['man in dhoti', 'dhoti', 'dhoti wala', 'dhoti wala aadmi', 'धोती', 'धोती वाला', 'धोती वाला आदमी'],
+  'woman in saree': ['woman in saree', 'saree', 'sari', 'saree wali', 'saree wali aurat', 'sari wali aurat', 'साड़ी', 'साड़ी वाली', 'साड़ी वाली औरत', 'साड़ी वाली महिला'],
+  'woman in salwar kameez': ['woman in salwar kameez', 'salwar suit', 'salwar kameez wali', 'suit wali aurat', 'सलवार कमीज़', 'सलवार कमीज', 'सलवार सूट', 'सलवार सूट वाली'],
+  'man in lungi': ['man in lungi', 'lungi wala', 'lungi wala aadmi', 'लुंगी', 'लुंगी वाला', 'लुंगी वाला आदमी'],
+  'man in sherwani': ['man in sherwani', 'sherwani', 'dulha', 'sherwani wala', 'शेरवानी', 'दूल्हा', 'शेरवानी वाला'],
   'blue house': ['blue house', 'blue houses', 'neela ghar', 'नीला घर'],
   windmill: ['windmill', 'windmills', 'पवनचक्की', 'molino'], target: ['target', 'targets', 'निशाना', 'लक्ष्य', 'diana'],
   barrel: ['barrel', 'barrels', 'ड्रम', 'बैरल', 'barril'], wall: ['wall', 'walls', 'दीवार', 'muro'],

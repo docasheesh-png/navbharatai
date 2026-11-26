@@ -8,6 +8,7 @@
  * words. Both render only what the server measured: an unread value is shown as unread, never as "healthy".
  */
 import React from 'react';
+import type { EngineDayRow, EngineDays } from '../../lib/engineDays';
 
 export type EngineHealthStatus = 'working' | 'degraded' | 'failing' | 'idle';
 export interface EngineHealthRow {
@@ -51,26 +52,53 @@ export function EngineChain(props: {
   chain: Array<{ name: string; model: string | null }>;
   health: EngineHealthData | null | undefined;
   names: Record<string, string> | undefined;
+  /** Today's per-engine stats (admin 2026-11-25: "per day fail"). When given, the chip counts TODAY, not 24 h. */
+  days?: EngineDays;
+  /** Tap an engine to see its per-day detail. */
+  onPick?: (engine: string) => void;
+  picked?: string | null;
 }): React.ReactElement {
   const byFamily = new Map((props.health?.engines ?? []).map((e) => [e.engine, e]));
+  const today = props.days?.days?.[0];
+  const todayBy = new Map((today?.engines ?? []).map((e) => [e.engine, e]));
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="engine-chain">
       {props.chain.map((rung, i) => {
-        const h = byFamily.get(engineFamily(rung.name));
+        const fam = engineFamily(rung.name);
+        const h = byFamily.get(fam);
         const status: EngineHealthStatus = h?.status ?? 'idle';
+        const d = todayBy.get(fam);
+        const perDay = !!props.days?.days;
+        const chipClass = `px-2.5 py-1.5 rounded-lg border bg-well font-mono text-[10px] font-black text-ink text-left ${props.picked === fam ? 'border-accent-text' : 'border-line'}`;
+        const body = (
+          <>
+            {displayName(rung.name, props.names)}
+            {rung.model && <span className="text-muted font-normal"> · {rung.model}</span>}
+            {perDay ? (
+              <>
+                {d && d.failed > 0 && <span className="ml-1.5 text-danger">{d.failed} failed today</span>}
+                {d && d.failed === 0 && d.answered > 0 && <span className="ml-1.5 text-success">OK today</span>}
+              </>
+            ) : (
+              <>
+                {h && h.failures > 0 && <span className={`ml-1.5 ${STATUS_TEXT[status]}`}>{h.failures} failed</span>}
+                {h && h.failures === 0 && h.delivered > 0 && <span className="ml-1.5 text-success">OK</span>}
+              </>
+            )}
+          </>
+        );
         return (
           <React.Fragment key={`${rung.name}-${rung.model ?? ''}-${i}`}>
             {i > 0 && <span className="text-faint text-xs">→</span>}
-            <span
-              data-testid={`engine-chip-${engineFamily(rung.name)}`}
-              title={h ? `${STATUS_LABEL[status]} in the last ${props.health?.windowHours ?? 24} hours` : 'No build used or failed on this engine in the window'}
-              className="px-2.5 py-1.5 rounded-lg border border-line bg-well font-mono text-[10px] font-black text-ink"
-            >
-              {displayName(rung.name, props.names)}
-              {rung.model && <span className="text-muted font-normal"> · {rung.model}</span>}
-              {h && h.failures > 0 && <span className={`ml-1.5 ${STATUS_TEXT[status]}`}>{h.failures} failed</span>}
-              {h && h.failures === 0 && h.delivered > 0 && <span className="ml-1.5 text-success">OK</span>}
-            </span>
+            {props.onPick ? (
+              <button type="button" data-testid={`engine-chip-${fam}`} aria-pressed={props.picked === fam}
+                title={`Show ${displayName(rung.name, props.names)}: requests, answers, failures and average time, per day`}
+                onClick={() => props.onPick?.(fam)} className={chipClass}>{body}</button>
+            ) : (
+              <span data-testid={`engine-chip-${fam}`}
+                title={h ? `${STATUS_LABEL[status]} in the last ${props.health?.windowHours ?? 24} hours` : 'No build used or failed on this engine in the window'}
+                className={chipClass}>{body}</span>
+            )}
           </React.Fragment>
         );
       })}
@@ -124,6 +152,91 @@ export function EngineHealthList(props: {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function seconds(ms: number | null): string {
+  if (ms === null) return '—';
+  return ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`;
+}
+
+/**
+ * One engine, per day (admin 2026-11-25: "kitne request gayi, kitne response aye, kitni der me aye (avg) aur kitne fail
+ * huye … fallback system kam kyu nahi kiya woh bhi likh kar ana chahiye"). Only what builds recorded; a day the server
+ * could not read says so.
+ */
+export function EngineDayDetail(props: {
+  engine: string;
+  days: EngineDays | undefined;
+  names: Record<string, string> | undefined;
+  onClose?: () => void;
+}): React.ReactElement {
+  const name = displayName(props.engine, props.names);
+  const close = props.onClose && (
+    <button type="button" onClick={props.onClose} className="text-[10px] font-black uppercase text-muted">Close</button>
+  );
+  if (!props.days || props.days.days === null) {
+    return (
+      <div className="rounded-xl border border-line p-3 space-y-1" data-testid="engine-day-detail">
+        <div className="flex items-center justify-between"><span className="text-sm font-bold text-ink">{name}</span>{close}</div>
+        <p className="text-xs text-warn">The per-day numbers could not be read right now. This is not the same as “nothing ran”.</p>
+      </div>
+    );
+  }
+  const rows = props.days.days.map((d) => ({ day: d.day, r: d.engines.find((e) => e.engine === props.engine) as EngineDayRow | undefined }));
+  const reasons: Record<string, number> = {};
+  const carried: Record<string, number> = {};
+  for (const { r } of rows) {
+    for (const [k, v] of Object.entries(r?.reasons ?? {})) reasons[k] = (reasons[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(r?.carriedBy ?? {})) carried[k] = (carried[k] ?? 0) + v;
+  }
+  const failedTotal = rows.reduce((a, { r }) => a + (r?.failed ?? 0), 0);
+  return (
+    <div className="rounded-xl border border-line p-3 space-y-3" data-testid="engine-day-detail">
+      <div className="flex items-center justify-between"><span className="text-sm font-bold text-ink">{name} — last {rows.length} days (UTC)</span>{close}</div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-muted text-left">
+            <th className="font-bold py-1">Day</th><th className="font-bold">Requests</th><th className="font-bold">Answered</th>
+            <th className="font-bold">Failed</th><th className="font-bold">Avg answer time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ day, r }) => (
+            <tr key={day} className="border-t border-line text-ink" data-testid={`engine-day-${day}`}>
+              <td className="py-1 font-mono">{day}</td>
+              <td>{r?.requests ?? 0}</td>
+              <td className={r && r.answered > 0 ? 'text-success' : ''}>{r?.answered ?? 0}</td>
+              <td className={r && r.failed > 0 ? 'text-danger' : ''}>{r?.failed ?? 0}</td>
+              <td>{r ? seconds(r.avgAnswerMs) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="space-y-1">
+        <p className="text-[11px] font-black uppercase tracking-widest text-ink">Why it failed</p>
+        {failedTotal === 0 ? <p className="text-xs text-muted">No failure recorded in these days.</p> : (
+          <ul className="space-y-0.5" data-testid="engine-day-reasons">
+            {Object.entries(reasons).sort((a, b) => b[1] - a[1]).map(([code, count]) => (
+              <li key={code} className="text-xs text-warn">{count}× {props.days?.reasonText[code] ?? code} <span className="text-faint font-mono">({code})</span></li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="space-y-1">
+        <p className="text-[11px] font-black uppercase tracking-widest text-ink">What happened when it failed</p>
+        {Object.keys(carried).length === 0 ? (
+          <p className="text-xs text-muted">{failedTotal === 0 ? 'Nothing needed to take over.' : 'No other engine is recorded as answering those turns — the turn was retried on this engine, or the build stopped first.'}</p>
+        ) : (
+          <ul className="space-y-0.5" data-testid="engine-day-carried">
+            {Object.entries(carried).sort((a, b) => b[1] - a[1]).map(([to, count]) => (
+              <li key={to} className="text-xs text-ink">{displayName(to, props.names)} answered {count} turn{count === 1 ? '' : 's'} instead.</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <p className="text-[10px] text-faint">Counted at the end of every build. A build whose server was lost before it finished is not counted. Requests = answered turns + failed attempts.</p>
     </div>
   );
 }

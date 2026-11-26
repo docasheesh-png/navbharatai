@@ -64,7 +64,7 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
-import { applyPlayerChoice, resolvePlayerChoice, findBones, playerModelRoot, type PlayerBody, type PlayerChoice } from './play/playerBody';
+import { applyPlayerChoice, resolvePlayerChoice, humanoidCollider, findBones, playerModelRoot, type PlayerBody, type PlayerChoice } from './play/playerBody';
 import { updateActions } from './play/actions';
 import { aimFrom, type AimResult } from './play/aim';
 import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
@@ -98,6 +98,15 @@ export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant
 /** A finger is the main pointer (a phone or a tablet). */
 function touchDevice(): boolean {
   try { return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches; } catch { return false; }
+}
+/**
+ * A browser driven by automation (navigator.webdriver: the build's playtest, explorer and screenshot browsers), where no
+ * person holds the mouse. Pointer lock there floods the page with synthetic input: measured on the open-world starter in the
+ * build sandbox's headless Chromium (queue Q-2698), 36,000 input messages a second and 4–6 frames a second with the lock,
+ * 14–16 without it, same scene. A person's own browser never sets the flag, so their mouse is captured exactly as before.
+ */
+function automatedBrowser(): boolean {
+  try { return typeof navigator !== 'undefined' && (navigator as Navigator & { webdriver?: boolean }).webdriver === true; } catch { return false; }
 }
 
 export interface GameOptions {
@@ -402,18 +411,21 @@ export class Game {
     // walked it in circles (verifier, 2026-10-11).
     this.rig = new CameraRig({ kind: options.camera === 'chase' ? 'third-person' : (options.camera ?? 'third-person') });
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
-    this.player = new CharacterController();
+    const firstPerson = (options.camera ?? 'third-person') === 'first-person';
+    this.playerChoice = resolvePlayerChoice(options.player);
+    const look = { height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) };
+    // The kit's own body sizes the walking capsule from its proportions; a game's own body keeps the default capsule.
+    const kitBody = !(options.playerBody && typeof options.playerBody === 'object') && options.playerBody !== false && !firstPerson;
+    this.player = new CharacterController(kitBody ? humanoidCollider(look) : undefined);
     this.scene.add(this.player.object);
     // 🔴 THE PLAYER HAS A BODY. The controller is an empty Object3D, and nothing gave it one — so in every
     // third-person game the hero was invisible unless the model happened to add a mesh, and the player
     // saw a camera drifting over the ground. (Found by PLAYING the shell: gamePlaytest.ts.)
-    const firstPerson = (options.camera ?? 'third-person') === 'first-person';
-    this.playerChoice = resolvePlayerChoice(options.player);
     // true means "the default body", the same as leaving it out (failedbr #1334: a boolean was passed and failed to compile).
     if (options.playerBody && typeof options.playerBody === 'object') {
       this.player.object.add(options.playerBody);
     } else if (options.playerBody !== false && !firstPerson) {
-      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) });
+      this.hero = createHumanoid(look);
       this.player.object.add(this.hero.root);
     }
     // BOTH blend layers. Adding one is how half the effects end up invisible.
@@ -786,7 +798,7 @@ export class Game {
     // that closed the dialogue box must not also jump or swing (core/dialogue.ts).
     const talking = dialogue.active || dialogue.takeJustEnded();
     if (!this.feel.frozen && !talking) {
-      const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), radius: 0.4, height: 1.8 };
+      const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), ...this.player.capsuleSize };
       // Use gets in or out of a vehicle first (ctx.vehicles); only a press that did neither opens a door.
       const usedSeat = this.input.wasPressed('interact') && this.useSeat();
       if (!this.chased && !usedSeat && this.input.wasPressed('interact')) interactHouseDoor(this.scene, doorActor);
@@ -1174,7 +1186,7 @@ export class Game {
 
   /** Desktop mouse-look: capture the pointer on a click during play (a phone has no pointer to capture). */
   private capturePointer(): void {
-    if (this.options.pointerLock === false || touchDevice()) return;
+    if (this.options.pointerLock === false || touchDevice() || automatedBrowser()) return;
     const c = this.canvas as HTMLCanvasElement & { requestPointerLock?: () => unknown };
     try { const r = c.requestPointerLock?.(); if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined); } catch { /* refused: the mouse still looks, just not captured */ }
   }

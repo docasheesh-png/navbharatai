@@ -21,7 +21,7 @@ import { usdInrRate } from './UsdInrRate';
 import { getServerDb } from './serverDb';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 
-export type AppAiRefusal = GatewayRefusal | 'switched-off' | 'own-key-refused' | 'own-key-failed';
+export type AppAiRefusal = GatewayRefusal | 'switched-off' | 'own-key-refused' | 'own-key-failed' | 'own-key-busy';
 
 export type AppAiAnswer =
   /**
@@ -44,7 +44,12 @@ export async function answerForApp(ask: AppAiAsk): Promise<AppAiAnswer> {
   const own = await ownKeyFor(ask.ownerId, ask.workspaceId);
   if (own) {
     const r = await askWithOwnKey(own, ask.system, ask.prompt);
-    if (!r.ok) return { ok: false, reason: r.reason === 'refused' ? 'own-key-refused' : 'own-key-failed', provider: own.provider };
+    if (!r.ok) {
+      // 'busy' is the free tier's rate limit (appFreeAi.ts) and it is NOT a failure: the same question
+      // works a moment later, so it is reported as its own reason rather than flattened into "failed".
+      const reason = r.reason === 'refused' ? 'own-key-refused' : r.reason === 'busy' ? 'own-key-busy' : 'own-key-failed';
+      return { ok: false, reason, provider: own.provider };
+    }
     // ₹0 on our side, but the CALL still counts — the counter is how a rate is seen later.
     const settleOwn = () => { void appAiUsageStore.record(ask.counter.appId, ask.counter.visitor, ask.counter.day, 0); };
     return { ok: true, text: r.text, via: 'own-key', provider: own.provider, settle: settleOwn };

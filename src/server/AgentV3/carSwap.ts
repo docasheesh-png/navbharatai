@@ -32,7 +32,8 @@ export function useAsCarPrompt(row: { id: string; name: string }): string | null
 }
 
 /** The game's own car file, as the platform writes it when the game has none yet. Mirrors src/game/player.ts. */
-export function raceCarFile(model: string | null = null): string {
+/** `color`: the car's starting paint (a new race gets one fixed by its project: projectVariety.ts starterCarPaint). */
+export function raceCarFile(model: string | null = null, color = 0xb42b2b): string {
   return [
     "// THIS RACE'S CAR — the car you drive. RacingRoadGame reads this file by itself (src/game/play/raceCustom.ts).",
     '// color is the standard car\'s paint (0xRRGGBB). To drive a 3D model instead, set model to a file of this project',
@@ -42,7 +43,7 @@ export function raceCarFile(model: string | null = null): string {
     "import type { CarChoice } from './play/raceCustom';",
     '',
     'export const CAR: CarChoice = {',
-    '  color: 0xb42b2b,',
+    `  color: 0x${(Math.floor(Number(color)) >>> 0 & 0xffffff).toString(16).padStart(6, '0')},`,
     `  model: ${model === null ? 'null' : `'${model}'`},`,
     '  modelLength: 4.3,',
     '};',

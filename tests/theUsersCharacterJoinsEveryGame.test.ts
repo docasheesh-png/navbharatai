@@ -300,7 +300,7 @@ describe('📚 the platform sets the library character in every game on the kit 
     expect(t.disk.get(PLAYER_FILE_PATH)).toContain(`model: '${subject}'`);
   });
   it('a racing game (its player is the car) and the first-person royale are TOLD so; nothing is added or written', async () => {
-    for (const app of ['<RacingRoadGame title="x" />', '<RoyalePractice />']) {
+    for (const app of ['<RacingRoadGame title="x" />', '<RoyalePractice />', '<RoyaleGame />']) {
       const t = turn({ 'src/App.tsx': app, 'src/game/Game.ts': shell, [PLAYER_FILE_PATH]: GAME_PLAYER_FILE });
       const handoff = await setLibraryCharacterAtTurnStart(t.io);
       expect(handoff, app).toContain('NOT DONE');
@@ -340,7 +340,7 @@ describe('🗣️ the builder is told how, in every game that has the file', () 
     expect(note).toMatch(/punch \("Punch_Right"\)/);
     // Admin 2026-11-24: a missing punch/kick/swing/throw/fire/use is MADE from the skeleton; the rest stays unanimated (playerMoves.lackedMovesClause).
     expect(note).toMatch(/kick, fire, swing, throw, use are not in its own clips, so NavBharatAI makes them from its skeleton/);
-    expect(note).toMatch(/walk, run, jump, block, hit, die, slide are not animated/);
+    expect(note).toMatch(/walk, run, jump, swim, dive, block, hit, die, slide are not animated/);
     expect(playerMovesOf([]).has).toEqual([]);
   });
   it('the shell recipe creates the file once (never replaces it), and says so', () => {

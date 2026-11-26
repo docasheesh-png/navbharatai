@@ -90,8 +90,8 @@ export function platformChecksProof(checks: PlatformChecks, opts: ProofOpts): Us
 
   // A game is PLAYED, not only opened — the strongest sentence a game can carry, so it goes near the top.
   const g = checks.game;
-  if (g && g.outcome === 'passed') passes.push(`NavBharatAI played your game — it answered its controls on a keyboard and a touch screen, and scored ${g.score ?? '—'}/100.`);
-  else if (g && g.outcome === 'failed') problems.push(`NavBharatAI played your game and found something to fix (Game Quality Score ${g.score ?? '—'}/100).`);
+  if (g && g.outcome === 'passed') passes.push(`NavBharatAI played your game — it answered its controls on a keyboard and a touch screen, and scored ${g.score ?? '—'}/100 for playability (not a rating of its graphics).`);
+  else if (g && g.outcome === 'failed') problems.push(`NavBharatAI played your game and found something to fix (playability score ${g.score ?? '—'}/100 — not a rating of its graphics).`);
   // 🔴 A game the playtest tried and could not play is NOT VERIFIED, and the card says so (autopsy 61279465:
   // the user read "complete and working" about a train game nobody had driven). Not a defect in the game —
   // a check that could not finish — so it is its own line, never a pass and never silence.

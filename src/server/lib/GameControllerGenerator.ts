@@ -416,6 +416,7 @@ export class CharacterController {
     this.outOfBreathFor = 0;
   }
 
+  get capsuleSize(): { radius: number; height: number } { return { radius: this.radius, height: this.height }; }
   get velocity(): { x: number; y: number; z: number } { return { x: this.state.vx, y: this.state.vy, z: this.state.vz }; }
   get isGrounded(): boolean { return this.state.grounded; }
   get speed(): number { return Math.hypot(this.state.vx, this.state.vz); }

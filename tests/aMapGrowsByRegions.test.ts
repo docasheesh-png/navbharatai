@@ -125,6 +125,13 @@ describe('🗺️ the game\'s own map file, and the rule that grows it', () => {
     expect(read('src/server/AgentV3/ToolDispatcher.ts')).toMatch(/if \(!mapped\) \{\s*const worldFile = await this\.guardedWrite\(GAME_WORLD_FILE_PATH, gameWorldFileSource\(/);
   });
 
+  it('writes independent terrain seeds for new projects and keeps requested cities', () => {
+    const projects = Array.from({length: 6}, (_, i) => ({workspaceId: 'project-' + i, city: true}));
+    const sources = projects.map(gameWorldFileSource);
+    expect(new Set(sources.map(source => source.match(/seed: (\d+)/)?.[1])).size).toBe(6);
+    expect(sources.every(source => source.includes("kind: 'city'"))).toBe(true);
+    expect(projects.map(gameWorldFileSource)).toEqual(sources);
+  });
   it('the wish decides: bigger land adds a place, a bigger city edits one entry, nothing already there is touched', () => {
     expect(GAME_WORLD_RULE).toMatch(/Read what the user\s+WANTS, not the words/);
     expect(GAME_WORLD_RULE).toMatch(/ADD one\s+region per place asked for \(several at once when they ask for several/);

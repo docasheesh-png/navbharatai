@@ -139,6 +139,7 @@ const STORAGE_MODULES: Record<string, Disposition> = {
   'src/server/lib/ShareStore.ts': { open: 'Q-3611' },
   'src/server/lib/navStoreStore.ts': { open: 'Q-3612' },
   'src/server/lib/zipUploadStore.ts': { open: 'Q-3613' },
+  'src/server/lib/mobileBuild/nativeArtifactStore.ts': { open: 'Q-3614' }, // owner-hashed key, but no eraser calls it yet
 };
 
 function serverFiles(dir: string): string[] {

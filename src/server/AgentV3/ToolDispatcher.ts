@@ -119,6 +119,8 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 
 /** A recipe's files in flight at once: enough to end the one-by-one wait, few enough for any sandbox. */
 const RECIPE_WRITE_CONCURRENCY = 6;
+/** The kit files whose creation gives a game its own seed (src/game/gameSeed.ts, Q-3373): the action town and the race starter. */
+const ACTION_TOWN_PATH = 'src/game/three/buildings.ts', RACE_STARTER_PATH = 'src/game/RacingRoadGame.tsx';
 import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
@@ -4154,12 +4156,6 @@ export class ToolDispatcher {
     return true;
   }
 
-  /** Is this project file absent (read as not found)? Any other read failure is thrown, never taken for "absent". */
-  private async fileAbsent(path: string): Promise<boolean> {
-    try { await this.actuator.readFile(this.workspaceId, path); return false; }
-    catch (error) { if (!isNotFoundError(error)) throw error; return true; }
-  }
-
   /**
    * 🎲 This game's own seeds (src/game/gameSeed.ts, projectVariety.ts — Q-3373): the facets whose kit file this recipe call has
    * just CREATED are written, the file created or only the missing lines added. A facet already there, or a file no longer in a
@@ -4237,6 +4233,7 @@ export class ToolDispatcher {
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
+      if (wrote.kind === 'create') this.recipeCreated.add(path);
       return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`;
     };
     lines.push(...await mapWithConcurrency(Object.entries(files), additiveOnly ? 1 : RECIPE_WRITE_CONCURRENCY, one));
@@ -4257,6 +4254,8 @@ export class ToolDispatcher {
    * replaced only after it is READ and found to be an older kit version, never on the strength of this set.
    */
   private readonly kitCurrentPaths = new Set<string>();
+  /** Kit files a recipe (or the layers it brought) CREATED in this dispatcher — read from the writes themselves, no sandbox read. */
+  private readonly recipeCreated = new Set<string>();
 
   private noteKitCurrent(path: string, content: string): void {
     if (recipeFilePool().get(path)?.content === content) this.kitCurrentPaths.add(path);
@@ -4354,6 +4353,7 @@ export class ToolDispatcher {
         this.noteKitCurrent(path, f.content);
         all[path] = f.content;
         added.set(path, f);
+        this.recipeCreated.add(path);
       }
       const refreshed: string[] = [];
       for (const [path, f] of plan.refresh) {
@@ -10791,10 +10791,8 @@ export class ToolDispatcher {
           : undefined;
         const gsh = generateGameShell(gshInclude);
         // 🎲 A race starter (or an action town) this call CREATES gets this project's own seed (src/game/gameSeed.ts); one that
-        // already existed keeps the road and the town it had.
-        const RACE_STARTER = 'src/game/RacingRoadGame.tsx', TOWN_FILE = 'src/game/three/buildings.ts';
-        const gshNewRace = Boolean(gsh.files[RACE_STARTER]) && await this.fileAbsent(RACE_STARTER);
-        const gshTownWasAbsent = await this.fileAbsent(TOWN_FILE);
+        // already existed keeps the road and the town it had. "Created" is read from the writes themselves (recipeCreated).
+        this.recipeCreated.delete(RACE_STARTER_PATH); this.recipeCreated.delete(ACTION_TOWN_PATH);
         const gshWritten = await this.writeRecipeFiles(gsh.files, agent);
         const gshLayers = await this.addMissingRecipeLayers(gsh.files, agent);
         // 🧍 Every game on the shell swaps its character in src/game/player.ts, which the shell reads by itself (2026-11-22:
@@ -10804,8 +10802,8 @@ export class ToolDispatcher {
         // this project (projectVariety.ts): six new races are not six red cars, and an edit never repaints it.
         const gshCar = gshInclude?.includes('racingroadgame') && gsh.files['src/game/RacingRoadGame.tsx'] ? await this.ensureRaceCarFile(agent) : false;
         const gshFacets: GameSeedFacet[] = [
-          ...(gshTownWasAbsent && !(await this.fileAbsent(TOWN_FILE)) ? ['town' as const] : []),
-          ...(gshNewRace ? ['road' as const] : []),
+          ...(this.recipeCreated.has(ACTION_TOWN_PATH) ? ['town' as const] : []),
+          ...(this.recipeCreated.has(RACE_STARTER_PATH) ? ['road' as const] : []),
         ];
         const gshSeed = await this.ensureGameSeedFile(agent, gshFacets, 'generate_game_shell');
         this.scheduleCheckpoint('game shell');
@@ -10913,10 +10911,10 @@ export class ToolDispatcher {
           : undefined;
         const g3 = generateGame3D(g3Include);
         // 🎲 The action town file this call CREATES gets this project's own town seed (src/game/gameSeed.ts, Q-3373).
-        const g3TownWasAbsent = await this.fileAbsent('src/game/three/buildings.ts');
+        this.recipeCreated.delete(ACTION_TOWN_PATH);
         const g3Written = await this.writeRecipeFiles(g3.files, agent);
         const g3Layers = await this.addMissingRecipeLayers(g3.files, agent);
-        const g3Seed = g3TownWasAbsent && !(await this.fileAbsent('src/game/three/buildings.ts')) ? await this.ensureGameSeedFile(agent, ['town'], 'generate_game_3d') : false;
+        const g3Seed = this.recipeCreated.has(ACTION_TOWN_PATH) ? await this.ensureGameSeedFile(agent, ['town'], 'generate_game_3d') : false;
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.

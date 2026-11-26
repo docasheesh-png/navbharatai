@@ -784,6 +784,25 @@ export class WorkspaceMemory {
     return homes.length === 1 ? `${component} (${homes[0]})` : component;
   }
 
+  /**
+   * 🗺️ THE GAME'S OWN FILES, WITH WHAT EACH ONE EXPORTS (Kadam 3, 2026-11-26). A game on the kit is many files — the kit
+   * (src/game/**) and the game's own code that imports it (src/cricket/engine.ts, src/game.ts …). The map named React
+   * components only, so a game's engine, scene and rules files were invisible and the builder searched for them: report
+   * #2538 spent 9 of 32 reads re-reading unchanged files, and the Gully Cricket edits grepped for the camera and the batter
+   * before every change. A file is the GAME'S own when it imports the kit and is not itself under src/game/. '' when none.
+   */
+  private gameFilesLine(): string {
+    const own: string[] = [];
+    for (const [file, facts] of this.fileFacts) {
+      if (/^src\/game\//.test(file) || /\.(test|spec)\.[jt]sx?$/.test(file)) continue;
+      if (!facts.imports.some((i) => /(^|\/)game\//.test(i))) continue;
+      const names = [...new Set(facts.symbols.map((s) => s.name))].slice(0, 6);
+      own.push(names.length ? `${file} (${names.join(', ')})` : file);
+      if (own.length >= 12) break;
+    }
+    return own.length ? `Game files (the game's own code on the kit): ${own.join('; ')}` : '';
+  }
+
   /** A compact, human-readable map of the project for injecting into agent context. */
   projectMap(): string {
     const g = this.graph();
@@ -795,6 +814,7 @@ export class WorkspaceMemory {
       g.components.length ? `Components: ${g.components.slice(0, 20).map((c) => this.withFile(c)).join(', ')}` : '',
       g.routes.length ? `Routes: ${g.routes.slice(0, 20).join(', ')}` : '',
       g.dependencies.length ? `Dependencies: ${g.dependencies.slice(0, 20).join(', ')}` : '',
+      this.gameFilesLine(),
       recentErrors.length ? `Recent errors:\n${recentErrors.join('\n')}` : '',
     ].filter(Boolean);
     return lines.join('\n');

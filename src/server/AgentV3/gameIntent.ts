@@ -196,6 +196,16 @@ export function namedGameReference(text: string | null | undefined): NamedGameRe
   return null;
 }
 
+/**
+ * Does the request name a well-known title whose kind the contract draws in 3D (a royale, an FPS, an endless runner)? The kit
+ * seed reads THIS, so the kit and the contract read one table (NAMED_KINDS) and cannot disagree (Q-3314: "temple run jaisa"
+ * was 3D third-person in the contract and the 2D kit in the seed). A title that is also an everyday word (halo, doom) is a
+ * reference, never on its own a 3D request. PURE.
+ */
+export function namesTitleDrawnIn3D(text: string | null | undefined): boolean {
+  return findGameTitles(String(text ?? '').normalize('NFKC')).some((m) => !m.plainWord && NAMED_KINDS[m.kind]?.dimension === '3d');
+}
+
 /** 2D games that MOVE a body on screen — the platform draws these flat, with the 2D kit (gameKitSeed). */
 export const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
 

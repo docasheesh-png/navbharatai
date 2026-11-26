@@ -3,6 +3,27 @@ export const GAME_BUILDINGS = String.raw`import * as THREE from 'three';
 import { markWorldCollider, worldColliders } from './collision';
 import { sharedMaterial } from './materials';
 
+/**
+ * THIS GAME'S OWN SEEDS (src/game/gameSeed.ts): written ONCE by NavBharatAI when the game was made, from the project's own id,
+ * so six new games do not open in the same town or on the same road, and an edit never moves them. town: createActionTown's
+ * shuffle. road / roadStart: the race road's land and the map it starts on (projectRoadPlan in ./objects). A game without
+ * the file (made before it existed) keeps the kit's defaults, exactly as it was.
+ */
+export interface GameSeedChoice { town?: number; road?: number; roadStart?: number }
+/** The game's own seeds, or {} when it has none. Never throws. */
+export function projectGameSeed(): GameSeedChoice {
+  try {
+    const found = import.meta.glob('../gameSeed.ts', { eager: true, import: 'GAME_SEED' }) as Record<string, GameSeedChoice | undefined>;
+    const own = Object.values(found)[0];
+    return own && typeof own === 'object' ? own : {};
+  } catch { return {}; }
+}
+/** A whole seed from the game's file, or the fallback when it is missing or not a positive number. */
+function ownSeed(value: unknown, fallback: number): number {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export interface DoorOccupant { feet: THREE.Vector3; radius: number; height: number }
 export interface HouseDoor {
   readonly hinge: THREE.Group;
@@ -290,9 +311,10 @@ function townRandom(seed: number): () => number {
 /**
  * At least 100 houses in four villages, on a seeded shuffle. The same model is never on an adjacent plot,
  * and the same model-plus-colour is never among the six nearest houses. Shells are instanced. The hollow
- * interior, door and floor exist only while the player is near.
+ * interior, door and floor exist only while the player is near. The seed is this game's own (GAME_SEED.town in
+ * src/game/gameSeed.ts) unless one is passed; a game without that file gets seed 1, as before.
  */
-export function createActionTown(count = 100, seed = 1): ActionTown {
+export function createActionTown(count = 100, seed = ownSeed(projectGameSeed().town, 1)): ActionTown {
   const total = Math.max(100, Math.min(400, Math.floor(count)));
   const rng = townRandom(seed);
   const spacing = 14;

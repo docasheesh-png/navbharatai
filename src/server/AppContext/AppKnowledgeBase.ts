@@ -908,6 +908,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['enemy', 'enemies', 'enemy banao', 'enemy nahi aa rahe', 'dushman', 'villain', 'villen', 'bot', 'zombie', 'gunde', 'waves', 'punch', 'punch se kuch nahi hota', 'log solid', 'aar paar', 'citizens', 'people solid', 'log gire', 'takkar', 'run over', 'gaadi se kuchal', 'zoom', 'scope', '2x', '4x', '8x', 'sniper zoom'],
   },
   {
+    id: 'game_police',
+    name: 'Real police in an open-world game: a police car drives in with its siren and the officers get out',
+    path: 'NavBharatAI Pro → chat → ask for police in an open-world 3D game (first build or any later message)',
+    description: 'Ask for police and they are put in the game at once on NavBharatAI\'s own police system: a police car with a flashing light bar drives in with its siren, the officers get out and come to you, and when no police is around another car comes after a while. Ask for more cars, or for the police to chase and arrest you, and that is set too. Committing a crime in the game (hurting a bystander) also brings police on its own.',
+    howToUse: 'In an open-world game say "police add karo" — with a number of cars, or that they should chase you, if you like. To change it later, just say what you want different.',
+    relatedFeatures: ['game_enemies_and_crowd', 'game_play_basics'],
+    keywords: ['police', 'pulis', 'police nahi aa rahi', 'police ki gaadi', 'police car', 'siren', 'cyron', 'sairan', 'officers', 'police utre', 'arrest', 'wanted', 'पुलिस'],
+  },
+  {
     id: 'game_cinematic_camera',
     name: 'Cinematic camera shots in a game: death cam, intro drone shot, any shot you describe',
     path: 'NavBharatAI Pro → chat → describe the shot in a 3D game request or a later message',

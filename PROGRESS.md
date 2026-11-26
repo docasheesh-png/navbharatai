@@ -6243,3 +6243,12 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Fix:** all three now call `projectVariety.ts` (`pickVariant` / the new `varietySeed`). The digests are identical, so no existing project's hero, outfit or map changes; a test proves byte-identity against the old formula for several ids.
 - **Lock:** a census in `tests/aNewGameGetsItsOwnLookAndKeepsIt.test.ts` fails when any server file hashes a facet and a project id by itself. Proved by putting back one private copy: the census fails.
 - **Queue:** Q-3370 and Q-3371 were closed by the #4541 merge, and Q-3372 by the #4535 merge. Q-3373 (action town seed) is no longer waiting on #4535; its row now gives the design it needs.
+## 2026-11-26 — The game library's storage budget is 400 MiB (admin decision)
+
+- **Why:** after the Indian clothes (#4540) the catalogue was 307.6 MiB of the 320 MiB budget, leaving about 12 MiB (roughly five animated characters).
+- **Options measured first:**
+  - **Pruning:** removing unused data from all 721 packaged files would save nothing. They are already lean, which corrects my own earlier guess that old characters carried leftover data.
+  - **Dye recolours:** storing them as patches on their base models would free at most 25.8 MiB of their 92.4 MiB, because the recoloured textures are most of each file. It would also need a change to how packaged models are served.
+- **Decision:** asked with the options, the admin chose to raise the budget to 400 MiB. `CATALOGUE_STORAGE_BUDGET_BYTES` changed. The error messages are derived from the constant, so they cannot state a stale number again. `catalogueBudget.test.ts` now asserts 400 MiB (80 × the 5 MiB worst case).
+- **Effect:** the models ship in the server image (Dockerfile `COPY assets/game-models`), so the image can grow by up to about 80 MiB more, to fill the budget.
+- **Not built:** the dye-patch dedupe. It is worth doing only if the library nears 400 MiB again.

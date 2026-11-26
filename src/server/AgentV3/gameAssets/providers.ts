@@ -61,10 +61,13 @@ export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalo
 
 /**
  * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was
- * this same 320 MiB expressed as 64 × the 5 MiB per-model ceiling; small low-poly models (~200 KB) made it a
+ * 320 MiB expressed as 64 × the 5 MiB per-model ceiling; small low-poly models (~200 KB) made it a
  * count limit that left the budget 90% unused. An entry without a reviewed size still costs the full 5 MiB.
+ * Admin decision 2026-11-26: 320 → 400 MiB. The catalogue had reached 307.6 MiB (the Indian clothes, the realistic
+ * humans); the packaged files were measured to carry no unused data, so slimming could not make room. The models ship
+ * in the server image (Dockerfile: COPY assets/game-models), so the image grows by up to the extra 80 MiB.
  */
-export const CATALOGUE_STORAGE_BUDGET_BYTES = 320 * 1024 * 1024;
+export const CATALOGUE_STORAGE_BUDGET_BYTES = 400 * 1024 * 1024;
 /** Bounds per-request linear scans; far above what the storage budget admits for real assets. */
 export const CATALOGUE_MAX_ENTRIES = 2048;
 export function catalogueStorageBytes(assets: readonly ReviewedAsset[]): number {
@@ -74,7 +77,7 @@ export function catalogueStorageBytes(assets: readonly ReviewedAsset[]): number 
 export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
   if (assets.length > CATALOGUE_MAX_ENTRIES) throw new Error('Catalogue exceeds the entry ceiling');
   for (const c of assets) if (c.bytes !== undefined && (!Number.isSafeInteger(c.bytes) || c.bytes < 28 || c.bytes > ASSET_LIMITS.bytes)) throw new Error('Unreviewed asset size');
-  if (catalogueStorageBytes(assets) > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error('Catalogue exceeds the 320 MiB cache/storage budget');
+  if (catalogueStorageBytes(assets) > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error(`Catalogue exceeds the ${CATALOGUE_STORAGE_BUDGET_BYTES / 1048576} MiB cache/storage budget`);
   const ids = new Set<string>();
   for (const c of assets) {
     if (!GAME_ASSET_PROVIDERS.includes(c.provider) || !c.review?.reviewer || !c.review.evidenceRevision || c.review.freeDownload !== true

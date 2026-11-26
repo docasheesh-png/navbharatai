@@ -6245,6 +6245,9 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
   - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.
 - **2026-11-26 follow-up (same PR #4544):** CI caught `tests/webSocketSingleSource.test.ts` — the kit opened a socket without a resolver. Not a lint nit: the store player is a srcdoc frame whose base is the PARENT page, which in the Android/iOS app is the local shell, so the online socket would have dialled the phone (the Sonic-on-phones class, 2026-08-13). Fix: the open route writes `window.__NBAI_API_ORIGIN` per response (`src/server/lib/storeApiOrigin.ts`, strict scheme://host[:port] only), and the kit's `resolveWebSocketUrl` prefers it. Locks: `tests/aStoreAppKnowsWhereTheApiIs.test.ts` and the native case in `tests/theOnlineRoyaleKitTalksToTheRealServer.test.ts` (reverted ⇒ fails). Sibling NavData (relative fetch from the same frame) recorded as Q-3393.
 
+## 2026-11-26 — No pointer lock in the platform's browsers (Q-3380, follow-up to #4552)
+- gamePlaytest.ts (desktop page) and clickExplorer.ts (every fresh page) stub Element.prototype.requestPointerLock before app code runs, so a game the builder wrote itself (or an older kit copy) can no longer flood the headless page with synthetic input after the playtest clicks its canvas (#4552 measured 4 → 15 fps with the lock stubbed).
+- Test: tests/aPlaytestBrowserNeverLocksThePointer.test.ts (removing the playtest install fails it).
 ## 2026-11-26 — One seed rule, not four copies (reconciling #4541 with #4535)
 
 - **What was found:** after #4535 and #4541 both merged, the same per-project pick existed four times: #4535's starter look (`'player:'`), realistic outfit (`'human:'`) and world seed (`'world:'`), each a private `createHash('sha256').update(facet + ':' + id)`, plus #4541's `projectVariety.ts`. This is the same class as the drifted `safeRelPath` copies: duplicates that agree today and can drift tomorrow.
@@ -6283,3 +6286,5 @@ The admin approved option A. What changed:
 - **Kill switch:** `AGENTV3_GAME_PROOF_KEEP=off`.
 - **Proof:** `tests/gameProofPicturesAreKeptPrivately.test.ts` (20 tests). Seven separate reversions each fail it: no admin middleware, no hash check, no size cap, no count cap, no path guard, no `stored` key, a shifted expiry.
 - **Open:** Q-3410 (account erasure does not reach these pictures before the 30 days are up).
+## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
+- Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.

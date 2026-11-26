@@ -9,6 +9,10 @@
 // prove rollback preserves binary, excluded, oversized, unreadable or unlisted files.
 // No environment value re-enables it. Normal building/playtesting and the completion
 // gate remain unchanged. See docs/security/game-auto-repair-suspension.md.
+// The ONE in-build game repair that does run is separate and narrower: the bounded
+// placeholder repair (gamePlaceholderRepair.ts, Q-3374, admin-approved 2026-11-26) —
+// missing model / empty map only, file tools only, a byte-exact verified backup
+// (gameWorkspaceBackup.ts) as its way back. It never calls this module's repair.
 //
 // 🚦 THE GATE defaults on: a game whose final play still shows a HARD defect (blank, ignored input, no touch,
 // stuck start, runtime error, wrong camera, stalled vehicle, or missing game-kit layer) or lacks a feature
@@ -35,6 +39,7 @@ export const HARD_DEFECTS: ReadonlySet<GameDefectCode> = new Set([
 
 /** Every measured defect the repair can address. */
 const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
+  GAME_DEFECT_NOT_SHOWN: 'The game said a model or item the code asks for could not be shown (its exact words are in "measured") — usually a library subject that was never added. Call add_library_models with that subject, then use the EXACT subject it was saved under (PLAYER.model / PLAYER.holds / the race car or track file). If the library has no such model, tell the user plainly and never claim it is shown.',
   GAME_DEFECT_START_STUCK: 'Pressing the start control shows no game surface — make the start control mount and start the game.',
   GAME_DEFECT_BLANK: 'The game surface is blank or one colour — draw the world and the player.',
   GAME_DEFECT_INPUT_IGNORED: 'Arrow keys/WASD/Space/drag change nothing — wire input from src/game/core into the update loop.',
@@ -147,5 +152,11 @@ export function gameIncompleteReason(defects: readonly GameDefect[], scopeMissin
   }
   if (fromCode.length) parts.push(`its code imports game-kit files that are not in the project (${fromCode.join(', ')})`);
   if (scopeMissing.length) parts.push(`features you asked for are missing (${scopeMissing.join(', ')})`);
+  // BR #2535: the game itself said something it was asked to show is not on screen (a gun not in the hand, a library
+  // character or a custom car it could not use). Not "unplayable" — the game still plays — but the ask was not met, so the
+  // build is not finished. Kept OUT of HARD_DEFECTS on purpose: that set means unplayable, and gameRegression's "Go back"
+  // offer reads it.
+  const notShown = defects.filter((d) => d.code === 'GAME_DEFECT_NOT_SHOWN').map((d) => d.evidence).filter(Boolean);
+  if (notShown.length) parts.push(`something the game was asked to show is not on screen — the game said: ${notShown.join(' · ').slice(0, 300)}`);
   return parts.length ? parts.join('; ') : null;
 }

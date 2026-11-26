@@ -16,11 +16,12 @@ describe('game library storage budget (admin decision 2026-11-19: bytes, not a 6
     expect(() => validateCatalogue(many(65, 200_000))).not.toThrow();
     expect(() => validateCatalogue(many(600, 200_000))).not.toThrow();
   });
-  it('still holds the 320 MiB ceiling, counting an undeclared size as the 5 MiB worst case', () => {
-    expect(CATALOGUE_STORAGE_BUDGET_BYTES / ASSET_LIMITS.bytes).toBe(64);
-    expect(() => validateCatalogue(many(64))).not.toThrow();
-    expect(() => validateCatalogue(many(65))).toThrow('storage budget');
-    expect(() => validateCatalogue(many(1700, 200_000))).toThrow('storage budget');
+  it('holds the 400 MiB ceiling (admin 2026-11-26, was 320), counting an undeclared size as the 5 MiB worst case', () => {
+    expect(CATALOGUE_STORAGE_BUDGET_BYTES).toBe(400 * 1024 * 1024);
+    expect(CATALOGUE_STORAGE_BUDGET_BYTES / ASSET_LIMITS.bytes).toBe(80);
+    expect(() => validateCatalogue(many(80))).not.toThrow();
+    expect(() => validateCatalogue(many(81))).toThrow('storage budget');
+    expect(() => validateCatalogue(many(2000, 220_000))).toThrow('storage budget');
   });
   it('refuses a declared size outside the per-model limits', () => {
     for (const bytes of [0, 27, 1.5, ASSET_LIMITS.bytes + 1]) expect(() => validateCatalogue(many(1, bytes))).toThrow('size');

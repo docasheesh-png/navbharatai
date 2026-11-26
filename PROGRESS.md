@@ -6687,3 +6687,17 @@ the kit and list it (and on the first build); missing kit files are added. tests
 "Use as my car" refused in every game but the racing starter. carSwap.setLibraryCarAtTurnStart now writes
 src/game/features/myCar.ts (GameMyCarFeature.ts) in a game on the kit's features list: the model added, drivable in front of the
 player. tests/aLibraryCarArrivesInAnOpenWorld.test.ts.
+
+## 2026-11-26 — Q-3702 + Q-3704: native build rows leave with the account, the collection census reads call receivers, expired shares are purged (PR #4602)
+
+- **Queue:** #4594 merged, so Q-3611…Q-3614 are closed (deleted, IDs registered).
+- **Q-3702, the census's class:** `everyCollectionIsClassified` read only `<identifier>.collection(…)`. Any store
+  reached through a call, a cast or optional chaining (`db().collection(BUILDS)`) was skipped in silence, so the
+  three native-build collections had no classification. Form 5 reads every receiver shape or demands a declared
+  reason; witnesses lock it. Sibling found by it: the `blocked`-row id check (`Q-\d{3}\b`) refused every four-digit
+  queue id.
+- **Q-3702, the data:** `mobile_native_builds` is erased by `userId` after its files; the runner deletes a file it saved
+  for a row that is gone or already final (never charged). Signing keys stay `blocked` on Q-3703 (admin decision).
+- **Q-3704:** `purgeExpiredShares` — 30 days past expiry, page → feedback → record, bounded at 200 per run, a failure
+  keeps the record; daily `expired-share-purge` under `DATA_RETENTION_PURGE_ENABLED`.
+- **Lock:** `tests/nativeRowsAndExpiredShares.test.ts`, census witnesses, two runner cases — 9 reversions, each fails.

@@ -6640,3 +6640,11 @@ three/rooms.ts: joinRoom on the user's Supabase Realtime (raw websocket, Phoenix
 - **Siblings:** every `ILLEGAL_RULES` rule shares the new pairing on the publish path; `CONTENT_RULES` already used bounded windows; `DeploymentStore` never ran the classifier. **Open sibling Q-3561 (🟡 decision):** prompt triage false-blocks "a cricket game for kids with a hardcore mode" and similar prompts; out of scope by instruction.
 - **Accounts:** none marked. A refused publish saved nothing and logged only `STORE_PUBLISH_REFUSED`.
 - **Lock:** `tests/aKitGameIsNotACrime.test.ts` (census of every recipe; failed 11 tests when whole-document pairing was restored) and the hold tests in `storePublishSafety.test.ts` (failed 4 when "illegal refuses" was restored).
+
+### 2026-11-26 — after #4562 merged: main's broken city-people kit, and no second set of enemies
+#4562 was merged from GitHub at its conflict-resolution commit, without the App Mart pin fix and the kit-history update, and
+with two sessions' "people fall down" work merged into one file: `citypeople.ts` declared `DOWN_SECONDS` twice (6 and 4), so
+the kit file did not compile — every new open world with city people broke. Fixed: one `DOWN_SECONDS` (6, the first session's).
+Found in the same merge: a new GTA game whose user named enemies got BOTH the requested-enemies feature and street danger's
+own enemies; `streetDangerSource({ ownEnemies })` now brings only bystanders and police then. Locked in
+`tests/anOpenWorldHasStreetDanger.test.ts`; the kit typecheck test now passes apart from this container's missing cannon-es.

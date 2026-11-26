@@ -104,9 +104,6 @@ export interface CityPeople {
   dispose(): void;
 }
 
-/** How long a punched person lies on the ground, in seconds. */
-export const DOWN_SECONDS = 4;
-
 /** How fast people cross a road, at least (m/s). */
 export const CROSS_SPEED = 1.4;
 

@@ -2255,6 +2255,15 @@ export default defineFeature<OpenWorld>({
 `;
 
 /** The game's list of features with street danger already in it (the platform wrote the file beside it). */
+/**
+ * Street danger for a game whose own enemies are already written (GameEnemiesFeature.ts — the enemies the user named): the
+ * same bystanders and police, and NO enemies of its own, so the game never gets a second set. PURE.
+ */
+export function streetDangerSource(opts: { ownEnemies?: boolean } = {}): string {
+  return opts.ownEnemies ? GAME_STREET_DANGER_FEATURE.replace('  enemies: 3,          // hostile people near the player at once (0 = none)', '  enemies: 0,          // hostile people near the player at once — 0: this game\'s own enemies are in features/enemies.ts')
+    : GAME_STREET_DANGER_FEATURE;
+}
+
 export const GAME_FEATURES_INDEX_WITH_DANGER = [
   '// THIS GAME, AS A LIST. Each feature is one file in this folder that adds one thing to the game.',
   '// To ADD something: create src/game/features/<name>.ts with defineFeature({ id, setup, update }) and add it to the list below.',

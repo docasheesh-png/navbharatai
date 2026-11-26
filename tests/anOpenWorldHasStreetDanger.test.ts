@@ -75,7 +75,8 @@ describe('a city you walk through has a fight in it — by intent, not by the wo
   it('wired: the dispatcher writes streetDanger.ts only when the systems are really there, lists it, and tells the builder', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
     expect(src).toContain("if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {");
-    expect(src).toContain('danger ? GAME_FEATURES_INDEX_WITH_DANGER : GAME_FEATURES_INDEX');
+    // Listed through the shared featuresIndexWith (GameEnemiesFeature.ts) since the merge with the requested-enemies feature.
+    expect(src).toContain("indexSource = featuresIndexWith(indexSource, 'streetDanger') ?? indexSource;");
     expect(src).toContain('The game ALREADY has its fight: src/game/features/streetDanger.ts');
   });
 });
@@ -84,5 +85,18 @@ describe('the kit ground is the map ground (sibling found while wiring the enemi
   it('the open world registers the Athree height as groundHeightAt / standOnGround, in render metres, and clears it on dispose', () => {
     expect(GAME_OPEN_WORLD_BRIDGE).toContain('setGround((x, z) => { const h = map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z);');
     expect(GAME_OPEN_WORLD_BRIDGE).toContain('setGround(null);');
+  });
+});
+
+describe('never a second set of enemies (found merging with the requested-enemies feature, 2026-11-26)', () => {
+  it('with the user\'s own enemies written, street danger brings bystanders and police but no enemies of its own', async () => {
+    const { streetDangerSource } = await import('../src/server/lib/GameOpenWorldGenerator');
+    expect(streetDangerSource()).toBe(GAME_STREET_DANGER_FEATURE);
+    const own = streetDangerSource({ ownEnemies: true });
+    expect(own).toMatch(/^\s*enemies: 0,/m);
+    expect(own).toMatch(/^\s*bystanders: 4,/m);
+    expect(own).not.toBe(GAME_STREET_DANGER_FEATURE);
+    const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
+    expect(src).toContain('streetDangerSource({ ownEnemies: !!enemyReq })');
   });
 });

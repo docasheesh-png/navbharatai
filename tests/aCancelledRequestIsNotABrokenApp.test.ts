@@ -69,6 +69,7 @@ async function recordedAfterRequestFailure(script: string, errorText: string): P
       handlers.requestfailed?.({ url: () => 'https://x/node_modules/.vite/deps/react-dom.js', failure: () => ({ errorText }) });
     },
     evaluate: async () => 1,
+    addInitScript: async () => {},
     waitForTimeout: async () => {},
     content: async () => '<div id="root">ok</div>',
   };

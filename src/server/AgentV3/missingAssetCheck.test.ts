@@ -122,18 +122,22 @@ describe('missingAssetUserMessage', () => {
 });
 
 describe('the check is wired into the ship (locked)', () => {
-  const route = require('node:fs').readFileSync(
-    require('node:path').resolve(__dirname, '../routes/mobileSetup.ts'), 'utf8');
+  // 2026-11-25: the check lives in the ONE preparation both Android providers share; the setup route runs
+  // that preparation, and refuses on its answer, before it creates the repository.
+  const read = (rel: string) => require('node:fs').readFileSync(require('node:path').resolve(__dirname, rel), 'utf8');
+  const route = read('../routes/mobileSetup.ts');
+  const prep = read('../lib/mobileBuild/prepareMobileProject.ts');
 
   it('runs BEFORE the repo is created, so a doomed push never happens', () => {
-    const check = route.indexOf('findMissingImportedAssets(appFiles');
-    const ensure = route.indexOf('await ensureRepo(');
-    expect(check).toBeGreaterThan(-1);
-    expect(check).toBeLessThan(ensure);
+    expect(prep.indexOf('findMissingImportedAssets(appFiles')).toBeGreaterThan(-1);
+    const prepared = route.indexOf('if (!prepared.ok) return res.status(prepared.status).json(prepared.body);');
+    expect(prepared).toBeGreaterThan(-1);
+    expect(prepared).toBeLessThan(route.indexOf('await ensureRepo('));
   });
 
   it('runs AFTER the heal, so a repair that removed the import clears the block itself', () => {
-    expect(route.indexOf('appFiles = preflight.files;')).toBeLessThan(route.indexOf('findMissingImportedAssets(appFiles'));
+    expect(prep.indexOf('const appFiles = preflight.files;')).toBeGreaterThan(-1);
+    expect(prep.indexOf('const appFiles = preflight.files;')).toBeLessThan(prep.indexOf('findMissingImportedAssets(appFiles'));
   });
 });
 

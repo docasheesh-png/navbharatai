@@ -908,6 +908,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['enemy', 'enemies', 'enemy banao', 'enemy nahi aa rahe', 'dushman', 'villain', 'villen', 'bot', 'zombie', 'gunde', 'waves', 'punch', 'punch se kuch nahi hota', 'log solid', 'aar paar', 'citizens', 'people solid', 'log gire', 'takkar', 'run over', 'gaadi se kuchal', 'zoom', 'scope', '2x', '4x', '8x', 'sniper zoom'],
   },
   {
+    id: 'game_cinematic_camera',
+    name: 'Cinematic camera shots in a game: death cam, intro drone shot, any shot you describe',
+    path: 'NavBharatAI Pro → chat → describe the shot in a 3D game request or a later message',
+    description: 'Describe a camera shot and the game plays it: after the hero dies, the camera closes in around the body from wide to near and holds a big GAME OVER before the end card; before the first round, a drone shot flies high over the map and circles down to the hero (once per session); or any sequence you describe — how far, how high, which way round, how wide, for how long, with what title. Black bars frame each shot, and a tap or a key skips it.',
+    howToUse: 'Say "hero marne ke baad cinematic camera aur game over animation", "game start hone se pahle pura map ka drone shot", or describe your own shot ("camera hero ke chaaron taraf ghoome, phir upar se dikhe").',
+    relatedFeatures: ['game_play_basics', 'game_enemies_and_crowd'],
+    keywords: ['cinematic', 'camera', 'death cam', 'game over animation', 'drone shot', 'intro', 'zoom in', 'zoom out', 'cutscene', 'video', 'slow motion', 'hero marne ke baad', 'pura map', 'camera ghoome'],
+  },
+  {
     id: 'game_2d_kit',
     name: '2D games that feel right — platformers, side-scrollers, runners',
     path: 'NavBharatAI Pro → chat → ask for any 2D game with movement (for example "Mario jaisa platformer banao", "2D runner game", "side scrolling shooter")',

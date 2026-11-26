@@ -6367,3 +6367,10 @@ Stacked on PR A (claude/game-play-fixes-a). Queue Q-3505..Q-3508.
 - #18 run-over: WORLD.runOver (off by default) → VEHICLE_STRUCK.
 - #14 scope: with a held gun, a Zoom button (Z) steps 1x/2x/4x/8x.
 Remaining from the list: PR C (#2 enterable buildings, #7/8/11 vehicle ground census, #17 variety, #9 cinematic camera) and PR D (#10 multiplayer on the user's backend, #20 real-3D tier).
+
+## 2026-11-26 — PR C of the admin's 18-point game list: camera shots the user describes (#9)
+
+Stacked on PR B. Queue Q-3509 (fix in PR) and Q-3510..Q-3514 (still OPEN, honestly recorded — not started in this session):
+- #9: play/cinematics.ts — shot lists as data, a Director in the render loop, DEATH_CAM / introDrone / HERO_SHOT, ctx.cinematic(list), GameOptions.cinematics from the request (cinematicsWanted), HUD bars and title, the end card waits, a tap skips.
+- OPEN: #2 enterable painted-door city lots (Q-3510), #7/8/11 car ground census (Q-3511, not reproduced), #17 default character/car variety (Q-3512), #10 multiplayer on the user's backend (Q-3513), #20 realism tier (Q-3514).
+- Note for the next session: PR A's open-world edge is separate from play/boundary.ts on purpose (it is in WORLD metres, follows the floating origin and grows with places; boundary.ts declares fixed render-space bounds). If they are ever unified, boundary.ts must learn the floating origin first.

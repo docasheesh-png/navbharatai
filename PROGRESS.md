@@ -6321,6 +6321,24 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
+## 2026-11-26 — Runner titles in 3D; each game its own town and race road; world races keep their length (PR #4561, Q-3314, Q-3373, Q-3450–Q-3455)
+
+The admin approved three items.
+- **Q-3314: "temple run / subway surfers jaisa".**
+  - **Class:** two readers disagreed. The contract's `NAMED_KINDS` said 3D third-person, while the kit seed kept a private FPS-only list and laid the 2D kit.
+  - **Fix:** `gameKitWants3D` reads `gameIntent.namesTitleDrawnIn3D` (one table), so these requests get the 3D kit and the lane-runner starter. A request that says 2D keeps 2D. AppKnowledgeBase was updated, and its claim that every runner starts from the ready game was corrected (Q-3454).
+  - **Lock:** `tests/aRunnerTitleIsBuiltIn3D.test.ts`, with a census over every catalogue spelling. Reverted: 8 fail.
+- **Q-3373: the action town and the race road.**
+  - **Class:** the same as #4541: constants (`seed = 1`; map 1, land seed 11), in calls the builder writes.
+  - **Fix:** the platform writes `src/game/gameSeed.ts` once, from `projectVariety`, only when the recipe call creates the town file or the race starter, and only ever adds to it. `createActionTown()` and `projectRoadPlan()` (start map plus land) read it by themselves. Older games keep the defaults. An untouched seed file counts as platform-seeded.
+  - **Lock:** `tests/aGameStartsInItsOwnTownAndRoad.test.ts`. Four reversions, each fails.
+- **World race length (Q-3450, admin: "keep races as long as before").**
+  - **Measured on the real kit:** compact own-world routes went from 1.9–6.2 km before #4537 to 0.8–2.2 km after.
+  - **Fix:** a route under 2 km (or under the `finishKm` asked) becomes laps of the tour: every highway out and back, so it stays on real roads, capped at 100 km.
+  - **Siblings fixed in the same change:** the off-road straight links in the chain (Q-3451); a tracker that ran backwards on a road driven twice, now resolved by heading and then continuity (Q-3452); a "needs two places" message shown to a world that has two (Q-3453).
+  - **Lock:** `tests/aWorldRaceKeepsItsLength.test.ts`. Reversions: 7, 3 and 2 tests fail.
+- **Open:** Q-3455. Games already racing on their world keep their old `worldRace.ts` / `worldCourse.ts`, because nothing refreshes those two files.
+- **Queue IDs:** started at Q-3450, because Q-3420–Q-3442 are taken by open PRs #4554 and #4555.
 ## 2026-11-26 — One bounded in-build placeholder repair (Q-3374) and the replay moved into the playtest phase (Q-3365)
 
 - **Admin decision:** option (b) for Q-3374, "baaki sab build karo". Repair of measured game DEFECTS stays suspended (`gameRepair.ts` is unchanged in behaviour).
@@ -6442,3 +6460,14 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
 - Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.
 - Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.
+
+## 2026-11-26 — Q-3560: a cricket game refused from App Mart as CSAM; flagged apps are now HELD for the admin (PR #4586)
+
+- **Report (admin):** publishing a plain cricket game to App Mart gave *"This app was not published: it pairs words describing a child with explicitly sexual words."*
+- **Root cause:** `classifyPublishedText` paired `subject` and `context` anywhere in the whole concatenated source. The game kit carries three.js `scene.children` and, in `GameShellGenerator.ts`, the comment "car control hardcore joystick…", so every game with the shell layer got CSAM_SIGNAL + ADULT_CONTENT. Three more recipes carried `children` + "explicit" and passed only because a protective word happened to stand the rule down.
+- **Class:** whole-document co-occurrence of two word lists over source code is not evidence.
+- **Fix:** `classifyPublishedFiles` pairs inside one phrase only (same file, same code statement, at most `PAIR_WINDOW` = 80 chars apart, no code identifiers via `isCodeToken`, no words ambiguous alone via `isAmbiguousWordAlone`), for every rule on the publish path. `scannableFiles` keeps the per-file text (one definition shared with `scannableText`).
+- **Policy (admin 2026-11-26, "sex se sambandhit app publish apply ho jaye, admin ko saf saf bataya jaye … khud reject kar dega"):** a sexual/illegal text finding no longer refuses an App Mart publish. The app is saved `heldForReview`, unlisted, served only to owner and store admin (`webAppServableTo`, used by page, metadata, remix, report and social), with the file and matched phrase on the admin review card (red notice at the top). Listing releases it; Remove rejects it. The creator sees a neutral "held for review" message. Prompt triage, the malware/phishing rules and hosting are unchanged. `illegalRefusal` removed (no caller left). Recorded in `docs/claude/PRODUCT_POLICY_PRECEDENTS.md`; `AppKnowledgeBase.ts` updated.
+- **Siblings:** every `ILLEGAL_RULES` rule shares the new pairing on the publish path; `CONTENT_RULES` already used bounded windows; `DeploymentStore` never ran the classifier. **Open sibling Q-3561 (🟡 decision):** prompt triage false-blocks "a cricket game for kids with a hardcore mode" and similar prompts; out of scope by instruction.
+- **Accounts:** none marked. A refused publish saved nothing and logged only `STORE_PUBLISH_REFUSED`.
+- **Lock:** `tests/aKitGameIsNotACrime.test.ts` (census of every recipe; failed 11 tests when whole-document pairing was restored) and the hold tests in `storePublishSafety.test.ts` (failed 4 when "illegal refuses" was restored).

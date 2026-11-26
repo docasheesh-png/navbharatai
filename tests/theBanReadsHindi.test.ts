@@ -127,6 +127,6 @@ describe('🔒 census: every rule reads Devanagari', () => {
     const triage = readFileSync(join(ROOT, 'src/server/lib/promptSafety.ts'), 'utf8');
     const rules = readFileSync(join(ROOT, 'src/server/AgentV3/illegalContentRules.ts'), 'utf8');
     expect(triage).toContain("const body = normalizeScanText(String(text ?? '').slice(0, PROMPT_SCAN_CAP));");
-    expect(rules).toContain("const body = normalizeScanText(String(text ?? '').slice(0, SCAN_TEXT_CAP));");
+    expect(rules).toContain("const body = normalizeScanText(String(text ?? '').slice(0, budget));");
   });
 });

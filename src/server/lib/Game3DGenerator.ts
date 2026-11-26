@@ -3088,7 +3088,7 @@ export function keepApart(movers: readonly Mover[]): number {
 `;
 
 const OBJECTS = `import * as THREE from 'three';
-import { createEnterableHouse } from './buildings';
+import { createEnterableHouse, projectGameSeed, type GameSeedChoice } from './buildings';
 export { createEnterableHouse, houseDoor } from './buildings';
 import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, resolveDetail, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, localLowestY, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
 import { restOriginY } from './groundContact';
@@ -5117,16 +5117,18 @@ export const RACING_ROAD_MAPS: readonly Readonly<RacingRoadMap>[] = Object.freez
   { id: 12, name: 'Night Market', lengthKm: 100, scenery: 'village', lighting: 'night' },
 ].map(m => Object.freeze(m as RacingRoadMap)));
 export const RACING_ROAD_CHUNK_METRES = 200;
-/** Fixed 1..12..1 order. Explicit user plans still go directly to createTrackStream unchanged.
+/** The twelve maps in 1..12 order, starting at startMap (default 1) and wrapping round (5..12, 1..4).
+ * Explicit user plans still go directly to createTrackStream unchanged.
  * lengthsKm overrides must contain exactly twelve finite lengths in [10,100].
  * At most 6000 small DATA entries; only ahead/current/behind chunks get geometry.
  */
-export function createRacingRoadPlan(lengthsKm: readonly number[] = RACING_ROAD_MAPS.map(m => m.lengthKm)): TrackPlan {
+export function createRacingRoadPlan(lengthsKm: readonly number[] = RACING_ROAD_MAPS.map(m => m.lengthKm), startMap = 1): TrackPlan {
   if (lengthsKm.length !== 12 || Array.from(lengthsKm).some(km => !Number.isFinite(km) || km < 10 || km > 100)) {
     throw new RangeError('Provide twelve road lengths between 10 and 100 km');
   }
+  const first = Number.isInteger(startMap) && startMap >= 1 && startMap <= 12 ? startMap : 1;
   const pieces: TrackPiece[] = [];
-  for (const map of RACING_ROAD_MAPS) {
+  for (const map of [...RACING_ROAD_MAPS.slice(first - 1), ...RACING_ROAD_MAPS.slice(0, first - 1)]) {
     const total = lengthsKm[map.id - 1] * 1000;
     const count = Math.ceil(total / RACING_ROAD_CHUNK_METRES);
     const length = total / count;
@@ -5150,6 +5152,16 @@ export function createRacingRoadPlan(lengthsKm: readonly number[] = RACING_ROAD_
 }
 /** Default only when the user has NOT supplied a course: twelve 10–100 km maps. */
 export const DEFAULT_TRACK_PLAN: TrackPlan = createRacingRoadPlan();
+/**
+ * The race road THIS game starts on when no course is given: the map it starts on and its land come from the game's own
+ * src/game/gameSeed.ts (GAME_SEED.roadStart, GAME_SEED.road — written once by NavBharatAI, so six new races do not open on
+ * the same straight and an edit never moves the road). A game without that file gets DEFAULT_TRACK_PLAN, exactly as before.
+ */
+export function projectRoadPlan(own: GameSeedChoice = projectGameSeed()): TrackPlan {
+  const start = Math.floor(Number(own.roadStart)), seed = Math.floor(Number(own.road));
+  const plan = Number.isFinite(start) && start >= 1 && start <= 12 ? createRacingRoadPlan(undefined, start) : DEFAULT_TRACK_PLAN;
+  return Number.isFinite(seed) && seed > 0 ? { ...plan, seed } : plan;
+}
 export interface TrackPose { x: number; z: number; heading: number; y: number }
 export interface TrackSegment {
   piece: TrackPiece;
@@ -5250,7 +5262,7 @@ function pieceProfile(piece: TrackPiece, y0: number, L: number): (s: number) => 
   return () => y0;
 }
 
-export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, options: BaseOpts = {}): TrackStream {
+export function createTrackStream(planIn: TrackPlan = projectRoadPlan(), options: BaseOpts = {}): TrackStream {
   const d = tier(options);
   let plan: TrackPlan = { ...DEFAULT_TRACK_PLAN, ...planIn, pieces: planIn.pieces && planIn.pieces.length ? planIn.pieces : DEFAULT_TRACK_PLAN.pieces };
   const W = plan.width ?? 9;
@@ -7415,7 +7427,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // chal rahi hai" — the headlights faced the player and LEFT turned the car RIGHT.
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
-      'Enterable houses: an action, shooter or open-world game calls createActionTown() — at least 100 varied houses on roads, instanced until the player is near, then a hollow interior with a swinging door. createHouse({ enterable: true }) or createEnterableHouse() is one house. enterableShellFor(model) wraps a solid library mesh. Furniture uses library subjects (bed, sofa, chair, table, kitchen counter, fridge, lamp, cabinet, shelf). The shell wires E and the phone Use button. Legacy createHouse() is solid scenery and is not enough for an action world.\n' +
+      'Enterable houses: an action, shooter or open-world game calls createActionTown() — this game\'s own town (its seed is read from src/game/gameSeed.ts by itself: never pass a fixed seed), at least 100 varied houses on roads, instanced until the player is near, then a hollow interior with a swinging door. createHouse({ enterable: true }) or createEnterableHouse() is one house. enterableShellFor(model) wraps a solid library mesh. Furniture uses library subjects (bed, sofa, chair, table, kitchen counter, fridge, lamp, cabinet, shelf). The shell wires E and the phone Use button. Legacy createHouse() is solid scenery and is not enough for an action world.\n' +
       (files['src/game/three/city.ts'] ? 'City: const city = createCity({ blocksX: 5, blocksZ: 5, style: \'mixed\' }); scene.add(city.root) — streets, crossings, pavements, shops, apartments, offices, houses, parks, street lights, centred on the origin. Put the player at city.spawn facing city.spawnHeading. Driving: pass { ground: city.heightAt } to driveVehicle; driveVehicle already stops a car at the city\'s buildings and poles (they are solid), so nothing more is needed — city.solidAt(x, z, radius) is only for a mover your own code positions by hand. city.route(from, to) gives left-lane waypoints for AI cars, taxis and deliveries; city.lotsOf(\'shop\') and lot.entrance give mission targets; lot.sign is where to write a shop name. Never hand-place a street grid.\n' : '') +
       (files['src/game/three/physics.ts'] ? 'Physics: const physics = createPhysics(scene) (gravity, a ground at y = 0, the scene\'s solid colliders as fixed walls); physics.add(mesh, { mass }) for anything that should fall, roll, stack or topple (0 = fixed); physics.explode(point, strength, radius) throws nearby bodies outward; const doll = physics.ragdoll(humanoid) makes a kit character go limp and fall (doll.push(impulse), doll.remove()); call physics.step(dt) every frame. Never fake a fall with a hand-written tween, and never add physics to the player\'s own walking capsule or a driven car (those already collide).\n' : '') +
       (files['src/game/three/citytraffic.ts'] ? 'City traffic: const traffic = createCityTraffic(city, { count: 15 }); scene.add(traffic.root); then traffic.update(dt, [playerObject]) every frame — cars, autos and buses drive the grid in the left lane, turn at crossings, obey the traffic lights (traffic.lightAt), keep their gap and stop for the player. Never animate city traffic by hand.\n' : '') +
@@ -7523,7 +7535,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "  'tunnel' | 'checkpoint' | 'finish' | 'water' (road runs into a lake: declared water) | 'end' (a\n" +
       "  barrier) — loop: 'infinite' (repeat; loopFrom: k keeps an intro once), 'none' (the course ENDS),\n" +
       "  or 'circuit' (closes back to the start). Only when the user said nothing about the course use\n" +
-      "  DEFAULT_TRACK_PLAN (12 maps of 10–100 km, starting 1..12..1 order). Start at stream.startPose.\n" +
+      "  createTrackStream() with no plan (12 maps of 10–100 km; this game's own start map and land from\n" +
+      "  src/game/gameSeed.ts — projectRoadPlan()). Start at stream.startPose.\n" +
       "  createRacingRoadPlan(lengthsKm) accepts twelve 10–100 km lengths. Map ID/name/progress live on\n" +
       "  status.segment.piece: mapId, name, mapLengthMetres, mapOffsetMetres. Geometry streams in 200m chunks.\n" +
       "  Apply RACING_ROAD_MAPS[mapId-1].lighting on map changes using atmosphere.ts; do not allocate all maps.\n" +

@@ -596,7 +596,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d"
   ],
   "src/game/royale/onlineClient.ts": [
-    "ced87ccdc3d6f85f5a4bd7886f8af121964f0b3cad753f1a8df46c70eb3a2e48"
+    "34daf1faeaa0be26e95667fc095b16a40d4b0b62c53220ae2961d8a3a66e8f2b"
   ],
   "src/game/royale/onlineMatch.ts": [
     "3890c6b08b6ecbe5858621795fe0d5a24a4a8861a100503bbc73adc83586e20e"

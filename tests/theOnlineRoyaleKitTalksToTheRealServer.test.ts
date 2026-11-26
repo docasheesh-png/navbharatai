@@ -63,6 +63,16 @@ describe('the online client tells the truth', () => {
     expect(kit.onlineEndpoint()).toBe('wss://navbharatai.com/api/royale-online/ws?app=abc&access=123.deadbeef');
   });
 
+  it('in the Android/iOS app the socket dials the API origin the store wrote into the page, never the phone\'s own shell', () => {
+    // The player frame's base is the PARENT page: in the bundled app that is the local shell. Without the store's API
+    // origin the socket would dial localhost — the Sonic-on-phones class (tests/webSocketSingleSource.test.ts).
+    g.window = { __NBAI_STORE_APP_ID: 'abc', __NBAI_API_ORIGIN: 'https://navbharatai.com' }; g.document = { baseURI: 'https://localhost/' };
+    expect(kit.onlineEndpoint()).toBe('wss://navbharatai.com/api/royale-online/ws?app=abc');
+    // A malformed origin is ignored rather than trusted.
+    g.window = { __NBAI_STORE_APP_ID: 'abc', __NBAI_API_ORIGIN: 'javascript:alert(1)' }; g.document = { baseURI: 'https://navbharatai.com/store' };
+    expect(kit.onlineEndpoint()).toBe('wss://navbharatai.com/api/royale-online/ws?app=abc');
+  });
+
   it('with the kill switch off the client shows the server\'s own reason', async () => {
     const s = await serve(false);
     g.window = { __NBAI_STORE_APP_ID: 'store-app' }; g.document = { baseURI: s.base };

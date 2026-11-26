@@ -202,13 +202,26 @@ export type OnlinePhase = 'connecting' | 'unavailable' | 'lobby' | 'queued' | 'p
 export type OnlineView = { phase: OnlinePhase; reason: string; waiting: number; busy: boolean; you: string; start: StartInfo | null; snapshot: Snapshot | null; result: MatchEnd | null; ping: number };
 export type OnlineSocket = { readyState: number; send(data: string): void; close(): void; onmessage: ((e: { data: unknown }) => void) | null; onclose: ((e: { code: number }) => void) | null; onerror: ((e: unknown) => void) | null };
 
+/**
+ * The socket address for an API path. A store game runs inside the player's frame, whose base is the PARENT page:
+ * on the web that is NavBharatAI itself, but in the Android/iOS app it is the app's local shell, and a socket built
+ * from it would dial the phone. So the API origin the store wrote into the page wins; the page base is only the
+ * fallback (the website, where the two are the same).
+ */
+export function resolveWebSocketUrl(path: string): URL {
+  const w = window as unknown as { __NBAI_API_ORIGIN?: unknown };
+  const api = typeof w.__NBAI_API_ORIGIN === 'string' && /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(w.__NBAI_API_ORIGIN) ? w.__NBAI_API_ORIGIN : '';
+  const url = new URL(path, api || document.baseURI);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url;
+}
+
 /** Where the match service is. Only a game opened from the NavBharatAI App Store has one; null everywhere else. */
 export function onlineEndpoint(): string | null {
   const w = window as unknown as { __NBAI_STORE_APP_ID?: unknown; __NBAI_NAVDATA_TOKEN?: unknown };
   const app = typeof w.__NBAI_STORE_APP_ID === 'string' ? w.__NBAI_STORE_APP_ID : '';
   if (!app) return null;
-  const url = new URL('/api/royale-online/ws', document.baseURI);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = resolveWebSocketUrl('/api/royale-online/ws');
   url.searchParams.set('app', app);
   if (typeof w.__NBAI_NAVDATA_TOKEN === 'string') url.searchParams.set('access', w.__NBAI_NAVDATA_TOKEN);
   return url.toString();

@@ -41,7 +41,7 @@ describe('original offline royale practice', () => {
       expect(source).not.toMatch(/https?:\/\/|fetch\(|Math\.random\(/);
       if(!online.has(path)) expect(source,path).not.toMatch(/WebSocket|XMLHttpRequest/);
     }
-    expect(result.files['src/game/royale/onlineClient.ts']).toContain("new URL('/api/royale-online/ws', document.baseURI)");
+    expect(result.files['src/game/royale/onlineClient.ts']).toContain("resolveWebSocketUrl('/api/royale-online/ws')");
     expect(result.instructions).toContain('Never fake online opponents'); expect(result.instructions).toContain('preserve existing projects');
     expect(result.instructions).toContain("import RoyaleGame from './game/RoyaleGame'");
   });

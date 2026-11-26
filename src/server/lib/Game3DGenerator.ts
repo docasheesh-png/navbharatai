@@ -30,6 +30,8 @@
 
 import { GAME_DENTS, GAME_DENTS_PATH } from './GameDentsGenerator';
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
+import { GAME_REALISM, GAME_REALISM_PATH } from './GameRealismGenerator';
+import { GAME_ROOMS, GAME_ROOMS_PATH } from './GameRoomsGenerator';
 import { GAME_CITY } from './GameCityGenerator';
 import { GAME_CITY_TRAFFIC } from './GameCityTrafficGenerator';
 import { GAME_CITY_PEOPLE } from './GameCityPeopleGenerator';
@@ -7307,6 +7309,8 @@ const FILES: Record<string, string> = {
   // Dents from crashes (admin 2026-11-24, question 9) — GameDentsGenerator.ts.
   [GAME_DENTS_PATH]: GAME_DENTS,
   'src/game/three/buildings.ts': GAME_BUILDINGS,
+  [GAME_REALISM_PATH]: GAME_REALISM,
+  [GAME_ROOMS_PATH]: GAME_ROOMS,
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
   'src/game/three/materials.ts': MATERIALS,
@@ -7342,7 +7346,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics', 'dents',
+  'buildings', 'realism', 'rooms', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'groundcontact', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'breakable', 'city', 'citytraffic', 'citypeople', 'physics', 'dents',
 ];
 
 /**
@@ -7373,6 +7377,10 @@ export function generateGame3D(include?: string[]): Game3DResult {
     if (files['src/game/three/citytraffic.ts']) { files['src/game/three/city.ts'] = FILES['src/game/three/city.ts']; files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts']; }
     // The city, its traffic and its people read the device's geometry tier (geometryTier, Q-2698) from surfaces.ts.
     if (files['src/game/three/city.ts']) files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
+    // The real look reads the device tier and the software-renderer check from surfaces.ts.
+    if (files[GAME_REALISM_PATH]) files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
+    // city.openLot stands a walk-in building (three/buildings.ts) where a lot was.
+    if (files['src/game/three/city.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/world.ts']) {
       files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
       // The ground is textured in the real tier and reads the detail level, both from surfaces.ts.
@@ -7396,7 +7404,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     if (files['src/game/three/surfaces.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/physics.ts']) {
       files['src/game/three/groundContact.ts'] = FILES['src/game/three/groundContact.ts'];
     }
-    if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
+    // city.ts imports buildings.ts (its enterable houses, CityOptions.enterableHouses).
+    if (files['src/game/three/objects.ts'] || files['src/game/three/city.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
     // physics.ts turns the scene's solid colliders into fixed obstacles.
     if (files['src/game/three/physics.ts']) files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];

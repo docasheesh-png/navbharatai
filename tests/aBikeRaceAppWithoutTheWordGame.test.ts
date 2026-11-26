@@ -125,7 +125,9 @@ describe('BR1969 neighbours: race-the-event and bike-the-vehicle stay non-games;
     expect(gameKitWants3D('gta5 wala game')).toBe(true);
     // An open-world GTA game also gets the big map, laid down after the 3D layer (failedbr #2478).
     // …and, since failedbr #2485, the open-world starter that puts the player on that map.
-    expect(gameKitPlan('gta5 wala game')).toEqual([...THREE_D_KIT.slice(0, 2), 'generate_athree_map', ...THREE_D_KIT.slice(2), 'generate_open_world']);
+    // …and, since the admin's open-world problem #4 (2026-11-25: "enemy nahi ban rahe … police car"), the fight kit the
+    // platform's street danger runs on — a GTA city has enemies and police from the first build.
+    expect(gameKitPlan('gta5 wala game')).toEqual([...THREE_D_KIT.slice(0, 2), 'generate_athree_map', 'generate_game_systems', ...THREE_D_KIT.slice(2), 'generate_open_world']);
     expect(analyzeRequirementGaps('Make a game game was type of super market simulator make a game').domain).toBe('game');
     expect(gameKitPlan('Make a game game was type of super market simulator make a game')).toEqual([
       'generate_game_runtime', 'generate_game_vfx', 'generate_melody',

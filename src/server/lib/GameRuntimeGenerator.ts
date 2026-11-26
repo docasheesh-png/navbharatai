@@ -352,6 +352,8 @@ export type GameEvent =
   | 'WEAPON_FIRED' | 'WEAPON_RELOADED' | 'WEAPON_EMPTY' | 'MELEE_SWING' | 'MELEE_HIT' | 'PROJECTILE_HIT'
   // The shell's bare-fist punch (a cone in front of the player) and a car the player drove into someone (WORLD.runOver).
   | 'PLAYER_PUNCHED' | 'VEHICLE_STRUCK'
+  // play/cinematics.ts: a camera shot list began / ended (the HUD shows bars and the title, and holds the end card).
+  | 'CINEMATIC_STARTED' | 'CINEMATIC_ENDED'
   | 'ITEM_COLLECTED' | 'ITEM_USED' | 'SCORE_CHANGED'
   | 'QUEST_STARTED' | 'QUEST_COMPLETED'
   | 'BOSS_SPAWNED' | 'BOSS_PHASE_CHANGED' | 'BOSS_DEFEATED'

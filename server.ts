@@ -1248,6 +1248,17 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
           void refreshFx();
           scheduler.register({ id: 'voice-ai-refund-recovery', schedule: { kind: 'everyMs', ms: 60_000 }, exclusive: true,
             handler: async () => { await import('./src/server/lib/voiceAiStore').then(m => m.reconcileVoiceHolds()); } });
+          // Q-3463 (failedbr #2523): a build whose server died stays "running" in its report until the next build of that
+          // app — 922 s in that report. Every two minutes, one instance settles reports whose heartbeat stopped and whose
+          // workspace lease lapsed (DiagnosticsStore.sweepAbandonedBuildReports). Idempotent; a failed run changes nothing.
+          scheduler.register({
+            id: 'abandoned-build-reports', exclusive: true, schedule: { kind: 'everyMs', ms: 2 * 60_000 },
+            handler: async () => {
+              await import('./src/server/AgentV3/DiagnosticsStore')
+                .then(({ sweepAbandonedBuildReports }) => sweepAbandonedBuildReports())
+                .catch(() => { /* a report sweep must never affect the server */ });
+            },
+          });
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },

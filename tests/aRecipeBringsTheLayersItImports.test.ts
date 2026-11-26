@@ -49,6 +49,8 @@ describe('a recipe brings the layers it imports', () => {
       'src/game/three/objects.ts',
       // RacingRoadGame races rivals with a countdown and a finish (createRace) since 2026-11-19 — so race.ts too.
       'src/game/three/race.ts',
+      // Game.ts draws through three/realism.ts when GameOptions.graphics is 'real' (2026-11-26, Q-3514) — so realism.ts too.
+      'src/game/three/realism.ts',
       // world.ts imports surfaces.ts since 2026-10-05 (the ground reads the detail tier and is textured
       // in the real tier) — so the closure must bring it too, or the added world.ts would not compile.
       'src/game/three/renderer.ts',

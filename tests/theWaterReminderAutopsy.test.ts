@@ -120,7 +120,8 @@ describe('1 · the app is named, not ordered', () => {
     // Autopsy 6ae30b33 added the app's own screen (`appSource`) as evidence, ahead of the prompt.
     // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-990): the route also says whether the app embeds a player that shows
     // its own ads, so the name and description derived from the request never say "ad-free". The name is still resolved.
-    expect(route).toMatch(/resolveAppDisplayName\(\{ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer \}\)/);
+    // prompt: checksRequest — the request a "continue" turn continues (build reports #2526–#2528), never the word itself.
+    expect(route).toMatch(/resolveAppDisplayName\(\{ chosenName: chosenAppName, indexHtml, prompt: checksRequest, appSource, adServingPlayer \}\)/);
     expect(tool).toMatch(/resolveAppDisplayName\(\{ chosenName: optStr\(input, 'app_name'\), indexHtml, appSource \}\)/);
   });
 });

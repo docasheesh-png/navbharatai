@@ -408,7 +408,7 @@ import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
 import { enemyRequestOf, enemyFeatureSource, featuresIndexWith, ENEMIES_FEATURE_PATH } from '../lib/GameEnemiesFeature';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_STREET_DANGER_FEATURE, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -425,7 +425,7 @@ import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Ar
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
-import { generateBoardGames } from '../lib/BoardGamesGenerator';
+import { generateBoardGames, cricketRulesFileSource, CRICKET_RULES_PATH } from '../lib/BoardGamesGenerator';
 import { generateGenreKits } from '../lib/GameGenreKitsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -1308,7 +1308,7 @@ export class ToolDispatcher {
     if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
     let rel = path;
     try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
-    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown });
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown, filesAtTurnStart: this.growthBaseline });
     if (verdict.allow) return;
     this.growthRefused.add(rel);
     try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }
@@ -10633,6 +10633,18 @@ export class ToolDispatcher {
         const bg = generateBoardGames(bgInclude);
         const bgWritten = await this.writeRecipeFiles(bg.files, agent);
         const bgLayers = await this.addMissingRecipeLayers(bg.files, agent);
+        // The match's rules are the game's own file (created once, never replaced): the user changes them by asking.
+        if (Object.keys(bg.files).some((p) => p.endsWith('/cricket.ts'))) {
+          let ruled = false;
+          try { await this.actuator.readFile(this.workspaceId, CRICKET_RULES_PATH); ruled = true; }
+          catch (error) { if (!isNotFoundError(error)) throw error; }
+          if (!ruled) {
+            const rules = await this.guardedWrite(CRICKET_RULES_PATH, cricketRulesFileSource(this.worldRequest()), { agent, source: 'generate_board_games' });
+            this.state?.recordFileChange({ path: CRICKET_RULES_PATH, kind: rules.kind }, agent);
+            getWorkspaceMemory(this.workspaceId).indexFile(CRICKET_RULES_PATH, rules.content);
+            bgWritten.push(CRICKET_RULES_PATH);
+          }
+        }
         this.scheduleCheckpoint('india games pack');
         return `Added the India games pack:\n${bgWritten.join('\n')}\n\n${bg.instructions}${bgLayers}`;
       }
@@ -10691,7 +10703,7 @@ export class ToolDispatcher {
             try { await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH); mapped = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!mapped) {
-              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, regions: owRec.regions, swim: owRec.swim === true, citizens: owRec.citizens && typeof owRec.citizens === 'object' ? { solid: (owRec.citizens as Record<string, unknown>).solid === true, hittable: (owRec.citizens as Record<string, unknown>).hittable === true } : undefined, runOver: owRec.runOver === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
+              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, regions: owRec.regions, swim: owRec.swim === true, citizens: owRec.citizens && typeof owRec.citizens === 'object' ? { solid: (owRec.citizens as Record<string, unknown>).solid === true, hittable: (owRec.citizens as Record<string, unknown>).hittable === true } : undefined, runOver: owRec.runOver === true, openBuildings: owRec.openBuildings === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }
@@ -10699,6 +10711,7 @@ export class ToolDispatcher {
             await this.ensurePlayerFile(agent, 'generate_open_world');
             // The game's own list of features: created once, never replaced (it is the user's game from then on).
             let listed = false;
+            let danger = false;
             try { await this.actuator.readFile(this.workspaceId, GAME_FEATURES_INDEX_PATH); listed = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!listed) {
@@ -10709,17 +10722,31 @@ export class ToolDispatcher {
                 const enemiesFile = await this.guardedWrite(ENEMIES_FEATURE_PATH, enemyFeatureSource(enemyReq), { agent, source: 'generate_open_world' });
                 this.state?.recordFileChange({ path: ENEMIES_FEATURE_PATH, kind: enemiesFile.kind }, agent);
                 getWorkspaceMemory(this.workspaceId).indexFile(ENEMIES_FEATURE_PATH, enemiesFile.content);
-                indexSource = featuresIndexWith(GAME_FEATURES_INDEX, 'enemies') ?? GAME_FEATURES_INDEX;
+                indexSource = featuresIndexWith(indexSource, 'enemies') ?? indexSource;
+              }
+              // A game with a fight in it (the seed passes danger: true when it laid the systems kit) starts with street
+              // danger — enemies, bystanders and police (Q-3521) — only when those systems are really in the project.
+              if (owRec.danger === true) {
+                const has = async (p: string) => { try { await this.actuator.readFile(this.workspaceId, p); return true; } catch { return false; } };
+                if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {
+                  const feature = await this.guardedWrite(GAME_STREET_DANGER_PATH, GAME_STREET_DANGER_FEATURE, { agent, source: 'generate_open_world' });
+                  this.state?.recordFileChange({ path: GAME_STREET_DANGER_PATH, kind: feature.kind }, agent);
+                  getWorkspaceMemory(this.workspaceId).indexFile(GAME_STREET_DANGER_PATH, feature.content);
+                  danger = true;
+                  indexSource = featuresIndexWith(indexSource, 'streetDanger') ?? indexSource;
+                }
               }
               const index = await this.guardedWrite(GAME_FEATURES_INDEX_PATH, indexSource, { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_FEATURES_INDEX_PATH, kind: index.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_FEATURES_INDEX_PATH, index.content);
             }
-            const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined });
+            const owCine = owRec.cinematics && typeof owRec.cinematics === 'object' ? owRec.cinematics as Record<string, unknown> : null;
+            const source = openWorldAppSource({ city: owRec.city === true, title: typeof owRec.title === 'string' ? owRec.title : undefined, cinematics: owCine ? { death: owCine.death === true, intro: owCine.intro === true } : undefined, graphics: owRec.graphics === 'real' ? 'real' : undefined });
             const wrote = await this.guardedWrite('src/App.tsx', source, { agent, source: 'generate_open_world', allowOverwrite: true });
             this.state?.recordFileChange({ path: 'src/App.tsx', kind: wrote.kind }, agent);
             getWorkspaceMemory(this.workspaceId).indexFile('src/App.tsx', wrote.content);
-            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.';
+            owMounted = '\nsrc/App.tsx ALREADY renders <OpenWorldGame world={WORLD} player={PLAYER} features={FEATURES} /> (the map\'s places are in src/game/world.ts; the character is src/game/player.ts) — the game is playable now. Add each thing the game needs as ONE file under src/game/features/ and one line in src/game/features/index.ts; do not replace src/App.tsx.'
+              + (danger ? ' The game ALREADY has its fight: src/game/features/streetDanger.ts (listed in FEATURES) spawns enemies who chase and attack, bystanders who can be hurt, and the police with wanted stars on a crime; the punch lands. Change THAT file for anything about enemies, police or fighting — never add a second set.' : '');
           }
         }
         this.scheduleCheckpoint('open world starter');

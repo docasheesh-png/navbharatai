@@ -1,7 +1,7 @@
 // PEOPLE WALK THE CITY SAFELY (admin 2026-11-21 plan: "people walking in the city"). Runs the REAL generated
 // three/citypeople.ts with REAL city traffic on a REAL city grid, and checks every frame of two minutes: nobody on the
 // road except on a zebra, nobody on a zebra unless the cars on that street have red, no car near anyone crossing — and
-// people really do cross, keep moving, stop for the player, and the whole crowd is two meshes.
+// people really do cross, keep moving, stop for the player, and the whole crowd is three meshes (shirt, trousers, skin).
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -29,13 +29,15 @@ function setup(opts: { cars?: number; people?: number; traffic?: boolean } = {})
 }
 
 describe('🚶 people in the city', () => {
-  it('ships in the 3D kit, brings the city with it, and draws the whole crowd in two meshes', () => {
+  it('ships in the 3D kit, brings the city with it, and draws the whole crowd in three meshes', () => {
     expect(GAME_3D_MODULES).toContain('citypeople');
     expect(Object.keys(generateGame3D(['citypeople']).files)).toEqual(expect.arrayContaining(['src/game/three/citypeople.ts', 'src/game/three/city.ts', 'src/game/three/collision.ts']));
     const { people } = setup({ people: 100 });
     let meshes = 0;
     people.root.traverse((o: any) => { if (o.isMesh) meshes++; });
-    expect(meshes).toBe(2);
+    // PIN UPDATED 2026-11-26 (admin's open-world problem #7, "gol cylinder ke upar ek ball"): a person is shirt, trousers and
+    // skin now — three instanced parts for the WHOLE crowd, however many people (tests/cityPeopleLookHuman.test.ts).
+    expect(meshes).toBe(3);
   });
 
   it('the pavement loop: corners in order, and a point maps back to its place on the loop', () => {

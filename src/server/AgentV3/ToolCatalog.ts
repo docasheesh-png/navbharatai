@@ -2483,7 +2483,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, worldmap, features, playerbody, actions, aim, boundary, racingroadgame, racecustom, lanerunnergame. Default = all. worldmap is what the corner map and the full map draw (the places and roads of a world, the waypoint); features is the guarded feature list a game grows by (one file per thing); playerbody is who the player is (the game reads src/game/player.ts by itself, and it always ships with game); racingroadgame and lanerunnergame are the ready racing and endless-runner games; racecustom is the user\'s own car and track (src/game/car.ts, src/game/track.ts) and always ships with racingroadgame.',
+            description: 'Optional subset: game, gamecanvas, hud, touchcontrols, worldmap, features, playerbody, actions, aim, boundary, cinematics, racingroadgame, racecustom, lanerunnergame. Default = all. worldmap is what the corner map and the full map draw (the places and roads of a world, the waypoint); features is the guarded feature list a game grows by (one file per thing); playerbody is who the player is (the game reads src/game/player.ts by itself, and it always ships with game); racingroadgame and lanerunnergame are the ready racing and endless-runner games; racecustom is the user\'s own car and track (src/game/car.ts, src/game/track.ts) and always ships with racingroadgame.',
           },
         },
       },
@@ -2678,7 +2678,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, collision, groundcontact, environment, surfaces, '
-              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere, breakable, city, citytraffic, citypeople, physics, dents. Default = all; imports are pulled in automatically. '
+              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, realism, rooms, atmosphere, breakable, city, citytraffic, citypeople, physics, dents. Default = all; imports are pulled in automatically. '
               + 'dents = enableVehicleDents(): every car that crashes is dented where it hit (deeper for a harder crash), scuffed, and says VEHICLE_DAMAGED { vehicle, damage 0..1 }; repairVehicle(car) restores it. '
               + 'groundcontact = standOnGround / restOriginY: the lowest point of a model sits on the ground, every frame. '
               + 'city = createCity({ blocksX, blocksZ, style }): a whole grid of city blocks — streets, crossings, pavements, shops, apartments, offices, houses, parks; city.spawn, city.route(from, to) for left-lane AI routes, city.lotsOf(kind) for mission targets. citytraffic = createCityTraffic(city): vehicles that drive the grid, turn at crossings and obey traffic lights. citypeople = createCityPeople(city, { traffic }): people on the pavements who cross on the zebras when the cars have red. '

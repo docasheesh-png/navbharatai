@@ -30,7 +30,10 @@ describe('🏙️ city blocks', () => {
     expect(GAME_3D_MODULES).toContain('city');
     const r = generateGame3D(['city']);
     // surfaces.ts (and what it pulls in) since Q-2698: the city reads the device's geometry tier from it.
-    expect(Object.keys(r.files).sort()).toEqual(['src/game/three/city.ts', 'src/game/three/collision.ts', 'src/game/three/environment.ts', 'src/game/three/groundContact.ts', 'src/game/three/surfaces.ts']);
+    // city.openLot stands a walk-in building (three/buildings.ts, with its materials) where a lot was (admin 2026-11-26 #2).
+    // buildings.ts (and the materials it uses) since 2026-11-26: CityOptions.enterableHouses builds the kit's enterable house
+    // on each house lot when the user asks to walk into the houses (tests/cityHousesCanBeEntered.test.ts).
+    expect(Object.keys(r.files).sort()).toEqual(['src/game/three/buildings.ts', 'src/game/three/city.ts', 'src/game/three/collision.ts', 'src/game/three/environment.ts', 'src/game/three/groundContact.ts', 'src/game/three/materials.ts', 'src/game/three/surfaces.ts']);
     expect(r.instructions).toMatch(/createCity\(/);
     expect(r.instructions).toMatch(/city\.solidAt/);
     expect(generateGame3D(['objects']).instructions).not.toMatch(/createCity\(/);

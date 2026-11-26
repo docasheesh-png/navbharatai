@@ -152,8 +152,11 @@ describe('🥊 moves are the model\'s OWN clips — and a move it lacks is SAID,
     expect(c.act('punch')).toBe(true);
     expect(c.act('block')).toBe(true);
     hints.length = 0;
-    expect(c.act('kick')).toBe(false);
-    expect(c.act('kick')).toBe(false);
+    // PIN UPDATED 2026-11-26 (admin: "aisa app maker chahiye jo movement khud bana le"): a missing kick is no longer a still
+    // character — NavBharatAI animates it (whole body here: this model has no leg bones) and still says so, once.
+    expect(c.act('kick')).toBe(true);
+    for (let i = 0; i < 12; i++) c.update(0.05);
+    expect(c.act('kick')).toBe(true);
     clips.stop();
     expect(clips.played).toEqual(expect.arrayContaining(['CharacterArmature|Idle', 'Punch_Right', 'Guard_Up']));
     expect(hints.filter((h) => /kick/.test(h.text))).toHaveLength(1);
@@ -166,9 +169,12 @@ describe('🥊 moves are the model\'s OWN clips — and a move it lacks is SAID,
     const c = PB.createPlayerCharacter(new THREE.Group(), { file: '/models/statue.glb' });
     await settle();
     hints.length = 0;
-    expect(c.act('punch')).toBe(false);
+    // PIN UPDATED 2026-11-26 (admin): the punch is animated by NavBharatAI with the whole body, and said; a missing run still
+    // plays the model's own walk first — a real clip beats a made one.
+    expect(c.act('punch')).toBe(true);
+    for (let i = 0; i < 12; i++) c.update(0.05);
     expect(c.move('run')).toBe(false);
-    expect(hints.map((h) => h.text).join(' | ')).toMatch(/no punch move[\s\S]*not animated[\s\S]*no run move[\s\S]*plays its walk instead/);
+    expect(hints.map((h) => h.text).join(' | ')).toMatch(/no punch move of its own, so NavBharatAI animates one with its whole body[\s\S]*no run move[\s\S]*plays its walk instead/);
     restore();
   });
   it('a model with no animations at all says it once, and nothing else', async () => {
@@ -339,8 +345,9 @@ describe('🗣️ the builder is told how, in every game that has the file', () 
     expect(note).toMatch(/AS THE PLAYER[\s\S]*PLAYER\.file = '\/models\/boxer\.glb'/);
     expect(note).toMatch(/punch \("Punch_Right"\)/);
     // Admin 2026-11-24: a missing punch/kick/swing/throw/fire/use is MADE from the skeleton; the rest stays unanimated (playerMoves.lackedMovesClause).
-    expect(note).toMatch(/kick, fire, swing, throw, use are not in its own clips, so NavBharatAI makes them from its skeleton/);
-    expect(note).toMatch(/walk, run, jump, swim, dive, block, hit, die, slide are not animated/);
+    // 2026-11-26 (admin "movement khud bana le"): walk and run are made too, and a model with no bones moves its whole body.
+    expect(note).toMatch(/walk, run, kick, fire, swing, throw, use are not in its own clips, so NavBharatAI makes them from its skeleton, or with its whole body/);
+    expect(note).toMatch(/jump, swim, dive, block, hit, die, slide are not animated/);
     expect(playerMovesOf([]).has).toEqual([]);
   });
   it('the shell recipe creates the file once (never replaces it), and says so', () => {

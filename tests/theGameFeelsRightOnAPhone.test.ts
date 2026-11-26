@@ -291,6 +291,71 @@ describe('🔁 restart brings the player back to the start, and 🔫 a held gun 
     bare.dispose();
   });
 
+  it('🎬 death cam: after the last life the camera closes in round the hero, holds GAME OVER, then hands the camera back', async () => {
+    const container = new FakeEl('div');
+    const game = new SHELL.Game({ container, cinematics: { death: true }, setup: (ctx: any) => { ctx.player.reset(10, 0, 10); return []; } });
+    game.start();
+    game.loop.step(1);
+    const STATE = await import(join(DIR, 'src/game/core/state.ts'));
+    STATE.state.lives = 1;
+    STATE.damagePlayer(1e6);
+    expect(STATE.state.status).toBe('gameover');
+    expect(game.director.active).toBe(true);
+    const cam = game.rig.camera;
+    const dist = () => Math.hypot(cam.position.x - 10, cam.position.z - 10);
+    (game as any).render(1, 0.05);
+    const wide = dist();
+    for (let i = 0; i < 40; i++) (game as any).render(1, 0.05);   // 2 s in: closing in
+    expect(dist()).toBeLessThan(wide);
+    for (let i = 0; i < 30; i++) (game as any).render(1, 0.05);
+    expect(game.cinematicFrame?.title).toBe('GAME OVER');
+    for (let i = 0; i < 60; i++) (game as any).render(1, 0.05);
+    expect(game.director.active).toBe(false);
+    expect(game.cinematicFrame).toBeNull();
+    game.dispose();
+  });
+
+  it('🎬 no death cam unless asked; a user-described shot list plays through ctx.cinematic and a key skips it', async () => {
+    const plain = new SHELL.Game({ container: new FakeEl('div'), setup: () => [] });
+    plain.start();
+    const STATE = await import(join(DIR, 'src/game/core/state.ts'));
+    STATE.state.lives = 1;
+    STATE.damagePlayer(1e6);
+    expect(plain.director.active).toBe(false);
+    plain.dispose();
+    let ctxRef: any = null;
+    const game = new SHELL.Game({ container: new FakeEl('div'), setup: (ctx: any) => { ctxRef = ctx; return []; } });
+    game.start();
+    let ended = false;
+    void ctxRef.cinematic([{ seconds: 5, distance: [20, 4], height: [30, 2], angle: [0, 360], title: 'Rampur' }, { seconds: 'x' }]).then(() => { ended = true; });
+    (game as any).render(1, 0.05);
+    expect(game.cinematicFrame).toEqual({ title: 'Rampur', subtitle: undefined, bars: true });
+    game.director.skip();
+    await Promise.resolve();
+    expect(ended).toBe(true);
+    expect(game.director.active).toBe(false);
+    game.dispose();
+  });
+
+  it('🎬 the intro drone shot plays once, before the first round, and the world waits for it', async () => {
+    const STATE = await import(join(DIR, 'src/game/core/state.ts'));
+    STATE.state.status = 'menu';
+    const game = new SHELL.Game({ container: new FakeEl('div'), startScreen: { title: 'Gaon' }, cinematics: { intro: true, introRadius: 200 }, setup: () => [] });
+    game.start();
+    game.play();
+    expect(game.director.active).toBe(true);
+    (game as any).render(1, 0.05);
+    expect(game.rig.camera.position.y).toBeGreaterThan(60);   // high over the map
+    expect(game.cinematicFrame?.title).toBe('Gaon');
+    for (let i = 0; i < 130; i++) (game as any).render(1, 0.05);
+    expect(game.director.active).toBe(false);
+    // Once per session: a second round has no intro.
+    STATE.state.status = 'menu';
+    game.play();
+    expect(game.director.active).toBe(false);
+    game.dispose();
+  });
+
   it('without a gun nothing fires and the button stays Attack', () => {
     const container = new FakeEl('div');
     const game = new SHELL.Game({ container, setup: () => [] });

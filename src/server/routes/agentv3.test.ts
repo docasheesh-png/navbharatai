@@ -2598,7 +2598,15 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      files READ as absent and refuses on any hand-edited one. Entered in preseededGolden. Considered ✓.
     expect(SRC).toContain('sportsWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
     expect(SRC).toContain('raceWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
-    expect(count).toBe(44);
+    // +2 (2026-11-26, admin: "open world game me enemy ban hi nahi rahe" and "ghar me game open karo … hero andar chala jayega"):
+    //   1× enemies at turn start (buildPhases/enemiesTurn.ts: the systems kit when it is missing, streetDanger.ts and its line
+    //      in the features list) — `skip: isImportTurn || !!projectModuleRef`, only in a platform open world, only when the
+    //      turn's words ask for enemies, never a second set; entered in preseededGolden. Considered ✓.
+    //   1× enterable houses at turn start (buildPhases/housesTurn.ts: enterableHouses: true in src/game/world.ts) — the same
+    //      skip, only when the words ask to go inside the houses and the game's kit copy can; entered in preseededGolden. ✓.
+    expect(SRC).toContain('enemiesAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
+    expect(SRC).toContain('housesAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
+    expect(count).toBe(46);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

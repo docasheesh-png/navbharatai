@@ -36,7 +36,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
 import { geometryTier } from '../three/surfaces';
 import { settings } from '../core/settings';
-import { localLowestY } from '../three/surfaces';
+import { localLowestY, setGround } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { damagePlayer } from '../core/state';
 import { events } from '../core/events';
@@ -98,7 +98,23 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * hittable crowd's people fall. Off by default.
    */
   runOver?: boolean;
+  /**
+   * EVERY BUILDING OPENS (admin 2026-11-26: "painted door wala ghar … user kahe to andar ja sake"). On: walking up to a city
+   * building's front door turns it into a walk-in building (city.openLot: a door that opens with Use, rooms, a floor, walls).
+   * Off by default — a city's buildings are scenery until the user asks.
+   */
+  openBuildings?: boolean;
+  /**
+   * 🚪 WALK INTO THE HOUSES (admin 2026-11-26: "ghar me game open karo … painted gate ko real gate banao … hero andar chala
+   * jayega"). true: every house in every city on the map is the kit's enterable house — a real door (E, or Use on a phone),
+   * hollow rooms, walls that collide (CityOptions.enterableHouses). A place's own city options can still say false.
+   */
+  enterableHouses?: boolean;
 }
+
+/** The open country kept around the farthest place inside the edge of the map, and the smallest play area, in metres. */
+export const PLAY_AREA_MARGIN = 500;
+export const PLAY_AREA_MIN = 1500;
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
 export type RegionKind = 'city' | 'town' | 'village' | LandKind | 'custom' | 'venue';
@@ -337,6 +353,8 @@ export interface OpenWorld {
    * EVERY place on the map, built or not, in the order listed. regions holds the places whose city has been built so far:
    * the first at once, the others as the player comes near (so a map of a hundred places starts as fast as a map of one).
    */
+  /** The edge of the map (OpenWorldOptions.boundary): a circle in WORLD metres the player cannot leave, or null for none. */
+  readonly playArea: { x: number; z: number; r: number } | null;
   readonly places: ReadonlyArray<{ id: string; kind: RegionKind; centre: { x: number; z: number }; radius: number; /** Its streets and blocks, in CITY metres around centre (built or not). */ readonly plan: CityPlan; readonly built: boolean }>;
   /** The place the player is in or nearest to, and how far its centre is. null in a world with no places. */
   nearestRegion(): { region: OpenWorldCity; distance: number } | null;
@@ -437,7 +455,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -469,6 +487,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const ground = markWorldCollider(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ visible: false })), 'ground');
   ground.frustumCulled = false;
   ctx.scene.add(ground);
+  // 🚗 THE MAP'S GROUND IS THE KIT'S GROUND (admin 2026-11-26 #7/#8/#11: "cities ke beech car zameen me dhas jati hai / hawa
+  // me"). The big map never told the kit where its ground is, so getGround() was null here: settleOnGround (every driven car)
+  // and groundScene (every frame's "nothing sinks") returned at once, and a car kept the height it had while the hills rose
+  // and fell under it between the places. Now every mover follows the map's own height, in render metres through the
+  // floating origin; a flier keeps userData.ground = false, and a car in water is the water's (WORLD.water).
+  setGround((x, z) => map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z));
   const centre = { x: Number.NaN, z: Number.NaN };
   const step = patchSize / cells;
   const layGround = (wx: number, wz: number): void => {
@@ -962,7 +986,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     // (Auto quality off + Graphics low = light), and a place a game gave its own tier keeps it. The light tier stands the same
     // streets, buildings and colliders with fewer draw calls and triangles; a device with a real GPU draws exactly what it did.
     const tier = geometryTier(settings.get());
-    const city = createCity({ tier, ...p.cityOptions });
+    const city = createCity({ tier, ...(enterableHouses ? { enterableHouses: true } : {}), ...p.cityOptions });
     const plan = city.plan;
     const root = new THREE.Group(); root.name = 'Region ' + p.region.id;
     root.add(city.root);
@@ -1244,7 +1268,21 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   ctx.player.reset(spawn.x - chunks.origin.x, spawn.y + 0.2, spawn.z - chunks.origin.z);
   // Restart / Menu stand the player at THIS start again, in today's render metres (the origin may have moved since).
   ctx.setRespawn?.(() => ctx.player.reset(spawn.x - chunks.origin.x, map.world.heightAt(spawn.x, spawn.z) + 0.2, spawn.z - chunks.origin.z));
-  ctx.player.setWater(map.world.seaLevel);
+  // 🌊 RIVERS AND LAKES ARE WATER (admin 2026-11-25: "bahut dur ja kar jameen me dhansne lagta hai"). Only the sea level was
+  // given to the controller, so in a river or a lake the player walked down the carved bed under the water — the "sinking".
+  // The controller now reads the map's own water where it stands (RENDER metres in, the origin read live): it swims there.
+  ctx.player.setWater((x, z) => {
+    const wx = x + chunks.origin.x, wz = z + chunks.origin.z;
+    const river = map.world.waterAt(wx, wz);
+    if (river) return river.surface;
+    return map.world.heightAt(wx, wz) < map.world.seaLevel ? map.world.seaLevel : null;
+  });
+  // 🧭 THE KIT'S GROUND IS THE MAP'S GROUND (admin 2026-11-25: "bahut dur ja kar jameen me dhansne lagta hai"). standOnGround,
+  // the enemies (systems/entities.ts), the police cars (systems/dispatch.ts) and every placed object ask the kit's one ground,
+  // groundHeightAt(). Nothing in an open world ever told it about the Athree terrain, so it answered 0 everywhere: an object
+  // "stood on the ground" sank into a hill or floated over a valley. Registered here, in RENDER metres (the origin is read live,
+  // so it stays right after every origin shift), and cleared in dispose().
+  setGround((x, z) => { const h = map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z); return Number.isFinite(h) ? h : 0; });
 
   // 🏙️ THE NEAREST CITIES LIVE (map expansion item 4; owner decision: phone 2, mid 5, desktop 8). A city — all the tiles of a
   // grown city together — counts once. When the player nears a place and the budget is full, the standing city farthest from
@@ -1311,6 +1349,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   };
   const anchored = new Map<THREE.Object3D, { x: number; z: number; lowest: number; lift: number }>();
   let time = 0;
+  const punchFrom = new THREE.Vector3();
   let edgeSaid = false;
   // LATE GROUND EDITS (on unless world: { lateEdits: false }): a pad, land or road laid after this point redraws the map's
   // chunks and plants it touches, the walkable ground under the player is sampled again at once, and everything put down with
@@ -1563,11 +1602,36 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const r1 = (v: number) => Math.round(v * 10) / 10;
     return { feet: r1(at.y), land: r1(land), water: Number.isFinite(water) ? r1(water) : null, seated: !!ctx.vehicles.seated };
   };
+  // 🧱 THE PLAY AREA (see OpenWorldOptions.boundary): a circle around the first place, past everything on the map.
+  const playArea = (() => {
+    if (edgeOption === false) return null;
+    const margin = Math.max(0, Number(edgeOption?.margin ?? PLAY_AREA_MARGIN) || 0);
+    let reach = 0;
+    const take = (x: number, z: number, r: number) => { const d = Math.hypot(x - spawn.x, z - spawn.z) + r; if (Number.isFinite(d)) reach = Math.max(reach, d); };
+    for (const p of planned) take(p.centre.x, p.centre.z, p.reach);
+    for (const l of landList) take(l.centre.x, l.centre.z, l.radius);
+    for (const v of venueList) take(v.centre.x, v.centre.z, Math.max(v.width, v.depth) / 2);
+    for (const m of userMaps) take(m.centre.x, m.centre.z, m.size / 2);
+    let r = Math.max(PLAY_AREA_MIN, reach + margin);
+    if (!looping) r = Math.min(r, Math.max(200, map.world.sizeMeters / 2 - 150));
+    return { x: spawn.x, z: spawn.z, r };
+  })();
+  let edgeToldAt = -Infinity;
+  /** Keep the player (and the car it drives) inside the play area. */
+  const keepInside = () => {
+    if (!playArea) return;
+    const at = playerWorld(), dx = at.x - playArea.x, dz = at.z - playArea.z, d = Math.hypot(dx, dz);
+    if (!(d > playArea.r)) return;
+    const back = d - playArea.r, ux = dx / d, uz = dz / d;
+    const car = ctx.vehicles.seated;
+    for (const o of car ? [car, ctx.player.object] : [ctx.player.object]) { o.position.x -= ux * back; o.position.z -= uz * back; }
+    if (time - edgeToldAt > 4) { edgeToldAt = time; try { events.emit('HINT', { id: 'world-edge', text: 'This is the edge of the map — turn back.', seconds: 3 }); } catch { /* no Hud */ } }
+  };
   const probeHook = { geometry: geometryReport, standing: standingReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
   if (probeWindow) probeWindow.__nbWorld = probeHook;
   return {
-    map, spawn, playerWorld, city: town, regions: towns, lands: landList, highways: roadLines,
+    map, spawn, playerWorld, playArea, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
     venues: venueList.map((v): OpenWorldVenue => ({
       get id() { return v.id; }, get venue() { return v.venue; }, get centre() { return v.centre; }, get width() { return v.width; }, get depth() { return v.depth; },
@@ -1606,6 +1670,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         roadGroup.position.x -= shift.dx; roadGroup.position.z -= shift.dz;
         edgeGroup.position.x -= shift.dx; edgeGroup.position.z -= shift.dz;
       }
+      keepInside();
       // ⛔ The edge holds: the car the player drives, else the player, is put back inside it (and a car stops).
       if (edge) {
         const car = ctx.vehicles.seated;
@@ -1682,6 +1747,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         carSpeed.last.copy(seated.position);
         struck = runOver && sp > RUN_OVER_SPEED && sp < 120;   // above 120 m/s it was a teleport or an origin shift, not driving
       } else carSpeed.last = null;
+      const punched = !seated && !!(ctx as { input?: { wasPressed?: (a: string) => boolean } }).input?.wasPressed?.('attack');
       towns.forEach((t, i) => {
         const d = Math.hypot(at.x - t.centre.x, at.z - t.centre.z);
         roots[i].visible = d < t.radius + CITY_HIDE;
@@ -1694,13 +1760,31 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
         // A solid crowd: the player on foot never walks through a person (citizens.solid).
         if (!seated) t.people?.pushOut(ctx.player.object.position);
+        // WORLD.openBuildings: the building whose front door the player walks up to opens (one per frame at most).
+        if (openBuildings && !seated) {
+          const lp = locals[i].position;
+          for (const lot of t.city.plan.lots) {
+            if (lot.open || lot.kind === 'park' || Math.hypot(lot.entrance.x - lp.x, lot.entrance.z - lp.z) > 4) continue;
+            t.city.openLot(lot);
+            break;
+          }
+        }
         if (struck) t.people?.hitAt(seated!.position, 1.8);
+
+        // 🧍 …and nobody walks through a PERSON either (open-world problem #6): the player on foot is pushed out of the crowd,
+        // and the Attack button (F / J / a click, Attack on a phone) knocks down the person in front.
+        if (!seated && t.people) {
+          t.people.pushOut(ctx.player.object, 0.4);
+          const fell = punched ? t.people.hit(ctx.player.object.getWorldPosition(punchFrom), ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y) : null;
+          if (fell) { try { events.emit('CITIZEN_HIT', { position: { x: fell.x, y: fell.y, z: fell.z } }); } catch { /* a listener must not undo the hit */ } }
+        }
       });
       if (struck) events.emit('VEHICLE_STRUCK', { position: { x: seated!.position.x, y: seated!.position.y, z: seated!.position.z }, radius: 1.8, damage: RUN_OVER_DAMAGE });
       reapHidden(at);
     },
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();
+      setGround(null);
       disposed = true;
       for (const off of offCrowdBlows) off();
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
@@ -1711,6 +1795,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       for (const m of Object.values(venueMats)) m.dispose();
       ctx.scene.remove(roadGroup); roadGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); asphalt.dispose();
       ctx.scene.remove(chunks.group); anchored.clear(); map.dispose();
+      setGround(null);
       unregisterMap();
       if (probeWindow && probeWindow.__nbWorld === probeHook) delete probeWindow.__nbWorld;
     },
@@ -1978,8 +2063,27 @@ export const OPEN_WORLD_BRIDGE_PATH = 'src/game/play/openWorld.ts';
 export const OPEN_WORLD_STARTER_PATH = 'src/game/OpenWorldGame.tsx';
 
 /** The App that mounts the starter — written by the platform only where no game is mounted yet. */
-export function openWorldAppSource(options: { city?: boolean; title?: string } = {}): string {
+/**
+ * The camera shots the request asks for (admin 2026-11-26 #9): death — "hero marne ke baad cinematic camera / zoom /
+ * game over animation"; intro — "game start hone se pahle pura map ka drone shot". {} when neither. PURE.
+ */
+export function cinematicsWanted(prompt: string | null | undefined): { death?: true; intro?: true } {
+  const t = String(prompt ?? '');
+  const camera = /\b(?:cinematic\w*|camera|cutscene|drone\s*shot|drone|zoom\s*in|zoom\s*out|slow\s*mo\w*|animation|video|intro|flyover|fly\s*over)\b|सिनेमैटिक|कैमरा|ड्रोन/i;
+  if (!camera.test(t)) return {};
+  const death = /\b(?:death|dies|die|dead|marne|mar\s+jaye|mar\s+jane|maut|game\s*over|haar)\b|मरने|मौत|गेम\s*ओवर/i.test(t);
+  const intro = /\b(?:drone|intro|start\s+hone\s+se\s+pahle|shuru\s+hone\s+se\s+pahle|before\s+(?:the\s+)?(?:game|play)\s+starts?|pura\s+map|whole\s+map|flyover|fly\s*over|opening)\b|ड्रोन/i.test(t);
+  return { ...(death ? { death: true as const } : {}), ...(intro ? { intro: true as const } : {}) };
+}
+
+export function openWorldAppSource(options: { city?: boolean; title?: string; cinematics?: { death?: boolean; intro?: boolean }; graphics?: 'real' } = {}): string {
   const title = String(options.title ?? 'Open World').replace(/[^\p{L}\p{N} .,!?'-]/gu, '').trim().slice(0, 60) || 'Open World';
+  const gameOpts: string[] = [];
+  if (options.cinematics && (options.cinematics.death || options.cinematics.intro)) {
+    gameOpts.push('cinematics: { ' + [options.cinematics.death ? 'death: true' : '', options.cinematics.intro ? 'intro: true, introRadius: 400' : ''].filter(Boolean).join(', ') + ' }');
+  }
+  if (options.graphics === 'real') gameOpts.push("graphics: 'real'");
+  const cine = gameOpts.length ? ' options={{ ' + gameOpts.join(', ') + ' }}' : '';
   return [
     "import { OpenWorldGame } from './game/OpenWorldGame';",
     "import { FEATURES } from './game/features';",
@@ -1991,11 +2095,179 @@ export function openWorldAppSource(options: { city?: boolean; title?: string } =
     '// The MAP grows the same way: its places (city, town, village) are the regions list in src/game/world.ts.',
     '// The world, the player and the camera are the kit\'s.',
     'export default function App() {',
-    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES} />;`,
+    `  return <OpenWorldGame title=${JSON.stringify(title)} world={WORLD} player={PLAYER} features={FEATURES}${cine} />;`,
     '}',
     '',
   ].join('\n');
 }
+
+/**
+ * 🦹 STREET DANGER — the fight an open-world (GTA-style) game has by nature (admin 2026-11-25, problem 4: "enemy nahi ban rahe hai,
+ * na police car ati hai hero ko pakadne … bas wahi template rattu tote ki tarah sabhi game me suna diya jata hai"). The kit had
+ * enemies that chase and attack (systems/entities.ts) and a wanted level with police cars (systems/dispatch.ts), but the open-world
+ * starter created none of them: every GTA build was the same peaceful city. Written by the platform as the game's first FEATURE
+ * when the request has a fight in it — one file the user owns and edits, listed in src/game/features/index.ts.
+ */
+export const GAME_STREET_DANGER_PATH = 'src/game/features/streetDanger.ts';
+export const GAME_STREET_DANGER_FEATURE = String.raw`// STREET DANGER — enemies who come for the hero, people who can be hurt, and the police who answer a crime.
+// Written by NavBharatAI for this game. It is YOUR file: change the numbers below, the kinds of enemy, or the whole idea.
+// · Enemies are there from the first second, near the player: some punch, some carry guns and FIRE (a flash, a tracer and
+//   the shot's sound). They hurt the player's health on the HUD. Beat one with a punch or a shot from your gun: score.
+// · Bystanders walk around. Punching one is a crime: wanted stars rise, a police car drives in with sirens, officers pursue
+//   and arrest you; from 3 stars they fight.
+// · Losing a life, or an arrest, puts the player back at the start with the stars cleared.
+import * as THREE from 'three';
+import { defineFeature } from '../play/features';
+import type { OpenWorld } from '../play/openWorld';
+import { Entities, type Entity } from '../systems/entities';
+import { Dispatch, Wanted } from '../systems/dispatch';
+import { events } from '../core/events';
+import { state, damagePlayer, addScore } from '../core/state';
+
+/** Tune the danger here. */
+export const STREET_DANGER = {
+  enemies: 3,          // hostile people near the player at once (0 = none)
+  bystanders: 4,       // people who can be hurt — hurting one is a crime
+  spawnEvery: 6,       // seconds between new arrivals
+  near: 18,            // spawn ring around the player, metres
+  far: 34,
+  leaveBeyond: 90,     // metres: people farther than this leave the game
+  punchDamage: 34,     // three punches beat an enemy
+  enemyDamage: 8,
+  gunmen: 0.4,         // share of enemies who carry a gun and fire from a distance (0 = all punch)
+  shotDamage: 6,       // one enemy bullet
+  playerShot: 40,      // one shot of the player's own gun on an enemy in front (within gunRange)
+  gunRange: 60,
+  scorePerEnemy: 100,
+};
+
+/** The running danger (one per game): the feature's own update() and dispose() drive it. */
+let run: { update(dt: number): void; dispose(): void } | null = null;
+
+export default defineFeature<OpenWorld>({
+  id: 'street-danger',
+  about: ['enemy', 'enemies', 'dushman', 'gang', 'goon', 'police', 'cop', 'sipahi', 'wanted', 'crime', 'fight', 'punch', 'health', 'gun', 'goli', 'fire', 'shoot', 'attack', 'hamla'],
+  setup(ctx, world) {
+    const npcs = new Entities(ctx, { onAttack: (_e, damage) => damagePlayer(damage), playerRadius: 0.4 });
+    const dispatch = new Dispatch(ctx, npcs);
+    const respawn = (why: string) => {
+      const pw = world.playerWorld(), pp = ctx.player.object.position;
+      const s = world.spawn;
+      ctx.player.reset(s.x - (pw.x - pp.x), s.y + 0.2, s.z - (pw.z - pp.z));
+      state.health = state.maxHealth;
+      events.emit('PLAYER_HEALED', { amount: state.maxHealth, health: state.health });
+      wanted.clear(why);
+    };
+    const wanted = new Wanted(ctx, npcs, dispatch, { onArrest: () => respawn('arrested') });
+    const offs = [
+      events.on('PLAYER_DIED', () => { if (state.status === 'playing') respawn('died'); }),
+      events.on('ENTITY_DIED', (p: { kind?: string; byPlayer?: boolean }) => { if (p?.kind === 'enemy' && p.byPlayer) addScore(STREET_DANGER.scorePerEnemy); }),
+      // Knocking down a passer-by in the city streets is a crime too (the city's crowd, play/openWorld.ts → CITIZEN_HIT).
+      events.on('CITIZEN_HIT', () => wanted.commit('assault')),
+    ];
+    const mine = new Set<Entity>();
+    const gunmen = new Map<string, Entity>();
+    let clock = 0, next = 0, filled = false;
+    // An enemy's shot is SEEN and HEARD: a short tracer to the player, and the kit's WEAPON_FIRED (its flash and sound).
+    const tracerLook = new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.9 });
+    /** The shot's line, from the gunman's chest to the player's. */
+    const tracerOf = (e: Entity) => {
+      const from = e.object.position.clone(); from.y += 1.3;
+      const to = ctx.player.object.position.clone(); to.y += 1.1;
+      return { line: new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), tracerLook), from };
+    };
+    const tracers: Array<{ line: ReturnType<typeof tracerOf>['line']; left: number }> = [];
+    offs.push(events.on('ENTITY_ATTACKED', (p: { id?: string }) => {
+      const e = p?.id ? gunmen.get(p.id) : undefined;
+      if (!e || !e.alive) return;
+      const { line, from } = tracerOf(e);
+      ctx.scene.add(line); tracers.push({ line, left: 0.08 });
+      events.emit('WEAPON_FIRED', { position: { x: from.x, y: from.y, z: from.z }, kind: 'pistol', ownerId: e.id });
+    }));
+    // The player's OWN gun (any kit Weapon) hits the enemy in front — no wiring needed in the gun's feature.
+    offs.push(events.on('WEAPON_FIRED', (p: { ownerId?: unknown } | undefined) => {
+      if (p && p.ownerId !== undefined && p.ownerId !== 'player') return;
+      const yaw = ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y;
+      npcs.melee(ctx.player.object.position, yaw, STREET_DANGER.playerShot, { range: STREET_DANGER.gunRange, arc: 0.25, only: 'first', byPlayer: true, attacker: ctx.player.object });
+    }));
+    /** One person in the spawn ring around the player, on the map's own ground, kept through origin shifts. */
+    const bring = (kind: 'enemy' | 'villager') => {
+      const pp = ctx.player.object.position, pw = world.playerWorld();
+      const a = Math.random() * Math.PI * 2, r = STREET_DANGER.near + Math.random() * (STREET_DANGER.far - STREET_DANGER.near);
+      const x = pp.x + Math.sin(a) * r, z = pp.z + Math.cos(a) * r;
+      const wx = x + (pw.x - pp.x), wz = z + (pw.z - pp.z);
+      if (!Number.isFinite(world.heightAt(wx, wz))) return;
+      const armed = kind === 'enemy' && Math.random() < STREET_DANGER.gunmen;
+      const e = npcs.spawn(kind === 'enemy'
+        ? { x, z, kind: 'enemy', hostile: true, ai: armed ? 'ranged' : Math.random() < 0.3 ? 'flanker' : 'melee', damage: armed ? STREET_DANGER.shotDamage : STREET_DANGER.enemyDamage, health: 100 }
+        : { x, z, kind: 'villager', hostile: false, patrolRadius: 8, health: 60 });
+      if (!e) return;
+      world.place(e.object, wx, wz, 0.05);
+      mine.add(e);
+      if (armed) gunmen.set(e.id, e);
+    };
+    run = {
+      update(dt: number) {
+        clock += dt;
+        for (let i = tracers.length - 1; i >= 0; i--) {
+          tracers[i].left -= dt;
+          if (tracers[i].left <= 0) { ctx.scene.remove(tracers[i].line); tracers[i].line.geometry.dispose(); tracers.splice(i, 1); }
+        }
+        // The first frame fills the street: every enemy and bystander is there at once, not one every few seconds.
+        if (!filled) {
+          filled = true;
+          for (let i = 0; i < STREET_DANGER.enemies; i++) bring('enemy');
+          for (let i = 0; i < STREET_DANGER.bystanders; i++) bring('villager');
+          next = clock + STREET_DANGER.spawnEvery;
+        }
+        // The punch: the Attack button (F / J, or Attack on a phone) lands on whoever is in front of the hero.
+        if (ctx.input.wasPressed('attack')) {
+          const yaw = ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y;
+          npcs.melee(ctx.player.object.position, yaw, STREET_DANGER.punchDamage, { byPlayer: true, attacker: ctx.player.object });
+        }
+        const pp = ctx.player.object.position;
+        for (const e of [...mine]) {
+          if (!e.alive || e.object.position.distanceTo(pp) > STREET_DANGER.leaveBeyond) {
+            if (e.alive) e.remove();
+            world.release(e.object); mine.delete(e); gunmen.delete(e.id);
+          }
+        }
+        if (clock >= next) {
+          next = clock + STREET_DANGER.spawnEvery;
+          if (npcs.alive('enemy').length < STREET_DANGER.enemies) bring('enemy');
+          if (npcs.alive('villager').length < STREET_DANGER.bystanders) bring('villager');
+        }
+      },
+      dispose() {
+        for (const off of offs) off();
+        for (const t of tracers) { ctx.scene.remove(t.line); t.line.geometry.dispose(); }
+        tracerLook.dispose();
+        for (const e of mine) world.release(e.object);
+        wanted.dispose(); dispatch.dispose(); npcs.dispose();
+      },
+    };
+    // Shared with other features (api.get('street-danger')): a mission can read who is wanted, or spawn through the same Entities.
+    return { npcs, dispatch, wanted };
+  },
+  update(_ctx, _world, dt) { run?.update(dt); },
+  dispose() { run?.dispose(); run = null; },
+});
+`;
+
+/** The game's list of features with street danger already in it (the platform wrote the file beside it). */
+export const GAME_FEATURES_INDEX_WITH_DANGER = [
+  '// THIS GAME, AS A LIST. Each feature is one file in this folder that adds one thing to the game.',
+  '// To ADD something: create src/game/features/<name>.ts with defineFeature({ id, setup, update }) and add it to the list below.',
+  '// To CHANGE one thing: edit only that feature\'s file. To REMOVE it: take it out of the list. Nothing else needs to change.',
+  "import type { GameFeature } from '../play/features';",
+  "import type { OpenWorld } from '../play/openWorld';",
+  "import streetDanger from './streetDanger';",
+  '',
+  'export const FEATURES: GameFeature<OpenWorld>[] = [',
+  '  streetDanger, // enemies, bystanders and the police — src/game/features/streetDanger.ts',
+  '];',
+  '',
+].join('\n');
 
 export const GAME_FEATURES_INDEX_PATH = 'src/game/features/index.ts';
 /** The game's own list of features — the user's file (never a kit file): created once, then only ever added to. */
@@ -2039,6 +2311,16 @@ export function citizensWanted(prompt: string | null | undefined): { solid?: tru
 }
 
 /** The user asked for a car to hurt what it drives into (admin 2026-11-26 #18: default off). PURE. */
+/** The user asked to go inside the city's buildings (admin 2026-11-26 #2). PURE. */
+export function openBuildingsWanted(prompt: string | null | undefined): boolean {
+  const t = String(prompt ?? '');
+  const building = /\b(?:ghar|gharon|ghaar|house|houses|building|buildings|imarat|dukaan|dukan|shop|shops|makaan|makan|office)\b|घर|बिल्डिंग|दुकान|मकान/i;
+  // Words for going IN — never a bare "open" or "khule" ("open-world", "khule maidan" are about the map, failedbr #2485).
+  const inside = /\b(?:andar|ander|enter|enters|entering|enterable|inside|go\s+in|get\s+in|walk\s+in|(?:door|darwaza|darwaaza|gate)\s+(?:khule|khulna|khul\s+jaye|open\w*)|(?:open|khol)\w*\s+(?:the\s+)?(?:door|darwaza|darwaaza))\b|अंदर|दरवाज/i;
+  if (!building.test(t) || !inside.test(t)) return false;
+  return !/\b(?:andar|ander|enter\w*|inside)\b[^.!?\n]{0,16}\b(?:nahi|nahin|mat|no|not)\b|\b(?:no|not|don'?t|mat|nahi)\b[^.!?\n]{0,12}\b(?:andar|enter|inside)\b/i.test(t);
+}
+
 export function runOverWanted(prompt: string | null | undefined): boolean {
   const t = String(prompt ?? '');
   const car = /\b(?:car|cars|gaadi|gadi|gaari|vehicle|truck|bike|bus)\b|गाड़ी|गाडी/i;
@@ -2064,7 +2346,7 @@ export function seedRegions(regions: unknown): Array<{ id: string; kind: string 
   return out.slice(0, 60);
 }
 
-export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; workspaceId?: string } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; regions?: unknown; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; openBuildings?: boolean; workspaceId?: string } = {}): string {
   const named = seedRegions(options.regions);
   const seed = options.workspaceId
     ? varietySeed(options.workspaceId, 'world')
@@ -2096,6 +2378,7 @@ export function gameWorldFileSource(options: { city?: boolean; regions?: unknown
         '  citizens: { solid: ' + (options.citizens.solid === true) + ', hittable: ' + (options.citizens.hittable === true) + ' },']
       : []),
     ...(options.runOver ? ['  // A car the player drives hurts the people and characters it hits (the user asked for it).', '  runOver: true,'] : []),
+    ...(options.openBuildings ? ['  // Walk up to any city building\'s front door and it opens: you can go inside (the user asked for it).', '  openBuildings: true,'] : []),
     '};',
     '',
   ].join('\n');
@@ -2144,8 +2427,14 @@ export function generateOpenWorld(): RecipeOutput {
       'user asks for an endless map; "map / jagah bada karo" → a bigger margin or more regions (it moves out by itself). RESTART puts the player',
       'back at the start by itself (ctx.setRespawn) — never write your own restart. PEOPLE: the city crowd is scenery unless the user asks —',
       '"log solid hon / aar paar na jaye" → WORLD.citizens = { solid: true }; "punch se gire / log ko maar sake" → { solid: true, hittable: true }.',
+      'BUILDINGS: "ghar / building ke andar ja sake" → WORLD.openBuildings = true (walking up to a front door opens it as a walk-in',
+      'building: door with Use, rooms, floor, walls); never draw your own interior over a city building.',
       'CARS: "gaadi ki takkar se log mare" → WORLD.runOver = true (off by default). A punch (the Attack button without a gun) already hurts any',
-      'character in reach; never write your own punch hit test.',
+      'character in reach; never write your own punch hit test. CAMERA SHOTS: "hero marne ke baad cinematic camera / game over animation" →',
+      '<OpenWorldGame options={{ cinematics: { death: true } }} />; "start se pahle pura map ka drone shot" → { intro: true, introRadius: 400 };',
+      'any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]).',
+      'Never move the camera yourself. GRAPHICS: "realistic / real 3D / HD graphics" → <OpenWorldGame options={{ graphics: \'real\' }} />',
+      '(lighting, reflections and soft shadows everywhere; ambient occlusion and bloom only on a capable device) — never add your own post-processing.',
       'RULES: never write your own world, ground plane, player, character controller, camera or game loop beside it; never set a position to',
       'y = 0 — use world.heightAt(x, z) or world.place(); positions you read from Three objects are RENDER metres (world metres minus',
       'world.map.chunks.origin) — use world.playerWorld() and world.place() and you never need to convert.',

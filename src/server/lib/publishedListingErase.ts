@@ -71,7 +71,22 @@ export interface ListingPolicy {
   unlistTo: string;
   /** Subcollections page-deleted BEFORE a listing that is being deleted. Firestore does not cascade. */
   subs?: readonly string[];
+  /**
+   * A field naming a bucket object the listing owns (Q-3612). When a never-public listing is deleted, that object is
+   * deleted FIRST — the record is its only pointer — unless another listing names the same object (the key may be
+   * content-addressed). If it cannot be confirmed deleted, the listing is NOT deleted: it is de-identified and moved
+   * to `unlistTo`, so the pointer survives with no person attached and the failure is reported.
+   */
+  ownedObjectField?: string;
   why: string;
+}
+
+/** The bucket side of `ownedObjectField`. Provided by the store that owns the bucket; every method THROWS on failure. */
+export interface ListingObjectDeps {
+  /** Does any listing in `collection` OTHER than `exceptId` name `path` in `field`? */
+  referencedElsewhere(collection: string, field: string, path: string, exceptId: string): Promise<boolean>;
+  /** Delete the object. A missing object is success; a path the store does not own is refused (throws). */
+  deleteObject(path: string): Promise<void>;
 }
 
 /**
@@ -101,6 +116,8 @@ export const LISTING_POLICIES: readonly ListingPolicy[] = [
     statusField: 'status',
     deleteWhenStatusIn: ['pending', 'rejected'],
     unlistTo: 'removed',
+    // `navStoreStore.ts` putApk — the APK bytes, content-addressed (`nav-store/apk/<sha256>.apk`).
+    ownedObjectField: 'storagePath',
     why: 'an APK submission; not purchasable, and only an `approved` one is served',
   },
   {
@@ -134,6 +151,12 @@ export interface ListingEraseResult {
   deIdentified: number;
   /** Documents removed from a deleted listing's subcollections. */
   children: number;
+  /** Bucket objects of deleted listings that were deleted (Q-3612). */
+  objectsDeleted?: number;
+  /** Bucket objects kept because another listing still names them. */
+  objectsKeptShared?: number;
+  /** Listings kept (de-identified, unlisted) because their object could not be confirmed deleted. Never counted as deleted. */
+  objectsNotConfirmed?: number;
   error?: string;
 }
 export interface ListingEraseReport {
@@ -141,6 +164,8 @@ export interface ListingEraseReport {
   collections: ListingEraseResult[];
   totalDeleted: number;
   totalDeIdentified: number;
+  /** Listing-owned bucket objects that could not be confirmed deleted (Q-3612). 0 is the only "all gone". */
+  objectsNotConfirmed: number;
 }
 
 const PAGE = 300;
@@ -186,6 +211,7 @@ export async function deIdentifyPublishedListings(
   store: ListingFirestore,
   uid: string,
   policies: readonly ListingPolicy[] = LISTING_POLICIES,
+  objects: ListingObjectDeps | null = null,
 ): Promise<ListingEraseReport> {
   if (!uid || typeof uid !== 'string') {
     throw new Error('deIdentifyPublishedListings: a non-empty uid is required.');
@@ -195,12 +221,31 @@ export async function deIdentifyPublishedListings(
     let deleted = 0;
     let deIdentified = 0;
     let children = 0;
+    let objectsDeleted = 0;
+    let objectsKeptShared = 0;
+    let objectsNotConfirmed = 0;
+    const objectCounts = () => (policy.ownedObjectField ? { objectsDeleted, objectsKeptShared, objectsNotConfirmed } : {});
     try {
       const snap = await store.collection(policy.collection).where(policy.uidField, '==', uid).get();
       for (const doc of snap.docs) {
         const row = doc.data() ?? {};
         const status = String(row[policy.statusField] ?? '');
-        if (policy.deleteWhenStatusIn.includes(status)) {
+        let objectStays = false;
+        if (policy.deleteWhenStatusIn.includes(status) && policy.ownedObjectField) {
+          // THE OBJECT BEFORE ITS POINTER (Q-3612): once this record is gone nothing can find the bytes.
+          const path = row[policy.ownedObjectField];
+          if (typeof path === 'string' && path) {
+            try {
+              if (!objects) throw new Error('no object store');
+              if (await objects.referencedElsewhere(policy.collection, policy.ownedObjectField, path, doc.id)) objectsKeptShared++;
+              else { await objects.deleteObject(path); objectsDeleted++; }
+            } catch {
+              objectsNotConfirmed++;
+              objectStays = true;
+            }
+          }
+        }
+        if (policy.deleteWhenStatusIn.includes(status) && !objectStays) {
           // CHILDREN FIRST — Firestore does not cascade, and a listing's bytes live one level down.
           for (const sub of policy.subs ?? []) {
             if (typeof doc.ref.collection !== 'function') {
@@ -230,10 +275,10 @@ export async function deIdentifyPublishedListings(
         await doc.ref.update(patch);
         deIdentified++;
       }
-      collections.push({ collection: policy.collection, deleted, deIdentified, children });
+      collections.push({ collection: policy.collection, deleted, deIdentified, children, ...objectCounts() });
     } catch (e) {
       collections.push({
-        collection: policy.collection, deleted, deIdentified, children,
+        collection: policy.collection, deleted, deIdentified, children, ...objectCounts(),
         error: e instanceof Error ? e.message : String(e),
       });
     }
@@ -243,6 +288,7 @@ export async function deIdentifyPublishedListings(
     collections,
     totalDeleted: collections.reduce((s, c) => s + c.deleted, 0),
     totalDeIdentified: collections.reduce((s, c) => s + c.deIdentified, 0),
+    objectsNotConfirmed: collections.reduce((s, c) => s + (c.objectsNotConfirmed ?? 0), 0),
   };
 }
 

@@ -21,6 +21,7 @@ import { getServerDb } from './serverDb';
 import { listEqNewestFirst } from './firestoreIndexSafe';
 import { publicCreatorId } from './storeCreator';
 import { rememberCreatorId } from './appMartCreatorIndex';
+import type { ListingObjectDeps } from './publishedListingErase';
 
 const COLLECTION = 'nav_store_apps';
 
@@ -169,6 +170,54 @@ export async function deleteApk(storagePath: string): Promise<void> {
   } catch {
     /* a failed delete is reported by the caller re-reading; never blocks the status change */
   }
+}
+
+/** An APK object this store writes: `nav-store/apk/<sha256>.apk`. Nothing else is ever deleted by the helpers below. */
+const APK_OBJECT = /^nav-store\/apk\/[0-9a-f]{64}\.apk$/;
+export function isApkObjectPath(v: unknown): v is string { return typeof v === 'string' && APK_OBJECT.test(v); }
+
+/**
+ * The APK bucket for account deletion (Q-3612): `deIdentifyPublishedListings` deletes a never-public listing's APK
+ * through this BEFORE deleting the listing, the only pointer to it. Every method THROWS on failure — a delete that
+ * could not be confirmed must stop the listing from being deleted, not be swallowed like `deleteApk`. Null when no
+ * bucket or database is configured.
+ */
+export function navStoreApkObjects(): ListingObjectDeps | null {
+  const name = bucketName();
+  const d = db();
+  if (!name || !d) return null;
+  return {
+    referencedElsewhere: (collection, field, path, exceptId) => apkReferencedElsewhere(d, collection, field, path, exceptId),
+    async deleteObject(path) {
+      if (!isApkObjectPath(path)) throw new Error('Refusing to delete an object this store did not write');
+      await admin.storage().bucket(name).file(path).delete({ ignoreNotFound: true });
+    },
+  };
+}
+
+/**
+ * Does any listing other than `exceptId` still name this APK? The key is CONTENT-ADDRESSED, so two submissions of the
+ * same bytes — by two different people — share ONE object; deleting it for one of them breaks the other's download.
+ */
+async function apkReferencedElsewhere(
+  d: admin.firestore.Firestore, collection: string, field: string, path: string, exceptId: string,
+): Promise<boolean> {
+  const snap = await d.collection(collection).where(field, '==', path).limit(5).get();
+  return snap.docs.some((doc) => doc.id !== exceptId);
+}
+
+/**
+ * Delete an APK that a listing (`exceptId`) has just stopped naming, ONLY when no other listing names it — the
+ * republish path's cleanup. Best-effort like `deleteApk`: a failed delete leaves an orphaned blob, never a broken
+ * submission; a failed reference check keeps the object (an orphan is recoverable, a deleted shared APK is not).
+ */
+export async function deleteApkIfUnreferenced(storagePath: string, exceptId: string): Promise<void> {
+  const d = db();
+  if (!d || !isApkObjectPath(storagePath)) return;
+  try {
+    if (await apkReferencedElsewhere(d, COLLECTION, 'storagePath', storagePath, exceptId)) return;
+  } catch { return; }
+  await deleteApk(storagePath);
 }
 
 export async function saveApp(app: StoreApp): Promise<void> {

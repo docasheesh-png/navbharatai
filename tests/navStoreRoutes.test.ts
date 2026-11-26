@@ -72,6 +72,7 @@ vi.mock('../src/server/lib/navStoreStore', () => ({
   putApk: async (sha: string) => { state.putCalls++; return `nav-store/apk/${sha}.apk`; },
   getApk: async () => Buffer.from('apk-bytes'),
   deleteApk: async (p: string) => { state.deleted.push(p); },
+  deleteApkIfUnreferenced: async (p: string) => { state.deleted.push(p); },
   saveApp: async (a: Record<string, unknown>) => { state.saved.push(a); state.apps[a.id as string] = a; },
   getApp: async (id: string) => state.apps[id] || null,
   updateApp: async (id: string, patch: Record<string, unknown>) => {

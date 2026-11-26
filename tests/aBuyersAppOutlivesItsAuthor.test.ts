@@ -224,7 +224,8 @@ describe('Q-766 — the money path closes with the listing', () => {
 
   it('the eraser is wired into account deletion, and reported on its own line', () => {
     const route = readFileSync(resolve(__dirname, '../src/server/routes/profile.ts'), 'utf8');
-    expect(route).toMatch(/deIdentifyPublishedListings\(listingDb, identity\.uid\)/);
+    // Q-3612 added the APK bucket as a further argument; the verified uid is still the one passed.
+    expect(route).toMatch(/deIdentifyPublishedListings\(listingDb, identity\.uid[,)]/);
     // Its own line in the response, because "de-identified" is not a deletion count and folding it into
     // one would tell the user the opposite of what happened to their published apps.
     expect(route).toMatch(/\n        listings,/);

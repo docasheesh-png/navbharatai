@@ -109,7 +109,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "65934936055a4d5ec735b0623a460c8ba345e39b2e808c70c7e32ecaf8c7d080",
     "52a0b7dcdbf65860a9081c975fd6e6d903b1f3609a9b40145627e17b58c82159",
     "db50858ac49f95fd4bbfc70cb874b2a45a0cc7b2a5c69201969c9486913f852a",
-    "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad"
+    "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad",
+    "92a2ef00238808ecb588daa90d7218d52606832cc264a25a161c07ae9c3390fe"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -571,7 +572,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "487ac129699447ae024c554b5040d2164c3826d5dab427e9089662e0fe1704ab",
     "2978e707c64f5a091ac68a1a7593c23923a9bcbdab144a88c77963eeb40552db",
     "f3a713a9f3c4b93f25190f8c65af7222d607bf8af7ce91edd998a23ea232846e",
-    "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6"
+    "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6",
+    "b759f15602fd1dd28974ddd0dce9a0e8168163c040e5cdd307ed1eb712b81599"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -617,7 +619,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/systems/dispatch.ts": [
     "ddff3cd7d3357fdaa4dce09270692e875e18fb1e2a540d1270d17acbcafdf1f1",
-    "06d03d44ab056ebcd5d24ee5added0ce22ec6d30897398bbce3aa6d0c6c791a9"
+    "06d03d44ab056ebcd5d24ee5added0ce22ec6d30897398bbce3aa6d0c6c791a9",
+    "bc1effbf9e687118a7ac9152113e932edec6051f029f994524f62a5c93670af4"
   ],
   "src/game/systems/entities.ts": [
     "19cd0e366abe7a4880882d7fc7bd321aaeb3723a106322568c615f8d5fab1a3b",
@@ -646,7 +649,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/systems/weapon.ts": [
     "fec88fc354b406a35df471174312633b58b63e064578b925d2408e211cb83828",
     "52f2b3fe7299c7db14167b7649a98dbc7cb249cb31187aa9530e7e4584daf841",
-    "c9c87c8302bf074e6c9fef7cad98d27c695867ee3f31474f34d5917e305f60f0"
+    "c9c87c8302bf074e6c9fef7cad98d27c695867ee3f31474f34d5917e305f60f0",
+    "91a0a99a36bfbdb67371e6eb4a7153822b4d33784270f811bab35630ef1066e0"
   ],
   "src/game/three/atmosphere.ts": [
     "ef9d092d175f1880430ab2e7a0285393433cf3a2f86d2105af4eda44b4e922b8"

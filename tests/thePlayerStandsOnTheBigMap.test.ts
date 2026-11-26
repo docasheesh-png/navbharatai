@@ -28,7 +28,9 @@ describe('🗺️ the seed plans the join, and mounts it', () => {
     expect(plan).toEqual(expect.arrayContaining(['generate_athree_map', 'generate_game_shell', 'generate_open_world']));
     expect(plan.indexOf('generate_open_world')).toBeGreaterThan(plan.indexOf('generate_game_shell'));
     expect(plan.indexOf('generate_open_world')).toBeGreaterThan(plan.indexOf('generate_athree_map'));
-    expect(gameKitRecipeInput('generate_open_world', plan, REQUEST)).toEqual({ mount: true, city: true });
+    // danger: the request is PUBG + GTA in a city — the platform's street danger (enemies, police) is laid down with it
+    // (admin's open-world problem #4, 2026-11-25: "enemy nahi ban rahe … police car").
+    expect(gameKitRecipeInput('generate_open_world', plan, REQUEST)).toEqual({ mount: true, city: true, danger: true });
   });
 
   it('on foot only: a race or a flight on the big map keeps its own vehicle; a game with no big map gets no starter', () => {
@@ -44,7 +46,8 @@ describe('🗺️ the seed plans the join, and mounts it', () => {
     expect(turn).toContain(ON_FOOT_LINE);
     expect(turn).toContain(CITY_LINE);
     expect(gameKitPlan(turn, 'vite-react')).toContain('generate_open_world');
-    expect(gameKitRecipeInput('generate_open_world', gameKitPlan(turn, 'vite-react'), turn)).toEqual({ mount: true, city: true });
+    // The street danger is the platform's kit for the user's own PUBG + GTA city, not a feature added to the contract.
+    expect(gameKitRecipeInput('generate_open_world', gameKitPlan(turn, 'vite-react'), turn)).toEqual({ mount: true, city: true, danger: true });
     expect(buildGameContract(`Step.\n${ON_FOOT_LINE}\n${CITY_LINE}`).requiredFeatures).toEqual([]);
   });
 

@@ -411,8 +411,8 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     // (gamePlaytest.ts rule probes, admin 2026-11-24). The measured line travels with the fix.
     code: 'GAME_RULE_BROKEN',
     title: 'Make the game follow your rules',
-    detail: 'NavBharatAI played your game and a rule you asked for (for example, killing an enemy raises the score) did not happen.',
-    prompt: 'NavBharatAI played this game and checked the rules the user asked for, and at least one did not happen (named below). Wire each one to the game kit\'s own events so it really happens in play: give every enemy the kit\'s Health (it announces ENEMY_DIED once) and listen for ENEMY_DIED to raise the score there with the kit\'s addScore; give the player a Health whose death event is PLAYER_DIED, and end the round on it. Keep the score, the round status and the health in the kit\'s game state so the rules can be checked again. Change nothing else.',
+    detail: 'NavBharatAI played your game and a rule you asked for (for example, killing an enemy raises the score) or the gun firing did not happen.',
+    prompt: 'NavBharatAI played this game and checked the rules the user asked for, and at least one did not happen (named below). Wire each one to the game kit\'s own events so it really happens in play: give every enemy the kit\'s Health (it announces ENEMY_DIED once) and listen for ENEMY_DIED to raise the score there with the kit\'s addScore; give the player a Health whose death event is PLAYER_DIED, and end the round on it. If the player\'s gun did not fire, call that gun\'s weapon.update(dt, ctx.input.isDown(\'attack\'), muzzle, aim, projectiles) every step from a feature that is in the game\'s features list, with no ownerId (the player\'s own shot), and call projectiles.update(dt, targets) as well so the shots travel and hit — the attack keys are F, J and a click. Keep the score, the round status and the health in the kit\'s game state so the rules can be checked again. Change nothing else.',
     withEvidence: true,
   },
   {

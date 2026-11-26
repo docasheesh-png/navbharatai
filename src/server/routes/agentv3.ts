@@ -86,7 +86,7 @@ import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../Age
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
 import { offerBugHunt, bugHuntReviewScope } from '../AgentV3/optionalBugHunt';
-import { isKitFile as isGameKitFile } from '../AgentV3/growthGuard';
+import { isKitFile as isGameKitFile, growthRequestFor } from '../AgentV3/growthGuard';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -17743,7 +17743,7 @@ async function noteBuildOutcome(
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
         // 🧱 GROWTH GUARD, lock 1 (growthGuard.ts): the project as it was when the turn began, and the user's own words.
-        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, prompt); } catch { /* the end-of-turn lock still holds */ }
+        try { dispatcher.setGrowthBaseline(projectFilesAtTurnStart, growthRequestFor(prompt, checksRequest)); } catch { /* the end-of-turn lock still holds */ }
         try {
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
@@ -21786,7 +21786,7 @@ async function noteBuildOutcome(
       // compared with what they were when the turn began. A change the request did not ask for is PUT BACK before any
       // check looks at the app, so what is verified, saved and shown is the game with everything that already worked.
       if (!abort.signal.aborted && !initialTerminalDecline) {
-        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: prompt, read: (p) => actuator.readFile(workspaceId, p),
+        await enforceGrowthAtTurnEnd({ filesAtTurnStart: projectFilesAtTurnStart, request: growthRequestFor(prompt, checksRequest), read: (p) => actuator.readFile(workspaceId, p),
           write: async (p, c) => { await runInPass('growth-guard-restore', () => actuator.writeFile(workspaceId, p, c)); writtenFiles.set(p, c); },
           platformWrote: new Map<string, string>([...preseededGolden, ...kitSeededFiles, ...dispatcher.platformWritesThisTurn()]),
           refused: dispatcher.growthRefusedThisTurn(), written: [...writtenFiles.keys()], record: (issue) => buildDiag.record(issue),

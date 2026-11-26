@@ -1302,7 +1302,7 @@ export class ToolDispatcher {
     if (!this.growthBaseline || !growthGuardEnabled() || this.internalWriteDepth > 0) return;
     let rel = path;
     try { rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); } catch { rel = path; }
-    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown });
+    const verdict = growthVerdict({ path: rel, before: this.growthBaseline[rel], after, request: this.growthRequest, known: this.growthKnown, filesAtTurnStart: this.growthBaseline });
     if (verdict.allow) return;
     this.growthRefused.add(rel);
     try { getWorkspaceMemory(this.workspaceId).recordAudit(`[GROWTH-GUARD] refused ${after === null ? 'delete' : 'write'} of ${rel}: ${verdict.reason}`); } catch { /* audit best-effort */ }

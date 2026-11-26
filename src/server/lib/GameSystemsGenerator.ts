@@ -916,6 +916,12 @@ export class Weapon {
     this.kind = typeof kind === 'string' ? kind : 'custom';
     this.ammo = this.spec.magazine;
     this.seed = (seed >>> 0) || 1;
+    // 🔎 NavBharatAI's playtest reads how many guns the game made: a game with a gun is played with the fire key, and a gun
+    // that never fires is reported (build reports #2526–#2530). Read-only; a game never reads it.
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __nbWeapons?: number };
+      w.__nbWeapons = (w.__nbWeapons ?? 0) + 1;
+    }
   }
 
   /** The current cone half-angle — wider while firing, back to calm when you stop. */

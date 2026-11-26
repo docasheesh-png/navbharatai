@@ -111,7 +111,8 @@ describe('🧩 where it ships, and what the builder is told', () => {
     expect(generateOpenWorld().files['src/game/OpenWorldGame.tsx']).toMatch(/host\.current\?\.update\(ctx, world\.current, delta\)/);
     // The list is the user's file: created once on mount, never replaced.
     const dispatcher = read('src/server/AgentV3/ToolDispatcher.ts');
-    expect(dispatcher).toMatch(/if \(!listed\) \{\s*const index = await this\.guardedWrite\(GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX, \{ agent, source: 'generate_open_world' \}\);/);
+    // The list is written inside `if (!listed)` only — with the street danger in it when the game has a fight (problem 4, Q-3356).
+    expect(dispatcher).toMatch(/if \(!listed\) \{[\s\S]{0,1600}?const index = await this\.guardedWrite\(GAME_FEATURES_INDEX_PATH, danger \? GAME_FEATURES_INDEX_WITH_DANGER : GAME_FEATURES_INDEX, \{ agent, source: 'generate_open_world' \}\);/);
   });
 
   it('the rule is said on the first build, and on EVERY later turn of a game that has the list — whatever the turn says', () => {

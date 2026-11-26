@@ -544,7 +544,10 @@ export class Game {
       if (typeof p.fraction === 'number' && Number.isFinite(p.fraction)) job.fraction = p.fraction;
       modelJobs.set(p.id, job);
     }));
-    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
+    // The player's own shots and swings (owner undefined or 'player', the attack key held), counted from the kit's events —
+    // the playtest presses fire and reads this to prove a gun really shoots (build reports #2526–#2530: a gun that never fired).
+    const attacks = { fired: 0, swung: 0 };
+    const hook = { status: () => state.status, attacks: () => ({ ...attacks }), score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
       // How much the last frame asked of the GPU — what decides whether a cheap phone keeps up (the playtest's budget check).
       load: () => { const i = this.renderer.info; return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures }; },
       models: () => { const now = performance.now(); let stuck = 0; for (const j of modelJobs.values()) if (j.fraction <= 0 && now - j.since > 20000) stuck++; return { pending: modelJobs.size, stuck }; },
@@ -567,8 +570,8 @@ export class Game {
       const owner = (payload as { ownerId?: unknown } | null)?.ownerId;
       return (owner === undefined || owner === 'player') && this.attackHeldThisStep;
     };
-    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { this.firedThisStep = true; this.heroAct('fire'); } }));
-    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { this.swungThisStep = true; this.heroAct('swing'); } }));
+    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { attacks.fired++; this.firedThisStep = true; this.heroAct('fire'); } }));
+    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { attacks.swung++; this.swungThisStep = true; this.heroAct('swing'); } }));
     this.disposers.push(events.on('PLAYER_JUMPED', () => this.heroAct('jump')));
     this.disposers.push(events.on('PLAYER_DAMAGED', () => this.heroAct('hit')));
 

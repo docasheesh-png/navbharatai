@@ -372,6 +372,16 @@ const seedRandom = (seed) => {
   Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 };
 
+// 🖱️ NO POINTER LOCK UNDER AUTOMATION (Q-3380, measured on #4552): the playtest clicks the canvas, a game asks for
+// pointer lock, and in an automated headless browser that floods the page with ~36,000 synthetic input messages a
+// second — the game drew 1–4 fps because of OUR browser, not its code (4 → 15 fps with the lock stubbed). The kit
+// shell already skips the lock when navigator.webdriver is set; this covers every game (builder-written, older kit
+// copies). A resolved promise and no pointerlockchange event: the game simply keeps the mouse free.
+const noPointerLock = () => {
+  const stub = function () { return Promise.resolve(); };
+  try { Element.prototype.requestPointerLock = stub; } catch (_e) { /* read-only: leave it */ }
+};
+
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
 // counted three times; a gap over 100ms is a long frame (a visible hitch).
 const frameCounter = () => {
@@ -977,6 +987,7 @@ const watchdog = setTimeout(async () => {
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
+  await ctx.addInitScript(noPointerLock);
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(soundCounter);
   await ctx.addInitScript(sceneHook);

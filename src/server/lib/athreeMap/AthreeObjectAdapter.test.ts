@@ -19,7 +19,8 @@ function load() {
    if(cache[name])return cache[name];
    if(!files[name])throw Error(name);
    const out:any={};cache[name]=out;
-   new Function('exports','require',ts.transpileModule(files[name],{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(out,get);
+   // A CommonJS harness has no import.meta: a kit file's import.meta.glob (the game's own optional files, e.g. src/game/gameSeed.ts) reads as "no such file" here, exactly as a bundler without glob support would.
+   new Function('exports','require',ts.transpileModule(files[name].replace(/import\.meta\.glob\(/g,'((..._glob: unknown[]) => ({}))('),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(out,get);
    return out;
  };return get('adapter');
 }

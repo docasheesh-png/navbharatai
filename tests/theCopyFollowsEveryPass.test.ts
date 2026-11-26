@@ -35,7 +35,7 @@ describe('the end-of-build refresh', () => {
     const restores = [...route.matchAll(/\bapplyGreenSnapshotRestore\s*\(/g)];
     const verifiedRepairRestores = [...route.matchAll(/revert:\s*revertToGreenSnapshot\b/g)];
     expect(restores).toHaveLength(5); // +1 2026-11-14: the edit gate's hold puts the verified base back through the same door
-    expect(verifiedRepairRestores).toHaveLength(6); // +1 2026-10-30: the game repair (gameRepair.ts)
+    expect(verifiedRepairRestores).toHaveLength(5); // +1 2026-10-30: the game repair (gameRepair.ts); −1 2026-11-26: that unreachable wiring removed (Q-3374) — the placeholder repair undoes with a byte-exact restore and runs BEFORE this refresh too
     for (const call of [...restores, ...verifiedRepairRestores]) expect(call.index).toBeLessThan(refreshAt);
   });
 

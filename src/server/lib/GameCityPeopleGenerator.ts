@@ -17,7 +17,8 @@ import { geometryTier, mergeGeometries, type GeometryTier } from './surfaces';
 /** What the walkers need from city traffic (createCityTraffic returns it): the lights and where the cars are. */
 export interface TrafficLike {
   lightAt(i: number, j: number, axis: 'x' | 'z', ahead?: number): string;
-  cars: Array<{ object: THREE.Object3D }>;
+  /** Each vehicle, its length along its heading (a bus is 10 m; a crossing is judged by the whole body, not its centre). */
+  cars: Array<{ object: THREE.Object3D; length?: number }>;
 }
 
 export interface CityPeopleOptions {
@@ -245,9 +246,11 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       for (let t = 0; t <= crossTime + 1; t += 0.5) if (traffic.lightAt(c.node[0], c.node[1], c.axis, t) !== 'red') return false;
       const mx = (c.ax + c.bx) / 2, mz = (c.az + c.bz) / 2;
       const p = new THREE.Vector3();
+      // 🚌 The whole BODY, not its centre (Q-3547: a 10 m bus pulled out of the junction and stopped across the zebra; judged
+      // by its centre it was "far", and the person walked through it).
       for (const car of traffic.cars) {
         inCity(car.object, p);
-        if (Math.hypot(p.x - mx, p.z - mz) < plan.road / 2 + 4) return false;
+        if (Math.hypot(p.x - mx, p.z - mz) - (car.length ?? 4.5) / 2 < plan.road / 2 + 4) return false;
       }
     }
     return true;
@@ -263,6 +266,18 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       const ahead = (p.x - w.x) * fx + (p.z - w.z) * fz;
       const side = Math.abs((p.x - w.x) * fz - (p.z - w.z) * fx);
       if (ahead > 0 && ahead < 1.2 && side < 0.6) return true;
+    }
+    return false;
+  };
+  /** A vehicle's body (its length along its heading, 2.4 m wide with a margin) is where a crossing person must not step. */
+  const inACar = (x: number, z: number): boolean => {
+    if (!traffic) return false;
+    const p = new THREE.Vector3();
+    for (const car of traffic.cars) {
+      inCity(car.object, p);
+      const h = car.object.rotation.y, fx = Math.sin(h), fz = Math.cos(h);
+      const along = (x - p.x) * fx + (z - p.z) * fz, side = (x - p.x) * fz - (z - p.z) * fx;
+      if (Math.abs(along) < (car.length ?? 4.5) / 2 + 0.4 && Math.abs(side) < 1.2) return true;
     }
     return false;
   };
@@ -327,6 +342,9 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
           const c = w.crossing;
           const fx = c.bx - c.ax, fz = c.bz - c.az, fl = Math.hypot(fx, fz) || 1;
           if (blocked(w, avoid, fx / fl, fz / fl)) continue;
+          // Never into a vehicle on the zebra: wait at the edge of its body until it has gone (Q-3547).
+          const stride = Math.max(w.speed, CROSS_SPEED) * dt + 0.3;
+          if (inACar(w.x + (fx / fl) * stride, w.z + (fz / fl) * stride)) continue;
           // People cross briskly (at least CROSS_SPEED), as they do on a real zebra.
           if (moveToward(w, c.bx, c.bz, Math.max(w.speed, CROSS_SPEED) * dt)) {
             w.block = c.to; w.state = 'leave';

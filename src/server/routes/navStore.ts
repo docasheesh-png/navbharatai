@@ -22,6 +22,7 @@ import type { GrantEmail } from '../AgentV3/featureFlag';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { canAccessNavData, withNavDataAccess, NAVDATA_TOKEN_HEADER } from '../lib/navDataAccess';
+import { storeApiOrigin, withApiOrigin } from '../lib/storeApiOrigin';
 import { SharedReadCache } from '../lib/boundedCache';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
 import axios from 'axios';
@@ -1081,7 +1082,10 @@ export function registerNavStoreRoutes(app: Express): void {
       }
       bumpWebAppCounter(found.id, 'runs');
       res.setHeader('Cache-Control', 'private, no-store');
-      res.json({ html: withNavDataAccess(compiled.html, found), name: found.name });
+      // The API origin this request reached, so a store app's online socket dials the API and not the phone's own
+      // shell (storeApiOrigin.ts). Per response, like the access capability — never in the shared cache.
+      const apiOrigin = storeApiOrigin(req.headers as Record<string, string | string[] | undefined>, req.protocol);
+      res.json({ html: withApiOrigin(withNavDataAccess(compiled.html, found), apiOrigin), name: found.name });
     } catch (e) {
       logStoreError('web/open', e);
       res.status(502).json({ error: 'Could not open that app.' });

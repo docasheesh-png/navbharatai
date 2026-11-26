@@ -19,6 +19,11 @@
  *   • death plays the body's fall, emits ENTITY_DIED (and Health's own ENEMY_DIED for a hostile one), and after a few
  *     seconds the entity is removed from the scene and disposed (ENTITY_REMOVED). A dead entity is never a target.
  *   • goTo(x, z) walks it to a point and emits ENTITY_ARRIVED only when it is really there (police, a delivery, a guard).
+ *   • spawnAround(n, spec) puts characters in a ring AROUND THE PLAYER, on the ground (2026-11-26, report #2519: "Knight
+ *     Boxer enemy show nahi ho rahe" — the enemies of a 1000-house city stood around a fixed centre far from the hero).
+ *   • window.__nbEntities() is a read-only list of every live character (kind, hostile, position, a visible body) and the
+ *     player's position, so the playtest can PROVE that the enemies a game was asked for are there and in view
+ *     (gamePlaceholderProbe.ts MISSING_ENEMIES). It reads; it never changes the game.
  */
 export const GAME_ENTITIES_PATH = 'src/game/systems/entities.ts';
 
@@ -144,6 +149,30 @@ interface Inner extends Entity {
 
 let nextId = 1;
 
+/** Every live Entities in the page, for the read-only playtest hook. */
+const LIVE = new Set<Entities>();
+function publishHook(): void {
+  const w = (typeof window !== 'undefined' ? window : null) as unknown as { __nbEntities?: () => unknown } | null;
+  if (!w) return;
+  if (LIVE.size === 0) { delete w.__nbEntities; return; }
+  w.__nbEntities = () => {
+    let spawned = 0, failed = 0;
+    let player: number[] | null = null;
+    const list: Array<[string, number, number, number, number, number, number]> = [];
+    for (const group of LIVE) {
+      spawned += group.report.spawned; failed += group.report.failed;
+      const pp = group.playerPosition();
+      if (!player && pp) player = [pp.x, pp.y, pp.z];
+      for (const e of group.all) {
+        if (list.length >= 64) break;
+        const p = e.object.position;
+        list.push([e.kind.slice(0, 24), e.hostile ? 1 : 0, e.alive ? 1 : 0, p.x, p.y, p.z, hasVisibleMesh(e.model) ? 1 : 0]);
+      }
+    }
+    return { spawned, failed, player, list };
+  };
+}
+
 export class Entities {
   private readonly list: Inner[] = [];
   private readonly off: (() => void) | null;
@@ -154,6 +183,30 @@ export class Entities {
   constructor(private readonly host: EntityHost, options: EntityOptions = {}) {
     this.options = options;
     this.off = host.onStep ? host.onStep((dt) => this.update(dt)) : null;
+    LIVE.add(this);
+    publishHook();
+  }
+
+  /** The player's feet now (the playtest hook reads it). */
+  playerPosition(): THREE.Vector3 | null { return this.host.player?.object?.position ?? null; }
+
+  /**
+   * Put 'count' characters in a ring AROUND THE PLAYER, between 'near' and 'far' metres away, each on the ground —
+   * the way to make sure the enemies the user asked for are where the hero is, not around a fixed point far away.
+   * Spread evenly by the golden angle (the same ring every time); a spot whose spawn fails is skipped and counted.
+   */
+  spawnAround(count: number, spec: Omit<CharacterSpec, 'x' | 'z'> = {}, ring: { near?: number; far?: number } = {}): Entity[] {
+    const centre = this.host.player.object.position;
+    const near = Math.max(2, ring.near ?? 8), far = Math.max(near, ring.far ?? 20);
+    const out: Entity[] = [];
+    const n = Math.max(0, Math.min(64, Math.floor(count)));
+    for (let i = 0; i < n; i++) {
+      const a = i * 2.399963229728653; // the golden angle
+      const d = near + (far - near) * ((i * 0.618034) % 1);
+      const e = this.spawn({ ...spec, x: centre.x + Math.cos(a) * d, z: centre.z + Math.sin(a) * d });
+      if (e) out.push(e);
+    }
+    return out;
   }
 
   /** Every entity still in the game (alive, or lying dead before removal). */
@@ -370,6 +423,8 @@ export class Entities {
   dispose(): void {
     for (const e of [...this.list]) e.remove();
     this.off?.();
+    LIVE.delete(this);
+    publishHook();
   }
 
   private hurt(e: Inner, amount: number, at: { x: number; y: number; z: number }, byPlayer: boolean): boolean {

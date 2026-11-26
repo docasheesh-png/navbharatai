@@ -6300,6 +6300,45 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
+## 2026-11-26 — Asked-for enemies are put where the hero is, and the playtest proves they are on screen (Q-3401)
+
+The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attack kare, to builder pura kam kar deta hai … par real game me enemies show hi nahi hote".
+
+- **Evidence:** BR2519 ("Knight Boxer enemy show nahi ho rahe hai"). The builder said the enemies were visible and attacking.
+  - Its enemies were hand-made: a custom GLTFLoader dressed bots of a `criminal-mobs` feature, around a fixed centre of a 1000-house city.
+  - It wrote that it "could not test by playing". The playtest ran out of time while starting the game (Q-3332).
+- **Earlier work, merged 2026-11-25 (#4532/#4533):** the kit already had `Entities`, which verifies each spawn: in the scene, at a finite position, with a visible body. The admin's game was built the day before.
+- **Two gaps were still open:**
+  1. Nothing PROVED that asked-for enemies are on screen. The played evidence covered score, level, sound, restart and a vehicle.
+  2. There was no primitive to put characters where the hero is.
+- **Fix:**
+  - `Entities.spawnAround(n, spec, {near, far})` rings characters round the PLAYER, on the ground, at golden-angle spacing.
+  - `window.__nbEntities` is a read-only list of live characters plus the player's position. It is added by the constructor and removed by `dispose`.
+  - The playtest's existing placeholder page hook measures, with the game's own camera: hostiles alive, the nearest one's distance, and how many are in the frame.
+  - `MISSING_ENEMIES` is said only when the contract asked for enemies. It fires when none is alive (with the failed-spawn count), when all are more than 60 m away and none is in view, or when the enemies are made outside Entities. It goes to the builder through the existing placeholder repair note.
+  - The system prompt and the systems instructions say "enemies go where the hero is".
+- **Proof:** `tests/enemiesAreWhereTheHeroIs.test.ts`, 8 tests, run on the real emitted kit and the real page hook. Each of three reversions made it fail: rings round the origin, no hook, no camera check. The related suites pass: 3906 tests in 164 files.
+- **What it does NOT fix:**
+  - A game the playtest never plays gets no page read (Q-3332, owned elsewhere).
+  - The admin's existing city game keeps its hand-made enemies until a turn moves them onto Entities. With this change, the next turn's playtest says so, and the builder is told the fix.
+
+## 2026-11-26 — Q-3402 (BR2532): a repair pass never breaks a file that was clean
+
+- **Report:** admin, "isme game ban gaya par enemy aa hi nahi rahe". The game built, but no enemy appeared.
+- **What happened:**
+  - The builder wrote `src/game/features/monsters.ts`. The write-time typecheck said that file was clean, with 3 errors left in old kit files.
+  - After the summary, the typecheck-gate repair pass was shown every written file and asked to fix those 3 errors. It rewrote `monsters.ts` with APIs that do not exist (`world.scene`, `controller.position`).
+  - The re-check failed, and the pass's writes were kept. No monster reached the scene, and the production build named the monsters.ts errors.
+  - The builder's summary blamed old kit files.
+- **Root cause:** a model repair's writes were kept even when they made the project worse. The typecheck-gate pass reverted nothing. The agentic endgame reverted only when the TOTAL error count rose, so 3 errors fixed in one file plus 3 new ones in another passed.
+- **Also:** the turn was an edit, and an edit turn records no game contract. So the playtest never looked for the asked-for enemies.
+- **Fix:**
+  - `repairBreakage.ts` holds one pure rule. A touched file that gained its first error goes back. A raised total puts back every touched file.
+  - `buildPhases/typecheckGateRepair.ts` (moved out of the route) snapshots, writes, re-checks, puts back what the rule names, records `REPAIR_REVERTED`, and re-checks.
+  - `EndgameRepair` applies the same per-file rule beside its count rule.
+  - `asksForEnemies` (gameIntent.ts) reads enemies from the turn's own words (English, Hinglish, Hindi; a declined sentence and "chatbot" do not count). The playtest uses it when there is no contract.
+- **Proof:** `tests/aRepairNeverBreaksACleanFile.test.ts`, 9 tests, replaying BR2532 on the real helper and the real endgame. Three reversions each made it fail: the rule, the endgame rule, the Hindi words. The related suites pass: 774 tests in 45 files.
+- **Watch:** the next game edit that asks for enemies. `REPAIR_REVERTED` shows if a repair broke a file; `MISSING_ENEMIES` shows if none is on screen.
 ### 2026-11-26 — Q-3392: the online Royale daily match-start cap is shared across instances (PR #4559)
 
 - **Problem:** the per-app daily cap (300) lived in each Cloud Run instance's memory, so N instances allowed N × 300 starts a day.

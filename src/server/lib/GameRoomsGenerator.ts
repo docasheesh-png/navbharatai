@@ -14,11 +14,14 @@
  *
  * String.raw: no backticks and no dollar-brace sequences inside the module text.
  */
-import { demoUntilKeySaved } from '../AppContext/navPaths';
-
 export const GAME_ROOMS_PATH = 'src/game/three/rooms.ts';
 export const ROOM_KEY_NAMES = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] as const;
-export const ROOM_NOT_CONFIGURED = demoUntilKeySaved('Online multiplayer', ROOM_KEY_NAMES.join(' and '));
+/**
+ * The RED line, word for word what demoUntilKeySaved (AppContext/navPaths.ts) says for these keys. Written out here because
+ * the kit-history command builds this file alone (only src/server/lib resolves at a past revision);
+ * tests/friendsPlayOnTheUsersOwnBackend.test.ts fails the moment the two differ.
+ */
+export const ROOM_NOT_CONFIGURED = 'Online multiplayer is a demo, not real. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in NavBharatAI → Settings → App Settings → Secrets & API Keys to make it real.';
 
 export const GAME_ROOMS = String.raw`import * as THREE from 'three';
 

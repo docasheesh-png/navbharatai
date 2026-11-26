@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { generateGame3D, GAME_3D_MODULES } from '../src/server/lib/Game3DGenerator';
 import { GAME_ROOMS_PATH, ROOM_NOT_CONFIGURED, onlineMultiplayerWanted, ROOMS_HANDOFF } from '../src/server/lib/GameRoomsGenerator';
 import { gameKitHandoffBlock } from '../src/server/AgentV3/gameKitSeed';
+import { demoUntilKeySaved } from '../src/server/AppContext/navPaths';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const DIR = join(__dirname, `.tmp-rooms-${process.pid}`);
@@ -53,6 +54,8 @@ describe('#10 a room on the user\'s own Supabase', () => {
     expect(room.status).toBe('not-configured');
     expect(room.reason).toBe(ROOM_NOT_CONFIGURED);
     expect(ROOM_NOT_CONFIGURED).toMatch(/VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY/);
+    // The same words the app's no-fake-feature rule uses everywhere (navPaths.ts), never a drifted copy.
+    expect(ROOM_NOT_CONFIGURED).toBe(demoUntilKeySaved('Online multiplayer', 'VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY'));
     room.sendState({ x: 1 }); room.send('shot', {});
     expect(room.peers.size).toBe(0);
   });

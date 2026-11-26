@@ -6359,3 +6359,22 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+## 2026-11-26 — failedbr #2523/#2525 queue, first four rows (Q-3468, Q-3462, Q-3466, Q-3467) — PR #4572
+
+- **Q-3468:** HUD and camera words were read as objects in the world.
+  - "score counter" gave a TABLE spec. "first-person view" gave a HUMAN.
+  - The library reader kept its own exception list. It also asked for a human and a MECHANIC ("shooting mechanics").
+  - **Fix:** the hero contract's one list of non-object senses now covers these words. The library reader uses the same list.
+  - **Test:** `tests/aHudWordIsNotAnObject.test.ts`, using the real #2523 prompt.
+- **Q-3462:** the write-time typecheck said a test file "fails the production build". The release build excludes test files.
+  - **Fix:** `releaseSkipsTests` reads the project's own package.json and build config. A test file's error now gets its own line.
+  - **Test:** `tests/aTestFileErrorDoesNotFailTheRelease.test.ts`.
+  - **Sibling recorded as Q-3494:** the end-of-build gate still counts test-only errors as a type failure.
+- **Q-3466:** the report printed `COMPLEXITY_ROUTING: COMPLEX` next to `complexityBand: cheapest band`.
+  - **Fix:** `routedStartTier` is now the single source for both lines.
+  - **Test:** `tests/oneComplexityBandInTheReport.test.ts`.
+- **Q-3467:** `SURPLUS_FALLBACK` said "the Weak ladder", but the build went on to ENGINE_R1.
+  - **Fix:** `weakEnginesBeforeLadder()` builds the chain, and both report lines name the engines from it.
+  - **Test:** `tests/theFallbackNamesTheEngineThatRuns.test.ts`.
+- **Proof:** each test was reverted and failed.

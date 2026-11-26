@@ -27,7 +27,7 @@
 // PURE, no imports.
 
 /** What naming a title asks for: the kind decides genre, view and map (gameIntent, gameKitSeed, athreeMapIntent). */
-export type GameTitleKind = 'royale' | 'fps' | 'runner' | 'gta' | 'sandbox' | 'other';
+export type GameTitleKind = 'royale' | 'fps' | 'runner' | 'gta' | 'sandbox' | 'fighting' | 'other';
 
 interface TitleEntry {
   /** The title as a person writes it — the contract's `reference` and the scope reason use this. */
@@ -65,6 +65,10 @@ const CATALOGUE: readonly TitleEntry[] = [
   // ── Open world ─────────────────────────────────────────────────────────────────────────────────────────────────
   { name: 'GTA', kind: 'gta', spellings: ['gta', 'gta 5', 'gta v', 'gta vice city', 'gta san andreas', 'gta sa', 'grand theft auto', 'जीटीए'] },
   { name: 'Minecraft', kind: 'sandbox', fuzzy: true, spellings: ['minecraft', 'mine craft', 'maincraft', 'main craft', 'mincraft', 'minecraf', 'maincraf', 'mainkraft', 'minekraft', 'mainecraft', 'माइनक्राफ्ट', 'माइनक्राफ़्ट', 'मायनक्राफ्ट'] },
+  // Fighting (game-maker audit 2026-11-26: "tekken / street fighter jaisa" read as no genre at all).
+  { name: 'Tekken', kind: 'fighting', spellings: ['tekken', 'tekkan', 'tekan', 'टेक्केन'] },
+  { name: 'Street Fighter', kind: 'fighting', fuzzy: true, spellings: ['street fighter', 'streetfighter', 'stret fighter', 'street fiter'] },
+  { name: 'Mortal Kombat', kind: 'fighting', fuzzy: true, spellings: ['mortal kombat', 'mortal combat', 'mortalkombat'] },
   // ── Other unmistakable games ───────────────────────────────────────────────────────────────────────────────────
   { name: 'Among Us', kind: 'other', spellings: ['among us', 'amongus', 'amang us'] },
   { name: 'Candy Crush', kind: 'other', fuzzy: true, spellings: ['candy crush', 'candycrush', 'kandy crush'] },

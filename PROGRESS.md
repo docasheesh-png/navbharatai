@@ -6404,6 +6404,24 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Q-3470:** `deadBuildHandoff.ts` takes the dead build's writes and its last typecheck from its saved report. `loadDeadBuildHandoff` reads them through the index-safe newest-refs reader and puts them in front of the prompt, before the conversation recap.
 - **Test:** `tests/aDeadBuildIsFoundAndHandedOver.test.ts`, using #2525's own saved report as the fixture (`tests/fixtures/failedbr2525-dead-build-report.json`). Three reversions each fail it.
 - **Q-3471 → 🟡 BLOCKED (admin decision):** assets and sounds download from one origin through a process-wide permit that refuses requests past one in the queue. That refusal is deliberate provider politeness, so running the two side by side would lose models and sounds when the cache is cold. The options are in the queue row; the recommendation is to let the permit queue a request for up to ~8 s.
+## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
+
+Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
+Honest scope: this PR builds what can be built and verified in the repo; the infrastructure items are recorded BLOCKED.
+
+- **Q-3480 places:** `worldSetting.ts` — the named places and lands (mapGrowthIntent's vocabulary), counts, order, refusals.
+  Houses/roads never turn a named village into a city; the open-world seed writes exactly those regions; a PLACES line
+  travels into milestones. Real prompt locked: failedbr #2520 "ek gav(village) game banao".
+- **Q-3481 genre kits:** `generate_genre_kits` — fighting.ts and towerDefense.ts (pure, 60 Hz, 2D or 3D), seeded by genre,
+  named in the handoff, design doc, system prompt and AppKnowledgeBase. Tests play the generated files frame by frame.
+- **Q-3482 benchmark:** `gameCoverage.ts` — 50 canonical games; today 22 of 50 get a starter / rules / genre kit, 28 are
+  kit-only (the builder improvises), 0 fall out of the game path. Ratchet MAX_KIT_ONLY = 28, only down. Fixed on the way:
+  ball sports read before shooters; Tekken / Street Fighter / Mortal Kombat in the shared title catalogue.
+- **Open / blocked (rows in BUILD_REPORT_QUEUE.md):** Q-3483 runner 3D starter, Q-3484 GTA with a car gets no player,
+  Q-3485 voxel kit, Q-3486 village drawn as a small town, Q-3487 GPU playtest, Q-3488 57 library subjects, Q-3489
+  post-processing / IK / retargeting, Q-3490 general multiplayer, Q-3491 real-phone runs, Q-3492 playtest adapters,
+  Q-3493 the 28 kit-only games. Auto-repair stays Q-3374.
+- Q-3460 (kit typecheck, #4554) closed — merged.
 ## 2026-11-26 — Q-3380: one no-pointer-lock stub on every platform browser that sends input (#4568)
 - **Problem:** a game that calls `requestPointerLock` floods a headless platform browser with synthetic input (108,052 messages in 3 s, 1–4 fps on #4552). #4553 stubbed it in the playtest's desktop context and the click explorer with two hand-written copies.
 - **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.

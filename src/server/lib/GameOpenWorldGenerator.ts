@@ -37,6 +37,7 @@ import { softwareRenderer } from '../three/surfaces';
 import { geometryTier } from '../three/surfaces';
 import { settings } from '../core/settings';
 import { localLowestY } from '../three/surfaces';
+import { setGround } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { damagePlayer } from '../core/state';
 import { events } from '../core/events';
@@ -475,6 +476,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const ground = markWorldCollider(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ visible: false })), 'ground');
   ground.frustumCulled = false;
   ctx.scene.add(ground);
+  // 🚗 THE MAP'S GROUND IS THE KIT'S GROUND (admin 2026-11-26 #7/#8/#11: "cities ke beech car zameen me dhas jati hai / hawa
+  // me"). The big map never told the kit where its ground is, so getGround() was null here: settleOnGround (every driven car)
+  // and groundScene (every frame's "nothing sinks") returned at once, and a car kept the height it had while the hills rose
+  // and fell under it between the places. Now every mover follows the map's own height, in render metres through the
+  // floating origin; a flier keeps userData.ground = false, and a car in water is the water's (WORLD.water).
+  setGround((x, z) => map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z));
   const centre = { x: Number.NaN, z: Number.NaN };
   const step = patchSize / cells;
   const layGround = (wx: number, wz: number): void => {
@@ -1716,6 +1723,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     },
     dispose() {
       ctx.scene.remove(ground); geometry.dispose(); (ground.material as THREE.Material).dispose();
+      setGround(null);
       disposed = true;
       for (const off of offCrowdBlows) off();
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });

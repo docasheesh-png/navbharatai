@@ -6382,3 +6382,7 @@ Stacked on PR C. Roots: the timing windows (30/70 ms) were tighter than a phone'
 ## 2026-11-26 — Q-3510 (#2): a city building opens when the user asks
 
 Stacked on the cricket branch. city.openLot redraws one block without the lot's ground floors and stands a walk-in building (three/buildings.ts) there; WORLD.openBuildings opens the door the player walks up to. Each city block now draws from its own random stream (window tones per block change once, deterministically). tests/aCityBuildingOpensWhenAsked.test.ts.
+
+## 2026-11-26 — Q-3511 (#7/#8/#11): a car follows the open world's ground between the places
+
+Root: the Athree open world never registered its terrain with the kit's ground (getGround() null), so settleOnGround and groundScene did nothing there. createOpenWorld now calls setGround with the map's height through the floating origin. tests/aCarFollowsTheOpenWorldGround.test.ts (reverted → fails). Note: the first build of the #2 reader matched "open-world"/"khule maidan" in failedbr #2485's request; fixed on the #2 branch with that request as a fixture.

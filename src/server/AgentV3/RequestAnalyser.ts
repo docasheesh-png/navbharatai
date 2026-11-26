@@ -52,6 +52,20 @@ export function startBandLabel(tier: StartTier | string | null | undefined): str
   }
 }
 
+/**
+ * The band the build ACTUALLY opened in, from the routing verdict that opened it (Q-3466, failedbr #2523/#2525). PURE.
+ *
+ * The same report said "COMPLEXITY_ROUTING: COMPLEX (score 15)" and "requestAnalysis.complexityBand: cheapest band":
+ * two readers of one score. The band came from the analyser's old score thresholds (≤ 20 → cheapest), which no longer
+ * route anything; the build opened where the complexity verdict sent it. A complex build opens on the ladder's second
+ * rung (the standard band, or the heaviest when the analyser said so); a simple one on its first (the cheapest). Both
+ * the routing line and the report's band come from here.
+ */
+export function routedStartTier(analysed: StartTier | string | null | undefined, complex: boolean): StartTier {
+  if (!complex) return 'gemini';
+  return String(analysed ?? '').trim() === 'opus' ? 'opus' : 'sonnet';
+}
+
 /** The band's key back from its report label (Q-2748): reports carry the label only; telemetry still groups by key. */
 export function startTierFromBandLabel(label: string | null | undefined): StartTier | null {
   switch (String(label ?? '').trim()) {

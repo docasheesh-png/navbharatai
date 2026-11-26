@@ -723,7 +723,7 @@ import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../Agen
 import type { InitialLaneDecline } from '../AgentV3/initialLaneDecline';
 import { assessBuildInput, shouldAskWhatToBuild, divertsToChat, steerForUnbuildable } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
-import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
+import { analyzeRequest, routedStartTier, startBandLabel, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
 import { heroObjectContract, wantsSceneObjects } from '../lib/heroObjectSpec';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
@@ -14852,7 +14852,8 @@ async function noteBuildOutcome(
       // of the prompt, while `analyzeRequest` scores explicit length bands (+5 over 300, +10 over 800)
       // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
       // different number printed as the same fact.
-      try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
+      // The band printed is the one the routing verdict opened the build in (Q-3466) — one reader of the score.
+      try { buildDiag.setRequestAnalysis(analysis && { ...analysis, startTier: routedStartTier(analysis.startTier, buildIsComplex) }); } catch { /* observation only — never a build's problem */ }
       // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
       // a complexity of 60 must explain where the rest came from (autopsy e725e002).
       if (attachmentRead) {
@@ -15311,8 +15312,8 @@ async function noteBuildOutcome(
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'COMPLEXITY_ROUTING', autoResolved: true,
           message: buildIsComplex
-            ? `Complexity: COMPLEX (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's second rung, past the cheap flash opener.`
-            : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung.`,
+            ? `Complexity: COMPLEX (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's second rung, past the cheap flash opener (${startBandLabel(routedStartTier(analysis?.startTier, true))}).`
+            : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung (${startBandLabel(routedStartTier(analysis?.startTier, false))}).`,
           detail: complexityDecision.reason,
         });
       } catch { /* diagnostics are best-effort — never blocks a build */ }

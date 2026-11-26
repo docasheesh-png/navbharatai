@@ -70,8 +70,6 @@ interface PublicApp {
   developerName: string; publishedAt: number; sha256: string;
   /** The uploader's public creator code — opens their profile. Never the account id. */
   creatorId?: string;
-  pinned?: boolean;
-  pinOrder?: number | null;
 }
 
 interface MineApp {
@@ -157,8 +155,6 @@ interface WebApp {
   /** Who made it — a display name and a public creator code (never the account uid). */
   creatorName?: string;
   creatorId?: string;
-  pinned?: boolean;
-  pinOrder?: number | null;
 }
 
 export interface NavAppStoreProps {
@@ -320,13 +316,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const viewWeb = browseView === 'general' ? webApps : (feed.view === browseView ? feed.webApps : []);
   const viewLoading = browseView === 'general' ? loading : feed.loading || feed.view !== browseView;
   const shelves = shelvesFor(kindFilter, HIDE_ANDROID_INSTALLS);
-  // One mixed pinned shelf preserves the admin's exact order across APKs and Web Apps.
-  const pinnedItems = useMemo(() => [
-    ...(shelves.web ? viewWeb.filter((a) => a.pinned).map((app) => ({ kind: 'web' as const, app, pinOrder: app.pinOrder ?? Number.MAX_SAFE_INTEGER })) : []),
-    ...(shelves.apk ? viewApk.filter((a) => a.pinned).map((app) => ({ kind: 'apk' as const, app, pinOrder: app.pinOrder ?? Number.MAX_SAFE_INTEGER })) : []),
-  ].sort((a, b) => a.pinOrder - b.pinOrder), [viewWeb, viewApk, shelves.web, shelves.apk]);
-  const regularViewWeb = useMemo(() => viewWeb.filter((a) => !a.pinned), [viewWeb]);
-  const regularViewApk = useMemo(() => viewApk.filter((a) => !a.pinned), [viewApk]);
+  // 📌 AN ADMIN'S PIN IS INVISIBLE (admin 2026-11-26: "admin jis app ko pin kare users ko pata bhi nahi lage … user ko
+  // naturally woh app top par show ho"). There used to be a separate "Pinned by NavBharatAI" shelf; now the server simply
+  // lists a pinned app FIRST and says nothing else, so it stands at the top of its own list in the same tile as every app.
+  const regularViewWeb = viewWeb;
+  const regularViewApk = viewApk;
   const pagedWebApps = usePagedList(regularViewWeb, { resetKey: `${browseView}|${kindFilter}` });
   const pagedApps = usePagedList(regularViewApk, { resetKey: `${browseView}|${kindFilter}` });
   const anyInView = (shelves.web && viewWeb.length > 0) || (shelves.apk && viewApk.length > 0);
@@ -335,7 +329,6 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   // 👍 · 👎 · 💬 under every app on the page, fetched for the visible tiles in ONE request. Counts are
   // public; pressing asks for a sign-in. See appMart/AppMartSocial.tsx and routes/appMartSocial.ts.
   const socialKeys = [
-    ...pinnedItems.map((item) => item.kind === 'web' ? webKey(item.app.id) : apkKey(item.app.id)),
     ...pagedWebApps.visible.map((a) => webKey(a.id)),
     ...pagedApps.visible.map((a) => apkKey(a.id)),
   ];
@@ -1100,25 +1093,6 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               </div>
             );
           })()
-        )}
-
-        {tab === 'browse' && browseView === 'general' && !viewLoading && pinnedItems.length > 0 && (
-          <section className="mb-6">
-            <p className="text-sm font-bold text-body mb-2 flex items-center gap-1.5"><Pin size={13} className="text-warn" /> Pinned by NavBharatAI</p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {pinnedItems.map((item) => (
-                <button
-                  key={`${item.kind}:${item.app.id}`}
-                  onClick={() => item.kind === 'web' ? void openWebDetail(item.app) : setOpenApp(item.app)}
-                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-card border border-amber-500/30 hover:border-amber-500/60 text-left min-w-0"
-                >
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-warn">{item.kind === 'web' ? 'Instant app' : 'Android app'}</span>
-                  <span className="text-sm font-semibold leading-snug line-clamp-2 w-full">{item.kind === 'web' ? item.app.name : item.app.appName}</span>
-                  <span className="text-[11px] text-accent-text">Open app →</span>
-                </button>
-              ))}
-            </div>
-          </section>
         )}
 
         {/* ── Half 1: PLAY INSTANTLY (web apps) — tap and it runs ── */}

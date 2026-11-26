@@ -6585,6 +6585,12 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
 
+### 2026-11-26 (same branch, #4562) — an admin's App Mart pin is invisible to users
+Admin, with a phone screenshot of App Mart's "Pinned by NavBharatAI" shelf: *"admin jis app ko pin kare users ko pata bhi nahi
+lage … user ko naturally woh app top par show ho"*. Root cause: the public lists already put pinned apps first, and then also
+sent `pinned` / `pinOrder` on every row, which NavAppStore drew as its own amber shelf. Now the order is the only trace: no pin
+field in `/api/nav-store/apps` or the web-apps list (Newest and For You keep pinned first), no shelf, the same tile as every
+app; the admin's Pin / Unpin is unchanged. Locked: `tests/anAdminPinIsInvisibleToUsers.test.ts` (reverted-and-failed).
 ## 2026-11-26 — Q-3514 (#20): real 3D graphics when the user asks
 
 three/realism.ts (GameOptions.graphics 'real'): image-based lighting and soft shadows everywhere; GTAO + subtle bloom + output pass on a capable device only. Stacked on the car-ground branch. tests/realGraphicsWhenAsked.test.ts.
@@ -6635,6 +6641,13 @@ three/rooms.ts: joinRoom on the user's Supabase Realtime (raw websocket, Phoenix
 - **Accounts:** none marked. A refused publish saved nothing and logged only `STORE_PUBLISH_REFUSED`.
 - **Lock:** `tests/aKitGameIsNotACrime.test.ts` (census of every recipe; failed 11 tests when whole-document pairing was restored) and the hold tests in `storePublishSafety.test.ts` (failed 4 when "illegal refuses" was restored).
 
+### 2026-11-26 — after #4562 merged: main's broken city-people kit, and no second set of enemies
+#4562 was merged from GitHub at its conflict-resolution commit, without the App Mart pin fix and the kit-history update, and
+with two sessions' "people fall down" work merged into one file: `citypeople.ts` declared `DOWN_SECONDS` twice (6 and 4), so
+the kit file did not compile — every new open world with city people broke. Fixed: one `DOWN_SECONDS` (6, the first session's).
+Found in the same merge: a new GTA game whose user named enemies got BOTH the requested-enemies feature and street danger's
+own enemies; `streetDangerSource({ ownEnemies })` now brings only bystanders and police then. Locked in
+`tests/anOpenWorldHasStreetDanger.test.ts`; the kit typecheck test now passes apart from this container's missing cannon-es.
 ## 2026-11-26 — main red after the game stack merged: two sessions built the same crowd and features-list code
 
 The game stack (#4578…#4584) and another session's street-danger work (e92a4949, "city people are solid and a punch knocks

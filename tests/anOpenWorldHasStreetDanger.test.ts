@@ -87,3 +87,16 @@ describe('the kit ground is the map ground (sibling found while wiring the enemi
     expect(GAME_OPEN_WORLD_BRIDGE).toContain('setGround(null);');
   });
 });
+
+describe('never a second set of enemies (found merging with the requested-enemies feature, 2026-11-26)', () => {
+  it('with the user\'s own enemies written, street danger brings bystanders and police but no enemies of its own', async () => {
+    const { streetDangerSource } = await import('../src/server/lib/GameOpenWorldGenerator');
+    expect(streetDangerSource()).toBe(GAME_STREET_DANGER_FEATURE);
+    const own = streetDangerSource({ ownEnemies: true });
+    expect(own).toMatch(/^\s*enemies: 0,/m);
+    expect(own).toMatch(/^\s*bystanders: 4,/m);
+    expect(own).not.toBe(GAME_STREET_DANGER_FEATURE);
+    const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
+    expect(src).toContain('streetDangerSource({ ownEnemies: !!enemyReq })');
+  });
+});

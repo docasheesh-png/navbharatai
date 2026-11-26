@@ -6169,7 +6169,7 @@ finalizer) run only at the END of a build, and a build with `!result.ok` bills 0
 JS, so it never reached a debit: it was not charged. #2525 is charged only if it settles ok, for its own spend (estimate
 ₹0.10).
 
-**Fixed in PR (claude/kit-typechecks-in-app):** Q-3420 — the seeded game kit failed its own first typecheck (6 errors
+**Fixed in PR #4554:** Q-3420 — the seeded game kit failed its own first typecheck (6 errors
 across playerBody, externalAssets ×2, RacingRoadGame, openWorld, worldLayer, plus the LOD block). New census
 `tests/theKitTypechecksInTheAppItShipsTo.test.ts` compiles the whole kit under the scaffold tsconfig and strict; each
 fix reverted-and-failed; a scratch app with three@0.180 + @types/three + TS 5.9.3 compiles it with 0 errors.

@@ -6169,6 +6169,23 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
 
+## 2026-11-25 — Autopsy failedbr #2523 + #2525 (FPS shooter, server lost, continue build)
+
+**Billing check (code read, not assumed):** both build debits (`debitWalletForBuild`, agentv3.ts settle and watchdog
+finalizer) run only at the END of a build, and a build with `!result.ok` bills 0. #2523's server died without running
+JS, so it never reached a debit: it was not charged. #2525 is charged only if it settles ok, for its own spend (estimate
+₹0.10).
+
+**Fixed in PR #4554:** Q-3460 — the seeded game kit failed its own first typecheck (6 errors
+across playerBody, externalAssets ×2, RacingRoadGame, openWorld, worldLayer, plus the LOD block). New census
+`tests/theKitTypechecksInTheAppItShipsTo.test.ts` compiles the whole kit under the scaffold tsconfig and strict; each
+fix reverted-and-failed; a scratch app with three@0.180 + @types/three + TS 5.9.3 compiles it with 0 errors.
+
+**Recorded in BUILD_REPORT_QUEUE.md:** Q-3461 (vitest declared, never installed — decision), Q-3462 (typecheck note says
+test errors fail the release), the four lost servers are main's Q-3354 (recorded first by another session, same evidence), Q-3463 (no live dead-build sweep), Q-3464 (Surplus 404 on six models → provider
+breaker; evidence for Q-3316), Q-3465 (fallbackMs 0), Q-3466 (COMPLEX vs cheapest band), Q-3467 (fallback message names
+the wrong ladder), Q-3468 (HERO_OBJECTS "table"), Q-3469 (Surplus on COMPLEX game builds — decision), Q-3470 (no
+continue hand-off), Q-3471 (seed assets serial after recipes).
 ## 2026-11-25 — "FREE AI CHALU KAREIN": an app's AI, free, in three steps under the ❗ button
 
 Admin, verbatim: *"navbharatai me jab bhi koi user ai banwaye, koi bhi ai. to header me ❗ button me 2

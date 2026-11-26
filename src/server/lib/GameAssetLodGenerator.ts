@@ -12,7 +12,7 @@ export function gameAssetLodSource(): string {
     const g = mesh.geometry, p = g.getAttribute('position');
     if (!p || p.count < 200 || p.count > 2000 || vertices + p.count > 6000 || !mesh.parent || mesh.children.length
       || mesh instanceof THREE.SkinnedMesh || mesh instanceof THREE.InstancedMesh || !mesh.visible || Array.isArray(mesh.material) || g.groups.length > 1
-      || Object.values(g.morphAttributes).some(v => v.length) || (g.index?.count ?? p.count) > 12000
+      || Object.values(g.morphAttributes).some(v => Array.isArray(v) && v.length > 0) || (g.index?.count ?? p.count) > 12000
       || Object.keys(g.attributes).some(n => !['position','normal','uv','tangent','color'].includes(n))) continue;
     vertices += p.count;
     let reduced: THREE.BufferGeometry | undefined;

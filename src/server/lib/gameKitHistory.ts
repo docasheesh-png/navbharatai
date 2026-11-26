@@ -146,7 +146,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c7ea438236cd31125d333f42fc9f2160dfd1ade6c38a7bf1d8d0678efb3be61f",
     "2da0a2fde705007cec51137c3ad9d4705bad9fba420fafef810649dd0ed16046",
     "12d11ad8ce51b01b0bc1e8f33c7bb3e4f194c819073d9abe3a616b9927116be0",
-    "1fc69964aa1f6861ea80bab3d929b9913c4191ab2e0eff410fcb254f73302ca0"
+    "1fc69964aa1f6861ea80bab3d929b9913c4191ab2e0eff410fcb254f73302ca0",
+    "e7a54b73e4f0e2b10691d8a2ad47e467aa899c9f2f69dfe7b1acc04ce44c9172"
   ],
   "src/game/RoyaleGame.tsx": [
     "311e46f6d8b356404bde145111171b21663211eea4ec9a8fa7bfb631a3763220"
@@ -586,7 +587,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2978e707c64f5a091ac68a1a7593c23923a9bcbdab144a88c77963eeb40552db",
     "f3a713a9f3c4b93f25190f8c65af7222d607bf8af7ce91edd998a23ea232846e",
     "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6",
-    "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc"
+    "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc",
+    "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -594,7 +596,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b11dbc6f0577383a719629d5fc46529b0c34111c0b2afd33cae0eff8f374bba1",
     "c60fff089f93a0ceada4afb3f70cd1daeb7c60e6782de352ef01e74906a49026",
     "6534e7fec5a7c5352589a3e14abca6fa96ecf5c2b5ad1458d64e01f39428e171",
-    "957e902936a70614c14515606e73f981754db803a8041408865fa30ed0266957"
+    "957e902936a70614c14515606e73f981754db803a8041408865fa30ed0266957",
+    "94235856d975d600028589fca19f9833cdeab901abb77937733cb7de50920688"
   ],
   "src/game/play/raceCustom.ts": [
     "fe09244ddc726a4a327996a103935738fd7f4190b7c012fd62a9f1db6bcdb3d0",
@@ -602,7 +605,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/play/worldLayer.ts": [
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
-    "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d"
+    "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
+    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8"
   ],
   "src/game/royale/onlineClient.ts": [
     "34daf1faeaa0be26e95667fc095b16a40d4b0b62c53220ae2961d8a3a66e8f2b"

@@ -161,14 +161,16 @@ function pagdi(body: Body, foreheadY: number): Part {
 }
 
 /** A strip laid over the body's surface along `path` (a saree's pallu), split into border | middle | border. */
-function ribbon(body: Body, path: THREE.Vector3[], width: number, border: number, lift: number): { middle: Part; edges: Part } {
+/** `freeBeyond`: a sample farther than this from the body keeps its own point (a pallu's hanging end). A strap passes
+ * Infinity so every sample lies on the body — between its waypoints the curve otherwise arched into the air. */
+function ribbon(body: Body, path: THREE.Vector3[], width: number, border: number, lift: number, freeBeyond = 0.06): { middle: Part; edges: Part } {
   const curve = new THREE.CatmullRomCurve3(path);
   const raw = curve.getSpacedPoints(48).map(pt => {
     let best = 0, bestD = Infinity; const p = V(0, 0, 0);
     for (let i = 0; i < body.count; i++) { p.fromArray(body.pos, i * 3); const d = p.distanceToSquared(pt); if (d < bestD) { bestD = d; best = i; } }
     const s = V(0, 0, 0).fromArray(body.pos, best * 3), nrm = V(0, 0, 0).fromArray(body.nrm, best * 3).normalize();
     // Where the path leaves the body (a hanging end), keep the path's own point; never inside the body.
-    return { at: Math.sqrt(bestD) > 0.06 ? pt.clone() : s.addScaledVector(nrm, lift), nrm };
+    return { at: Math.sqrt(bestD) > freeBeyond ? pt.clone() : s.addScaledVector(nrm, lift), nrm };
   });
   const smooth = raw.map((_, i) => { const a = raw[Math.max(0, i - 1)], b = raw[i], c = raw[Math.min(raw.length - 1, i + 1)]; return { at: a.at.clone().add(b.at).add(c.at).divideScalar(3), nrm: a.nrm.clone().add(b.nrm).add(c.nrm).normalize() }; });
   const cols = [-width / 2, -width / 2 + border, width / 2 - border, width / 2];
@@ -311,6 +313,51 @@ function saree(g: Glb, b: Body, sareeColour: string, borderColour: string, blous
   addGarment(g, b, 'Pallu', [{ part: middle, material: material(g, 'Pallu', sareeColour, 0.55) }, { part: edges, material: borderM }]);
 }
 
+// ── more garments (2026-11-26): salwar-kameez with dupatta, lungi with baniyan, sherwani with churidar and safa ────────
+/** A long top (kameez, sherwani): collar, torso, sleeves and a hanging skirt, sized to THIS body's shoulders and neck. */
+function longTop(g: Glb, b: Body, o: { name: string; colour: string; hem: number; sleeveReach: number; collar: [number, number]; neckHalf: number; chestHalf: number; chestTop: number; flare: number; ease?: number; skirtEase?: number; roughness?: number }): void {
+  const arm = { y: b.jointPos('upperarm_l').y, z: b.jointPos('upperarm_l').z, wrist: b.jointPos('hand_l').x - 0.04 };
+  const collar = torso(b, o.collar[0], o.collar[1], () => o.neckHalf, 0.012);
+  const body = [...collar, ...torso(b, o.chestTop, 1.0, y => (y > 1.27 ? o.chestHalf : 0.3), o.ease ?? 0.03, 6)];
+  const skirt = hang(torso(b, 1.08, o.hem, () => 0.32, o.skirtEase ?? 0.044, 4), o.flare);
+  const x0 = b.jointPos('upperarm_l').x - 0.05;
+  const reach = x0 + (arm.wrist - x0) * o.sleeveReach;
+  const m = material(g, o.name, o.colour, o.roughness ?? 0.85);
+  addGarment(g, b, o.name, [
+    { part: merge(tube(body, Y), tube(sleeve(b, 1, x0, reach, arm.y, arm.z, 0.026), X), tube(sleeve(b, -1, x0, reach, arm.y, arm.z, 0.026), V(-1, 0, 0))), material: m, k: 16 },
+    { part: tube(skirt, Y), material: m, k: 16, hem: true },
+  ]);
+}
+/** Trousers for one body: ease by height (a salwar is wide at the thigh and gathered at the ankle; a churidar is close). */
+function trousers(g: Glb, b: Body, name: string, colour: string, ease: (y: number) => number): void {
+  const x = b.jointPos('thigh_l').x;
+  addGarment(g, b, name, [{ part: merge(tube(leg(b, 1, x, 1.02, 0.09, ease), Y), tube(leg(b, -1, x, 1.02, 0.09, ease), Y)), material: material(g, name, colour) }]);
+}
+/** A sleeveless vest (baniyan), tucked into what is worn below it. */
+function baniyan(g: Glb, b: Body, colour: string): void {
+  const m = material(g, 'Baniyan', colour);
+  // Two straps over the shoulders, from the front of the vest to its back (without them it read as a strapless top).
+  const sh = b.jointPos('upperarm_l');
+  const strap = (side: 1 | -1) => ribbon(b, [V(side * 0.11, 1.4, 0.3), V(side * 0.11, 1.5, 0.3), V(side * (sh.x - 0.06), sh.y + 0.06, sh.z), V(side * 0.11, 1.5, -0.3), V(side * 0.11, 1.4, -0.3)], 0.05, 0.0001, 0.008, Infinity).middle;
+  addGarment(g, b, 'Baniyan', [{ part: merge(tube(torso(b, 1.47, 0.9, y => (y > 1.3 ? 0.19 : 0.3), 0.012, 4), Y), strap(1), strap(-1)), material: m, k: 16 }]);
+}
+/** A lungi: one cloth wrapped from the waist to the ankle, with a band near the hem. */
+function lungi(g: Glb, b: Body, colour: string, bandColour: string): void {
+  const wrap = hang(torso(b, 1.02, 0.07, () => 0.32, 0.038, 4), 0.0018);
+  const band = wrap.filter(r => r.center.y < 0.2 && r.center.y > 0.12).map(r => ({ ...r, radii: r.radii.map(x => x + 0.003) }));
+  addGarment(g, b, 'Lungi', [{ part: tube(wrap, Y), material: material(g, 'Lungi', colour), k: 16, hem: true }, { part: tube(band, Y), material: material(g, 'Border', bandColour), k: 16, hem: true }]);
+}
+/** A dupatta: from the back, over both shoulders, dipping across the front. */
+function dupatta(g: Glb, b: Body, colour: string, borderColour: string): void {
+  const sh = b.jointPos('upperarm_l');
+  const top = (side: 1 | -1) => V(side * (sh.x - 0.08), sh.y + 0.12, sh.z);
+  // Round the back of the neck, both ends hanging down the front (the first, 20 cm wide drape over both shoulders sat
+  // on them like a collar).
+  const path = [V(0.1, 1.0, 0.3), V(0.09, 1.3, 0.3), top(1), V(0, sh.y + 0.08, -0.3), top(-1), V(-0.09, 1.3, 0.3), V(-0.1, 1.0, 0.3)];
+  const { middle, edges } = ribbon(b, path, 0.12, 0.018, 0.016);
+  addGarment(g, b, 'Dupatta', [{ part: middle, material: material(g, 'Dupatta', colour, 0.6) }, { part: edges, material: material(g, 'Border', borderColour, 0.4) }]);
+}
+
 const VARIANTS: Variant[] = [
   { id: 'q16-man-kurta-pajama', from: 'q7-villager-man', base: 'Superhero_Male_FullBody', subjects: ['man in kurta pajama', 'kurta pajama'], describe: 'cream knee-length kurta with full sleeves, white pajama',
     dress: (g, b) => { kurta(g, b, 0.56, 1, '#f2ead3'); pajama(g, b, '#fafafa'); } },
@@ -320,6 +367,20 @@ const VARIANTS: Variant[] = [
     dress: (g, b) => { kurta(g, b, 0.86, 0.55, '#e9dcc0'); dhoti(g, b, '#f7f4ec'); turban(g, b, '#f4f1e8'); } },
   { id: 'q16-woman-saree', from: 'q7-villager-woman', base: 'Superhero_Female_FullBody', subjects: ['woman in saree', 'woman in sari'], describe: 'maroon saree with a gold border and pallu, green blouse',
     dress: (g, b) => { saree(g, b, '#8f1430', '#d4a72c', '#1d6b3c'); } },
+  { id: 'q16-woman-salwar-kameez', from: 'q7-villager-woman', base: 'Superhero_Female_FullBody', subjects: ['woman in salwar kameez', 'salwar kameez'], describe: 'magenta knee-length kameez with three-quarter sleeves, cream salwar, yellow dupatta with a gold border',
+    dress: (g, b) => {
+      longTop(g, b, { name: 'Kameez', colour: '#c2185b', hem: 0.6, sleeveReach: 0.62, collar: [1.535, 1.51], neckHalf: 0.07, chestHalf: 0.17, chestTop: 1.48, flare: 0.003, ease: 0.036, skirtEase: 0.05 });
+      trousers(g, b, 'Salwar', '#f4ecd8', y => (y > 0.66 ? 0.014 : y > 0.18 ? 0.02 + (y - 0.18) * 0.03 : 0.012)); // slim under the kameez, full below it
+      dupatta(g, b, '#f2c12e', '#d4a72c');
+    } },
+  { id: 'q16-man-lungi', from: 'q7-villager-man', base: 'Superhero_Male_FullBody', subjects: ['man in lungi', 'lungi'], describe: 'white baniyan, blue lungi with a white band',
+    dress: (g, b) => { baniyan(g, b, '#f7f7f2'); lungi(g, b, '#2f5d9e', '#f4f4f4'); } },
+  { id: 'q16-man-sherwani', from: 'q7-villager-man', base: 'Superhero_Male_FullBody', subjects: ['man in sherwani', 'groom'], describe: 'gold knee-length sherwani with a high collar, cream churidar, red safa',
+    dress: (g, b) => {
+      longTop(g, b, { name: 'Sherwani', colour: '#c9a24b', hem: 0.5, sleeveReach: 1, collar: [1.625, 1.56], neckHalf: 0.078, chestHalf: 0.2, chestTop: 1.53, flare: 0.003, skirtEase: 0.052, roughness: 0.45 });
+      trousers(g, b, 'Churidar', '#f3ead6', y => (y > 0.54 ? 0.01 : 0.012));
+      turban(g, b, '#b3202a');
+    } },
 ];
 
 const entries: ReviewedAsset[] = [];

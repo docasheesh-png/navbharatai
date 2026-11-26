@@ -1077,6 +1077,30 @@ export function softwareRenderer(): boolean {
 /** The tier a request for \`d\` really gets on this device. */
 export function resolveDetail(d: Detail): Detail { return d === 'real' && softwareRenderer() ? 'lite' : d; }
 
+/**
+ * 🏙️ HOW MUCH GEOMETRY A BIG WORLD MAY DRAW ON THIS DEVICE (queue Q-2698). The open-world city drew 1–4 frames a second in the
+ * build's software renderer, and a weak phone hits the same wall: the limit there is GEOMETRY (draw calls and triangles), not
+ * pixels. 'light' builds the same city with fewer of both (windows painted on one facade panel instead of one box each, each
+ * moving vehicle one mesh, fewer cars and people) — the streets, buildings and colliders are identical, so nothing that can be
+ * walked into or driven on changes. 'full' is what a device with a real GPU always drew, unchanged.
+ * Auto: a software renderer, or a phone that says it is small (a coarse pointer with at most 4 cores AND at most 4 GB — a
+ * browser that does not say how much memory it has keeps 'full'). The player's Settings win: Auto quality off with Graphics
+ * 'low' is light, any other Graphics choice with Auto off is full. Read when a city is built.
+ */
+export type GeometryTier = 'full' | 'light';
+export function geometryTier(choice?: { quality?: string; autoQuality?: boolean } | null): GeometryTier {
+  if (choice && choice.autoQuality === false) return choice.quality === 'low' ? 'light' : 'full';
+  if (softwareRenderer()) return 'light';
+  try {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'full';
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const cores = nav.hardwareConcurrency ?? 0;
+    if (coarse && cores > 0 && cores <= 4 && typeof nav.deviceMemory === 'number' && nav.deviceMemory <= 4) return 'light';
+  } catch { /* unknown device: full */ }
+  return 'full';
+}
+
 // ── THE GROUND (2026-11-02, "car zameen me dhas jaati hai") ──────────────────────────────────────
 // 🔴 createTerrain() pushed its vertices up into hills, but the height lived ONLY in the mesh: nothing
 // else could ask "how high is the ground here?", and driveVehicle() moved x and z and never touched y.

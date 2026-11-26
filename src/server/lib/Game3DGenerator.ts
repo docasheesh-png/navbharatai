@@ -85,7 +85,12 @@ export function createRenderer(options: RendererOptions = {}): THREE.WebGLRender
     alpha: false,
   });
   renderer.setPixelRatio(software ? SOFTWARE_PIXEL_RATIO : Math.min(window.devicePixelRatio || 1, options.maxPixelRatio ?? 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  // A canvas the page already sizes (style width and height, e.g. 100% of the game's box — what Game.ts gives its own)
+  // keeps that size: setSize's default writes the window's size in px onto the style, and from then on the canvas stayed
+  // that size whatever its box became. Going full screen grew the box, the drawing buffer followed (handleResize) and the
+  // picture was drawn into the old, shorter canvas with the page showing below it (admin's iPhone screenshot, 2026-11-26).
+  const styled = !!options.canvas?.style.width && !!options.canvas?.style.height;
+  renderer.setSize(window.innerWidth, window.innerHeight, !styled);
 
   // The four lines that decide whether the scene looks right.
   renderer.outputColorSpace = THREE.SRGBColorSpace;

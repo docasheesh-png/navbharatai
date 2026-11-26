@@ -6258,3 +6258,13 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Fixed on the way:** `ribbon` kept any sample more than 6 cm from the body at its own point, which is right for the pallu's hanging end. Between a strap's waypoints, that made the curve arch into the air. Now `freeBeyond` is a parameter, and a strap passes `Infinity`; the pallu keeps the old value, so the saree file is unchanged.
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
+
+## 2026-11-26 — Game full screen: only the button, and it fills the screen (admin iPhone screenshot)
+
+- Q-3440: `Game.play()` no longer goes full screen on a phone; the Full screen button is the only way in (builder prompt
+  updated). Locked by a census (only Game.ts asks the browser; the only other caller is the button).
+- Q-3441: root of the "two-thirds screen": `createRenderer` wrote the window size in px onto a canvas Game.ts sizes at 100%,
+  and container-mode `handleResize` never touches the style, so the canvas never grew with its box. A page-sized canvas
+  now keeps its style. Locked by running the real generated renderer.ts into a grown box.
+- Q-3442 🟡: the HUD under the status bar inside the app's preview frame (iOS gives an iframe 0 safe-area insets) — needs
+  the page to pass its insets in; recorded with a recommendation.

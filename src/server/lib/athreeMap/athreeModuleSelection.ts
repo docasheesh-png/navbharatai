@@ -65,9 +65,17 @@ export function athreeModulesFor(prompt:string):AthreeModules {
    if(!(neg&&!negativeHasFeature&&['add','include','want','chahiye','chaiye','चाहिए','चाहिये'].includes(t))){neg=false;negativeHasFeature=false;}
   }
  }
- const chosen=(wantsAll||mentions.length===0?all:all.filter(m=>hits[m])).filter(m=>!excluded.has(m));
+ // 🧠 A NAMED FEATURE IS A WISH FOR IT, NOT A BAN ON EVERYTHING ELSE (admin 2026-11-25, problem 5: "2 city ke beech me bas green ghas
+ // ka maidan hota hai, real tree, real bush nahi" — and "user ke words par nahi intention par kam ho"). This picker used to keep ONLY
+ // the modules a request named, so "an open world with cities and cars" (roads + vehicles) lost the plants, rivers, sky and sea, and
+ // every map between its cities was bare grass. The admin's own rule for these modules (2026-11-15) was "user ki need ke anusar" — a
+ // world needs its nature whether or not the word "tree" was typed. So: every module, minus what the user EXCLUDES; a request
+ // narrows to its named modules only when it says so ("sirf nadi", "only roads", "keval sadak").
+ const ONLY=new Set(['only','sirf','keval','kewal','just','सिर्फ','केवल']);
+ const restrictive=mentions.length>0&&tokens.some(t=>ONLY.has(t));
+ const chosen=(wantsAll||!restrictive?all:all.filter(m=>hits[m])).filter(m=>!excluded.has(m));
  const denied=all.filter(m=>excluded.has(m));
- const reason=(wantsAll?'The request asks for everything except explicit exclusions.':mentions.length===0?'The request names no particular feature, so every module is included.':'Only what the request asks for: '+chosen.map(m=>m+' ('+(hits[m]??[]).slice(0,2).join(', ')+')').join('; ')+'.')+(denied.length?' Excluded by request: '+denied.join(', ')+'.':'');
+ const reason=(wantsAll?'The request asks for everything except explicit exclusions.':mentions.length===0?'The request names no particular feature, so every module is included.':restrictive?'Only what the request asks for: '+chosen.map(m=>m+' ('+(hits[m]??[]).slice(0,2).join(', ')+')').join('; ')+'.':'Every module, the named ones included ('+Object.entries(hits).map(([m,w])=>m+' ('+w.slice(0,2).join(', ')+')').join('; ')+'); a named feature adds to the world, it does not remove the rest.')+(denied.length?' Excluded by request: '+denied.join(', ')+'.':'');
  return {modules:chosen,excluded:denied,reason};
 }
 /** Use for model-supplied include: it may narrow selection but never override owner exclusions. */

@@ -70,6 +70,7 @@ import { updateActions } from './play/actions';
 import { aimFrom, type AimResult } from './play/aim';
 import { Director, DEATH_CAM, HERO_SHOT, introDrone, type Shot, type CinematicFrame } from './play/cinematics';
 export type { Shot, CinematicFrame } from './play/cinematics';
+import { applyRealism, type Realism } from './three/realism';
 import { WorldBoundary, type WorldBounds, type BoundaryOptions } from './play/boundary';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
@@ -140,6 +141,11 @@ export interface GameOptions {
    * (introRadius metres of map, default 150). true for the ready shot, or your own Shot list. Off unless asked.
    */
   cinematics?: { death?: boolean | Shot[]; intro?: boolean | Shot[]; introRadius?: number };
+  /**
+   * 🌄 'real' when the user asked for real / realistic / HD graphics (three/realism.ts): image-based lighting and soft
+   * shadows everywhere, ambient occlusion and a subtle bloom on a capable device only. Default 'standard'.
+   */
+  graphics?: 'standard' | 'real';
   /** Additional world-space NPC/remote bodies that must block door swings. */
   doorOccupants?: (ctx: GameContext) => readonly DoorOccupant[];
   container: HTMLElement;
@@ -453,6 +459,8 @@ export class Game {
     // walked it in circles (verifier, 2026-10-11).
     this.rig = new CameraRig({ kind: options.camera === 'chase' ? 'third-person' : (options.camera ?? 'third-person') });
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
+    // The real look, only when asked (after the lights exist, so their shadows are set up).
+    if (options.graphics === 'real') { try { this.realism = applyRealism(this.renderer, this.scene, this.rig.camera); } catch (error) { console.error('[game] the real graphics could not start; drawing the standard look', error); } }
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
     this.playerChoice = resolvePlayerChoice(options.player);
     this.handGun = handGunFor(this.playerChoice);
@@ -606,7 +614,10 @@ export class Game {
       if (typeof p.fraction === 'number' && Number.isFinite(p.fraction)) job.fraction = p.fraction;
       modelJobs.set(p.id, job);
     }));
-    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
+    // The player's own shots and swings (owner undefined or 'player', the attack key held), counted from the kit's events —
+    // the playtest presses fire and reads this to prove a gun really shoots (build reports #2526–#2530: a gun that never fired).
+    const attacks = { fired: 0, swung: 0 };
+    const hook = { status: () => state.status, attacks: () => ({ ...attacks }), score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality,
       // How much the last frame asked of the GPU — what decides whether a cheap phone keeps up (the playtest's budget check).
       load: () => { const i = this.renderer.info; return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures }; },
       models: () => { const now = performance.now(); let stuck = 0; for (const j of modelJobs.values()) if (j.fraction <= 0 && now - j.since > 20000) stuck++; return { pending: modelJobs.size, stuck }; },
@@ -629,8 +640,8 @@ export class Game {
       const owner = (payload as { ownerId?: unknown } | null)?.ownerId;
       return (owner === undefined || owner === 'player') && this.attackHeldThisStep;
     };
-    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { this.firedThisStep = true; this.heroAct('fire'); } }));
-    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { this.swungThisStep = true; this.heroAct('swing'); } }));
+    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { attacks.fired++; this.firedThisStep = true; this.heroAct('fire'); } }));
+    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { attacks.swung++; this.swungThisStep = true; this.heroAct('swing'); } }));
     this.disposers.push(events.on('PLAYER_JUMPED', () => this.heroAct('jump')));
     this.disposers.push(events.on('PLAYER_DAMAGED', () => this.heroAct('hit')));
 
@@ -1106,6 +1117,11 @@ export class Game {
     updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
     // Two players: each camera in its own half of the screen (three/splitscreen.ts).
     if (this.secondCamera) renderSplit(this.renderer, this.scene, [this.rig.camera, this.secondCamera]);
+    else if (this.realism) {
+      const sz = this.renderer.getSize(this.drawSize);
+      if (sz.x !== this.drawnW || sz.y !== this.drawnH) { this.drawnW = sz.x; this.drawnH = sz.y; this.realism.setSize(sz.x, sz.y); }
+      this.realism.render(this.scene, this.rig.camera);
+    }
     else this.renderer.render(this.scene, this.rig.camera);
   }
 
@@ -1135,6 +1151,12 @@ export class Game {
     setStatus('playing');
     this.playIntro();
   }
+
+  /** The real look (GameOptions.graphics 'real'), or null. */
+  realism: Realism | null = null;
+  private readonly drawSize = new THREE.Vector2();
+  private drawnW = 0;
+  private drawnH = 0;
 
   /** The camera-shot player (play/cinematics.ts). */
   readonly director = new Director();
@@ -1394,6 +1416,7 @@ export class Game {
       if (mesh.geometry) safe(() => mesh.geometry.dispose());
     });
     safe(() => disposeMaterials());
+    if (this.realism) safe(() => this.realism!.dispose());
     if (this.renderer) safe(() => this.renderer.dispose());
     if (this.canvas) safe(() => this.canvas.parentElement?.removeChild(this.canvas));
     // This is the game's bus, not the app's. Remove setup handlers on failed construction too.
@@ -4884,25 +4907,58 @@ export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W
     console.error('[feature ' + f.id + '] switched off — ' + reason);
     try { events.emit('FEATURE_FAILED', { id: f.id, reason }); } catch { /* a listener must not undo the isolation */ }
   };
+  // ⏳ AN ASYNC setup() IS WAITED FOR (failedbr #2531, 2026-11-25: a monsters feature with "async setup()" handed the host a
+  // Promise; the host ran its update() at once, before the monsters existed, and they "stood where they were" for the whole
+  // game). A setup that returns a Promise (it loads a model first) is now a feature that STARTS when that Promise settles:
+  // its update() runs only from then on, its value is what the Promise resolves to, a rejection switches it off with the
+  // reason, and a feature that needs it waits for it. Nothing changes for an ordinary setup().
+  const starting = new Set<string>();
+  let disposed = false;
+  let pending: GameFeature<W>[] = [];
+  const isPromise = (v: unknown): v is PromiseLike<unknown> => !!v && typeof (v as { then?: unknown }).then === 'function';
+  const drain = (ctx: GameContext, world: W): void => {
+    // In the order of the list, but a feature waits for the ones it needs.
+    let progressed = true;
+    while (pending.length && progressed) {
+      progressed = false;
+      for (let i = 0; i < pending.length; i++) {
+        const f = pending[i];
+        const needs = f.needs || [];
+        const missing = needs.find((id) => !seen.has(id) || off.has(id));
+        if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
+        if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
+        pending.splice(i--, 1); progressed = true;
+        try {
+          const value = f.setup ? f.setup(ctx, world, api) : undefined;
+          if (isPromise(value)) {
+            starting.add(f.id);
+            Promise.resolve(value).then((v) => {
+              starting.delete(f.id);
+              if (disposed) { try { f.dispose?.(); } catch { /* it never ran */ } return; }
+              if (off.has(f.id)) return;
+              running.push(f); if (v !== undefined) shared.set(f.id, v);
+              drain(ctx, world);                                             // the features that waited for it start now
+            }, (error) => { starting.delete(f.id); if (!disposed) { fail(f, 'setup', error); drain(ctx, world); } });
+            continue;
+          }
+          running.push(f); if (value !== undefined) shared.set(f.id, value);
+        } catch (error) { fail(f, 'setup', error); }
+      }
+    }
+    // Still waiting for an async setup that one of them needs: they start when it does. Otherwise their needs form a circle.
+    if (starting.size) return;
+    for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+    pending = [];
+  };
+  const status = () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const }));
+  // 🔎 NavBharatAI's playtest reads which features are switched off and why (a feature that throws was silent before:
+  // one console line, so "the enemies never came" had no reason anywhere). Read-only.
+  const hosts = typeof window !== 'undefined' ? ((window as unknown as { __nbFeatureHosts?: Array<() => unknown> }).__nbFeatureHosts ??= []) : null;
   return {
     setup(ctx, world) {
-      // In the order of the list, but a feature waits for the ones it needs.
-      const pending = [...all];
-      let progressed = true;
-      while (pending.length && progressed) {
-        progressed = false;
-        for (let i = 0; i < pending.length; i++) {
-          const f = pending[i];
-          const needs = f.needs || [];
-          const missing = needs.find((id) => !seen.has(id) || off.has(id));
-          if (missing) { off.set(f.id, 'needs "' + missing + '", which is not running'); console.error('[feature ' + f.id + '] switched off — needs "' + missing + '", which is not running'); pending.splice(i--, 1); progressed = true; continue; }
-          if (needs.some((id) => !running.some((r) => r.id === id))) continue;   // its turn comes after them
-          pending.splice(i--, 1); progressed = true;
-          try { const value = f.setup ? f.setup(ctx, world, api) : undefined; running.push(f); if (value !== undefined) shared.set(f.id, value); }
-          catch (error) { fail(f, 'setup', error); }
-        }
-      }
-      for (const f of pending) { off.set(f.id, 'its needs form a circle'); console.error('[feature ' + f.id + '] switched off — its needs form a circle'); }
+      pending = [...all];
+      if (hosts && !hosts.includes(status)) hosts.push(status);
+      drain(ctx, world);
     },
     update(ctx, world, delta) {
       for (const f of [...running]) {
@@ -4911,8 +4967,10 @@ export function createFeatureHost<W = unknown>(list: ReadonlyArray<GameFeature<W
         try { f.update(ctx, world, delta, api); } catch (error) { fail(f, 'update', error); }
       }
     },
-    status: () => all.map((f) => (off.has(f.id) ? { id: f.id, state: 'off' as const, reason: off.get(f.id) } : { id: f.id, state: 'on' as const })),
+    status,
     dispose() {
+      disposed = true;
+      if (hosts) { const at = hosts.indexOf(status); if (at >= 0) hosts.splice(at, 1); }
       for (const f of running.splice(0).reverse()) { try { f.dispose?.(); } catch (error) { console.error('[feature ' + f.id + '] dispose: ' + String(error)); } }
       shared.clear();
     },
@@ -5384,6 +5442,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drag on the right, Attack/Jump/Use/Run buttons bottom-right, and a Pause button in the HUD. They\n' +
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
+      "  graphics: 'real' — only when the user asks for realistic / real 3D / HD graphics (three/realism.ts: image lighting, soft shadows; ambient occlusion and a subtle bloom on a capable device). Never add your own EffectComposer.\n" +
       "  cinematics: { death: true, intro: true } — the user's camera shots (play/cinematics.ts): a death cam that closes in and holds on GAME OVER, a drone shot over the map before play; any other shot the user describes is ctx.cinematic([{ seconds, distance: [from, to], height: [from, to], angle: [from, to], fov, title }]). Never move the camera yourself.\n" +
       '- WHEN THE USER ASKS WHERE THE CONTROLS GO, set it in touchControls — never move them with your own CSS:\n' +
       "  \"joystick on the right\" / \"buttons on the left\" → joystick: { side: 'right' } (the buttons and camera drag swap\n" +

@@ -23,6 +23,16 @@
 // Phase 2 boundaries require a state-preserving execution design before automatic takeover is safe.
 // Runtime IDs, preview origins and existing workspace source paths are unchanged here.
 
+/**
+ * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
+ * second build in the same workspace (autopsy eed79815). Default ON; `AGENTV3_WORKSPACE_LEASE=off`
+ * reverts to the in-memory lock alone, with no deploy. With it off there is no lease to prove a build
+ * dead, so the liveness sweep (Q-3463) stands down too.
+ */
+export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off';
+}
+
 /** A lease as it is stored. */
 export interface WorkspaceBuildLease {
   /** A random token for THIS build attempt — never the user id, which two attempts share. */

@@ -44,9 +44,9 @@ export interface MapGrowthIntent {
 }
 
 // Letters, digits and combining marks (Devanagari vowel signs are marks: \w does not see them).
-const norm = (s: string): string => ` ${String(s ?? '').slice(0, 4000).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}×]+/gu, ' ').trim()} `;
+export const norm = (s: string): string => ` ${String(s ?? '').slice(0, 4000).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}×]+/gu, ' ').trim()} `;
 /** A whole-word alternative group, safe for Devanagari (spaces, never \b). */
-const W = (alts: string): string => `(?<=\\s)(?:${alts})(?=\\s)`;
+export const W = (alts: string): string => `(?<=\\s)(?:${alts})(?=\\s)`;
 const has = (t: string, re: RegExp): RegExpExecArray | null => re.exec(t);
 
 // ── Words ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ const ROAD = 'roads?|sadak|sadke|sadkon|sadako|sadkein|highways?|rasta|raste|ras
 const JOIN_VERB = 'jodo|jod|joro|jodna|connect|connected|link|join|joined|milao|जोड़ो|जोड़|जोडो|मिलाओ|कनेक्ट';
 const BIG = 'bada|badaa|bade|badi|bara|bari|bigger|big|larger|large|huge|vishal|lamba|lambi|lambe|longer|long|badhao|badha|expand|extend|बड़ा|बड़ी|बड़े|बडा|लंबा|लंबी|लम्बा|लम्बी|बढ़ाओ|विशाल';
 const SMALL = 'chhota|chota|chhoti|choti|smaller|small|shrink|ghatao|kam|छोटा|छोटी|घटाओ|कम';
-const NEG = 'nahi|nahin|nai|mat|not|never|नहीं|नही|मत';
+export const NEG = 'nahi|nahin|nai|mat|not|never|नहीं|नही|मत';
 const GAMEWORD = 'game|games|khel|khelna|khelne|khelo|khelte|khelenge|match|gem|गेम|खेल|खेलना|खेलने|मैच';
 const SPORT_CRICKET = 'cricket|kriket|क्रिकेट';
 const SPORT_FOOTBALL = 'football|soccer|futbol|फुटबॉल|फ़ुटबॉल';
@@ -78,7 +78,7 @@ const re = (src: string) => new RegExp(src.normalize('NFKC'), 'u');
 const near = (a: string, b: string, gap = 4): RegExp => re(`${W(a)}(?:\\s+\\S+){0,${gap}}?\\s+${W(b)}|${W(b)}(?:\\s+\\S+){0,${gap}}?\\s+${W(a)}`);
 const before = (a: string, b: string, gap = 4): RegExp => re(`${W(a)}(?:\\s+\\S+){0,${gap}}?\\s+${W(b)}`);
 
-const PLACE_OF: Array<[MapPlaceKind, string]> = [
+export const PLACE_OF: Array<[MapPlaceKind, string]> = [
   ['desert', 'desert|registan|reghistan|marusthal|रेगिस्तान|मरुस्थल'], ['jungle', 'jungle|jangal|forest|van|जंगल|वन'],
   ['mountain', 'mountains?|pahad|pahaad|pahar|parvat|hills?|पहाड़|पहाड़ों|पर्वत'], ['snow', 'snow|barf|baraf|बर्फ|बर्फ़'],
   ['beach', 'beach|samundar|samudra|kinara|tat|समुद्र|किनारा|बीच'], ['village', 'village|villages|gaon|gaanv|gav|gaav|गाँव|गांव'],
@@ -93,7 +93,7 @@ const placeIn = (t: string, after = 0): MapPlaceKind | undefined => {
   }
   return best?.kind;
 };
-const NUM_WORD: Record<string, number> = { do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, das: 10, sau: 100, hazaar: 1000, hazar: 1000, two: 2, three: 3, four: 4, five: 5, ten: 10, hundred: 100, thousand: 1000, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'पाँच': 5, 'दस': 10, 'सौ': 100 };
+export const NUM_WORD: Record<string, number> = { do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, das: 10, sau: 100, hazaar: 1000, hazar: 1000, two: 2, three: 3, four: 4, five: 5, ten: 10, hundred: 100, thousand: 1000, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'पाँच': 5, 'दस': 10, 'सौ': 100 };
 
 /** Which way the user wants the map changed. PURE. Never throws. */
 export function mapGrowthIntent(text: string | null | undefined): MapGrowthIntent {

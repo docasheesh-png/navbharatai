@@ -516,6 +516,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/fx/synth.ts": [
     "f6ac6662b6e06e8616fa599b7aef37ccf0d6835e230f181efd8282b32633cf76"
   ],
+  "src/game/genres/fighting.ts": [
+    "b578b3395b4d87924fde12d40bbd69de702c32dbc77aca44202b5ab8ea68b689"
+  ],
+  "src/game/genres/towerDefense.ts": [
+    "6fc5ad77463c27b2c76f5e7fa87c707847a11e1623fda8f1f0724eb3def482b2"
+  ],
   "src/game/play/actions.ts": [
     "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3"
   ],

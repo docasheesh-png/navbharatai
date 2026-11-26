@@ -44,7 +44,7 @@ const jsZipLoader = async (buf: Buffer) => {
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import {
-  isStorageConfigured, putApk, getApk, getApkStream, deleteApk, saveApp, getApp, updateApp,
+  isStorageConfigured, putApk, getApk, getApkStream, deleteApk, deleteApkIfUnreferenced, saveApp, getApp, updateApp,
   listApps, listAppsByUid, toPublic, findRepublishTarget,
   type StoreApp, type SubmissionStatus,
 } from '../lib/navStoreStore';
@@ -308,10 +308,12 @@ async function ingestApkSubmission(
         ...(provenance ? { provenance } : {}),
       };
       await saveApp(record);
-      // The PREVIOUS version's bytes are no longer referenced by any record once this save lands —
-      // clean them up. Best-effort: a failed delete leaves an orphaned blob, never a broken submission.
+      // The PREVIOUS version's bytes are no longer referenced by THIS record once this save lands — clean
+      // them up, unless another listing names the same content-addressed object (identical bytes submitted
+      // by someone else share one object, Q-3612). Best-effort: a failed delete leaves an orphaned blob,
+      // never a broken submission.
       if (existing?.storagePath && existing.storagePath !== storagePath) {
-        await deleteApk(existing.storagePath).catch(() => {});
+        await deleteApkIfUnreferenced(existing.storagePath, id).catch(() => {});
       }
       const suspicious = scan.verdict === 'suspicious';
       return { httpStatus: 200, body: {
@@ -478,9 +480,10 @@ export function registerNavStoreRoutes(app: Express): void {
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
       const pins = await getAppMartPins().catch(() => []);
       const rank = new Map<string, number>(pins.map((p, index) => [`${p.kind}:${p.id}`, index] as const));
-      const publicApps = filtered.map(toPublic).map((a) => ({
-        ...a, pinned: rank.has(`apk:${a.id}`), pinOrder: rank.get(`apk:${a.id}`) ?? null,
-      }));
+      // 📌 A PIN IS NEVER SAID TO THE PUBLIC (admin 2026-11-26: "admin jis app ko pin kare users ko pata bhi nahi lage … user ko
+      // naturally woh app top par show ho"). The ORDER carries it — a pinned app simply comes first — and no field of the
+      // public list says it was pinned (the admin's own Pin / Unpin reads /api/nav-store/admin/pins).
+      const publicApps = filtered.map(toPublic);
       publicApps.sort((a, b) => {
         const ar = rank.get(`apk:${a.id}`), br = rank.get(`apk:${b.id}`);
         return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
@@ -1151,7 +1154,7 @@ export function registerNavStoreRoutes(app: Express): void {
           const ar = webPinRank.get(`web:${a.row.id}`), br = webPinRank.get(`web:${b.row.id}`);
           return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
             || (ar === undefined ? a.index - b.index : (ar - (br ?? 0)));
-        }).map(({ row }) => ({ ...row, pinned: webPinRank.has(`web:${row.id}`), pinOrder: webPinRank.get(`web:${row.id}`) ?? null }));
+        }).map(({ row }) => row);                                        // the order says it; no "pinned" field (see /api/nav-store/apps)
       visible = pinnedFirst(visible);
       // FOR YOU (admin 2026-10-14). `?sort=newest` or no `sort` = the list exactly as before (newest
       // first). `?sort=foryou&seed=…` = personalised + trending, seed-stable so paging never reshuffles.

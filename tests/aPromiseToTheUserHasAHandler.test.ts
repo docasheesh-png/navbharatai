@@ -33,6 +33,7 @@ import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
 import { raceWorldYes } from '../src/server/AgentV3/mapGrowthIntent';
 import { enemyRequestFrom } from '../src/server/lib/GameEnemiesFeature';
+import { policeRequestFrom } from '../src/server/lib/GamePoliceFeature';
 import { realGraphicsWanted } from '../src/server/lib/GameRealismGenerator';
 import { cinematicsWanted, openBuildingsWanted } from '../src/server/lib/GameOpenWorldGenerator';
 import { cricketRulesFileSource } from '../src/server/lib/BoardGamesGenerator';
@@ -181,6 +182,12 @@ const RECAP = 'the build prompt carries the conversation recap ([CONVERSATION SO
 interface Handled { handler: string; why: string; proof: () => boolean }
 
 const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
+  // Real police (failedbr #2549): the knowledge base tells the user to say "police add karo" in an open-world game.
+  'police add karo': {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/platformDoneTurn.ts → growthTurn.ts (addPoliceAtTurnStart); src/server/lib/GamePoliceFeature.ts (policeFeatureSource on systems/dispatch.ts)`,
+    why: 'a build order on the open project: at turn start the platform writes src/game/features/policeDispatch.ts on the kit\'s real police, lists it, adds the kit files it imports and tells the builder they are in',
+    proof: () => reachesWork('police add karo') && policeRequestFrom('police add karo') !== null && read('src/server/AgentV3/platformDoneTurn.ts').includes('await addPoliceAtTurnStart(io)'),
+  },
   // Real graphics (admin 2026-11-26 #20, Q-3514): the knowledge base tells the user to ask in these words.
   'realistic graphics add karo': {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/gameKitSeed.ts (realGraphicsWanted → graphics: 'real'); src/server/lib/GameRealismGenerator.ts (applyRealism)`,

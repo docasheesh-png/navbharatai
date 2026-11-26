@@ -79,7 +79,9 @@ describe('the platform does it at the start of the turn', () => {
   });
   it('🔴 where it cannot, NOTHING is written and the builder is told to say so and ask', async () => {
     const notRace = turn({}, null, 'export default function App() { return <OpenWorldGame />; }');
-    expect(await setLibraryCarAtTurnStart(notRace.io)).toMatch(/^\[NOT DONE — the user's car\][\s\S]*not a race on NavBharatAI's racing starter/);
+    // Neither a race nor a game on the kit's features list (an open world WITH the list gets the car as a feature:
+    // aLibraryCarArrivesInAnOpenWorld.test.ts).
+    expect(await setLibraryCarAtTurnStart(notRace.io)).toMatch(/^\[NOT DONE — the user's car\][\s\S]*neither a race on NavBharatAI's racing starter nor an open-world game on the kit's features list/);
     expect(notRace.addModel).not.toHaveBeenCalled();
     const failed = turn({ addModel: vi.fn(async () => 'No library model could be added this time (quota)') });
     expect(await setLibraryCarAtTurnStart(failed.io)).toMatch(/could not be added to the game/);

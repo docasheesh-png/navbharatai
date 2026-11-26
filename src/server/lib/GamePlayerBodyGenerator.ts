@@ -354,6 +354,55 @@ function say(id: string, text: string): void {
   try { events.emit('HINT', { id, text, seconds: 6 }); } catch { /* a game without the Hud still plays */ }
 }
 
+// ✋ WHAT IS IN THE PLAYER'S HANDS, LIVE (Kadam 1/2, build report #2535: "hero ke haath me gun" was reported done while
+// nothing was in the hand). Every path that puts a PLAYER.holds item in a hand — a model character, the kit person, and
+// the kit person shown because a model could not load — goes through holdChosen(), and records the subject here only once
+// the item is really in the hand. NavBharatAI's playtest reads it (window.__nbHeld) to PROVE what the user asked for.
+const HELD = new Map<'right' | 'left', string>();
+function publishHeld(): void {
+  if (typeof window === 'undefined') return;
+  const w = window as unknown as { __nbHeld?: () => Array<{ side: string; subject: string }> };
+  w.__nbHeld = () => [...HELD.entries()].map(([side, subject]) => ({ side, subject }));
+}
+
+/**
+ * Load each PLAYER.holds subject from the game's saved models and give it to put(item, side). One implementation for every
+ * body, so the kit person can never silently drop what a model would have held. Returns an undo that empties the hands.
+ */
+function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.Object3D, side: 'right' | 'left') => boolean, loaders: PlayerLoaders): () => void {
+  const placed: Array<{ side: 'right' | 'left'; item: THREE.Object3D; dispose?: () => void }> = [];
+  let undone = false;
+  for (const side of ['right', 'left'] as const) {
+    const wanted = typeof choice?.holds?.[side] === 'string' ? String(choice?.holds?.[side]).trim() : '';
+    if (!wanted) continue;
+    const none = (): PlayerModelHandle => ({ root: new THREE.Group(), source: 'procedural', update() { /* nothing to move */ } });
+    void (loaders.library ?? assetModule)().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(wanted, none) : null)).then((item) => {
+      if (undone) { item?.dispose?.(); return; }
+      if (!item || item.source !== 'model') { item?.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' to hold is not one of this game\'s saved models, so nothing is in the hand.'); return; }
+      if (!put(item.root, side)) { item.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' could not be put in the hand, so nothing is in the hand.'); return; }
+      placed.push({ side, item: item.root, dispose: item.dispose });
+      HELD.set(side, wanted);
+      publishHeld();
+    }).catch(() => say('player-hold-missing-' + side, 'The ' + wanted + ' to hold could not be loaded, so nothing is in the hand.'));
+  }
+  return () => {
+    undone = true;
+    for (const p of placed) { p.item.removeFromParent(); p.dispose?.(); if (HELD.get(p.side)) HELD.delete(p.side); }
+    placed.length = 0;
+    publishHeld();
+  };
+}
+
+/** Put an item in the kit person's hand, sized like a model's (about a third of its height). */
+function holdOnPerson(hero: { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } }, item: THREE.Object3D, side: 'right' | 'left'): boolean {
+  const tall = (() => { const b = new THREE.Box3().setFromObject(hero.root); const h = b.max.y - b.min.y; return Number.isFinite(h) && h > 0.2 ? h : 1.75; })();
+  const longest = Math.max(...new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3()).toArray()) || 1;
+  item.scale.multiplyScalar((0.3 * tall) / longest / (Math.abs(hero.root.scale.x) || 1));
+  if (side === 'left') { if (!hero.joints?.leftHand) return false; hero.joints.leftHand.add(item); return true; }
+  hero.hold(item);
+  return true;
+}
+
 /** The player's character: the kit's body until a model takes its place. */
 export interface PlayerCharacter {
   readonly showing: 'person' | 'model';
@@ -386,7 +435,7 @@ export function asksForModel(choice: PlayerChoice | null | undefined): boolean {
  * Put the chosen model under holder (the object that moves as the player) and drive its moves. shown() runs once the
  * model has taken its place — hide the kit body there. Nothing is asked → the kit body stays and nothing is loaded.
  */
-export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoice | null | undefined, shown: () => void = () => {}, loaders: PlayerLoaders = {}): PlayerCharacter {
+export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoice | null | undefined, shown: () => void = () => {}, loaders: PlayerLoaders = {}, fellBack: () => void = () => {}): PlayerCharacter {
   const { url, subject } = asked(choice);
   let model: PlayerModel | null = null;
   let wrapper: THREE.Group | null = null;
@@ -420,7 +469,9 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     const name = url || subject;
     console.error('[player] the character "' + name + '" could not be used (' + why + '); the default person is shown.');
     try { events.emit('HINT', { id: 'player-model-missing', text: 'Your character "' + name + '" could not be loaded, so the default person is shown.', seconds: 6 }); } catch { /* no Hud */ }
+    fellBack();   // the kit person stays, so what the model would have held goes in ITS hands
   };
+  let emptyHands: () => void = () => {};
   const mount = (m: PlayerModel) => {
     if (gone) { m.dispose(); return; }
     const pivot = new THREE.Group();
@@ -443,16 +494,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     // Names first; the skeleton's shape fills every role the names did not (findBonesByShape).
     bones = { ...findBonesByShape(m.root, outer), ...findBones(m.root) };
     // What the character holds (PLAYER.holds): library subjects, each put in its hand once it has loaded.
-    for (const side of ['right', 'left'] as const) {
-      const wanted = typeof choice?.holds?.[side] === 'string' ? String(choice?.holds?.[side]).trim() : '';
-      if (!wanted) continue;
-      const none = (): PlayerModelHandle => ({ root: new THREE.Group(), source: 'procedural', update() { /* nothing to move */ } });
-      void (loaders.library ?? assetModule)().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(wanted, none) : null)).then((item) => {
-        if (gone) { item?.dispose?.(); return; }
-        if (!item || item.source !== 'model') { item?.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' to hold is not one of this game\'s saved models, so nothing is in the hand.'); return; }
-        api.hold(item.root, side);
-      }).catch(() => say('player-hold-missing-' + side, 'The ' + wanted + ' to hold could not be loaded, so nothing is in the hand.'));
-    }
+    emptyHands = holdChosen(choice, (item, side) => api.hold(item, side), loaders);
     if (m.clips && m.clips.length === 0) { told.add('*'); say('player-moves-none', 'Your character has no animations of its own, so NavBharatAI animates its moves for it.'); }
     shown();
   };
@@ -607,6 +649,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     },
     dispose() {
       gone = true;
+      emptyHands();
       if (model) { model.root.removeFromParent(); model.dispose(); model = null; }
       if (wrapper) { wrapper.removeFromParent(); wrapper = null; }
     },
@@ -634,14 +677,26 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
   const person: PlayerBody = { get showing() { return 'person' as const; }, update() { /* the shell drives the kit person */ }, dispose() { /* nothing taken */ } };
   const before = applied.get(ctx);
   if (before) return { get showing() { return before.body.showing; }, update() { /* the first one drives it */ }, dispose() { /* the first one owns it */ } };
-  if (!asksForModel(choice)) return person;
+  const loaders: PlayerLoaders = typeof load === 'function' ? { library: load } : load;
   const hero = ctx.hero;
+  // ✋ THE KIT PERSON HOLDS TOO (build report #2535). PLAYER.holds used to be read only for a model character, so with the
+  // kit person — the default — the gun was dropped without a word.
+  const wantsHold = !!(choice?.holds && (choice.holds.right || choice.holds.left));
+  if (!asksForModel(choice)) {
+    if (!wantsHold) return person;
+    if (!hero) { say('player-no-body', 'This game shows no player body (it is first-person, or it brought its own), so nothing is shown in its hands.'); return person; }
+    const empty = holdChosen(choice, (item, side) => holdOnPerson(hero, item, side), loaders);
+    const held: PlayerBody = { get showing() { return 'person' as const; }, update() { /* the shell drives the kit person */ }, dispose() { applied.delete(ctx); empty(); } };
+    applied.set(ctx, { body: held, character: { showing: 'person', root: null, move: () => false, act: () => false, revive() { /* the kit person */ }, hold: () => false, update() { /* the kit person's own grips: ctx.hero.hold */ }, dispose: empty } as PlayerCharacter });
+    return held;
+  }
   if (!hero) {
     say('player-no-body', 'This game shows no player body (it is first-person, or it brought its own), so your character is not shown.');
     return person;
   }
-  const loaders: PlayerLoaders = typeof load === 'function' ? { library: load } : load;
-  const character = createPlayerCharacter(ctx.player.object, choice, () => { hero.root.scale.setScalar(0.0001); }, loaders);   // the kit person steps aside (the shell still drives it)
+  let personHands: () => void = () => {};
+  const character = createPlayerCharacter(ctx.player.object, choice, () => { hero.root.scale.setScalar(0.0001); }, loaders,   // the kit person steps aside (the shell still drives it)
+    () => { if (wantsHold) personHands = holdChosen(choice, (item, side) => holdOnPerson(hero, item, side), loaders); });
   const act = hero.act, die = hero.die, revive = hero.revive;
   hero.act = (pose, strength) => { act(pose, strength); character.act(MOVE_FOR_POSE[pose]); };
   hero.die = (fromFront) => { die(fromFront); character.act('die'); };
@@ -660,6 +715,7 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
       applied.delete(ctx);
       hero.act = act; hero.die = die; hero.revive = revive;
       character.dispose();
+      personHands();
       hero.root.scale.setScalar(1);
     },
   };

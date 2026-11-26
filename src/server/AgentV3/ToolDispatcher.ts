@@ -408,7 +408,8 @@ import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
 import { enemyRequestOf, enemyFeatureSource, featuresIndexWith, ENEMIES_FEATURE_PATH } from '../lib/GameEnemiesFeature';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_STREET_DANGER_FEATURE, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
+import { policeRequestOf, policeFeatureSource, POLICE_FEATURE_PATH } from '../lib/GamePoliceFeature';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, streetDangerSource, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -10688,7 +10689,7 @@ export class ToolDispatcher {
         if (!owHasMap) refuse('The open-world starter stands on the Athree map, and this project has none. Run generate_athree_map first; if that is refused, this game has no big map and the starter is not for it.');
         const ow = generateOpenWorld();
         const owWritten = await this.writeRecipeFiles(ow.files, agent);
-        const owLayers = await this.addMissingRecipeLayers(ow.files, agent);
+        let owLayers = await this.addMissingRecipeLayers(ow.files, agent);
         // MOUNTED BY THE PLATFORM where no game is mounted yet (the kit seed asks for it): the first render is already a
         // player on the big map. An App that renders a game of its own is never replaced.
         const owRec = (input as Record<string, unknown>) || {};
@@ -10724,12 +10725,27 @@ export class ToolDispatcher {
                 getWorkspaceMemory(this.workspaceId).indexFile(ENEMIES_FEATURE_PATH, enemiesFile.content);
                 indexSource = featuresIndexWith(indexSource, 'enemies') ?? indexSource;
               }
+              // The kit's real police the first request asked for (GamePoliceFeature.ts): a car with its siren, officers get out.
+              const policeReq = policeRequestOf(owRec.police);
+              if (policeReq) {
+                const policeFile = await this.guardedWrite(POLICE_FEATURE_PATH, policeFeatureSource(policeReq), { agent, source: 'generate_open_world' });
+                this.state?.recordFileChange({ path: POLICE_FEATURE_PATH, kind: policeFile.kind }, agent);
+                getWorkspaceMemory(this.workspaceId).indexFile(POLICE_FEATURE_PATH, policeFile.content);
+                indexSource = featuresIndexWith(indexSource, 'policeDispatch') ?? indexSource;
+              }
+              // Every kit file the enemies or the police import (systems/entities.ts, systems/dispatch.ts …) is in the project
+              // too, or the first build would not compile (the seed lays the systems kit only for some requests).
+              const peopleFiles: Record<string, string> = {};
+              if (enemyReq) peopleFiles[ENEMIES_FEATURE_PATH] = enemyFeatureSource(enemyReq);
+              if (policeReq) peopleFiles[POLICE_FEATURE_PATH] = policeFeatureSource(policeReq);
+              if (Object.keys(peopleFiles).length) owLayers += await this.addMissingRecipeLayers(peopleFiles, agent);
               // A game with a fight in it (the seed passes danger: true when it laid the systems kit) starts with street
               // danger — enemies, bystanders and police (Q-3521) — only when those systems are really in the project.
               if (owRec.danger === true) {
                 const has = async (p: string) => { try { await this.actuator.readFile(this.workspaceId, p); return true; } catch { return false; } };
                 if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {
-                  const feature = await this.guardedWrite(GAME_STREET_DANGER_PATH, GAME_STREET_DANGER_FEATURE, { agent, source: 'generate_open_world' });
+                  // Never a second set of enemies: with the user's own enemies written above, street danger brings only bystanders and police.
+                  const feature = await this.guardedWrite(GAME_STREET_DANGER_PATH, streetDangerSource({ ownEnemies: !!enemyReq }), { agent, source: 'generate_open_world' });
                   this.state?.recordFileChange({ path: GAME_STREET_DANGER_PATH, kind: feature.kind }, agent);
                   getWorkspaceMemory(this.workspaceId).indexFile(GAME_STREET_DANGER_PATH, feature.content);
                   danger = true;

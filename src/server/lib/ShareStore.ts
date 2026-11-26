@@ -23,6 +23,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { verifiedOwnerKeySegment } from './workspaceAssetStorage';
 
 const SHARES_COLLECTION = 'shares';
 const FEEDBACK_SUBCOLLECTION = 'feedback';
@@ -179,7 +180,7 @@ export async function saveShare(share: ShareRecord): Promise<boolean> {
   if (!db || !share.token) return false;
   try {
     if (shouldOffloadToStorage(share.html.length, isShareStorageConfigured())) {
-      const path = `${SHARE_HTML_PREFIX}/${share.token}.html`;
+      const path = shareHtmlObjectPath(share.ownerId, share.token);
       try {
         await admin
           .storage()
@@ -202,6 +203,118 @@ export async function saveShare(share: ShareRecord): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Where a large share's HTML is kept (Q-3611). A share created by a VERIFIED owner (the share route takes `ownerId`
+ * from the token, never the body) is filed under that owner — `shares/<owner>/<token>.html`, the same one-level owner
+ * encoding the workspace-asset and proof-picture erasers use — so account deletion reaches it with one prefix delete
+ * even if its Firestore pointer is already gone. An owner with no usable id keeps the legacy `shares/<token>.html`,
+ * which only its record can point at. PURE.
+ */
+export function shareHtmlObjectPath(ownerId: string, token: string): string {
+  const owner = verifiedOwnerKeySegment(ownerId);
+  return owner ? `${SHARE_HTML_PREFIX}/${owner}/${token}.html` : `${SHARE_HTML_PREFIX}/${token}.html`;
+}
+
+/** The prefix holding every share HTML filed under this verified owner, or null when the uid is unusable. PURE. */
+export function shareHtmlOwnerPrefix(verifiedUid: string): string | null {
+  const owner = verifiedOwnerKeySegment(verifiedUid);
+  return owner ? `${SHARE_HTML_PREFIX}/${owner}/` : null;
+}
+
+const SHARE_TOKEN = /^[A-Za-z0-9_-]{8,128}$/;
+
+/**
+ * Is `htmlPath` the object THIS share (token, owner) could have written? Only such a path is ever deleted by the
+ * account eraser: a record's pointer is data, and a pointer to anything else (another owner's folder, a different
+ * token, another prefix) is refused rather than trusted. PURE.
+ */
+export function isOwnShareHtmlPath(htmlPath: string, token: string, verifiedUid: string): boolean {
+  if (!SHARE_TOKEN.test(token)) return false;
+  if (htmlPath === `${SHARE_HTML_PREFIX}/${token}.html`) return true;
+  const owner = verifiedOwnerKeySegment(verifiedUid);
+  return !!owner && htmlPath === `${SHARE_HTML_PREFIX}/${owner}/${token}.html`;
+}
+
+/** What account deletion needs from the share store. firebase-admin in production; a fake in tests. */
+export interface ShareEraseDeps {
+  /** Every share record this owner has (`shares` where `ownerId == uid`): its token and stored pointer. Throws when unreadable. */
+  listOwnedShares(uid: string): Promise<Array<{ token: string; ownerId: string; htmlPath?: string }>>;
+  /** Delete one object. A missing object is success; any other failure THROWS (never swallowed). */
+  deleteObject(path: string): Promise<void>;
+  /** Delete every object under a prefix. Throws on failure. */
+  deletePrefix(prefix: string): Promise<void>;
+}
+
+export interface ShareHtmlEraseReport {
+  attempted: boolean;
+  /** Every large-share HTML of this owner that could be found was confirmed deleted. */
+  htmlRemoved: boolean;
+  /** Share records whose legacy (owner-less) HTML object was deleted through the record's pointer. */
+  legacyObjectsDeleted: number;
+  /** Whether the owner's `shares/<owner>/` folder was deleted. */
+  ownerFolderDeleted: boolean;
+  failures: string[];
+}
+
+/** The production dependencies, or null when Firestore or the bucket is not configured. */
+export function liveShareEraseDeps(): ShareEraseDeps | null {
+  const db = getDb();
+  const name = shareBucketName();
+  if (!db || !name) return null;
+  const bucket = () => admin.storage().bucket(name);
+  return {
+    async listOwnedShares(uid) {
+      const snap = await db.collection(SHARES_COLLECTION).where('ownerId', '==', uid).get();
+      return snap.docs.map((d) => {
+        const data = (d.data() ?? {}) as Partial<ShareRecord>;
+        return { token: d.id, ownerId: String(data.ownerId ?? ''), ...(typeof data.htmlPath === 'string' ? { htmlPath: data.htmlPath } : {}) };
+      });
+    },
+    async deleteObject(path) { await bucket().file(path).delete({ ignoreNotFound: true }); },
+    async deletePrefix(prefix) { await bucket().deleteFiles({ prefix, force: true }); },
+  };
+}
+
+/**
+ * DELETE /api/profile's step for share-link HTML (Q-3611). MUST run BEFORE the `shares` records are erased: a legacy
+ * offload (`shares/<token>.html`) is reachable only through its record's `htmlPath`, and the record is the pointer
+ * `deleteUserData` removes. Deletes (1) the owner's `shares/<owner>/` folder — every share filed by owner, pointer or
+ * not — and (2) each legacy HTML its own record points at, only when the pointer is exactly that share's own path.
+ * `verifiedUid` is the deletion route's VERIFIED identity. A failure is reported as a failure, never as a removal.
+ * Never throws.
+ */
+export async function eraseUserShareHtml(
+  verifiedUid: string,
+  deps: ShareEraseDeps | null = liveShareEraseDeps(),
+): Promise<ShareHtmlEraseReport> {
+  const report: ShareHtmlEraseReport = { attempted: false, htmlRemoved: false, legacyObjectsDeleted: 0, ownerFolderDeleted: false, failures: [] };
+  const prefix = shareHtmlOwnerPrefix(verifiedUid);
+  if (!prefix) return { ...report, failures: ['No usable account id: share link pages could not be selected for removal.'] };
+  if (!deps) return { ...report, failures: ['Share link storage is not configured; removal of large share pages could not be confirmed.'] };
+  report.attempted = true;
+  try { await deps.deletePrefix(prefix); report.ownerFolderDeleted = true; } catch {
+    report.failures.push('The folder of your large share link pages could not be confirmed removed.');
+  }
+  let shares: Array<{ token: string; ownerId: string; htmlPath?: string }>;
+  try { shares = await deps.listOwnedShares(verifiedUid); } catch {
+    report.failures.push('Your share links could not be listed; pages stored before they were filed by owner could not be confirmed removed.');
+    return report;
+  }
+  let failed = 0;
+  let refused = 0;
+  for (const share of shares) {
+    const path = share.htmlPath ?? '';
+    if (!path || share.ownerId !== verifiedUid) continue;
+    if (path.startsWith(prefix)) continue; // inside the owner folder deleted above
+    if (!isOwnShareHtmlPath(path, share.token, verifiedUid)) { refused++; continue; }
+    try { await deps.deleteObject(path); report.legacyObjectsDeleted++; } catch { failed++; }
+  }
+  if (failed) report.failures.push(`${failed} large share link page(s) could not be confirmed removed.`);
+  if (refused) report.failures.push(`${refused} share link record(s) pointed at a page outside their own path; it was not deleted and needs review.`);
+  report.htmlRemoved = report.failures.length === 0;
+  return report;
 }
 
 /** Resolve a share by token. Returns null when missing/unreadable. */

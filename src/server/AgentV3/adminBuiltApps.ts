@@ -30,6 +30,8 @@
 import type { DeploymentRecord } from './DeploymentStore';
 import { isLiveDeployment } from './DeploymentStore';
 import { isWorkspaceId, workspaceOwnerUid, WORKSPACE_UID_RE } from '../lib/workspaceIdentity';
+import { matchesTier, parseTierFilter, type AccountTier, type AccountTierFilter } from '../lib/accountTier';
+import type { BuildOutcome } from './DiagnosticsStore';
 
 /** "12-12 ke set me" — the admin's number, and the only page size the panel asks for. */
 export const BUILT_APPS_PAGE_SIZE = 12;
@@ -145,6 +147,10 @@ export interface BuiltAppRow {
    * click is more use than a blank.
    */
   owner: { name: string; email: string; label: string; anonymous: boolean } | null;
+  /** The LAST build's result (DiagnosticsStore.getBuildOutcomesMany): passed, failed, or unknown. */
+  outcome: BuildOutcome;
+  /** The owner's account: paid (has bought tokens), free (never), admin/tester, or unknown — the All-builds rule. */
+  tier: AccountTier;
 }
 
 /**
@@ -179,6 +185,8 @@ export function builtAppRow(
     orphaned: rec?.orphaned === true,
     appName: null,
     owner: null,
+    outcome: 'unknown',
+    tier: 'unknown',
   };
 }
 
@@ -268,4 +276,70 @@ export function sliceOwnerPage<T>(all: T[], offsetRaw: unknown, size: number): {
   const page = all.slice(offset, offset + size);
   const next = offset + size;
   return { page, nextOffset: next < all.length ? String(next) : null };
+}
+
+// ── SORT AND FILTER (admin 2026-11-26: "list me app aa rahi hai, be tarteeb hai, sort karne ka system banao — old new,
+//    free paid, fail pass") ────────────────────────────────────────────────────────────────────────────────────────
+
+/** How the admin wants the list: the order, and which apps to keep. */
+export interface AppsView {
+  /** newest = latest save first (the default); oldest = earliest save first. */
+  sort: 'newest' | 'oldest';
+  /** The last build's result. */
+  outcome: 'all' | BuildOutcome;
+  /** The owner's account tier (the same rule as All builds). */
+  tier: AccountTierFilter;
+  /** live = on the internet now; not-live = everything else (never published, unpublished, banned, held, paused). */
+  publish: 'all' | 'live' | 'not-live';
+}
+
+/** Read the view from the query string; anything unrecognised means "do not filter". PURE. */
+export function parseAppsView(q: Record<string, unknown>): AppsView {
+  const sort = q.sort === 'oldest' ? 'oldest' : 'newest';
+  const outcome = q.outcome === 'passed' || q.outcome === 'failed' || q.outcome === 'unknown' ? q.outcome : 'all';
+  const publish = q.publish === 'live' || q.publish === 'not-live' ? q.publish : 'all';
+  return { sort, outcome, tier: parseTierFilter(q.tier), publish };
+}
+
+/** True when the view keeps only some apps (so the page must be found by looking, not just read in order). PURE. */
+export function viewFilters(v: AppsView): boolean {
+  return v.outcome !== 'all' || v.tier !== 'all' || v.publish !== 'all';
+}
+
+/** Does one row survive the view? PURE. */
+export function rowMatchesView(row: Pick<BuiltAppRow, 'outcome' | 'tier' | 'publish'>, v: AppsView): boolean {
+  if (v.outcome !== 'all' && row.outcome !== v.outcome) return false;
+  if (!matchesTier(row.tier, v.tier)) return false;
+  if (v.publish === 'live' && row.publish !== 'live') return false;
+  if (v.publish === 'not-live' && row.publish === 'live') return false;
+  return true;
+}
+
+/**
+ * How far one filtered page may look. The facts a filter reads (the last build's result, the owner's account, the
+ * publish state) live in three other collections, so no single query can answer "the next 12 failed apps" — the server
+ * reads apps in order, in batches, and keeps the ones that match. BOUNDED, so a rare filter can never become the
+ * load-everything the panel exists to avoid: at most SCAN_BATCHES × SCAN_BATCH apps per page, and the answer says how
+ * many it looked at, so the screen never claims "no more" when it simply stopped looking.
+ */
+export const SCAN_BATCH = 48;
+export const SCAN_BATCHES = 8;
+
+/**
+ * Keep the matching rows of one batch, in order, up to `want`. Returns them and the id of the LAST row examined — the
+ * cursor to resume from, so a match after it is never skipped (stopping mid-batch must not jump to the batch's end). PURE.
+ */
+export function takeMatches<T extends Pick<BuiltAppRow, 'workspaceId' | 'outcome' | 'tier' | 'publish'>>(
+  rows: T[], v: AppsView, want: number,
+): { kept: T[]; lastExamined: string | null; examined: number } {
+  const kept: T[] = [];
+  let lastExamined: string | null = null;
+  let examined = 0;
+  for (const r of rows) {
+    if (kept.length >= want) break;
+    examined++;
+    lastExamined = r.workspaceId;
+    if (rowMatchesView(r, v)) kept.push(r);
+  }
+  return { kept, lastExamined, examined };
 }

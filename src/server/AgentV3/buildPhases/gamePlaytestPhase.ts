@@ -14,13 +14,15 @@ import {
   domGameKind, domGameNotPlayedVerdict, isCanvasGameProject, gameDefectsMessage, gameScopeVerdict, missingKitLayerPaths, parsePlaytest,
   playtestDefects, playtestNotRunVerdict, playtestOutcome, playtestSkipReason, playtestVerdict, replayFromCode, withKitLayersFromDisk,
 } from '../gamePlaytest';
-import { scopeMatch, type GameScopeContract } from '../gameIntent';
+import { asksForEnemies, scopeMatch, type GameScopeContract } from '../gameIntent';
 import { gameGotWorse, gameMeasureFromIssues, gameUndoMessage, versionBeforeTurn } from '../gameRegression';
 import { GAME_GEOMETRY_CODE, gameGeometryProbeEnabled, geometryFindings, geometryFindingsMessage } from '../gameGeometryProbe';
 import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbeEnabled, missingModelFindings, pagePlaceholderFindings, placeholderFindingsMessage } from '../gamePlaceholderProbe';
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from './gameFixVerdict';
 import { reportRuleProbes } from './gameRuleProbes';
 import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
+import type { KeepResult } from '../gameProofPictures';
+import type { ProofShot } from '../gamePlaytest';
 
 /** What decides whether the game can be played now. All true ⇒ played; otherwise the reason is said. */
 export interface PlaytestFacts {
@@ -58,6 +60,8 @@ export interface GamePlaytestPorts {
   /** The project as it stands after this turn's writes. */
   files: Record<string, string>;
   contract: GameScopeContract | null;
+  /** This turn's request — an edit turn has no contract, but may still ask for enemies (BR2532). */
+  request?: string;
   /** Runs the playtest script in the sandbox (the route wraps the timeout); its stdout is parsed. */
   play: () => Promise<{ stdout: string }>;
   readFile: (path: string) => Promise<string | null | undefined>;
@@ -70,6 +74,11 @@ export interface GamePlaytestPorts {
   versions: () => Promise<Parameters<typeof versionBeforeTurn>[0]>;
   turnStartedAt: number;
   fix: GameFixPorts;
+  /**
+   * Q-3363: copies the pictures the playtest took into the private store for the admin report (gameProofPictures.ts).
+   * Optional: absent, GAME_PROOF says the pictures stay in the sandbox, as before.
+   */
+  keepPictures?: (shots: ProofShot[]) => Promise<KeepResult | null>;
 }
 
 /** The workspace's file list, or [] when it fails or takes longer than `ms` (the timer is always cleared). */
@@ -125,7 +134,9 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         // Bounded: a slow listing must never hold the build — after 5 s the file check says nothing.
         const present = p.listFiles ? await listWithin(p.listFiles, 5000) : [];
         const fromFiles = missingModelFindings(playedFiles, present);
-        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff);
+        // Enemies are looked for only when the request asked for them (report #2519: asked for, built, never on screen) —
+        // the contract, or this turn's own words when an edit turn has no contract (BR2532).
+        const fromPage = pagePlaceholderFindings(playRun.placeholderStart, playRun.placeholderEnd, playRun.controlsOff, { enemies: !!p.contract?.requiredFeatures.includes('enemies') || asksForEnemies(p.request) });
         const placeholderMsg = placeholderFindingsMessage(combinePlaceholderFindings(fromFiles, fromPage));
         if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }
@@ -155,7 +166,7 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
       if (scope) p.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
       if (evidence?.notVerified?.length) out.featuresUnverified = [...evidence.notVerified];
     } catch { /* observation only */ }
-    recordProof(p, playRun, ranMs);
+    recordProof(p, playRun, ranMs, undefined, await keptPictures(p, playRun));
   } catch (err) {
     // A playtest that timed out or crashed is a check that could not look — the same open warning the runner's own
     // "never played" answer gives, never an info line that reads as a pass.
@@ -199,14 +210,22 @@ function notPlayed(p: GamePlaytestPorts): GamePlaytestResult | null {
   return out;
 }
 
+/** Q-3363: the pictures a played run took, kept privately for the admin. null when none or no keeper. Never throws. */
+async function keptPictures(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest>): Promise<KeepResult | null> {
+  if (!p.keepPictures || !run?.ok) return null;
+  const shots = (run.proofShots ?? []).filter((s): s is ProofShot => !!s && !('error' in s) && typeof (s as ProofShot).id === 'string');
+  if (shots.length === 0) return null;
+  try { return await p.keepPictures(shots); } catch { return null; }
+}
+
 /**
  * 🎮 GAME_PROOF — the four proofs of every game build the playtest reached (gameProof.ts): the contract, what it looked
  * like, what was played, and how long and how fast it ran in the sandbox (never called a phone). A game that was not
  * played still gets the section, with every played proof said as not taken and why. Evidence only; never throws.
  */
-function recordProof(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest> | null, ranMs: number | null, notPlayedWhy?: string): void {
+function recordProof(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest> | null, ranMs: number | null, notPlayedWhy?: string, kept?: KeepResult | null): void {
   try {
-    const issue = gameProofIssue(gameProof({ contract: p.contract, run, ranMs, files: p.files, notPlayedWhy }));
+    const issue = gameProofIssue(gameProof({ contract: p.contract, run, ranMs, files: p.files, notPlayedWhy, kept }));
     p.record({ phase: 'preview', severity: issue.severity, code: issue.code, message: issue.message, autoResolved: issue.autoResolved, detail: issue.detail });
   } catch { /* observation only */ }
 }

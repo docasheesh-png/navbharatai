@@ -73,6 +73,9 @@ export const PROCESS_ONLY_CODES = new Set([
   // The growth guard put back a change the BUILDER made without being asked (growthTurn.ts): the user's app is exactly as
   // it was before the turn — ours to fix, never a defect in their app. The user is told in plain words (growthUserNote).
   'GROWTH_GUARD_RESTORED',
+  // BR2532 (Q-3402): a repair pass broke a file that compiled before it, and the platform put that file back
+  // (typecheckGateRepair.ts). The user's file is exactly as their build wrote it — our repair's slip, never their app's.
+  'REPAIR_REVERTED',
   // Q-381 batch six (2026-10-12). The dev server would not stay up after the platform restarted it. Its own
   // recording sites say "The app's code was never the problem here — nothing was listening on the preview
   // port" and call it "an infrastructure finding, not an accusation against the user's code" (autopsy

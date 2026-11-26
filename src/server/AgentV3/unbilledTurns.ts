@@ -259,6 +259,6 @@ export function absorbedWorkDetail(
 const PHASE_WORDS: Record<string, string> = {
   [PHASE_POST_BUILD_REVIEW]: 'the post-build review delivered no findings (it ran out of time, or its result could not be read)',
   [PHASE_EXPLORER_REPAIR]: 'a button repair was undone, so the app kept nothing it wrote',
-  [PHASE_GAME_REPAIR]: 'the game repair after the playtest is absorbed by the platform (admin decision pending)',
+  [PHASE_GAME_REPAIR]: 'the in-build game repair after the playtest is absorbed by the platform, kept or undone (admin decision 2026-11-26)',
   [PHASE_POST_FIX_REVIEW]: 'the review after a repair gave no verdict (no time left, or it could not finish)',
 };

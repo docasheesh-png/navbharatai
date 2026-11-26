@@ -334,6 +334,9 @@ vertContinued': async () => { await io.writeFile('a', 'green'); } };`, 'revertCo
       'src/server/routes/agentv3.ts#applyGreenSnapshotRestore': ['applySnapshotRestore', 'snapshotRestoreStopped(abort.signal)', 'reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })'],
       'src/server/routes/agentv3.ts#revertToGreenSnapshot': ['applyGreenSnapshotRestore', 'snapshotRestoreComplete'],
       'src/server/routes/agentv3.ts#restore': ['applyGreenSnapshotRestore(plan, () => abort.signal.aborted'],
+      // Q-3374: the placeholder repair's undo is the byte-exact tar restore, CHECKED against the backup's own manifest
+      // fingerprint (gameWorkspaceBackup.ts); the captured writes and the store are put back only after that check passed.
+      'src/server/AgentV3/buildPhases/gamePlaytestPhase.ts#restore': ['parseGameRestore(', 'digest)', 'if (restored.ok) await putCapturedBack'],
       // Different domains: checked git/tar restore; fresh-machine refill; deterministic kit repair;
       // and constructing a new, detached VFS. They never claim that a swallowed rollback completed.
       'src/server/AgentV3/sandbox/EngineerAI/actuators/DockerActuator.ts#restore': ['result.exitCode !== 0', 'throw new Error'],

@@ -6056,6 +6056,27 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
+## 2026-11-25 — Dual Android build providers: NavBharatAI Native Cloud Build + the existing GitHub Actions build
+
+**Admin task:** one "Build Android App" button → exactly two genuine providers. Full design: `MOBILE_NATIVE_BUILD.md`.
+
+- **UI:** `AndroidBuildProviders.tsx` (the button + two-option sheet; the last choice is pre-selected, never auto-switched) wraps the
+  UNCHANGED `StoreBuildPanel` (GitHub) and the new `NativeBuildPanel` (native). Wired in `APKBuilder.tsx`.
+- **No second recipe:** the native worker runs the app's own generated GitHub workflow, translated step by step
+  (`workflowScript.ts`, census-tested for every step of both lanes on Capacitor 5–8; unknown actions / GitHub expressions throw).
+- **No duplicate preparation or charge:** `/api/mobile-ship/setup`'s GitHub-independent body moved verbatim into
+  `prepareMobileProject.ts`; the ₹ charge moved into `mobileBuildCharge.ts`; both providers call them. Source guards re-pointed, not weakened.
+- **Stateless native driver:** detached build in a disposable E2B machine, Firestore job row, `advanceNativeBuild` under a transactional lease
+  (a read-then-write lease race was caught by a test and fixed; the test Firestore double now models contention retries).
+- **Trust split:** untrusted build machine (no env, restricted egress) → fresh network-less signing machine (fixed script, key files deleted by trap)
+  → private bucket (md5-verified) → completed → charged once (`native_<id>`). Upload keys sealed with `secrets.ts`, consent recorded, every use audited.
+- **Real verification in this container:** real Gradle APK + signed/validated AAB from NavBharatAI-assembled projects; real keytool checks for
+  PKCS12/JKS; the whole orchestrator end to end (`tests/nativeCloudBuildRealGradle.test.ts`, opt-in).
+- **Defaults:** native OFF (`MOBILE_NATIVE_BUILD_ENABLED`), GitHub ON (`MOBILE_GITHUB_BUILD_ENABLED`).
+- **OPEN (owner-side, not code):** build the worker template (`template_kind: android-native`) — the image has never been built (no Docker
+  daemon here); set `MOBILE_NATIVE_BUILD_TEMPLATE` + `MOBILE_BUILD_ARTIFACT_BUCKET`; pin Temurin digests; bucket lifecycle rule; a first
+  live native build and a real-device install.
+- **OPEN (admin decision):** whether a native build whose paid balance cannot cover ₹1 should withhold the download (GitHub cannot; native could).
 ## 2026-11-25 — The first online Royale match: server-authoritative, 2–4 players, quota-bound (admin "sab karo")
 
 - **What was asked:** an external audit's order, approved by the admin — first a small, complete online match for the original Royale game, then scale. Until now only the offline Practice (PR #4217) existed.
@@ -6347,6 +6368,24 @@ stand-in clip), one "animates its moves" line for a model with no clips. Builder
 Locked: `tests/aCharacterMakesItsOwnMoves.test.ts`. Still not made when missing: jump, swim, dive, block, hit, die, slide.
 Also fixed on CI: openWorld.ts's `softwareRenderer` import kept on its own line (the no-GPU guard pins it).
 
+## 2026-11-26 — One bounded in-build placeholder repair (Q-3374) and the replay moved into the playtest phase (Q-3365)
+
+- **Admin decision:** option (b) for Q-3374, "baaki sab build karo". Repair of measured game DEFECTS stays suspended (`gameRepair.ts` is unchanged in behaviour).
+- **Why the old repair was suspended, and what answers it:** its way back was `collectWorkspaceFiles(...).files`, a best-effort text map that cannot undo a binary move or delete. New `gameWorkspaceBackup.ts` takes a tar of the whole project outside it plus a sha256 manifest. It refuses (no repair) on a special file, a control character in a name, a tree over 400 MB, too little space or any tar warning. The restore removes every non-directory, extracts, removes directories the repair created, and compares a fresh manifest with the backup's own fingerprint. Only `node_modules` and Vite's `*.timestamp-*.mjs` are outside it, by declaration.
+- **The repair (`gamePlaceholderRepair.ts`, through `buildPhases/gamePlaytestPhase.ts`):** only when the placeholder look found ONLY `MISSING_MODEL` and/or `EMPTY_MAP`. One pass, file tools only (`onlyTheseTools` in `repairScope.ts` makes the runner refuse every other name), 120 s, 160,000 tokens, 8 steps, 12,000 output tokens per turn. Platform-paid: billing phase `game-repair` is added to the barren set before the first call. The game is played again; kept only if it has fewer stand-ins, no new kind, no new defect, no named feature lost and a score not lower. Otherwise every byte is put back and verified, the captured writes are restored exactly, and the store gets each touched file back (or forgets one the repair created). A restore that does not match is a warning, and the backup stays in the sandbox. Every outcome is one `GAME_PLACEHOLDER_REPAIR` line. Free tier: shares the explorer repair's daily allowance. Kill switch `AGENTV3_GAME_PLACEHOLDER_REPAIR=off` (ENV_REGISTRY).
+- **Q-3365:** the route's repair `replay` closure is deleted. `replayGamePlaytest` runs the same `playIt` as the first play, with its report lines held and flushed only on keep (prefixed "Replay after the kept placeholder repair:"). So a kept repair re-records GAME_PROOF and the unverified-feature list. The route applies the first play and a kept replay through one `applyGamePlayed`, which deletes `gameFeaturesUnverified` when the replay proves them all. When no stand-in is left, a final GAME_PLACEHOLDERS "none left" line makes `placeholderRepairNote` hand the next turn nothing.
+- **Tests:** `tests/aGameRepairCanAlwaysGoBack.test.ts` runs the real shell backup/restore on a real directory (binary move and delete, a 300 KB file a text map never saw, a mode change, a swapped symlink, new nested folders, and each refusal). `tests/aPlaceholderIsRepairedInTheBuild.test.ts` covers the judgement, caps (time, tokens), keep/undo/no-change/restore-unverified, a write outside the backup, the phase end to end (GAME_PROOF re-recorded on keep, nothing on discard, captured writes and store put back), and route source guards. The restore census (`anAutomaticRestoreReportsOnlyWhatItApplied`) classifies the new restore.
+- **Opened by the sibling hunt (OPEN, not fixed here):** Q-3500 (`E2BActuator.checkpoint()` reports an id when tar failed; `restore()` is neither exact nor verified), Q-3501 (five live repairs still undo from the text map).
+- **Watch on the next real game build with a missing model or a blank map:** the `GAME_PLACEHOLDER_REPAIR` line, and on a keep, a second GAME_PROOF prefixed with the replay note.
+## 2026-11-26 — Game full screen: only the button, and it fills the screen (admin iPhone screenshot)
+
+- Q-3440: `Game.play()` no longer goes full screen on a phone; the Full screen button is the only way in (builder prompt
+  updated). Locked by a census (only Game.ts asks the browser; the only other caller is the button).
+- Q-3441: root of the "two-thirds screen": `createRenderer` wrote the window size in px onto a canvas Game.ts sizes at 100%,
+  and container-mode `handleResize` never touches the style, so the canvas never grew with its box. A page-sized canvas
+  now keeps its style. Locked by running the real generated renderer.ts into a grown box.
+- Q-3442 🟡: the HUD under the status bar inside the app's preview frame (iOS gives an iframe 0 safe-area insets) — needs
+  the page to pass its insets in; recorded with a recommendation.
 ## 2026-11-26 — Q-3363: game proof pictures kept privately for 30 days, admin-only (#4557, not merged)
 
 The admin approved option A. What changed:
@@ -6419,3 +6458,26 @@ possible cause aur root cause dhundo"*. Evidence: the code, plus failedbr #2510�
   (`window.__nbEntities`, MISSING_ENEMIES), a repair that rewrote a clean `monsters.ts` into a broken one (#2532).
 - Also seen: a server loss before any enemy was written (#2520, Q-3354); a turn spent on an unrelated warning (#2511), now covered by the platform acting itself.
 
+## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
+
+Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
+Honest scope: this PR builds what can be built and verified in the repo; the infrastructure items are recorded BLOCKED.
+
+- **Q-3480 places:** `worldSetting.ts` — the named places and lands (mapGrowthIntent's vocabulary), counts, order, refusals.
+  Houses/roads never turn a named village into a city; the open-world seed writes exactly those regions; a PLACES line
+  travels into milestones. Real prompt locked: failedbr #2520 "ek gav(village) game banao".
+- **Q-3481 genre kits:** `generate_genre_kits` — fighting.ts and towerDefense.ts (pure, 60 Hz, 2D or 3D), seeded by genre,
+  named in the handoff, design doc, system prompt and AppKnowledgeBase. Tests play the generated files frame by frame.
+- **Q-3482 benchmark:** `gameCoverage.ts` — 50 canonical games; today 22 of 50 get a starter / rules / genre kit, 28 are
+  kit-only (the builder improvises), 0 fall out of the game path. Ratchet MAX_KIT_ONLY = 28, only down. Fixed on the way:
+  ball sports read before shooters; Tekken / Street Fighter / Mortal Kombat in the shared title catalogue.
+- **Open / blocked (rows in BUILD_REPORT_QUEUE.md):** Q-3483 runner 3D starter, Q-3484 GTA with a car gets no player,
+  Q-3485 voxel kit, Q-3486 village drawn as a small town, Q-3487 GPU playtest, Q-3488 57 library subjects, Q-3489
+  post-processing / IK / retargeting, Q-3490 general multiplayer, Q-3491 real-phone runs, Q-3492 playtest adapters,
+  Q-3493 the 28 kit-only games. Auto-repair stays Q-3374.
+- Q-3460 (kit typecheck, #4554) closed — merged.
+## 2026-11-26 — Q-3380: one no-pointer-lock stub on every platform browser that sends input (#4568)
+- **Problem:** a game that calls `requestPointerLock` floods a headless platform browser with synthetic input (108,052 messages in 3 s, 1–4 fps on #4552). #4553 stubbed it in the playtest's desktop context and the click explorer with two hand-written copies.
+- **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
+- **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
+- **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.

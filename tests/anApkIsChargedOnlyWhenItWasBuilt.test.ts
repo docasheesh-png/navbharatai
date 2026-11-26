@@ -39,9 +39,11 @@ describe('the charge', () => {
   const artifacts = route.slice(route.indexOf("app.get('/api/mobile-ship/artifacts'"), route.indexOf("app.get('/api/mobile-ship/download'"));
 
   it('🔒 lives on the artifacts call, once per built file, and never on the trigger', () => {
-    expect(artifacts).toContain('debitWalletForBuild(');
-    expect(artifacts).toContain('buildRef: apkChargeRef(owner, repo, String(a.id))');
+    // 2026-11-25: the debit itself moved into the ONE shared charge (mobileBuildCharge.ts) so the Native
+    // Cloud Build charges exactly like this lane; this route still CALLS it here, and only here.
+    expect(artifacts).toContain('chargeMobileBuild(identity.uid, apkChargeRef(owner, repo, String(a.id)), String(a.name))');
     const trigger = route.slice(route.indexOf("app.post('/api/mobile-ship/trigger'"), route.indexOf("app.post('/api/mobile-ship/autofix'"));
     expect(trigger).not.toContain('debitWalletForBuild(');
+    expect(trigger).not.toContain('chargeMobileBuild(');
   });
 });

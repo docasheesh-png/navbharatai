@@ -1,4 +1,4 @@
-import { SANDBOX_BROWSER_ARGS, SANDBOX_PLAYWRIGHT_VERSION } from '../../../sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, SANDBOX_PLAYWRIGHT_VERSION, NO_POINTER_LOCK_INIT, noPointerLockInstall } from '../../../sandboxBrowserScript';
 import { exclusiveCreateCommand } from '../../../../lib/proceduralObjects/exclusiveCreateCommand';
 import { randomUUID } from 'node:crypto';
 import { assertNotCanaryWorkspace } from '../../../reliability/canaryIsolation';
@@ -402,6 +402,7 @@ ${CONSOLE_RECORDER_JS}
 (async()=>{
   const b=await chromium.launch({args:[...${JSON.stringify(SANDBOX_BROWSER_ARGS)},'--disable-setuid-sandbox']});
   const p=await b.newPage();
+  ${noPointerLockInstall('p')}
 ${attachConsoleJs('p').trimEnd()}
   const vw=parseInt(process.argv[3],10)||1280;
   const vh=parseInt(process.argv[4],10)||720;
@@ -423,7 +424,11 @@ export function persistentBrowserPageJs(target = "''", width = '1280', height = 
   return `
   const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
   const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:${width},height:${height}}});
+  // No pointer lock under automation (Q-3380): the actions click the app, and a game that locks the pointer floods this
+  // headless browser with synthetic input. The shared stub — for documents this connection opens, and the open one now.
+  ${noPointerLockInstall('ctx')}
   let page=ctx.pages()[0]||await ctx.newPage();
+  await page.evaluate(${NO_POINTER_LOCK_INIT}).catch(()=>{});
   await page.setViewportSize({width:${width},height:${height}}).catch(()=>{});
   const requested=${target};
   const canonical=(u)=>{try{return new URL(u).href;}catch{return u;}};
@@ -472,6 +477,8 @@ export function browsePageScript(url: string, opts?: { recordConsole?: boolean }
   // Default ON: the measurement was missing, which is the whole finding. `recordConsole: false`
   // emits the pre-2026-09-21 script byte for byte, so the kill switch is a real revert and not a
   // different code path that merely looks quiet.
+  // (The one line both modes share that the 2026-09-21 script lacked is the pointer-lock stub every page this
+  // file opens carries — Q-3380, sandboxBrowserScript.ts. It is not console capture, so the switch leaves it.)
   const record = opts?.recordConsole !== false;
   return `
 const {chromium}=require('playwright');
@@ -479,6 +486,7 @@ ${record ? CONSOLE_RECORDER_JS : ''}
 (async()=>{
   const b=await chromium.launch({args:[...${JSON.stringify(SANDBOX_BROWSER_ARGS)},'--disable-setuid-sandbox']});
   const p=await b.newPage();
+  ${noPointerLockInstall('p')}
 ${record ? attachConsoleJs('p').trimEnd() : ''}
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
 ${paintWaitJs('p')}

@@ -111,7 +111,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "db50858ac49f95fd4bbfc70cb874b2a45a0cc7b2a5c69201969c9486913f852a",
     "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad",
     "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d",
-    "d083400e9e28eac41868b349a9517ffab70dfffa4f9436b0d21bbb86e57a1a04"
+    "63dd5f6dc7104b31d8867f37276f525c60d5304b57e6a61cf808ddb1f6ed9489",
+    "2792f83abe02c9523c5f4b9ad58a8d4a96f96feae8aef4e2cff071902b0b947f"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -516,6 +517,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/fx/synth.ts": [
     "f6ac6662b6e06e8616fa599b7aef37ccf0d6835e230f181efd8282b32633cf76"
   ],
+  "src/game/genres/fighting.ts": [
+    "b578b3395b4d87924fde12d40bbd69de702c32dbc77aca44202b5ab8ea68b689"
+  ],
+  "src/game/genres/towerDefense.ts": [
+    "6fc5ad77463c27b2c76f5e7fa87c707847a11e1623fda8f1f0724eb3def482b2"
+  ],
   "src/game/play/actions.ts": [
     "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3"
   ],
@@ -585,10 +592,6 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6",
     "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc",
     "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54",
-    "9086bb42de0932c667ba1d04f21ea89075b671339d4d0aac27ceb6234966a9da",
-    "9fc7c7814a9caca635963c9ba1cf6299fae344218583de97ec5816c58dfe86e7",
-    "3ffe68af528b831eb6b33fb5bf6a8eca981ce0d457ee1f4ffa6937a33421c130",
-    "44d0b404a439c54317d92f4b39ddff92f2b59eb597130f1bf3db28dfcf47af2e",
     "49a35f633265c76b43f2b16dd2b9a194c2faa888148a7cf9bb6b1b3ecc128e54"
   ],
   "src/game/play/playerBody.ts": [
@@ -609,7 +612,6 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
     "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8",
-    "740f6276018b1e41c36781d1c280c3aba5f6f6471cf78dadf7541f058add53f5",
     "3541c247986062654210fe6e7c79baf1d751cd6994596b8a03bdd26a0895d03c"
   ],
   "src/game/royale/onlineClient.ts": [
@@ -714,10 +716,6 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6e42bc38b958c308de5c67dc663db25afba002b4ed2cb24b59292da67b34c6ee",
     "9aa32ad02cd425cc3b4a00eeea9ae1a21d35ac5142fae90c5b2c1da118517778",
     "e3411c230fe3afdb7e7fe312a3707eca9a3858a1b98312439d8d8a785ae94745",
-    "44087d681f16216a1278752793b763af4bc34be48db76a9b7aa439389f51f12a",
-    "d0ccb9f7c71e51f7d330691ef5d355e4d48e2907c34f5adeb7a6e1ad84b54d84",
-    "b6241230536ac0dd55b7b02e96ae1cdc9388841a223019b71b130f17dcdde2ed",
-    "a5efdbba7e9bacf32595c29b53e9b834a5ce7081510c5dfbbd598facf0ab3f13",
     "47269d73710bc869cd350562a794763c0b9dfff6adaae87a7e3fbb61c5c6ded0"
   ],
   "src/game/three/citytraffic.ts": [
@@ -818,7 +816,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/renderer.ts": [
     "e3bd063f8ab3ab10a658e8d808c0155a163ca15fb0d8744a4cd7d4fb902b7c19",
     "ec9599b1f6eedf372220c5ce2245c75ad53698bd983ebe90687debaad56fed50",
-    "a4eab150c392d6bbe183fbd647c080a6025334fc43f3952e67999ba68cf6b18f"
+    "a4eab150c392d6bbe183fbd647c080a6025334fc43f3952e67999ba68cf6b18f",
+    "fe280baa5b2469cacf2ac9d3bab6881ab872e387f127b32d544749ab4b4a993f"
   ],
   "src/game/three/splitscreen.ts": [
     "f3d3cd253e6e20134507928f6db8f71f8bbd2d9436f8dc4f806c4945632ec6de"

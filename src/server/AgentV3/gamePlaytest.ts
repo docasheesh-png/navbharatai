@@ -38,7 +38,7 @@
 
 import { missingLayerFiles } from '../lib/gameRecipeLayers';
 import { scopeMatch, type GameScopeContract, type ScopeMatch } from './gameIntent';
-import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport, noPointerLockInstall } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
@@ -336,6 +336,9 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     // The browser's own interventions (a passive-listener preventDefault it ignored): recorded apart from errors.
     intervention: BROWSER_INTERVENTION.source,
     interventionFlags: BROWSER_INTERVENTION.flags,
+    // The game saying a model or item the code asked for could not be shown (BR #2535) — recorded apart, as unmet asks.
+    notShown: KIT_NOT_SHOWN.source,
+    notShownFlags: KIT_NOT_SHOWN.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
     start: { any: START_LABEL.source, lead: START_LABEL_LEADING.source, flags: START_LABEL.flags,
       never: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags, notStart: NOT_A_START.source, notStartFlags: NOT_A_START.flags,
@@ -364,22 +367,13 @@ const { mkdirSync: nbMkdir, writeFileSync: nbWrite } = await import('node:fs');
 const { createHash: nbHash } = await import('node:crypto');
 const noise = new RegExp(cfg.noise, cfg.noiseFlags);
 const intervention = new RegExp(cfg.intervention, cfg.interventionFlags);
+const notShownRe = new RegExp(cfg.notShown, cfg.notShownFlags);
 
 // Deterministic randomness (Game Engine Ultra Phase 2): Math.random becomes a seeded mulberry32, so the
 // same game is played against the same spawns every run. crypto.getRandomValues is left alone.
 const seedRandom = (seed) => {
   let a = seed >>> 0;
   Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-};
-
-// 🖱️ NO POINTER LOCK UNDER AUTOMATION (Q-3380, measured on #4552): the playtest clicks the canvas, a game asks for
-// pointer lock, and in an automated headless browser that floods the page with ~36,000 synthetic input messages a
-// second — the game drew 1–4 fps because of OUR browser, not its code (4 → 15 fps with the lock stubbed). The kit
-// shell already skips the lock when navigator.webdriver is set; this covers every game (builder-written, older kit
-// copies). A resolved promise and no pointerlockchange event: the game simply keeps the mouse free.
-const noPointerLock = () => {
-  const stub = function () { return Promise.resolve(); };
-  try { Element.prototype.requestPointerLock = stub; } catch (_e) { /* read-only: leave it */ }
 };
 
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
@@ -882,9 +876,17 @@ const errors = [];
 // WHERE the throw is. '' when there is none (a console line carries no stack).
 const errorStacks = [];
 const interventions = [];
+// What the game itself said it could not show (a held item or a character that is not a saved model, a custom car that
+// could not be used) — BR #2535: the hand stayed empty and only a hint said so. A warning is recorded here alone; an
+// error is recorded here AND as an error, as before.
+const notShown = [];
 function watch(page) {
   page.on('pageerror', (e) => { errors.push(String(e && e.message || e).slice(0, 160)); errorStacks.push(String(e && e.stack || '').slice(0, 1200)); });
   page.on('console', (m) => {
+    if ((m.type() === 'warning' || m.type() === 'error') && notShownRe.test(m.text())) {
+      if (notShown.length < 5 && !notShown.includes(m.text().slice(0, 200))) notShown.push(m.text().slice(0, 200));
+      if (m.type() === 'warning') return;
+    }
     if (m.type() !== 'error' || noise.test(m.text())) return;
     // A browser intervention is the BROWSER declining one call (it ignored a preventDefault) — the game did not crash.
     if (intervention.test(m.text())) { if (interventions.length < 5) interventions.push(m.text().slice(0, 160)); return; }
@@ -987,7 +989,8 @@ const watchdog = setTimeout(async () => {
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
-  await ctx.addInitScript(noPointerLock);
+  // No pointer lock under automation (Q-3380): the shared stub, before any app code runs (sandboxBrowserScript.ts).
+  ${noPointerLockInstall('ctx')}
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(soundCounter);
   await ctx.addInitScript(sceneHook);
@@ -1328,6 +1331,8 @@ try {
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
   enter('playing it with touch controls on a phone');
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  // The phone taps the canvas too, and a tap is a click to the game: the same stub (Q-3380 — #4553 left this context bare).
+  ${noPointerLockInstall('m')}
   if (cfg.placeholders) await m.addInitScript(placeholderHook);
   const mp = await m.newPage();
   watch(mp);
@@ -1377,6 +1382,7 @@ try {
   out.errorStacks = errorStacks.slice(0, 5);
   out.errorCount = errors.length;
   if (interventions.length) out.interventions = interventions;
+  if (notShown.length) out.notShown = notShown;
   say(out);
 } catch (e) {
   if (e !== null) say({ ok: false, webgl: out.webgl, error: String(e && e.message || e).slice(0, 200) });
@@ -1597,6 +1603,8 @@ export interface PlaytestRun {
   errorCount?: number;
   /** Browser interventions seen while played (e.g. a passive-listener preventDefault it ignored) — not errors. */
   interventions?: string[];
+  /** What the game said it could not show (a held item / character not saved, a custom car that failed) — BR #2535. */
+  notShown?: string[];
   /** GAME_PROOF: the pictures kept in the sandbox (see PROOF_PICTURES) — a description each, never the image. */
   proofShots?: Array<ProofShot | { view: string; error: string } | null>;
   /** GAME_PROOF: why a picture was not taken, by view ('moved', 'far', 'all'). */
@@ -1640,6 +1648,11 @@ export function parsePlaytest(stdout: string | null | undefined): PlaytestRun {
  * a runtime error. Hiding it entirely would be dishonest: on a phone it means the page can scroll under the thumb.
  */
 export const BROWSER_INTERVENTION = /\[Intervention\]|unable to preventdefault inside passive event listener/i;
+/**
+ * The kit's own sentence for "what the code asked for is not on screen" (BR #2535): `[player] The rifle to hold is not one of
+ * this game's saved models…`, `[player] the character "x" could not be used…`, `[race car] Your car "x" could not be used…`.
+ */
+export const KIT_NOT_SHOWN = /^\[(?:player|race car|race track)\][^]*?(?:is not one of this game's saved models|could not be used|could not be loaded, so nothing is in the hand)/i;
 
 export type Dimension = 'runs' | 'responds' | 'mobile' | 'stable' | 'smooth' | 'alive' | 'replay' | 'feel' | 'progression' | 'visual';
 /** S4: the dimensions a run measures only when it can (a three.js scene, a game that reports its state, a picture). */
@@ -2218,7 +2231,8 @@ export type GameDefectCode =
   | 'GAME_DEFECT_RESTART_BROKEN'  // 2026-11-19: after the round ended, no play-again control, or pressing it did not restart
   | 'GAME_DEFECT_SILENT'          // 2026-11-19: the game's code plays sound, and a whole playthrough played none
   | 'GAME_DEFECT_TOUCH_SCROLLS'   // 2026-11-20 (failedbr #2477): a touch handler's preventDefault was ignored (passive listener)
-  | 'GAME_DEFECT_TOO_HEAVY';      // 2026-11-21: a frame asks more of the GPU than a budget phone can draw smoothly
+  | 'GAME_DEFECT_TOO_HEAVY'       // 2026-11-21: a frame asks more of the GPU than a budget phone can draw smoothly
+  | 'GAME_DEFECT_NOT_SHOWN';      // BR #2535: the game said a model or item the code asked for could not be shown
 export interface GameDefect { code: GameDefectCode; evidence: string }
 
 export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = [], replay?: GameCodeFacts | null): GameDefect[] {
@@ -2245,6 +2259,7 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
   if (run?.interventions?.some((t) => /passive event listener/i.test(t))) out.push({ code: 'GAME_DEFECT_TOUCH_SCROLLS', evidence: 'a touch handler called preventDefault on a passive listener, so the browser ignored it — the page can scroll or zoom under the player\'s thumb; add the listener with { passive: false } or give the game area touch-action: none' });
   const heavy = run ? tooHeavyForBudgetPhones(run.load) : null;
   if (heavy) out.push({ code: 'GAME_DEFECT_TOO_HEAVY', evidence: heavy });
+  if (run?.notShown?.length) out.push({ code: 'GAME_DEFECT_NOT_SHOWN', evidence: run.notShown.slice(0, 3).join(' · ') });
   if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
   return out;
 }

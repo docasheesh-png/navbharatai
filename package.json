@@ -35,6 +35,7 @@
     "license:gate": "node scripts/licenseGate.mjs",
     "sbom": "node scripts/genSbom.mjs",
     "bakeoff": "tsx scripts/agentv3-bakeoff.ts",
+    "game:coverage": "tsx scripts/game-coverage.ts",
     "bench:reliability": "tsx scripts/agentv3-reliability-bench.ts",
     "bench:compare": "tsx scripts/agentv3-reliability-compare.ts",
     "mobile:sync": "npm run build && npx cap sync",

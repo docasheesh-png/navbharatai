@@ -1073,6 +1073,11 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    7c. run_recipe({ name: "generate_game_2d" }) — for ANY 2D canvas game with movement (platformer, side-scroller, runner,',
     '       shooter): src/game/2d/ gives Animator sprites, Camera2D, Tilemap.fromRows, PlatformerController (coyote time, jump',
     '       buffer, one-way platforms, no tunnelling), Parallax and Particles2D. Never hand-roll a jump, tile collision or camera.',
+    // 🥊 GENRE KITS (game-maker audit 2026-11-26): the rules of the genres the rest of the kit has no system for.
+    '    7c2. run_recipe({ name: "generate_genre_kits" }) — for a FIGHTING game (src/game/genres/fighting.ts: createMatch / stepMatch',
+    '       / readFighterInput — frames, hit-stun, combos, blocks, throws, specials, rounds, a computer opponent) or a TOWER DEFENSE',
+    '       (src/game/genres/towerDefense.ts: createTowerDefense from a text map / placeTower / upgradeTower / sellTower / startWave',
+    '       / stepTowerDefense). Draw them and play their events; never write your own hit detection, combos, paths or waves.',
     // 🎲 INDIA GAMES PACK (admin 2026-11-19 game-gap audit): tested rules engines for India's board games.
     '    7d. run_recipe({ name: "generate_board_games" }) — for Ludo, Snakes & Ladders (saanp-seedhi) or chess: src/game/board/ has the',
     '       tested rules (createLudo / legalMoves / move / pass / chooseMove, createSnakes / takeTurn) and board geometry (cellOf,',
@@ -1152,7 +1157,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     `  ${ENTERABLE_HOUSE_RULE}`,
     // ⚙️ Admin 2026-11-19 game-gap audit: the 3D shell now owns these screens, so a builder must not add a second set.
     '  ⚙️ A 3D GAME ON <GameCanvas> ALREADY HAS the start screen, the pause menu (Resume / Restart / Settings / Menu),',
-    '  the game-over screen, a mute button, a Full screen button (Play on a phone goes full screen and locks it sideways;',
+    '  the game-over screen, a mute button, a Full screen button (the ONLY way into full screen — never call requestFullscreen on Play, a tap or a swipe; it locks a phone sideways;',
     '  options.orientation = \'portrait\' | \'any\' changes that), a loading bar for real downloads, and its Settings (volume, music, effects, mute, graphics quality, look',
     '  speed, vibration) are applied and saved by the kit. Do NOT build a second start or pause screen: set',
     '  options.startScreen = { title, subtitle, controls: { touch, keyboard } } for the start screen, or',

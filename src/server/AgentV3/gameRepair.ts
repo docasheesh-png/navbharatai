@@ -31,10 +31,14 @@ export function gameCompleteGateEnabled(env: NodeJS.ProcessEnv = process.env): b
 export const HARD_DEFECTS: ReadonlySet<GameDefectCode> = new Set([
   'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH', 'GAME_DEFECT_START_STUCK',
   'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_CAMERA_WRONG', 'GAME_DEFECT_VEHICLE_STALLED', 'GAME_DEFECT_MISSING_LAYER',
+  // BR #2535: what the user asked for (a gun in the hand, a library character, their own car) is not on screen — the game
+  // itself said so. A build whose requested thing did not appear is not a finished build.
+  'GAME_DEFECT_NOT_SHOWN',
 ]);
 
 /** Every measured defect the repair can address. */
 const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
+  GAME_DEFECT_NOT_SHOWN: 'The game said a model or item the code asks for could not be shown (its exact words are in "measured") — usually a library subject that was never added. Call add_library_models with that subject, then use the EXACT subject it was saved under (PLAYER.model / PLAYER.holds / the race car or track file). If the library has no such model, tell the user plainly and never claim it is shown.',
   GAME_DEFECT_START_STUCK: 'Pressing the start control shows no game surface — make the start control mount and start the game.',
   GAME_DEFECT_BLANK: 'The game surface is blank or one colour — draw the world and the player.',
   GAME_DEFECT_INPUT_IGNORED: 'Arrow keys/WASD/Space/drag change nothing — wire input from src/game/core into the update loop.',

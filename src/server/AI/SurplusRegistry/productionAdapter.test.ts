@@ -15,6 +15,7 @@ import { createProductionSurplusAdapter } from './productionAdapter';
 import { isSurplusReceiptDecision } from './receiptPolicy';
 import * as liveAdmission from './liveAdmission';
 import { syntheticTestReviews } from '../../../../tests/fixtures/surplusProductionEvidence';
+import { resetSurplusPairRefusalsForTests } from './surplusPairRefusals';
 const now = 1800000000000;
 function snapshot(): NonNullable<SurplusReviewedState['snapshot']> {
   return { version: 'generation', startedAt: now, observedAt: now, expiresAt: now + 300000, models: ['model-a'], offers: [{ model: 'model-a', offerId: 'offer-a', providerId: 'provider-a', available: true, healthy: true, trusted: true, providerTrustConfirmed: true, trustObservedAt: now,
@@ -22,6 +23,8 @@ function snapshot(): NonNullable<SurplusReviewedState['snapshot']> {
 }
 const params = { model: 'ignored-legacy-model', system: 'build', messages: [{ role: 'user' as const, content: 'Make app' }], tools: [], maxTokens: 100 };
 function setup(extraEnv: Record<string, string> = {}) {
+  // The pair memory is process-wide on purpose (every build shares what the market refused); each test starts empty.
+  resetSurplusPairRefusalsForTests();
   const snap = snapshot();
   const wire = { status: 200, receivedAt: now + 1, headers: { 'x-si-provider-family': 'provider-a', 'x-si-served-by': 'marketplace' } as Record<string, string>,
     body: { id: 'response-1', model: 'model-a', choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],

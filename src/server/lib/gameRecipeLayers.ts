@@ -386,6 +386,12 @@ export interface KitRefreshPlan {
   added: string[];
   /** Why nothing was written although an older kit file was found — an edited file the new code would need names from. */
   blocked: string | null;
+  /**
+   * Older kit files NOT brought up to date because their new version (or something it needs) would take a name from a
+   * file somebody edited — each with the reason. Everything else WAS refreshed (failedbr BR2518/BR2519: one edited
+   * playerBody.ts used to hold back the whole kit, so none of the kit's fixes reached that game).
+   */
+  heldBack?: Array<{ path: string; why: string; edited?: string; missing?: string[] }>;
 }
 
 /**
@@ -416,18 +422,36 @@ export function planKitRefresh(
   if (Object.keys(stale).length === 0 && !(hasCollision && assetLoader)) return none;
   const has = new Set(Object.keys(files));
   const existing = new Map<string, string | null>(Object.entries(files));
-  const plan = planKitLayers(stale, has, existing, pool, reasonOf);
-  if (plan.kept.length > 0) {
-    const k = plan.kept[0];
-    return { ...none, blocked: `${k.importer} would need ${k.missing.join(', ')} from ${k.path}, which was edited` };
+  // 🧬 THE LARGEST SAFE PART, NOT ALL OR NOTHING (failedbr BR2518 + BR2519, 2026-11-24). It used to be all or nothing: one
+  // edited kit file (playerBody.ts, which play/actions.ts takes names from) held back EVERY kit file, so Game.ts, the
+  // aim, the entities, the police and the particle fix never reached that game while the user asked for exactly those.
+  // Each stale file is planned on its OWN import closure: a closure with no edited file in the way is refreshed whole
+  // (the file, the kit files it pulls up to date, the ones it adds); one that needs a name an edited file lacks is held
+  // back whole, and so is anything that would need IT (it would pull it into its own closure). So what is written always
+  // compiles against what stays, and a file somebody edited is never written.
+  const write: Record<string, string> = {};
+  const added = new Set<string>();
+  const heldBack: Array<{ path: string; why: string; edited?: string; missing?: string[] }> = [];
+  for (const [path, content] of Object.entries(stale)) {
+    const one = planKitLayers({ [path]: content }, has, existing, pool, reasonOf);
+    if (one.kept.length > 0) {
+      const k = one.kept[0];
+      heldBack.push({ path, why: `${k.importer} would need ${k.missing.join(', ')} from ${k.path}, which was edited`, edited: k.path, missing: [...k.missing] });
+      continue;
+    }
+    write[path] = content;
+    for (const [p, l] of one.refresh) write[p] = l.content;
+    for (const [p, l] of one.add) { write[p] = l.content; added.add(p); }
   }
-  const write: Record<string, string> = { ...stale };
-  for (const [p, l] of plan.refresh) write[p] = l.content;
-  for (const [p, l] of plan.add) write[p] = l.content;
+  // A held-back file that another closure refreshed anyway (it was clean there) is not held back.
+  const stillHeld = heldBack.filter((h) => !(h.path in write));
+  if (Object.keys(write).length === 0 && stillHeld.length > 0) {
+    return { ...none, blocked: stillHeld[0].why, heldBack: stillHeld };
+  }
   if (assetLoader && collisionKit && (hasCollision || write[collisionPath] === collisionKit)) {
     write[GAME_ASSET_MODELS_PATH] = assetLoader;
   }
-  return { write, refreshed: Object.keys(write).filter((p) => p in files).sort(), added: [...plan.add.keys()].sort(), blocked: null };
+  return { write, refreshed: Object.keys(write).filter((p) => p in files).sort(), added: [...added].sort(), blocked: null, ...(stillHeld.length ? { heldBack: stillHeld } : {}) };
 }
 
 /**
@@ -443,6 +467,30 @@ export function planKitRefresh(
  * is refreshed, anything else is somebody's code and kept), and the plan is made again on that until every file it writes
  * was read and agrees. A file is still never written over unseen. PURE apart from `read`; never throws.
  */
+/**
+ * 🧬 THE BUILDER IS TOLD WHAT THE EDITED FILE IS MISSING (Q-3331 — failedbr BR2518/BR2519). A partial refresh holds back the
+ * shell chain behind an edited kit file (there: playerBody.ts lacked aimBone, boneKey, playerModelRoot, holdItem, so Game.ts
+ * and twelve others stayed old). Overwriting the user's file is never done; instead the builder is told exactly which names
+ * the kit needs from it, to ADD them to that file (keeping the user's own changes) — and the next turn's refresh brings the
+ * rest. '' when nothing is held back. PURE.
+ */
+export function kitHeldBackHandoff(heldBack: KitRefreshPlan['heldBack']): string {
+  const need = new Map<string, Set<string>>();
+  for (const h of heldBack ?? []) {
+    if (!h.edited || !h.missing?.length) continue;
+    const set = need.get(h.edited) ?? new Set<string>();
+    for (const n of h.missing) set.add(n);
+    need.set(h.edited, set);
+  }
+  if (!need.size) return '';
+  const lines = [...need].map(([path, names]) => `- ${path} (edited in this project) must export: ${[...names].join(', ')}`);
+  return [
+    '[KIT UPDATE WAITING] Part of the game engine could not be brought up to date, because a file somebody edited is missing names the new engine imports:',
+    ...lines,
+    'Add each missing export to that file from the kit\'s current version of it, KEEPING every change already in the file (never replace the file, never remove what is there). Then the rest of the engine updates on the next turn. Do this only if this turn touches the game; say in your summary that you did it.',
+  ].join('\n');
+}
+
 export async function planKitRefreshAgainstSandbox(
   saved: Readonly<Record<string, string>>,
   read: (path: string) => Promise<string | null>,

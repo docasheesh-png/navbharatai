@@ -84,6 +84,12 @@ export interface RuntimeEvidence {
    */
   game?: CheckOutcome;
   /**
+   * 🎮 Named features of a played game that nothing PROVED — the code names them, but no kit call the game reaches and no
+   * played action showed them working (gameProof.ts, external Game Maker audit 2026-11-25). Said as unproven, and named in
+   * a green headline, so "played" is never read as "every feature you asked for works". Never a verdict by itself.
+   */
+  gameFeaturesUnverified?: string[];
+  /**
    * The dev server would not stay up. Infrastructure, not a judgement of the app.
    * Only changes the wording of an unproven preview (`not-run`). Never a verdict
    * by itself — a preview that was seen NOT to render stays `failed`.
@@ -278,7 +284,7 @@ export function clipReason(text: unknown, max: number): string {
   return `${head.replace(/[\s,;:(—-]+$/, '')}…`;
 }
 
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded' | 'gameIncomplete' | 'game'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded' | 'gameIncomplete' | 'game' | 'gameFeaturesUnverified'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -463,6 +469,8 @@ export function releaseGate(
   if (ev.game === 'passed') proven.push('the game was PLAYED in a real browser — its controls, movement and camera answered');
   else if (ev.game === 'failed') softFailures.push('playing the game in a real browser found problems');
   else if (ev.game === 'not-run') unproven.push('the game was never played in a real browser, so its controls, movement and camera are NOT VERIFIED');
+  const featuresUnverified = isPlayedGame ? (ev.gameFeaturesUnverified ?? []).filter(Boolean) : [];
+  if (featuresUnverified.length) unproven.push(`the named feature(s) ${featuresUnverified.join(', ')} were NOT VERIFIED — the code names them, but no kit call the game reaches and no played action proved them`);
 
   if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)${namedFindings(f.blockers, f.blockerLabels)}`);
   if (ev.gameIncomplete) failures.push(`the game is not complete: ${ev.gameIncomplete}`);
@@ -517,7 +525,7 @@ export function releaseGate(
     return {
       state: 'green',
       headline: isPlayedGame
-        ? 'Shippable — it runs, and the game was played in a real browser: its controls, movement and camera answered.'
+        ? `Shippable — it runs, and the game was played in a real browser: its controls, movement and camera answered.${featuresUnverified.length ? ` Not verified: ${featuresUnverified.join(', ')}.` : ''}`
         : ev.journeys === 'passed'
         ? 'Shippable — it runs, and a real user journey held up end to end.'
         : 'Shippable — it runs, and pressing its controls in a real browser held up.',

@@ -108,7 +108,7 @@ describe('phase S7 — the game playtest (locked plan, 2026-11-24)', () => {
     const out = await runGamePlaytestPhase(p);
     expect(played).toBe(0);
     expect(out?.gate).toBe('not-run');
-    expect(seen).toEqual(['GAME_PLAYTEST_NOT_RUN', 'GAME_FIX_UNVERIFIED']);
+    expect(seen).toEqual(['GAME_PLAYTEST_NOT_RUN', 'GAME_FIX_UNVERIFIED', 'GAME_PROOF']); // GAME_PROOF: every played proof said as not taken
   });
   it('not a game, or a failed build: nothing is said and nothing changes', async () => {
     const { runGamePlaytestPhase } = await import('../src/server/AgentV3/buildPhases/gamePlaytestPhase');

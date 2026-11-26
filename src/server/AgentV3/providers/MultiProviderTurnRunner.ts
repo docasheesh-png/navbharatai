@@ -1052,7 +1052,9 @@ export function makeMultiProviderTurnRunner(
           });
           providerInFlight(name, -1);
           trafficOpen = false;
-          return { ...result, attemptMs: result.attemptMs ?? answeredInMs, fallbackMs: fallbackMs + (result.fallbackMs ?? 0) };
+          // The engine that answered rides out too (`??`: the innermost chain names it), so a row filed per call can
+          // say WHICH engine took that long — the per-day engine stats (engineDayStats.ts) read it.
+          return { ...result, attemptMs: result.attemptMs ?? answeredInMs, fallbackMs: fallbackMs + (result.fallbackMs ?? 0), answeredBy: result.answeredBy ?? reportName };
         } catch (err) {
           fallbackMs += Math.max(0, now() - attemptStartedAt);
           if (trafficOpen) { providerInFlight(name, -1); trafficOpen = false; }

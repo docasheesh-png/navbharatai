@@ -39,19 +39,21 @@ describe('🔴 the scope match: a comment does not satisfy what the user asked f
     const m = scopeMatch(contract, files);
     expect(m.missing).toEqual(expect.arrayContaining(['levels', 'enemies']));
   });
-  it('real code is still present (neighbour)', () => {
+  // Since Q-3360 (external Game Maker audit, 2026-11-25) real code is a SIGNAL — "not verified", never missing and never
+  // present: only a reachable kit call or a played action proves a feature. These keep the comment rule on that signal.
+  it('real code is still a signal, not missing (neighbour)', () => {
     const files = { 'src/Game.ts': 'export const levels = [1, 2, 3];\nexport const enemies: Enemy[] = [];\nexport let score = 0;\n' };
     const m = scopeMatch(contract, files);
     expect(m.missing).not.toEqual(expect.arrayContaining(['levels']));
-    expect(m.present).toEqual(expect.arrayContaining(['levels', 'enemies']));
+    expect(m.notVerified).toEqual(expect.arrayContaining(['levels', 'enemies']));
   });
   it('🔴 real code named the way code is written counts: plurals and camelCase', () => {
     const files = { 'src/Game.ts': 'let currentLevel = 1;\nfunction spawnEnemy() {}\nfunction addScore(n: number) {}\n' };
-    expect(scopeMatch(contract, files).present).toEqual(expect.arrayContaining(['levels', 'enemies', 'score']));
+    expect(scopeMatch(contract, files).notVerified).toEqual(expect.arrayContaining(['levels', 'enemies', 'score']));
   });
   it('UI text in a template still counts (strings are kept)', () => {
     const files = { 'src/Hud.tsx': 'export const Hud = ({ n }: { n: number }) => <p>{`Level ${n}`}</p>;\n' };
-    expect(scopeMatch(contract, files).present).toContain('levels');
+    expect(scopeMatch(contract, files).notVerified).toContain('levels');
   });
 });
 

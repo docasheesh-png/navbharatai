@@ -28,8 +28,16 @@ export interface BrowserAiKeyFinding {
 const SOURCE_RE = /\.(?:[cm]?[jt]sx?|vue|svelte|html)$/i;
 const NOT_BROWSER_RE = /(^|[\\/])(?:server|backend|functions|netlify|supabase[\\/]functions|__mocks__|mocks?|tests?|__tests__|e2e|node_modules|coverage)([\\/]|$)|^(?:api|dist|build|scripts)[\\/]|(^|[\\/])pages[\\/]api[\\/]|\.(?:test|spec|server)\.|(^|[\\/])app[\\/](?:.+[\\/])?route\.[cm]?[jt]s$|(^|[\\/])(?:server|index\.server|vite\.config|next\.config)\.[cm]?[jt]s$/i;
 
-/** AI providers' own API hosts — a browser call to one of these carries the provider key. */
-const PROVIDER_HOST_RE = /\bapi\.openai\.com\b|\bapi\.anthropic\.com\b|\bgenerativelanguage\.googleapis\.com\b|\bapi\.x\.ai\b|\bapi\.groq\.com\b|\bopenrouter\.ai\/api\b|\bapi\.mistral\.ai\b|\bapi\.together\.(?:xyz|ai)\b|\bapi\.deepseek\.com\b|\bapi\.cohere\.(?:ai|com)\b|\bapi\.perplexity\.ai\b|\baiplatform\.googleapis\.com\b/i;
+/**
+ * AI providers' own API hosts — a browser call to one of these carries the provider key.
+ *
+ * 🔴 `api.z.ai` WAS MISSING UNTIL 2026-11-25, and the free-AI setup (appFreeAi.ts) is exactly what made
+ * it reachable: the owner now saves a real Z.ai key in Keys & Secrets, so a build can see `ZAI_API_KEY`
+ * in the app's `.env` and reach for the one shape this module exists to forbid — the page calling the
+ * provider itself. Same class as the OpenAI case above, same fix, found by hunting the sibling rather
+ * than by a build failing. `open.bigmodel.cn` is the same API's China host.
+ */
+const PROVIDER_HOST_RE = /\bapi\.z\.ai\b|\bopen\.bigmodel\.cn\b|\bapi\.openai\.com\b|\bapi\.anthropic\.com\b|\bgenerativelanguage\.googleapis\.com\b|\bapi\.x\.ai\b|\bapi\.groq\.com\b|\bopenrouter\.ai\/api\b|\bapi\.mistral\.ai\b|\bapi\.together\.(?:xyz|ai)\b|\bapi\.deepseek\.com\b|\bapi\.cohere\.(?:ai|com)\b|\bapi\.perplexity\.ai\b|\baiplatform\.googleapis\.com\b/i;
 /**
  * An AI picture service called from the page (autopsy 303e8a6f, the sibling of cc3ef776). The picture
  * services answer 401 to a request without a key (Pollinations included, since 2026-10-04), so a page that
@@ -40,7 +48,7 @@ const IMAGE_HOST_RE = /\b(?:image|gen)\.pollinations\.ai\b|\bapi\.stability\.ai\
 /** A provider SDK told to run in the browser — the SDK's own name for "the key is in the page". */
 const BROWSER_SDK_RE = /\bdangerouslyAllowBrowser\s*:\s*true\b/;
 /** A provider key the bundler inlines into the page. */
-const BUNDLED_KEY_RE = /\b(?:import\.meta\.env|process\.env)\.(?:VITE_|NEXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)?(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE_GENAI|GOOGLE_AI|GROQ|XAI|GROK|MISTRAL|DEEPSEEK|OPENROUTER|TOGETHER|COHERE|PERPLEXITY)_?API_?KEY\b/i;
+const BUNDLED_KEY_RE = /\b(?:import\.meta\.env|process\.env)\.(?:VITE_|NEXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)?(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE_GENAI|GOOGLE_AI|GROQ|XAI|GROK|MISTRAL|DEEPSEEK|OPENROUTER|TOGETHER|COHERE|PERPLEXITY|ZAI|Z_AI|ZHIPU|GLM)_?API_?KEY\b/i;
 
 const SHAPES: Array<[BrowserAiKeyShape, RegExp]> = [
   ['image-host', IMAGE_HOST_RE],

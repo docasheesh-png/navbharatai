@@ -15,7 +15,7 @@ import { createAssetProviders, validateCatalogue, REVIEWED_GAME_ASSETS } from '.
 import { downloadReviewedAsset } from '../../src/server/AgentV3/gameAssets/assetTransport';
 import { createDurableAssetCache } from '../../src/server/AgentV3/gameAssets/assetCache';
 import { acquireGameAsset } from '../../src/server/AgentV3/gameAssets/assetEngine';
-import { LIBRARY_THUMB_DIR, LIBRARY_THUMB_SIZE, thumbnailAllowed } from '../../src/server/AgentV3/gameAssets/libraryThumbnails';
+import { LIBRARY_THUMB_DIR, LIBRARY_THUMB_SIZE, thumbnailAllowed, thumbnailPoseClip } from '../../src/server/AgentV3/gameAssets/libraryThumbnails';
 
 const [workArg, playwrightArg, chromiumArg, onlyArg] = process.argv.slice(2);
 assert.ok(workArg && playwrightArg, 'Supply a work directory and the Playwright module path');
@@ -28,8 +28,10 @@ const store = {
   async write(key: string, bytes: Uint8Array) { await save(join(work, 'cache', key), bytes); },
 };
 const only = onlyArg ? new Set(onlyArg.split(',')) : null;
+const readGlbClipNames = (b: Uint8Array): string[] => { const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength); const doc = JSON.parse(buf.subarray(20, 20 + buf.readUInt32LE(12)).toString('utf8')); return (doc.animations ?? []).map((a: { name?: string }) => a.name ?? ''); };
 const out = resolve(LIBRARY_THUMB_DIR);
 const bytesByHash = new Map<string, Uint8Array>();
+const idleRoleByHash = new Map<string, string | undefined>();
 const failures: string[] = [];
 const seen = new Set<string>();
 for (const c of REVIEWED_GAME_ASSETS) {
@@ -45,6 +47,7 @@ for (const c of REVIEWED_GAME_ASSETS) {
   }, new AbortController().signal).catch((e: Error) => ({ kind: 'procedural' as const, reason: e.message }));
   if (outcome.kind !== 'model' || !captured) { failures.push(`${c.id}: ${outcome.kind === 'procedural' ? outcome.reason : 'no bytes'}`); continue; }
   bytesByHash.set(c.sha256, captured);
+  idleRoleByHash.set(c.sha256, c.animationRoles?.idle);
   console.log('acquired', c.id);
 }
 
@@ -75,12 +78,12 @@ await page.evaluate(async (size: number) => {
   renderer.setPixelRatio(2); renderer.setSize(size, size); renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.body.appendChild(renderer.domElement);
-  (window as unknown as { nbThumb: (hash: string) => Promise<string> }).nbThumb = async (hash: string) => {
+  (window as unknown as { nbThumb: (hash: string, pose: string | null) => Promise<string> }).nbThumb = async (hash: string, pose: string | null) => {
     const buf = await (await fetch(`/model/${hash}.glb`)).arrayBuffer();
     const gltf = await new GLTFLoader().parseAsync(buf, '');
     const root = gltf.scene;
-    // A rigged character is shown in its first frame of idle when it has one, never in a T-pose if avoidable.
-    const idle = gltf.animations.find((a: { name: string }) => /idle/i.test(a.name)) ?? null;
+    // A rigged character is shown standing, in the first frame of its idle (chosen by thumbnailPoseClip), never in a T-pose if avoidable.
+    const idle = gltf.animations.find((a: { name: string }) => a.name === pose) ?? null;
     if (idle) { const mixer = new THREE.AnimationMixer(root); mixer.clipAction(idle).play(); mixer.update(0.01); }
     root.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(root);
@@ -105,7 +108,9 @@ await page.evaluate(async (size: number) => {
 let written = 0;
 for (const [hash] of bytesByHash) {
   try {
-    const dataUrl: string = await page.evaluate((h: string) => (window as unknown as { nbThumb: (h: string) => Promise<string> }).nbThumb(h), hash);
+    const clips = readGlbClipNames(bytesByHash.get(hash)!);
+    const pose = thumbnailPoseClip(clips, idleRoleByHash.get(hash));
+    const dataUrl: string = await page.evaluate(([h, p]: [string, string | null]) => (window as unknown as { nbThumb: (h: string, p: string | null) => Promise<string> }).nbThumb(h, p), [hash, pose] as [string, string | null]);
     assert.ok(dataUrl.startsWith('data:image/webp;base64,'), 'not a webp');
     const bytes = Buffer.from(dataUrl.slice('data:image/webp;base64,'.length), 'base64');
     assert.ok(bytes.length > 400, 'blank picture');

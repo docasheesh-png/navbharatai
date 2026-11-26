@@ -6310,3 +6310,22 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
+
+Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
+Honest scope: this PR builds what can be built and verified in the repo; the infrastructure items are recorded BLOCKED.
+
+- **Q-3480 places:** `worldSetting.ts` — the named places and lands (mapGrowthIntent's vocabulary), counts, order, refusals.
+  Houses/roads never turn a named village into a city; the open-world seed writes exactly those regions; a PLACES line
+  travels into milestones. Real prompt locked: failedbr #2520 "ek gav(village) game banao".
+- **Q-3481 genre kits:** `generate_genre_kits` — fighting.ts and towerDefense.ts (pure, 60 Hz, 2D or 3D), seeded by genre,
+  named in the handoff, design doc, system prompt and AppKnowledgeBase. Tests play the generated files frame by frame.
+- **Q-3482 benchmark:** `gameCoverage.ts` — 50 canonical games; today 22 of 50 get a starter / rules / genre kit, 28 are
+  kit-only (the builder improvises), 0 fall out of the game path. Ratchet MAX_KIT_ONLY = 28, only down. Fixed on the way:
+  ball sports read before shooters; Tekken / Street Fighter / Mortal Kombat in the shared title catalogue.
+- **Open / blocked (rows in BUILD_REPORT_QUEUE.md):** Q-3483 runner 3D starter, Q-3484 GTA with a car gets no player,
+  Q-3485 voxel kit, Q-3486 village drawn as a small town, Q-3487 GPU playtest, Q-3488 57 library subjects, Q-3489
+  post-processing / IK / retargeting, Q-3490 general multiplayer, Q-3491 real-phone runs, Q-3492 playtest adapters,
+  Q-3493 the 28 kit-only games. Auto-repair stays Q-3374.
+- Q-3460 (kit typecheck, #4554) closed — merged.

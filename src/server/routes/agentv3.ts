@@ -474,6 +474,7 @@ import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
 import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff, withLibraryMenuForExistingGame } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt, useAsCharacterPrompt } from '../AgentV3/gameAssets/libraryThumbnails';
+import { expandLibraryMentions } from '../AgentV3/gameAssets/libraryMention';
 import { useAsCarPrompt } from '../AgentV3/carSwap';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
@@ -10790,6 +10791,8 @@ async function noteBuildOutcome(
     // (adversarial review of 303e8a6f: the judge and the repair lanes still read "needs no API key"). The chat
     // history keeps what was typed (`typedPrompt`).
     let prompt = chipPromptForBuild(typedPrompt);
+    // A Game Library pick is a mention (@model:<id>) where the cursor was; read it into what it names (libraryMention.ts).
+    prompt = expandLibraryMentions(prompt);
     if (!prompt) {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;

@@ -6406,6 +6406,14 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Sibling hunt:** a census of every server module that touches Cloud Storage (`tests/accountDeletionReachesGameProofPictures.test.ts`). Each must say which eraser removes its objects, why they belong to nobody, or which queue row owns the gap. Three gaps found and recorded: Q-3611 (large share HTML `shares/<token>.html` orphaned when the `shares` docs are erased), Q-3612 (never-public App Store APK bytes left when the listing is deleted), Q-3613 (abandoned zip-upload chunks left when the `zip_uploads` record is erased).
 - **The census paid for itself at once:** merging main brought #4564's `mobileBuild/nativeArtifactStore.ts` (owner-hashed native build files that no eraser deletes); the census failed until it was registered, and it is recorded as Q-3614.
 - **Proof by reversion:** six reversions, each fails: eraser not called by the route (2 fail), eraser deletes whole day folders (1), key filed by build id only (7), route passes the claimed uid (2), admin view accepts only v1 (1), a new unregistered storage writer (1).
+## 2026-11-26 — PR A of the admin's 18-point game list: restart, a gun that fires, drowning, the map's edge, library ids
+
+- Q-3516 (was Q-3500; renumbered at merge — #4563 had taken it) Restart / Menu stand the player at the start (ctx.setRespawn; open world sets its own), out of any car.
+- Q-3517 (was Q-3501; renumbered at merge — #4563 had taken it) A held gun fires: Attack becomes Fire, shots along ctx.aim, SHOT_HIT hurts Entities characters.
+- Q-3502 Water drowns by default (WORLD.water), swimming only when asked.
+- Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
+- Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
+- KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.
 ## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
 
 Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
@@ -6429,3 +6437,8 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
+
+## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
+- Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
+- Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.
+- Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.

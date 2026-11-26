@@ -163,3 +163,31 @@ describe('🏙️ the kit derives each place\'s buildings from the map, and neve
     } finally { if (!hadWindow) delete g.window; }
   }, 120_000);
 });
+
+// 🧬 ONE SEED RULE, NOT FOUR COPIES (reconciled with #4535, 2026-11-26). The player's starter look, the realistic outfit and
+// the world seed each carried a private copy of the same sha256 pick; they now all call projectVariety.ts. The picks are
+// byte-identical to the copies they replaced, so no existing project's hero, outfit or map changes.
+describe('🧬 every per-project pick goes through projectVariety.ts', () => {
+  it('the shared rule gives exactly what the replaced private copies gave (no existing game changes)', async () => {
+    const { createHash } = await import('node:crypto');
+    const { gamePlayerFileSource, GAME_PLAYER_FILE_VARIANTS } = await import('../src/server/lib/GamePlayerBodyGenerator');
+    const { REALISTIC_HUMANS } = await import('../src/server/AgentV3/gameAssets/realisticHumans');
+    const { varietySeed } = await import('../src/server/lib/projectVariety');
+    const old = (facet: string, id: string) => createHash('sha256').update(facet + ':' + id).digest().readUInt32BE(0);
+    for (const id of [...IDS, 'x', '']) {
+      expect(gamePlayerFileSource(id)).toBe(GAME_PLAYER_FILE_VARIANTS[old('player', id) % GAME_PLAYER_FILE_VARIANTS.length]);
+      expect(pickVariant(id, 'human', REALISTIC_HUMANS)).toBe(REALISTIC_HUMANS[old('human', id) % REALISTIC_HUMANS.length]);
+      expect(varietySeed(id, 'world')).toBe(old('world', id) || 1);
+      if (id) expect(seedOf(gameWorldFileSource({ workspaceId: id }))).toBe(old('world', id) || 1);
+    }
+    expect(new Set(IDS.map((id) => gamePlayerFileSource(id))).size).toBeGreaterThan(1);
+    expect(new Set(IDS.map((id) => pickVariant(id, 'human', REALISTIC_HUMANS).id)).size).toBeGreaterThan(1);
+  });
+
+  it('census: no server file but projectVariety.ts hashes a facet and a project id by itself', async () => {
+    const { execSync } = await import('node:child_process');
+    const hits = execSync("git grep -nE \"createHash\\('sha256'\\)\\.update\\('[a-z-]+:' *\\+\" -- 'src/server/**/*.ts' ':!*.test.ts' || true", { cwd: join(__dirname, '..'), encoding: 'utf8' })
+      .split('\n').filter(Boolean);
+    expect(hits, 'use pickVariant / varietySeed from src/server/lib/projectVariety.ts').toEqual([]);
+  });
+});

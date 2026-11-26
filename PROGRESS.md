@@ -6237,6 +6237,12 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
   - **Size now:** the catalogue is 307.6 MiB, inside the admin's 320 MiB budget, which stays the only limit. The snapshot line was replaced by a note.
   - **Watch:** only about 12 MiB of library room is left. The next large batch needs the budget raised (the admin's decision), or older models slimmed the same way. Many packaged characters still carry their unused materials.
 
+## 2026-11-26 — One seed rule, not four copies (reconciling #4541 with #4535)
+
+- **What was found:** after #4535 and #4541 both merged, the same per-project pick existed four times: #4535's starter look (`'player:'`), realistic outfit (`'human:'`) and world seed (`'world:'`), each a private `createHash('sha256').update(facet + ':' + id)`, plus #4541's `projectVariety.ts`. This is the same class as the drifted `safeRelPath` copies: duplicates that agree today and can drift tomorrow.
+- **Fix:** all three now call `projectVariety.ts` (`pickVariant` / the new `varietySeed`). The digests are identical, so no existing project's hero, outfit or map changes; a test proves byte-identity against the old formula for several ids.
+- **Lock:** a census in `tests/aNewGameGetsItsOwnLookAndKeepsIt.test.ts` fails when any server file hashes a facet and a project id by itself. Proved by putting back one private copy: the census fails.
+- **Queue:** Q-3370 and Q-3371 were closed by the #4541 merge, and Q-3372 by the #4535 merge. Q-3373 (action town seed) is no longer waiting on #4535; its row now gives the design it needs.
 ## 2026-11-26 — The game library's storage budget is 400 MiB (admin decision)
 
 - **Why:** after the Indian clothes (#4540) the catalogue was 307.6 MiB of the 320 MiB budget, leaving about 12 MiB (roughly five animated characters).

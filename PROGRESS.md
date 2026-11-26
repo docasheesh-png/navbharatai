@@ -6422,3 +6422,17 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
+
+## 2026-11-26 — "Made with NavBharatAI" was doubled on published apps, with no × (admin screenshot)
+
+- **Root cause:** two modules each put a badge in the same bottom-right corner, at the same z-index: the build writes
+  the "made by NavBharatAI" signature into the app's own index.html (`AgentV3/appSignature.ts`, has a × since 2026-09-30),
+  and publishing stamped "Made with NavBharatAI" (`lib/madeWithBadge.ts`, no ×) on top of it — covering the signature's ×.
+- **Fix (the class: two owners of one corner):** `injectBadge` removes the build's signature from the page it stamps
+  (`withoutAppSignature`), so a published page carries ONE badge; the paid plan removes both. The publish badge gained the
+  same CSS-only × (checkbox, `autocomplete="off"` — works under a strict CSP, back on refresh, nothing stored), the guard
+  script respects a close and still re-shows a pill hidden by injected CSS, and the pill can shrink on a narrow phone.
+- **Proof:** `tests/onePublishedBadgeThatCloses.test.ts` (9, reversion-proven: 4 fail without the dedupe); Chromium run of a
+  real stamped page: one badge, × closes it, guard leaves it closed after 4 s, refresh restores it, injected CSS cannot hide it.
+- **Limit (honest):** apps published BEFORE this change keep the old doubled badge until they are published again — the
+  edge worker (`infra/cloudflare/mitrify-apps-worker.js`) serves stored files and is deployed by hand, so it was not changed.

@@ -6240,3 +6240,24 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 ## 2026-11-26 — No pointer lock in the platform's browsers (Q-3380, follow-up to #4552)
 - gamePlaytest.ts (desktop page) and clickExplorer.ts (every fresh page) stub Element.prototype.requestPointerLock before app code runs, so a game the builder wrote itself (or an older kit copy) can no longer flood the headless page with synthetic input after the playtest clicks its canvas (#4552 measured 4 → 15 fps with the lock stubbed).
 - Test: tests/aPlaytestBrowserNeverLocksThePointer.test.ts (removing the playtest install fails it).
+## 2026-11-26 — The game library's storage budget is 400 MiB (admin decision)
+
+- **Why:** after the Indian clothes (#4540) the catalogue was 307.6 MiB of the 320 MiB budget, leaving about 12 MiB (roughly five animated characters).
+- **Options measured first:**
+  - **Pruning:** removing unused data from all 721 packaged files would save nothing. They are already lean, which corrects my own earlier guess that old characters carried leftover data.
+  - **Dye recolours:** storing them as patches on their base models would free at most 25.8 MiB of their 92.4 MiB, because the recoloured textures are most of each file. It would also need a change to how packaged models are served.
+- **Decision:** asked with the options, the admin chose to raise the budget to 400 MiB. `CATALOGUE_STORAGE_BUDGET_BYTES` changed. The error messages are derived from the constant, so they cannot state a stale number again. `catalogueBudget.test.ts` now asserts 400 MiB (80 × the 5 MiB worst case).
+- **Effect:** the models ship in the server image (Dockerfile `COPY assets/game-models`), so the image can grow by up to about 80 MiB more, to fill the budget.
+- **Not built:** the dye-patch dedupe. It is worth doing only if the library nears 400 MiB again.
+
+## 2026-11-26 — Three more Indian outfits (batch 16 grows to 7)
+
+- **New models:** built from the same `buildIndianGarments.mts`. The four earlier models are byte-identical (same sha256), because the builder is deterministic.
+  - `q16-woman-salwar-kameez`: magenta knee-length kameez, cream salwar, yellow dupatta with a gold border.
+  - `q16-man-lungi`: white baniyan with shoulder straps, blue lungi with a white band.
+  - `q16-man-sherwani`: gold sherwani with a high collar, cream churidar, red safa.
+- **Checks:** all seven were admitted live; the three new thumbnails were rendered.
+- **New builder pieces:** `longTop` (a kameez or sherwani sized to the body's own shoulders and neck), `trousers` (ease set by height), `baniyan`, `lungi` and `dupatta`.
+- **Fixed on the way:** `ribbon` kept any sample more than 6 cm from the body at its own point, which is right for the pallu's hanging end. Between a strap's waypoints, that made the curve arch into the air. Now `freeBeyond` is a parameter, and a strap passes `Infinity`; the pallu keeps the old value, so the saree file is unchanged.
+- **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
+- **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.

@@ -6372,5 +6372,5 @@ Remaining from the list: PR C (#2 enterable buildings, #7/8/11 vehicle ground ce
 
 Stacked on PR B. Queue Q-3509 (fix in PR) and Q-3510..Q-3514 (still OPEN, honestly recorded — not started in this session):
 - #9: play/cinematics.ts — shot lists as data, a Director in the render loop, DEATH_CAM / introDrone / HERO_SHOT, ctx.cinematic(list), GameOptions.cinematics from the request (cinematicsWanted), HUD bars and title, the end card waits, a tap skips.
-- OPEN: #2 enterable painted-door city lots (Q-3510), #7/8/11 car ground census (Q-3511, not reproduced), #17 default character/car variety (Q-3512), #10 multiplayer on the user's backend (Q-3513), #20 realism tier (Q-3514).
+- OPEN: #2 enterable painted-door city lots (Q-3510), #7/8/11 car ground census (Q-3511, not reproduced), #17 variety (Q-3512, mostly exists since 2026-11-25; blocked on which case the admin saw), #10 multiplayer on the user's backend (Q-3513), #20 realism tier (Q-3514).
 - Note for the next session: PR A's open-world edge is separate from play/boundary.ts on purpose (it is in WORLD metres, follows the floating origin and grows with places; boundary.ts declares fixed render-space bounds). If they are ever unified, boundary.ts must learn the floating origin first.

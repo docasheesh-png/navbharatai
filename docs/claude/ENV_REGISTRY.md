@@ -5338,6 +5338,23 @@ A race on the world's city roads (`src/server/AgentV3/raceWorld.ts`, map expansi
 
 The placeholder look (`src/server/AgentV3/gamePlaceholderProbe.ts`). During the game playtest it checks whether the page shows placeholder art (a plain stand-in shape where a real model should be) and reports it, so a placeholder is not called finished. Only `off` (any case) disables it; the playtest then does not run this check. The check is read-only and costs no model call.
 
+### AGENTV3_GAME_PLACEHOLDER_REPAIR (code default: ON; not set in Cloud Run) — 2026-11-26
+
+The ONE bounded in-build game repair (Q-3374, admin-approved 2026-11-26: "baaki sab build karo";
+`src/server/AgentV3/gamePlaceholderRepair.ts`, wired through `buildPhases/gamePlaytestPhase.ts`). When the placeholder look
+above found ONLY a missing model and/or an empty map, the same build takes a byte-exact backup of the project
+(`gameWorkspaceBackup.ts`: a tar of the whole tree outside the project plus a sha256 manifest; it refuses on a special file,
+a control character in a name, a tree over 400 MB, too little free space or any tar warning), runs ONE pass with file tools
+only (read/write/edit/search — every other tool is refused), capped at 120 s and 160,000 tokens (8 steps, 12,000 output
+tokens per turn), then plays the game again. It is KEPT only if the replay has fewer placeholder findings, no new
+placeholder kind, no new measured defect and a playtest score not lower; otherwise every file is put back and the restore is
+checked against the backup's manifest (a restore that does not match is a warning line, and the backup is left in the
+sandbox). **Paid by the platform**: the pass runs in billing phase `game-repair`, which is barren — never on the user's bill,
+kept or undone. On the free tier it shares the explorer repair's daily allowance (`explorerRepairBudget.ts`). Every outcome is
+one `GAME_PLACEHOLDER_REPAIR` line in the admin report. Only `off` (any case) disables it; the finding then goes to the next
+game turn's builder exactly as before. It does NOT re-enable `AGENTV3_GAME_AUTO_REPAIR` (still ignored; repair of measured
+defects stays suspended).
+
 ### APP_FREE_AI_MODELS (code default: the two free text models; not set in Cloud Run) — 2026-11-25
 
 The text ladder for an app's FREE AI — the owner's own Z.ai key, set up from the ❗ tray in three steps

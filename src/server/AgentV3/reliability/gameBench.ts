@@ -18,11 +18,13 @@ export interface GameBenchSignals {
   scope: 'ok' | 'gap' | null;
   repair: 'repaired' | 'unrepaired' | 'skipped' | null;
   gateBlocked: boolean;
+  /** Kadam 2: the gate said what THIS request asked for is not in the played game (GAME_DEFECT_ASK_NOT_MET). */
+  askNotMet: boolean;
 }
 
 export type GameFailClass =
   | 'ok' | 'transport' | 'build-failed' | 'no-files' | 'errored'
-  | 'not-playable' | 'scope-gap' | 'not-played';
+  | 'not-playable' | 'ask-not-met' | 'scope-gap' | 'not-played';
 
 type Issue = { code?: unknown; message?: unknown };
 
@@ -37,7 +39,7 @@ function issuesOf(events: ReadonlyArray<Record<string, unknown>>): Issue[] {
 }
 
 export function gameSignalsFromEvents(events: ReadonlyArray<Record<string, unknown>>): GameBenchSignals {
-  const out: GameBenchSignals = { kitSeeded: null, playtest: null, gqs: null, defects: [], scope: null, repair: null, gateBlocked: false };
+  const out: GameBenchSignals = { kitSeeded: null, playtest: null, gqs: null, defects: [], scope: null, repair: null, gateBlocked: false, askNotMet: false };
   for (const i of issuesOf(events)) {
     const code = String(i.code ?? '');
     const msg = String(i.message ?? '');
@@ -51,7 +53,7 @@ export function gameSignalsFromEvents(events: ReadonlyArray<Record<string, unkno
     else if (code === 'GAME_REPAIRED') out.repair = 'repaired';
     else if (code === 'GAME_REPAIR_UNREPAIRED') out.repair = 'unrepaired';
     else if (code === 'GAME_REPAIR_SKIPPED') out.repair = 'skipped';
-    else if (code === 'GAME_COMPLETE_GATE_BLOCKED') out.gateBlocked = true;
+    else if (code === 'GAME_COMPLETE_GATE_BLOCKED') { out.gateBlocked = true; if (/what you asked for is not in the game yet/.test(msg)) out.askNotMet = true; }
     else if (code === 'GAME_DEFECTS') for (const m of msg.matchAll(/GAME_DEFECT_[A-Z_]+/g)) if (!out.defects.includes(m[0])) out.defects.push(m[0]);
     if (code.startsWith('GAME_PLAYTEST_') && out.gqs === null) {
       const m = /Game Quality Score (\d{1,3})\/100/.exec(msg);
@@ -69,7 +71,10 @@ export function gameFailClass(run: { failure?: string; success: boolean; metrics
   if (run.metrics.errored) return 'errored';
   if (run.metrics.filesCreated <= 0) return 'no-files';
   if (!run.success || !run.metrics.ok) return 'build-failed';
-  if (g && (g.defects.some((d) => HARD.has(d)) || g.gateBlocked)) return 'not-playable';
+  if (g && g.defects.some((d) => HARD.has(d))) return 'not-playable';
+  // The game plays, but what the request asked for is not in it — the gap a user feels most ("jo bola woh nahi kiya").
+  if (g?.askNotMet) return 'ask-not-met';
+  if (g?.gateBlocked) return 'not-playable';
   if (g?.scope === 'gap') return 'scope-gap';
   if (!g || g.playtest === null || g.playtest === 'not-run') return 'not-played';
   return 'ok';

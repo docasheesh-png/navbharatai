@@ -6648,3 +6648,11 @@ the kit file did not compile — every new open world with city people broke. Fi
 Found in the same merge: a new GTA game whose user named enemies got BOTH the requested-enemies feature and street danger's
 own enemies; `streetDangerSource({ ownEnemies })` now brings only bystanders and police then. Locked in
 `tests/anOpenWorldHasStreetDanger.test.ts`; the kit typecheck test now passes apart from this container's missing cannon-es.
+## 2026-11-26 — main red after the game stack merged: two sessions built the same crowd and features-list code
+
+The game stack (#4578…#4584) and another session's street-danger work (e92a4949, "city people are solid and a punch knocks
+one down") both added crowd knock-down and both learned to start a game's features list. The merge kept both: citypeople.ts
+declared DOWN_SECONDS twice (6 and 4) — a parse error that failed every suite that writes the 3D kit — and
+GAME_FEATURES_INDEX_WITH_DANGER stayed a hand-written copy of what the dispatcher now builds with featuresIndexWith.
+Fix: one DOWN_SECONDS (6, every blow); GAME_FEATURES_INDEX_WITH_DANGER is derived from featuresIndexWith(GAME_FEATURES_INDEX,
+'streetDanger'), so the dispatcher and the fixture cannot drift; the street-danger test asserts the dispatcher's real line.

@@ -750,8 +750,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "e3411c230fe3afdb7e7fe312a3707eca9a3858a1b98312439d8d8a785ae94745",
     "47269d73710bc869cd350562a794763c0b9dfff6adaae87a7e3fbb61c5c6ded0",
     "0ebde6dd71bc2bd9c12e00873c352c2ea641e345df9acb8983bd51f7b8b11df6",
-    "9a9bc4092bf316b5504162c02429a04f8853be8d648f27e96a76992e31465f96",
-    "c24d0fd58358837fe1e60732904fa9e7b2535eff934a79da83d366d42eabbcba"
+    "0e562a97e47d75325c80cab5e55b93a18d71953b106898bcc69d4b5ccf3b6339"
   ],
   "src/game/three/citytraffic.ts": [
     "a1c64e0c58cd2a3975747dfd84bc554249b3b54f4b00568e1216f58b35946a76",

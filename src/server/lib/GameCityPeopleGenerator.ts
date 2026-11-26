@@ -45,7 +45,7 @@ export interface CityPeopleOptions {
   hittable?: boolean;
 }
 
-/** How long a knocked-down person lies before getting up, seconds. */
+/** How long a knocked-down person lies before getting up, seconds (a punch, a shot or a car — one number for every blow). */
 export const DOWN_SECONDS = 6;
 /** How far the player is kept from a person's centre when the crowd is solid, metres. */
 export const PERSON_RADIUS = 0.45;

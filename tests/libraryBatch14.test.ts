@@ -18,7 +18,8 @@ describe('colour packs and recolours', () => {
   it('admits every Kenney urban model, the nature kit that fits, and a medieval subset', () => {
     validateCatalogue(REVIEWED_GAME_ASSETS);
     expect(catalogueStorageBytes(REVIEWED_GAME_ASSETS)).toBeLessThanOrEqual(CATALOGUE_STORAGE_BUDGET_BYTES);
-    expect(catalogueStorageBytes(REVIEWED_GAME_ASSETS)).toBeLessThan(300 * 1024 * 1024);
+    // The admin's storage budget (400 MiB since 2026-11-26, line above) is the limit. A 300 MiB snapshot of the day this batch landed stood
+    // here with no recorded reason and stopped the next batch at 307.6 MiB, inside the budget (batch 16, 2026-11-25).
     expect(ids.filter((id) => id.startsWith('urban-'))).toHaveLength(124);
     expect(ids.filter((id) => id.startsWith('nature-'))).toHaveLength(68);
     expect(ids.filter((id) => id.startsWith('village-')).length).toBeGreaterThan(10);

@@ -5333,3 +5333,28 @@ Map-request routing (`src/server/AgentV3/mapGrowthIntent.ts`, map expansion item
 ### AGENTV3_RACING_WORLD (code default: OFF; not set in Cloud Run) — 2026-11-24
 
 A race on the world's city roads (`src/server/AgentV3/raceWorld.ts`, map expansion item 8). Only `on` (or 1/true/yes) enables it. When enabled, a road-library race (`<RacingRoadGame>`) asked for cities gets ONE question from the builder (mapGrowthIntent.ts) telling the user to reply "race shehar me karo". Only on that yes (or the same said plainly: "race ko shehar ki sadkon par le jao", "move the race onto city roads"; never a negation, a question, or a new-game request) does the platform add the world race files (`src/game/play/worldRace.ts`, `worldCourse.ts`) and the open-world layers they import by the kit's own rules, and set `TRACK.world = true` in `src/game/track.ts`, last. It refuses and changes nothing for a race on the user's own track model, a hand-edited race starter, an edited kit file the race would need names from, or a different file already at those paths. Unset or `off`: the race stays on the road library and the builder says cities on the route are not available yet (as before). No cost: no model call.
+
+### AGENTV3_GAME_PLACEHOLDER_PROBE (code default: ON; not set in Cloud Run) — 2026-11-25
+
+The placeholder look (`src/server/AgentV3/gamePlaceholderProbe.ts`). During the game playtest it checks whether the page shows placeholder art (a plain stand-in shape where a real model should be) and reports it, so a placeholder is not called finished. Only `off` (any case) disables it; the playtest then does not run this check. The check is read-only and costs no model call.
+
+### APP_FREE_AI_MODELS (code default: the two free text models; not set in Cloud Run) — 2026-11-25
+
+The text ladder for an app's FREE AI — the owner's own Z.ai key, set up from the ❗ tray in three steps
+(`src/server/lib/appFreeAi.ts`, `src/lib/freeAiSetup.ts`; admin 2026-11-25: *"glm 4.5 flash, glm 4.6v flash
+glm 4.7 flash — yeh teeno free module hai. yahi use hone chahiye only!"*). Unset ⇒ `glm-4.7-flash` first,
+`glm-4.5-flash` when the first is busy or rate-limited (HTTP 429/5xx, or Z.ai's own 429 codes 1302/1305/1308);
+`glm-4.6v-flash` is the image model and is not in a text ladder.
+
+🔒 **It can only NARROW the list, never extend it.** An id outside the three is dropped, and an override that
+leaves nothing falls back to the default order. The reason is money and it is the user's: the key belongs to
+the APP'S OWNER, so a paid id here would spend their own Z.ai balance behind a button that said "free". A
+matcher on the word "flash" would do exactly that — `glm-4.7-flashx` ($0.07/$0.40) and `glm-5.3-flash`
+($0.15/$0.50) both contain it, which is the trap `providerRates.ts` already records being walked into three
+times. `tests/freeAiChaluKarein.test.ts` fails if a paid id can reach the call.
+
+Nothing on this path touches NavBharatAI's own keys, wallet or ladders: `GLM_API_KEY` and the tier ladders are
+unrelated and unchanged. The vault name the owner's key is stored under is `ZAI_API_KEY`, scoped to the one app
+(widened to all of their apps only from Keys & Secrets, by them). The builder may never ask for it mid-build
+(`AI_MODEL_KEY_NAMES` in `secretRequest.ts`), and a built app calling `api.z.ai` from its own page is caught by
+`browserAiKeyScan.ts`.

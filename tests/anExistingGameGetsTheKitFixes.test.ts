@@ -69,7 +69,7 @@ const pool = new Map<string, LayerFile>([['a.ts', { recipe: 'r', content: NEW_A 
 const known = new Set([OLD_A, OLD_B]);
 const reasonOf = (_p: string, cur: string, _next: string) => (known.has(cur) ? null : 'edited' as const);
 
-describe('planKitRefresh: untouched files up to date, all or nothing', () => {
+describe('planKitRefresh: untouched files up to date (only what needs an edited file is held back)', () => {
   it('older untouched files are refreshed and what they newly import is added', () => {
     const r = planKitRefresh({ 'a.ts': OLD_A, 'b.ts': OLD_B, 'game.ts': 'mine' }, pool, reasonOf);
     expect(r.blocked).toBeNull();
@@ -78,7 +78,7 @@ describe('planKitRefresh: untouched files up to date, all or nothing', () => {
     expect(r.added).toEqual(['c.ts']);
     expect(r.write['game.ts']).toBeUndefined();
   });
-  it('an EDITED file the new code needs a name from blocks the whole refresh — nothing is written', () => {
+  it('an EDITED file the new code needs a name from: when NOTHING else is due, nothing is written and the reason is said', () => {
     const r = planKitRefresh({ 'a.ts': 'export const x = 1; // edited by the user\n', 'b.ts': OLD_B }, pool, reasonOf);
     expect(r.write).toEqual({});
     expect(r.blocked).toMatch(/b\.ts would need y from a\.ts, which was edited/);
@@ -86,6 +86,50 @@ describe('planKitRefresh: untouched files up to date, all or nothing', () => {
   it('a project already current, or with no kit, plans nothing', () => {
     expect(planKitRefresh({ 'a.ts': NEW_A, 'b.ts': NEW_B, 'c.ts': C }, pool, reasonOf).write).toEqual({});
     expect(planKitRefresh({ 'src/App.tsx': 'x' }, pool, reasonOf).write).toEqual({});
+  });
+});
+
+// 🧬 failedbr BR2518 + BR2519 (2026-11-24): one edited kit file (playerBody.ts — play/actions.ts takes four names from it)
+// held back the WHOLE kit, so Game.ts, the aim, the entities and the particle fix never reached that game. Same shape here:
+// a.ts edited, b.ts needs a new name from it; d.ts is independent; e.ts needs b.ts's new version.
+const OLD_D = "export const d = 1;\n";
+const NEW_D = "export const d = 2;\nexport const d2 = 3;\n";
+const OLD_E = "import { b } from './b';\nexport const e = b;\n";
+const NEW_E = "import { b } from './b';\nexport const e = b * 2;\n";
+const pool2 = new Map<string, LayerFile>([...pool, ['d.ts', { recipe: 'r', content: NEW_D }], ['e.ts', { recipe: 'r', content: NEW_E }]]);
+const known2 = new Set([OLD_A, OLD_B, OLD_D, OLD_E]);
+const reasonOf2 = (_p: string, cur: string, _next: string) => (known2.has(cur) ? null : 'edited' as const);
+
+describe('🔴 one edited file holds back only what needs it — the rest of the kit is still brought up to date', () => {
+  const EDITED_A = 'export const x = 1; // edited by the user\n';
+  const r = planKitRefresh({ 'a.ts': EDITED_A, 'b.ts': OLD_B, 'd.ts': OLD_D, 'e.ts': OLD_E, 'game.ts': 'mine' }, pool2, reasonOf2);
+  it('the independent file IS refreshed (it used to be held back with everything else)', () => {
+    expect(r.blocked).toBeNull();
+    expect(r.write['d.ts']).toBe(NEW_D);
+  });
+  it('the file that needs a name the edited file lacks is held back, with the reason', () => {
+    expect(r.write['b.ts']).toBeUndefined();
+    expect(r.heldBack?.map((h) => h.path)).toContain('b.ts');
+    expect(r.heldBack?.find((h) => h.path === 'b.ts')?.why).toMatch(/b\.ts would need y from a\.ts, which was edited/);
+  });
+  it('a file whose new version needs the held-back one is held back too — what is written always compiles against what stays', () => {
+    // e.ts's own new version only imports b (which old b has), but planning it pulls b up to date — so it stays back.
+    expect(r.write['e.ts']).toBeUndefined();
+    for (const [path, content] of Object.entries(r.write)) {
+      for (const m of content.matchAll(/import \{([^}]*)\} from '\.\/(\w+)'/g)) {
+        const target = `${m[2]}.ts`;
+        const provider = r.write[target] ?? ({ 'a.ts': EDITED_A, 'b.ts': OLD_B, 'd.ts': OLD_D, 'e.ts': OLD_E } as Record<string, string>)[target] ?? pool2.get(target)?.content ?? '';
+        for (const name of m[1].split(',').map((n) => n.trim()).filter(Boolean)) expect(provider, `${path} needs ${name} from ${target}`).toMatch(new RegExp(`export const ${name}\\b`));
+      }
+    }
+  });
+  it('the edited file and the user\'s own file are never written', () => {
+    expect(r.write['a.ts']).toBeUndefined();
+    expect(r.write['game.ts']).toBeUndefined();
+  });
+  it('the route names what was held back in the same line that says what was refreshed', () => {
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(route).toContain('Held back (they would need names from a file somebody edited)');
   });
 });
 

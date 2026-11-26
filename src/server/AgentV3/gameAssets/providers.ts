@@ -1,3 +1,4 @@
+import { REALISTIC_HUMANS } from './realisticHumans';
 import type { ObjectCategory } from '../../lib/objectCatalogTypes';
 import { ASSET_LIMITS, candidateMatches, type AssetCandidate, type AssetRequirement } from './assetPolicy';
 import type { AssetProvider } from './assetEngine';
@@ -19,6 +20,7 @@ import { REVIEWED_LIBRARY_BATCH_12 } from './reviewedLibraryBatch12';
 import { REVIEWED_LIBRARY_BATCH_13 } from './reviewedLibraryBatch13';
 import { REVIEWED_LIBRARY_BATCH_14 } from './reviewedLibraryBatch14';
 import { REVIEWED_LIBRARY_BATCH_15 } from './reviewedLibraryBatch15';
+import { REVIEWED_LIBRARY_BATCH_16 } from './reviewedLibraryBatch16';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab', 'vuena', 'ggbot'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
@@ -55,14 +57,17 @@ export interface ReviewedAsset extends AssetCandidate {
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8, ...REVIEWED_LIBRARY_BATCH_9, ...REVIEWED_LIBRARY_BATCH_10, ...REVIEWED_LIBRARY_BATCH_11, ...REVIEWED_LIBRARY_BATCH_12, ...REVIEWED_LIBRARY_BATCH_13, ...REVIEWED_LIBRARY_BATCH_14, ...REVIEWED_LIBRARY_BATCH_15];
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8, ...REVIEWED_LIBRARY_BATCH_9, ...REVIEWED_LIBRARY_BATCH_10, ...REVIEWED_LIBRARY_BATCH_11, ...REVIEWED_LIBRARY_BATCH_12, ...REVIEWED_LIBRARY_BATCH_13, ...REVIEWED_LIBRARY_BATCH_14, ...REVIEWED_LIBRARY_BATCH_15, ...REALISTIC_HUMANS, ...REVIEWED_LIBRARY_BATCH_16];
 
 /**
  * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was
- * this same 320 MiB expressed as 64 × the 5 MiB per-model ceiling; small low-poly models (~200 KB) made it a
+ * 320 MiB expressed as 64 × the 5 MiB per-model ceiling; small low-poly models (~200 KB) made it a
  * count limit that left the budget 90% unused. An entry without a reviewed size still costs the full 5 MiB.
+ * Admin decision 2026-11-26: 320 → 400 MiB. The catalogue had reached 307.6 MiB (the Indian clothes, the realistic
+ * humans); the packaged files were measured to carry no unused data, so slimming could not make room. The models ship
+ * in the server image (Dockerfile: COPY assets/game-models), so the image grows by up to the extra 80 MiB.
  */
-export const CATALOGUE_STORAGE_BUDGET_BYTES = 320 * 1024 * 1024;
+export const CATALOGUE_STORAGE_BUDGET_BYTES = 400 * 1024 * 1024;
 /** Bounds per-request linear scans; far above what the storage budget admits for real assets. */
 export const CATALOGUE_MAX_ENTRIES = 2048;
 export function catalogueStorageBytes(assets: readonly ReviewedAsset[]): number {
@@ -72,7 +77,7 @@ export function catalogueStorageBytes(assets: readonly ReviewedAsset[]): number 
 export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
   if (assets.length > CATALOGUE_MAX_ENTRIES) throw new Error('Catalogue exceeds the entry ceiling');
   for (const c of assets) if (c.bytes !== undefined && (!Number.isSafeInteger(c.bytes) || c.bytes < 28 || c.bytes > ASSET_LIMITS.bytes)) throw new Error('Unreviewed asset size');
-  if (catalogueStorageBytes(assets) > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error('Catalogue exceeds the 320 MiB cache/storage budget');
+  if (catalogueStorageBytes(assets) > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error(`Catalogue exceeds the ${CATALOGUE_STORAGE_BUDGET_BYTES / 1048576} MiB cache/storage budget`);
   const ids = new Set<string>();
   for (const c of assets) {
     if (!GAME_ASSET_PROVIDERS.includes(c.provider) || !c.review?.reviewer || !c.review.evidenceRevision || c.review.freeDownload !== true

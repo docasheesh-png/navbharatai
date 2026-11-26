@@ -222,6 +222,18 @@ const RULES: Rule[] = [
     demoDowngrade: true,
   },
   {
+    rule: 'secret-env-fallback-literal',
+    severity: 'medium',
+    // `process.env.JWT_SECRET || 'some-string'` (or `??`) — the fallback IS the secret whenever the variable is
+    // unset, and it is readable by anyone with the source, so sign-ins or sessions can be forged. The
+    // assignment and jwt.sign rules miss this form (audit 2026-11-21; the platform's own auth generators wrote
+    // it). Placeholder-looking text is NOT ignored on purpose: 'please-set-me' is exactly as public. An empty
+    // string does not match. Fix: no literal fallback — a random per-run secret, or require the variable.
+    re: /process\.env\.[A-Z0-9_]*(?:SECRET|SIGNING_KEY|PRIVATE_KEY)[A-Z0-9_]*\s*(?:\|\||\?\?)\s*(['"`])[^'"`]+\1/,
+    message: 'A secret falls back to a fixed string when its environment variable is unset — anyone with the code can then forge sign-ins. Use a random per-run value (e.g. crypto.randomBytes(32).toString(\'hex\')) or require the variable.',
+    demoDowngrade: true,
+  },
+  {
     rule: 'jwt-none-algorithm',
     severity: 'high',
     // A JWT configured with the "none" algorithm accepts UNSIGNED tokens — anyone can

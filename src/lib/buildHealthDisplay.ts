@@ -12,6 +12,7 @@
 /** Friendly names for the security rules a user is most likely to see. */
 const RULE_LABELS: Record<string, string> = {
   'hardcoded-secret': 'secret keys are written in the code',
+  'secret-env-fallback-literal': 'a secret falls back to a fixed value in the code',
   'connection-string-credentials': 'a database password is written in the code',
   'hardcoded-provider-token': 'an API token is written in the code',
   'insecure-random-token': 'a token is generated insecurely',

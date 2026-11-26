@@ -56,9 +56,11 @@ describe('"good" is said only when it is measured', () => {
     const v = playtestVerdict(GOODRUN, replay);
     expect(v.code).toBe('GAME_PLAYTEST_OK');
     expect(v.score!.overall).toBeGreaterThanOrEqual(GOOD_SCORE);
-    expect(v.message.startsWith('A good game — ')).toBe(true);
-    expect(playtestVerdict(OLD, replay).message.startsWith('A good game')).toBe(false);                    // progression never measured
-    expect(playtestVerdict({ ...GOODRUN, progression: { ...GOODRUN.progression!, advanced: false } }, replay).message.startsWith('A good game')).toBe(false);
+    // 2026-11-25 (external Game Maker audit, Q-3362): "A good game" read as a graphics verdict — the words are now "Plays well".
+    expect(v.message.startsWith('Plays well — Game Quality Score ')).toBe(true);
+    expect(v.message).toMatch(/for playability, not graphics/);
+    expect(playtestVerdict(OLD, replay).message.startsWith('Plays well')).toBe(false);                    // progression never measured
+    expect(playtestVerdict({ ...GOODRUN, progression: { ...GOODRUN.progression!, advanced: false } }, replay).message.startsWith('Plays well')).toBe(false);
     expect(isGoodGame(playtestVerdict(GOODRUN, replay).score!, [{ verdict: 'not-held' }])).toBe(false);   // a named rule broke
   });
   it('a measured zero on a new dimension never makes a game unplayable (they decide "good", not "playable")', () => {

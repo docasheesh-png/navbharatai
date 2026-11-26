@@ -1,4 +1,5 @@
 import { resolveAdminMfaDocument, unavailableAdminMfa, requireMfaEnrollmentAllowed, pendingAdminMfaSecret, AdminMfaPolicyError, type AdminMfaState } from '../lib/adminMfaState';
+import { settledRead, type UnreadAnalytics } from '../lib/adminAnalyticsReads';
 import { getChatOutcomeObservation } from '../AI/chatOutcomeObservation';
 import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
 import { adminTokenAdjustmentReceipt } from '../lib/adminTokenAdjustmentReceipt';
@@ -168,6 +169,7 @@ import { buildTrafficBoard } from '../AI/ProviderHealth/trafficBoard';
 import { aggregateEngineHealth, ENGINE_DISPLAY_NAMES } from '../AgentV3/engineHealth';
 import { weakLeadEngines } from '../AgentV3/weakLeadEngines';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
+import { readEngineDays, ENGINE_REASON_TEXT } from '../AgentV3/engineDayStats';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
 import { listReports } from '../lib/userReportStore';
 import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
@@ -1847,21 +1849,31 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const windowStartIso = new Date(windowStartMs).toISOString();
       const wallets = db.collection('user_token_wallets');
       const txCol = db.collection('payment_transactions');
+      // 🔴 ONE FAILED READ NO LONGER SINKS THE PAGE (admin 2026-11-25: "Could not read the platform analytics: Internal server
+      // error … yeh error hatao"). The seven reads are independent, but one Promise.all turned any single failure (a missing
+      // index, a permission, a timeout) into one opaque 500, and every tile showed a fake 0. Each is settled on its own now:
+      // the ones that succeed are shown, the ones that fail are NAMED with their Firestore code in `unread` (this route is
+      // admin-only), and the page says which numbers are not real — never a 0 standing in for "could not read".
+      const unread: UnreadAnalytics[] = [];
+      const EMPTY_SNAP = { docs: [] as any[] };
+      const ZERO_AGG = (k: string) => ({ data: () => ({ [k]: 0 }) });
+      const settle = <T,>(read: string, fields: string[], p: Promise<T>, empty: T): Promise<T> => settledRead(unread, read, fields, p, empty);
       const [userCountAgg, newTodayAgg, topWalletSnap, logsSnap, revenueAgg, txIsoSnap, txMsSnap] = await Promise.all([
-        wallets.count().get(),
+        settle('registered users (count of user_token_wallets)', ['totalUsers'], wallets.count().get(), ZERO_AGG('count') as any),
         // `walletsCreatedOn` counts ISO `createdAt` strings that start with today's date — this range is
         // exactly that set, counted by the index instead of by reading every wallet.
-        wallets.where('createdAt', '>=', today2).where('createdAt', '<', `${today2}\uffff`).count().get(),
+        settle('new users today', ['newUsersToday'], wallets.where('createdAt', '>=', today2).where('createdAt', '<', `${today2}\uffff`).count().get(), ZERO_AGG('count') as any),
         // Only the fields this page reads (adminReadFields.ts), never the 500-entry ledgers.
-        wallets.orderBy('totalTokensUsed', 'desc').limit(10).select(...WALLET_SUMMARY_FIELDS).get(),
+        settle('top 10 wallets by tokens used', ['expensiveUsers'], wallets.orderBy('totalTokensUsed', 'desc').limit(10).select(...WALLET_SUMMARY_FIELDS).get(), EMPTY_SNAP as any),
         // Every writer stores `createdAt` as an ISO string, so a string range is the whole window.
-        db.collection('ai_usage_logs').where('createdAt', '>=', windowStartIso)
-          .orderBy('createdAt', 'desc').limit(ANALYTICS_USAGE_ROW_CAP).select(...USAGE_LOG_FIELDS).get(),
-        txCol.where('paymentStatus', '==', 'SUCCESS').aggregate({ total: AggregateField.sum('amountPaid') }).get(),
+        settle('AI usage logs (last 30 days)', ['totalTokensUsed', 'totalProviderCost', 'activeUsers', 'providerRanking', 'providerWise', 'websiteHitsTotal', 'websiteHitsToday', 'platformMargin'],
+          db.collection('ai_usage_logs').where('createdAt', '>=', windowStartIso)
+            .orderBy('createdAt', 'desc').limit(ANALYTICS_USAGE_ROW_CAP).select(...USAGE_LOG_FIELDS).get(), EMPTY_SNAP as any),
+        settle('total revenue (sum of successful payments)', ['totalRevenue'], txCol.where('paymentStatus', '==', 'SUCCESS').aggregate({ total: AggregateField.sum('amountPaid') }).get(), ZERO_AGG('total') as any),
         // Orders carry `createdAt` as an ISO string OR epoch ms (both exist — see revenueToday), and a range
         // filter matches one type only, so the window is read in both spellings.
-        txCol.where('createdAt', '>=', windowStartIso).get(),
-        txCol.where('createdAt', '>=', windowStartMs).get(),
+        settle('payments in the last 30 days (ISO dates)', ['tokenPurchaseCount', 'recentPurchases', 'platformMargin'], txCol.where('createdAt', '>=', windowStartIso).get(), EMPTY_SNAP as any),
+        settle('payments in the last 30 days (epoch dates)', ['tokenPurchaseCount', 'recentPurchases', 'platformMargin'], txCol.where('createdAt', '>=', windowStartMs).get(), EMPTY_SNAP as any),
       ]);
       const logs = logsSnap.docs.map((d: any) => d.data());
       const transactions = [...txIsoSnap.docs, ...txMsSnap.docs].map((d: any) => d.data());
@@ -1888,8 +1900,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // The day docs hold the build and assistant cost; one extra day is read so the window's first day
       // is never cut off by the store's own "newest N" limit.
       const [buildCostDays, assistantSpend] = await Promise.all([
-        agentV3CostTelemetry.list(PLATFORM_MARGIN_DAYS + 1),
-        assistantSpendStore.summary(PLATFORM_MARGIN_DAYS + 1),
+        settle('build cost days', ['platformMargin'], agentV3CostTelemetry.list(PLATFORM_MARGIN_DAYS + 1), [] as any),
+        settle('assistant spend', ['platformMargin'], assistantSpendStore.summary(PLATFORM_MARGIN_DAYS + 1), { days: [] } as any),
       ]);
       const platformMargin = platformMarginWindow({
         nowMs, days: PLATFORM_MARGIN_DAYS, transactions, chatLogs: logs,
@@ -2053,6 +2065,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         providerRanking, unansweredTurns, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
+        // Which reads failed this time, and the fields they feed — those numbers are NOT real. [] when every read worked.
+        unread,
       });
     } catch (err: any) {
       // Keep the browser response generic, but retain the Firestore error code and stack in
@@ -2063,7 +2077,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         message: err?.message ?? String(err),
         stack: err?.stack ?? null,
       });
-      return res.status(500).json({ error: 'Internal server error.' });
+      // Admin-only route: the admin is told the real cause (code and message), not "Internal server error".
+      const code = err?.code != null ? String(err.code) : 'unknown';
+      return res.status(500).json({ error: `The analytics could not be computed (${code}: ${String(err?.message ?? err).slice(0, 240)}).`, code });
     }
   });
 
@@ -2281,6 +2297,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const recent = await listAllDiagnostics(300, Date.now() - windowHours * 3_600_000);
       out.health = aggregateEngineHealth(recent, windowHours);
     } catch { out.health = null; }
+
+    // PER DAY, PER ENGINE (admin 2026-11-25): requests, answers, failures, average answer time, why it failed and who
+    // carried on — the chip's "failed today" and the tap-through detail. `null` = could not read (engineDayStats.ts).
+    try {
+      out.engineDays = { days: await readEngineDays(7), reasonText: ENGINE_REASON_TEXT };
+    } catch { out.engineDays = { days: null, reasonText: ENGINE_REASON_TEXT }; }
 
     // WHAT REALLY SERVED TODAY. `null` is "could not read" and the screen says so; `{}` is the real
     // answer "nothing has built today yet".

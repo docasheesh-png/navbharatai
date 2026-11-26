@@ -1,9 +1,12 @@
+import { gamePlayerFileSource } from '../lib/GamePlayerBodyGenerator';
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
 import { askStandIn, generateStandIn } from './gameAssets/standInObject';
 import { composeAction } from './gameAssets/composeAction';
 import { composeRule } from './gameAssets/composeRule';
 import { composeEffect } from './gameAssets/composeEffect';
 import { deadStoreSubscriptionNote } from './deadStoreSubscription';
+import { CAR_FILE_PATH, raceCarFile } from './carSwap';
+import { starterCarPaint } from '../lib/projectVariety';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
@@ -400,7 +403,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { growthGuardEnabled, growsByLists, growthVerdict, growthRefusal, partsKnown, type PartsKnown } from './growthGuard';
-import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX_WITH_DANGER, GAME_STREET_DANGER_FEATURE, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
+import { generateOpenWorld, openWorldAppSource, GAME_FEATURES_INDEX, GAME_FEATURES_INDEX_PATH, GAME_FEATURES_INDEX_WITH_DANGER, GAME_STREET_DANGER_FEATURE, GAME_STREET_DANGER_PATH, GAME_WORLD_FILE_PATH, gameWorldFileSource, GAME_PLAYER_FILE_PATH } from '../lib/GameOpenWorldGenerator';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -4132,9 +4135,22 @@ export class ToolDispatcher {
   private async ensurePlayerFile(agent: AgentRole, source: string): Promise<boolean> {
     try { await this.actuator.readFile(this.workspaceId, GAME_PLAYER_FILE_PATH); return false; }
     catch (error) { if (!isNotFoundError(error)) throw error; }
-    const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, GAME_PLAYER_FILE, { agent, source });
+    const playerFile = await this.guardedWrite(GAME_PLAYER_FILE_PATH, gamePlayerFileSource(this.workspaceId), { agent, source });
     this.state?.recordFileChange({ path: GAME_PLAYER_FILE_PATH, kind: playerFile.kind }, agent);
     getWorkspaceMemory(this.workspaceId).indexFile(GAME_PLAYER_FILE_PATH, playerFile.content);
+    return true;
+  }
+
+  /**
+   * A new race's own car file (src/game/car.ts): created once when absent, never replaced — the user's from then on. Its paint
+   * is fixed by this project (projectVariety.ts starterCarPaint). True when it was created now.
+   */
+  private async ensureRaceCarFile(agent: AgentRole): Promise<boolean> {
+    try { await this.actuator.readFile(this.workspaceId, CAR_FILE_PATH); return false; }
+    catch (error) { if (!isNotFoundError(error)) throw error; }
+    const carFile = await this.guardedWrite(CAR_FILE_PATH, raceCarFile(null, starterCarPaint(this.workspaceId)), { agent, source: 'generate_game_shell' });
+    this.state?.recordFileChange({ path: CAR_FILE_PATH, kind: carFile.kind }, agent);
+    getWorkspaceMemory(this.workspaceId).indexFile(CAR_FILE_PATH, carFile.content);
     return true;
   }
 
@@ -10602,7 +10618,7 @@ export class ToolDispatcher {
             try { await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH); mapped = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!mapped) {
-              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true }), { agent, source: 'generate_open_world' });
+              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }
@@ -10767,8 +10783,11 @@ export class ToolDispatcher {
         // 🧍 Every game on the shell swaps its character in src/game/player.ts, which the shell reads by itself (2026-11-22:
         // "Use as my character" in ALL games) — so the file exists from the first build, created once, never replaced.
         const gshPlayer = gsh.files['src/game/Game.ts'] ? await this.ensurePlayerFile(agent, 'generate_game_shell') : false;
+        // 🎲 A race the seed KNOWS is a race (its include names the race starter) gets its own car file with a paint fixed by
+        // this project (projectVariety.ts): six new races are not six red cars, and an edit never repaints it.
+        const gshCar = gshInclude?.includes('racingroadgame') && gsh.files['src/game/RacingRoadGame.tsx'] ? await this.ensureRaceCarFile(agent) : false;
         this.scheduleCheckpoint('game shell');
-        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}\n\n${gsh.instructions}${gshLayers}`;
+        return `Composed the game shell:\n${gshWritten.join('\n')}${gshPlayer ? `\ncreated ${GAME_PLAYER_FILE_PATH} (who the player is — the shell reads it by itself)` : ''}${gshCar ? `\ncreated ${CAR_FILE_PATH} (the car the player drives — RacingRoadGame reads it by itself)` : ''}\n\n${gsh.instructions}${gshLayers}`;
       }
 
       case 'generate_melody': {

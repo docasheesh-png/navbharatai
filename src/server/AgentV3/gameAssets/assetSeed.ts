@@ -1,6 +1,10 @@
-import { prepareHumanAssets } from './humanPack';
+import { REALISTIC_HUMANS } from './realisticHumans';
+import { GAME_PLAYER_FILE_PATH, gamePlayerFileSource } from '../../lib/GamePlayerBodyGenerator';
+import { setPlayerModel } from '../characterSwap';
+import { needsHumanCharacter, prepareHumanAssets } from './humanPack';
 import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
 import { createHash } from 'node:crypto';
+import { pickVariant } from '../../lib/projectVariety';
 import { localModelEntries, localModelsOverride, localModelSubjects } from './localModelNote';
 import { downloadGameAsset } from './assetDownload';
 import { acquireGameAsset, type AssetEngineDependencies, type AssetOutcome } from './assetEngine';
@@ -32,6 +36,8 @@ export interface GameAssetSeedOptions {
   prompt: string;
   /** Trusted builder plan override; false means deliberately no visible human. */
   needsHuman?: boolean;
+  /** Player source newly created by this build, before the asset seed. */
+  starterPlayerSource?: string;
   workspaceId: string;
   verifiedOwnerUid?: string;
   workspace: GameAssetWorkspace;
@@ -72,7 +78,7 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   const scenery = await prepareExternalGameAssets(options);
   options.signal.throwIfAborted();
   // Never install a second competing visible-human authority.
-  if (localModelSubjects(scenery.files[GAME_ASSET_MODELS_PATH]).includes('human')) return scenery;
+  if (scenery.files[GAME_PLAYER_FILE_PATH] || localModelSubjects(scenery.files[GAME_ASSET_MODELS_PATH]).includes('human')) return scenery;
   const humanPaths = ['src/game/three/humanRuntime.ts', 'src/game/three/humanAssets.ts', 'public/game-assets/HUMANS_NOTICE.txt'];
   if (humanPaths.some(path => Object.prototype.hasOwnProperty.call(scenery.files, path))) return scenery;
   let humans: GameAssetSeedResult | null;
@@ -108,9 +114,18 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
   // Named subjects first, then the scenery this KIND of game needs (L3 step 4) — same bound of six models.
   const explicit = options.requirements !== undefined;
   const named = explicit ? options.requirements!.slice(0, 6).map((r) => ({ subject: r.subject, ...(r.animation ? { animation: r.animation } : {}) })) : gameAssetRequirements(options.prompt, catalogue);
+  const starter = !explicit && options.starterPlayerSource === gamePlayerFileSource(options.workspaceId)
+    && needsHumanCharacter(options) && !/cartoon|stylized|stylised|low[ -]?poly|voxel|anime|pixel art/i.test(options.prompt)
+    && !named.some(r => r.subject !== 'human' && catalogue.some(c => c.libraryCategory === 'character' && c.subjects.includes(r.subject)))
+    ? pickVariant(options.workspaceId, 'human', REALISTIC_HUMANS)
+    : undefined;
+  const starterSubject = starter && catalogue.some(c => c.id === starter.id) ? starter.subjects[0] : undefined;
+  const requested = starterSubject
+    ? [{ subject: starterSubject, animation: 'idle' }, ...named.filter(r => r.subject !== 'human')]
+    : named;
   const scenery = explicit ? null : sceneryFor(options.prompt);
   const served = new Set(catalogue.flatMap((c) => c.subjects));
-  const requirements = [...named, ...(scenery?.subjects ?? [])
+  const requirements = [...requested, ...(scenery?.subjects ?? [])
     .filter((subject) => served.has(subject) && !named.some((r) => r.subject === subject))
     .map((subject): AssetRequirement => ({ subject }))].slice(0, 6);
   if (!requirements.length) return { ...out, status: 'procedural' };
@@ -222,6 +237,10 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
   };
   const dressed = scenery ? scenery.subjects.filter((subject) => ready.some((r) => r.subject === subject)) : [];
   if (scenery && dressed.length) files['src/game/three/worldDressing.ts'] = generateWorldDressingModule(dressed, scenery.layout);
+  if (starterSubject && options.starterPlayerSource && ready.some(r => r.subject === starterSubject)) {
+    const player = setPlayerModel(options.starterPlayerSource, starterSubject);
+    if (player.ok) files[GAME_PLAYER_FILE_PATH] = player.source;
+  }
   try {
     signal.throwIfAborted();
     await persistence.saveText(options.workspaceId, files);

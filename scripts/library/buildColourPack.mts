@@ -484,7 +484,7 @@ for (const asset of REVIEWED_GAME_ASSETS.filter((item) => item.id.startsWith('ps
 
 const headroom = 300 * 1024 * 1024;
 const total = catalogueStorageBytes(REVIEWED_GAME_ASSETS) + kept.reduce((sum, row) => sum + row.bytes.length, 0);
-if (total > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error(`catalogue would exceed 320 MiB (${total})`);
+if (total > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error(`catalogue would exceed ${CATALOGUE_STORAGE_BUDGET_BYTES / 1048576} MiB (${total})`);
 if (total > headroom) console.log('HEADROOM', total, 'over the 300 MiB comfort line');
 
 await mkdir('assets/game-models', { recursive: true });

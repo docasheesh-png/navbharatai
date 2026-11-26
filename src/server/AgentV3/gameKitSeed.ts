@@ -710,7 +710,7 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
         + (has('generate_game_3d')
           ? ' Move a vehicle with driveVehicle(...) and createVehicleState(...) from src/game/three/objects.ts (they'
             + ' own steering, starting speed and contact with the world), and build objects with the kit factories.'
-            + ' An action, shooter or open-world game calls createActionTown() (at least 100 houses, varied, instanced until the player is near). One house is createHouse({ enterable: true }) or createEnterableHouse(). enterableShellFor(model) wraps a solid library mesh. The shell wires E and the phone Use button. Legacy createHouse() is solid scenery, not enterable.'
+            + ' An action, shooter or open-world game calls createActionTown() (at least 100 houses, varied, instanced until the player is near). One house is createHouse({ enterable: true }) or createEnterableHouse(). For an existing house edit, preserve its position and update its existing house factory options: roofColor accepts a hex number, sideDoor accepts "left" or "right" and adds a usable second entrance. For realistic games choose reviewed high-detail materials and meshes that match the scene; use mobile quality tiers for texture resolution and distant detail. enterableShellFor(model) wraps a solid library mesh. The shell wires E and the phone Use button. Legacy createHouse() is solid scenery, not enterable.'
             + ' Kit buildings, tree trunks and terrain are collidable automatically. Mark custom walls, stairs and'
             + ' platforms with markWorldCollider(mesh) from src/game/three/collision.ts. For custom movers,'
             + ' use sweepWorldCapsules with worldColliders before applying movement. Verify that walls and'
@@ -800,7 +800,11 @@ export function gameKitSeededMessage(results: readonly GameKitSeedResult[], file
   const done = results.filter((r) => r.ok).map((r) => r.recipe);
   const failed = results.filter((r) => !r.ok).map((r) => r.recipe);
   const secs = Math.max(0, Math.round(ms / 100) / 10);
-  return `Laid down the game kit before the first model call: ${done.join(', ')} (${files} file${files === 1 ? '' : 's'}, ${secs} s). `
+  // Where the seconds went, slowest first (failedbr BR2514: "94 files, 66.5 s" of a 98 s wait before the first model call,
+  // and nothing said which recipe cost it — the per-recipe time was measured (Q-3232) and dropped here).
+  const timed = results.filter((r) => typeof r.ms === 'number' && r.ms >= 0).sort((a, b) => (b.ms as number) - (a.ms as number));
+  const slowest = timed.length ? ` Time per recipe: ${timed.map((r) => `${r.recipe} ${Math.round((r.ms as number) / 100) / 10} s`).join(', ')}.` : '';
+  return `Laid down the game kit before the first model call: ${done.join(', ')} (${files} file${files === 1 ? '' : 's'}, ${secs} s).${slowest} `
     + 'The builder was told the kit is on disk and to build only the game on it.'
     + (failed.length ? ` Not laid down: ${failed.join(', ')} (the builder was told to run ${failed.length === 1 ? 'it' : 'them'} itself).` : '');
 }

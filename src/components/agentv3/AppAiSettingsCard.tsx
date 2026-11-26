@@ -12,7 +12,7 @@ export interface AppAiSettingsView {
   available: boolean;
   usesAi: boolean;
   enabled: boolean;
-  ownKey: 'openai' | 'anthropic' | null;
+  ownKey: 'openai' | 'anthropic' | 'zai' | null;
   previewCapInr: number;
   previewSpentTodayInr: number;
   publishedSpentTodayInr: number;
@@ -40,7 +40,9 @@ export async function fetchAppAiSpend(workspaceId: string): Promise<(SpendHistor
   }
 }
 
-const OWN_KEY_NAME = { openai: 'your OpenAI key', anthropic: 'your Anthropic key' } as const;
+// The owner's OWN accounts, so they are named (the White-Label Law covers NavBharatAI's engine, never a
+// key the user made themselves). The free one is named by what it is to them rather than by its vendor.
+const OWN_KEY_NAME = { openai: 'your OpenAI key', anthropic: 'your Anthropic key', zai: 'your free AI key' } as const;
 
 /**
  * WHAT YOUR APP'S AI HAS COST (Q-797, admin 2026-10-11). The owner saw only today's number, so a cost that grew
@@ -88,6 +90,7 @@ export function AppAiSettingsView({ view, busy, error, onToggle, history, histor
       {view.ownKey ? (
         <p className="mt-2 text-body">
           Your app&rsquo;s assistant answers with <strong>{OWN_KEY_NAME[view.ownKey]}</strong>, on our server. Nothing is charged to your NavBharatAI balance, and the key never goes into the app&rsquo;s page.
+          {view.ownKey === 'zai' && ' The models it uses are free, so your app\u2019s AI costs you nothing.'}
         </p>
       ) : (
         <>

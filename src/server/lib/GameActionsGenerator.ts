@@ -286,8 +286,10 @@ const CLIP_MOVE: Record<string, 'jump' | 'swim' | 'dive' | 'punch' | 'kick' | 'b
   'fire-pistol': 'fire', 'fire-rifle': 'fire', 'sword-swing': 'swing', throw: 'throw', 'pick-up': 'use', slide: 'slide',
 };
 
+// The library travels as ONE JSON string, parsed once at load: as an object literal it was tens of thousands of syntax
+// nodes that every TypeScript tool (the game's own typecheck, the import healer) had to build on every pass.
 const LIBRARY: Record<string, ActionDef> = {};
-for (const def of (__LIBRARY__ as unknown as ActionDef[])) LIBRARY[def.name] = def;
+for (const def of (JSON.parse(__LIBRARY__) as ActionDef[])) LIBRARY[def.name] = def;
 /** Every move the kit ships, by name (120+). */
 export const MOVES: readonly string[] = Object.keys(LIBRARY);
 
@@ -847,4 +849,4 @@ export function updateActions(ctx: GameContext, dt: number): void {
     }
   }
 }
-`.replace('__LIBRARY__', JSON.stringify(LIBRARY_ACTIONS)).replace('__ALIASES__', JSON.stringify(MOVE_ALIASES));
+`.replace('__LIBRARY__', () => JSON.stringify(JSON.stringify(LIBRARY_ACTIONS))).replace('__ALIASES__', () => JSON.stringify(MOVE_ALIASES));

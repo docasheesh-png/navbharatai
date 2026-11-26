@@ -95,6 +95,12 @@ describe('the move library — separate from every character', () => {
     expect(ACT.MOVES.length).toBe(LIBRARY_ACTIONS.length);
   });
 
+  it('🔒 the kit carries the library as ONE JSON string, never a giant object literal (it slowed every TypeScript pass — CI timed out)', () => {
+    expect(GAME_ACTIONS).toMatch(/for \(const def of \(JSON\.parse\("\[\{/);
+    const longestCodeLine = Math.max(...GAME_ACTIONS.split('\n').filter((l) => !l.includes('JSON.parse("')).map((l) => l.length));
+    expect(longestCodeLine).toBeLessThan(8000);
+  });
+
   it('a mirrored pose swaps sides and the sideways direction', () => {
     expect(mirrorPose({ rightUpperArm: [-1, 0.2, 0.3] })).toEqual({ leftUpperArm: [1, 0.2, 0.3] });
     expect(MOVE_LIBRARY.length).toBeGreaterThan(100);

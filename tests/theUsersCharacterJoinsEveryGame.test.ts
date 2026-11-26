@@ -300,7 +300,7 @@ describe('📚 the platform sets the library character in every game on the kit 
     expect(t.disk.get(PLAYER_FILE_PATH)).toContain(`model: '${subject}'`);
   });
   it('a racing game (its player is the car) and the first-person royale are TOLD so; nothing is added or written', async () => {
-    for (const app of ['<RacingRoadGame title="x" />', '<RoyalePractice />']) {
+    for (const app of ['<RacingRoadGame title="x" />', '<RoyalePractice />', '<RoyaleGame />']) {
       const t = turn({ 'src/App.tsx': app, 'src/game/Game.ts': shell, [PLAYER_FILE_PATH]: GAME_PLAYER_FILE });
       const handoff = await setLibraryCharacterAtTurnStart(t.io);
       expect(handoff, app).toContain('NOT DONE');

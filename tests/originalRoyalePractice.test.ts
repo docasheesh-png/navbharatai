@@ -32,13 +32,18 @@ describe('original offline royale practice', () => {
     r.stepMatch(m,0.1,0); expect(m.result).toBe('won'); expect(r.fire(m,0)).toBe(false);
   });
   it('emits syntactically valid original modules and an honest integration contract', () => {
-    const result=generateGameRoyale(); expect(Object.keys(result.files)).toHaveLength(3);
+    const result=generateGameRoyale(); expect(Object.keys(result.files)).toHaveLength(7);
+    // ONLINE (2026-11-25): only the online client talks to the network, and only to NavBharatAI's own match service.
+    const online=new Set(['src/game/royale/onlineClient.ts']);
     for(const [path,source] of Object.entries(result.files)) {
       const parsed=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,path.endsWith('.tsx')?ts.ScriptKind.TSX:ts.ScriptKind.TS);
       expect((parsed as unknown as {parseDiagnostics:unknown[]}).parseDiagnostics).toEqual([]);
       expect(source).not.toMatch(/https?:\/\/|fetch\(|Math\.random\(/);
+      if(!online.has(path)) expect(source,path).not.toMatch(/WebSocket|XMLHttpRequest/);
     }
-    expect(result.instructions).toContain('Not multiplayer'); expect(result.instructions).toContain('preserve existing projects');
+    expect(result.files['src/game/royale/onlineClient.ts']).toContain("resolveWebSocketUrl('/api/royale-online/ws')");
+    expect(result.instructions).toContain('Never fake online opponents'); expect(result.instructions).toContain('preserve existing projects');
+    expect(result.instructions).toContain("import RoyaleGame from './game/RoyaleGame'");
   });
   it('uses existing collision/controllers, obstructed camera shots, mobile input, and teardown on restart', () => {
     const f=generateGameRoyale().files, practice=f['src/game/royale/practice.ts'], ui=f['src/game/RoyalePractice.tsx'];

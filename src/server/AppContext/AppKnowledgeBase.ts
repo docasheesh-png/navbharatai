@@ -53,10 +53,19 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     id: 'original_royale_practice',
     name: 'Experimental offline royale practice starter',
     path: 'NavBharatAI Pro → request a new royale-style game',
-    description: 'When explicitly enabled by the operator, the builder has an original bounded offline practice recipe with local bots and a shrinking zone. It is not a licensed branded game, online multiplayer, photorealistic world or a set of five finished templates. Existing/imported source and a named or stored Athree map are preserved. No new charge or artificial waiting is introduced. Availability and visual/mobile acceptance must be verified separately.',
+    description: 'When explicitly enabled by the operator, the builder has an original bounded offline practice recipe with local bots and a shrinking zone. It is not a licensed branded game, photorealistic world or a set of five finished templates; its online mode is a separate entry (original_royale_online). Existing/imported source and a named or stored Athree map are preserved. No new charge or artificial waiting is introduced. Availability and visual/mobile acceptance must be verified separately.',
     howToUse: 'Ask for a new royale-style practice game. Read the build result and test controls, doors, restart and your device. A disabled recipe is unavailable, not a successful build.',
     relatedFeatures: ['agentv3_builder'],
     keywords: ['royale', 'practice game', 'offline bots', 'shrinking zone'],
+  },
+  {
+    id: 'original_royale_online',
+    name: 'Online Royale match (2–4 players)',
+    path: 'NavBharatAI Pro → request a new royale-style game → publish it to App Mart → open it from App Mart → Online tab',
+    description: 'The royale starter has two tabs: Practice (offline, two bots) and Online (2026-11-25). Online is a real match for 2 to 4 players run on NavBharatAI\'s own match server: the server checks every move (no speed hacks, no walking through cover), decides every shot, owns the loot (a crate goes to one player only), shrinks the zone on its own clock, and decides one winner. A lobby finds a match: it starts when 4 players are waiting, after about 10 seconds with 2 or 3, or after about 30 seconds for a lone player; empty seats are filled with bots that are always shown as bots, never as people. A player whose connection drops gets back in automatically within about 15 seconds with the same place, health and position; staying away longer counts as leaving the match. Every player gets the same single result (places, kills, damage) and can press "Queue again". Online works only for a game opened from App Mart (not in the builder preview, where the Online tab says so) and only when NavBharatAI has online matches switched on; when it is off, full, or unreachable, the tab says exactly that and offers Practice. Limits per game: up to 5 matches at once, 16 players waiting, 300 matches a day; a private app needs its password first. Players on different servers may not meet yet (they still get a real match with labelled bots).',
+    howToUse: 'Ask for a new royale-style game, publish it to App Mart, then open it from App Mart and tap Online → Find a match. Share the App Mart link with friends so they queue at the same time. If the tab says online is switched off or not available, play Practice — nothing is faked.',
+    relatedFeatures: ['original_royale_practice', 'agentv3_builder'],
+    keywords: ['online', 'online match', 'multiplayer', 'royale online', 'battle royale online', 'dosto ke saath khelo', 'online khelo', 'pubg online', 'free fire online', 'queue again', 'lobby', 'match dhundo'],
   },
 
   {

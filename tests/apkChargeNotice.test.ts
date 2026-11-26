@@ -122,14 +122,14 @@ describe('WIRING — the server reports it and the screen says it', () => {
     const at = server.indexOf("'/api/mobile-ship/artifacts'");
     expect(at).toBeGreaterThan(-1);
     const seg = server.slice(at, server.indexOf('res.json({ artifacts })', at));
-    expect(seg).toContain('isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))');
+    expect(seg).toContain('mobileBuildBillingExempt(identity)'); // the shared exemption rule (mobileBuildCharge.ts)
     const dl = server.indexOf("'/api/mobile-ship/download'");
     expect(server.slice(dl, server.indexOf('res.send(got.bytes)', dl))).toContain("CHARGE_APPLIED_HEADER, 'false'");
   });
 
   it('the charge NEVER blocks the response — the debit is still fire-and-forget', () => {
     const at = server.indexOf("'/api/mobile-ship/artifacts'");
-    expect(server.slice(at, server.indexOf('res.json({ artifacts })', at))).toContain('void debitWalletForBuild(');
+    expect(server.slice(at, server.indexOf('res.json({ artifacts })', at))).toContain('void chargeMobileBuild(');
   });
 
   it('the screen shows the price BEFORE and the receipt AFTER', () => {

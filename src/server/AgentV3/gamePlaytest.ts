@@ -38,7 +38,7 @@
 
 import { missingLayerFiles } from '../lib/gameRecipeLayers';
 import { scopeMatch, type GameScopeContract, type ScopeMatch } from './gameIntent';
-import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport, noPointerLockInstall } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
@@ -370,16 +370,6 @@ const intervention = new RegExp(cfg.intervention, cfg.interventionFlags);
 const seedRandom = (seed) => {
   let a = seed >>> 0;
   Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-};
-
-// 🖱️ NO POINTER LOCK UNDER AUTOMATION (Q-3380, measured on #4552): the playtest clicks the canvas, a game asks for
-// pointer lock, and in an automated headless browser that floods the page with ~36,000 synthetic input messages a
-// second — the game drew 1–4 fps because of OUR browser, not its code (4 → 15 fps with the lock stubbed). The kit
-// shell already skips the lock when navigator.webdriver is set; this covers every game (builder-written, older kit
-// copies). A resolved promise and no pointerlockchange event: the game simply keeps the mouse free.
-const noPointerLock = () => {
-  const stub = function () { return Promise.resolve(); };
-  try { Element.prototype.requestPointerLock = stub; } catch (_e) { /* read-only: leave it */ }
 };
 
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
@@ -969,7 +959,8 @@ const watchdog = setTimeout(async () => {
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
-  await ctx.addInitScript(noPointerLock);
+  // No pointer lock under automation (Q-3380): the shared stub, before any app code runs (sandboxBrowserScript.ts).
+  ${noPointerLockInstall('ctx')}
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(soundCounter);
   await ctx.addInitScript(sceneHook);
@@ -1300,6 +1291,8 @@ try {
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
   enter('playing it with touch controls on a phone');
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  // The phone taps the canvas too, and a tap is a click to the game: the same stub (Q-3380 — #4553 left this context bare).
+  ${noPointerLockInstall('m')}
   if (cfg.placeholders) await m.addInitScript(placeholderHook);
   const mp = await m.newPage();
   watch(mp);

@@ -6056,6 +6056,27 @@ Two reports, two root causes, one PR. Both were root-caused at the class, with s
 - **Sibling, fixed too:** `github-claimed` — the build agent has no GitHub tool (pushing is the user's own button), so "I pushed the code to your GitHub" / "opened a pull request" is corrected; the fact is `toolWasUsed('github')`, so a future GitHub tool answers it truthfully. 857 claim-audit tests pass.
 - **Analytics (pattern sweep of admin / telemetry / build-analytics routes — not a line-by-line audit of every screen):** no fabricated fallback found — an unread figure is left ABSENT ("unmeasured ⇒ no badge"), the load board names unreadable tiles `unknown` instead of showing 0, analytics failures answer 500 with an error. Nothing changed.
 
+## 2026-11-25 — Dual Android build providers: NavBharatAI Native Cloud Build + the existing GitHub Actions build
+
+**Admin task:** one "Build Android App" button → exactly two genuine providers. Full design: `MOBILE_NATIVE_BUILD.md`.
+
+- **UI:** `AndroidBuildProviders.tsx` (the button + two-option sheet; the last choice is pre-selected, never auto-switched) wraps the
+  UNCHANGED `StoreBuildPanel` (GitHub) and the new `NativeBuildPanel` (native). Wired in `APKBuilder.tsx`.
+- **No second recipe:** the native worker runs the app's own generated GitHub workflow, translated step by step
+  (`workflowScript.ts`, census-tested for every step of both lanes on Capacitor 5–8; unknown actions / GitHub expressions throw).
+- **No duplicate preparation or charge:** `/api/mobile-ship/setup`'s GitHub-independent body moved verbatim into
+  `prepareMobileProject.ts`; the ₹ charge moved into `mobileBuildCharge.ts`; both providers call them. Source guards re-pointed, not weakened.
+- **Stateless native driver:** detached build in a disposable E2B machine, Firestore job row, `advanceNativeBuild` under a transactional lease
+  (a read-then-write lease race was caught by a test and fixed; the test Firestore double now models contention retries).
+- **Trust split:** untrusted build machine (no env, restricted egress) → fresh network-less signing machine (fixed script, key files deleted by trap)
+  → private bucket (md5-verified) → completed → charged once (`native_<id>`). Upload keys sealed with `secrets.ts`, consent recorded, every use audited.
+- **Real verification in this container:** real Gradle APK + signed/validated AAB from NavBharatAI-assembled projects; real keytool checks for
+  PKCS12/JKS; the whole orchestrator end to end (`tests/nativeCloudBuildRealGradle.test.ts`, opt-in).
+- **Defaults:** native OFF (`MOBILE_NATIVE_BUILD_ENABLED`), GitHub ON (`MOBILE_GITHUB_BUILD_ENABLED`).
+- **OPEN (owner-side, not code):** build the worker template (`template_kind: android-native`) — the image has never been built (no Docker
+  daemon here); set `MOBILE_NATIVE_BUILD_TEMPLATE` + `MOBILE_BUILD_ARTIFACT_BUCKET`; pin Temurin digests; bucket lifecycle rule; a first
+  live native build and a real-device install.
+- **OPEN (admin decision):** whether a native build whose paid balance cannot cover ₹1 should withhold the download (GitHub cannot; native could).
 ## 2026-11-25 — The first online Royale match: server-authoritative, 2–4 players, quota-bound (admin "sab karo")
 
 - **What was asked:** an external audit's order, approved by the admin — first a small, complete online match for the original Royale game, then scale. Until now only the offline Practice (PR #4217) existed.
@@ -6309,6 +6330,15 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tests:** `tests/aGameRepairCanAlwaysGoBack.test.ts` runs the real shell backup/restore on a real directory (binary move and delete, a 300 KB file a text map never saw, a mode change, a swapped symlink, new nested folders, and each refusal). `tests/aPlaceholderIsRepairedInTheBuild.test.ts` covers the judgement, caps (time, tokens), keep/undo/no-change/restore-unverified, a write outside the backup, the phase end to end (GAME_PROOF re-recorded on keep, nothing on discard, captured writes and store put back), and route source guards. The restore census (`anAutomaticRestoreReportsOnlyWhatItApplied`) classifies the new restore.
 - **Opened by the sibling hunt (OPEN, not fixed here):** Q-3500 (`E2BActuator.checkpoint()` reports an id when tar failed; `restore()` is neither exact nor verified), Q-3501 (five live repairs still undo from the text map).
 - **Watch on the next real game build with a missing model or a blank map:** the `GAME_PLACEHOLDER_REPAIR` line, and on a keep, a second GAME_PROOF prefixed with the replay note.
+## 2026-11-26 — Game full screen: only the button, and it fills the screen (admin iPhone screenshot)
+
+- Q-3440: `Game.play()` no longer goes full screen on a phone; the Full screen button is the only way in (builder prompt
+  updated). Locked by a census (only Game.ts asks the browser; the only other caller is the button).
+- Q-3441: root of the "two-thirds screen": `createRenderer` wrote the window size in px onto a canvas Game.ts sizes at 100%,
+  and container-mode `handleResize` never touches the style, so the canvas never grew with its box. A page-sized canvas
+  now keeps its style. Locked by running the real generated renderer.ts into a grown box.
+- Q-3442 🟡: the HUD under the status bar inside the app's preview frame (iOS gives an iframe 0 safe-area insets) — needs
+  the page to pass its insets in; recorded with a recommendation.
 ## 2026-11-26 — Q-3363: game proof pictures kept privately for 30 days, admin-only (#4557, not merged)
 
 The admin approved option A. What changed:
@@ -6368,3 +6398,9 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - **Open:** Q-3430 🟡 (fallback starts are not added to the shared count after an outage). Service still off by default (Q-3390); shared matchmaker still deferred (Q-3391, SCALE_PLAN §6).
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
+
+## 2026-11-26 — Q-3380: one no-pointer-lock stub on every platform browser that sends input (#4568)
+- **Problem:** a game that calls `requestPointerLock` floods a headless platform browser with synthetic input (108,052 messages in 3 s, 1–4 fps on #4552). #4553 stubbed it in the playtest's desktop context and the click explorer with two hand-written copies.
+- **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
+- **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
+- **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.

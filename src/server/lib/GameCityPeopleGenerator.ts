@@ -12,7 +12,7 @@
  */
 export const GAME_CITY_PEOPLE = String.raw`import * as THREE from 'three';
 import { CITY_KERB, CITY_ROAD_Y, CITY_ZEBRA, type City, type CityPlan } from './city';
-import { geometryTier, type GeometryTier } from './surfaces';
+import { geometryTier, mergeGeometries, type GeometryTier } from './surfaces';
 
 /** What the walkers need from city traffic (createCityTraffic returns it): the lights and where the cars are. */
 export interface TrafficLike {
@@ -175,17 +175,33 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   const pave = CITY_ROAD_Y + CITY_KERB;
   const root = new THREE.Group();
   root.name = 'City people';
-  const bodyGeo = new THREE.CylinderGeometry(0.2, 0.24, 1.15, light ? 6 : 8);
-  bodyGeo.translate(0, 0.78, 0);
-  const headGeo = light ? new THREE.SphereGeometry(0.15, 6, 4) : new THREE.SphereGeometry(0.15, 10, 8);
-  headGeo.translate(0, 1.55, 0);
+  // 🧍 A PERSON, NOT A CYLINDER WITH A BALL (admin 2026-11-25, open-world problem #7: "villeges human jaise nahi … gol cylinder
+  // ke upar ek ball"). A low-poly person in three instanced parts — shirt (torso and arms), trousers (two legs), skin (neck,
+  // head and hands) — each part one draw call for the whole crowd, so a city full of people costs what the old shapes did.
+  const part = (w: number, h: number, d: number, x: number, y: number, z = 0) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; };
+  /** One geometry from its pieces; the pieces are freed at once. */
+  const merged = (list: THREE.BufferGeometry[]) => { const g = mergeGeometries(list); for (const x of list) x.dispose(); return g; };
+  const bodyGeo = merged([
+    part(0.4, 0.56, 0.22, 0, 1.12),                                       // torso, shoulders at 1.4 m
+    part(0.1, 0.52, 0.11, -0.26, 1.12), part(0.1, 0.52, 0.11, 0.26, 1.12), // arms
+  ]);
+  const legGeo = merged([
+    part(0.15, 0.8, 0.17, -0.1, 0.44), part(0.15, 0.8, 0.17, 0.1, 0.44),  // legs, feet at the pavement
+    part(0.16, 0.06, 0.24, -0.1, 0.03, 0.03), part(0.16, 0.06, 0.24, 0.1, 0.03, 0.03), // shoes
+  ]);
+  const head = light ? new THREE.SphereGeometry(0.12, 6, 4) : new THREE.SphereGeometry(0.12, 10, 8);
+  head.translate(0, 1.6, 0);
+  const headGeo = merged([head, part(0.09, 0.08, 0.09, 0, 1.44), part(0.08, 0.1, 0.09, -0.26, 0.81), part(0.08, 0.1, 0.09, 0.26, 0.81)]);
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+  const legMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
   const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 });
   const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
+  const legs = new THREE.InstancedMesh(legGeo, legMat, count);
   const heads = new THREE.InstancedMesh(headGeo, headMat, count);
-  bodies.name = 'people'; heads.name = 'people heads';
+  bodies.name = 'people'; legs.name = 'people legs'; heads.name = 'people heads';
   const shirts = [0xd62828, 0x1d4ed8, 0xf59e0b, 0x15803d, 0x7c3aed, 0xf3f4f6, 0x0f766e, 0xbe185d, 0x374151];
   const skins = [0x8d5524, 0xc68642, 0xe0ac69, 0x6b3e26, 0xf1c27d];
+  const trousers = [0x1f2937, 0x334155, 0x1e3a8a, 0x78350f, 0x111827, 0x57534e, 0xf5f5f4];
   const colour = new THREE.Color();
   const walkers: Walker[] = [];
   for (let k = 0; k < count; k++) {
@@ -196,8 +212,10 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
     walkers.push({ block, s, dir: rand() < 0.5 ? 1 : -1, speed: baseSpeed * (0.8 + rand() * 0.4), state: 'walk', x: p.x, z: p.z, heading: 0, crossing: null, waited: 0, body: new THREE.Object3D() });
     bodies.setColorAt(k, colour.setHex(shirts[Math.floor(rand() * shirts.length)]));
     heads.setColorAt(k, colour.setHex(skins[Math.floor(rand() * skins.length)]));
+    // From the index, never from rand(): the look must not change the crowd's walks (the same seed, the same crossings).
+    legs.setColorAt(k, colour.setHex(trousers[(k * 5 + 2) % trousers.length]));
   }
-  root.add(bodies, heads);
+  root.add(bodies, legs, heads);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
   const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   const tmp = new THREE.Vector3();
@@ -211,11 +229,12 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       q.setFromAxisAngle(up, w.heading);
       if (w.state === 'down') q.multiply(lying);                       // flat on the ground, head where it fell
       m.compose(at.set(w.x, y, w.z), q, one);
-      bodies.setMatrixAt(k, m); heads.setMatrixAt(k, m);
+      bodies.setMatrixAt(k, m); legs.setMatrixAt(k, m); heads.setMatrixAt(k, m);
       w.body.position.set(w.x, y, w.z);
     });
-    bodies.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
+    bodies.instanceMatrix.needsUpdate = true; legs.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+    if (legs.instanceColor) legs.instanceColor.needsUpdate = true;
     if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
   };
 
@@ -359,8 +378,8 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
     },
     dispose: () => {
       root.removeFromParent();
-      bodyGeo.dispose(); headGeo.dispose(); bodyMat.dispose(); headMat.dispose();
-      bodies.dispose(); heads.dispose();
+      bodyGeo.dispose(); legGeo.dispose(); headGeo.dispose(); bodyMat.dispose(); legMat.dispose(); headMat.dispose();
+      bodies.dispose(); legs.dispose(); heads.dispose();
     },
   };
 }

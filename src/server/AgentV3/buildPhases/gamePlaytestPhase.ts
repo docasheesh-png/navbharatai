@@ -21,6 +21,8 @@ import { GAME_PLACEHOLDER_CODE, combinePlaceholderFindings, gamePlaceholderProbe
 import { reportGameFixOutcome, reportGameFixUnverified, type GameFixPorts } from './gameFixVerdict';
 import { reportRuleProbes, reportFeaturesOff } from './gameRuleProbes';
 import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
+import type { KeepResult } from '../gameProofPictures';
+import type { ProofShot } from '../gamePlaytest';
 
 /** What decides whether the game can be played now. All true ⇒ played; otherwise the reason is said. */
 export interface PlaytestFacts {
@@ -72,6 +74,11 @@ export interface GamePlaytestPorts {
   versions: () => Promise<Parameters<typeof versionBeforeTurn>[0]>;
   turnStartedAt: number;
   fix: GameFixPorts;
+  /**
+   * Q-3363: copies the pictures the playtest took into the private store for the admin report (gameProofPictures.ts).
+   * Optional: absent, GAME_PROOF says the pictures stay in the sandbox, as before.
+   */
+  keepPictures?: (shots: ProofShot[]) => Promise<KeepResult | null>;
 }
 
 /** The workspace's file list, or [] when it fails or takes longer than `ms` (the timer is always cleared). */
@@ -160,7 +167,7 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
       if (scope) p.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
       if (evidence?.notVerified?.length) out.featuresUnverified = [...evidence.notVerified];
     } catch { /* observation only */ }
-    recordProof(p, playRun, ranMs);
+    recordProof(p, playRun, ranMs, undefined, await keptPictures(p, playRun));
   } catch (err) {
     // A playtest that timed out or crashed is a check that could not look — the same open warning the runner's own
     // "never played" answer gives, never an info line that reads as a pass.
@@ -204,14 +211,22 @@ function notPlayed(p: GamePlaytestPorts): GamePlaytestResult | null {
   return out;
 }
 
+/** Q-3363: the pictures a played run took, kept privately for the admin. null when none or no keeper. Never throws. */
+async function keptPictures(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest>): Promise<KeepResult | null> {
+  if (!p.keepPictures || !run?.ok) return null;
+  const shots = (run.proofShots ?? []).filter((s): s is ProofShot => !!s && !('error' in s) && typeof (s as ProofShot).id === 'string');
+  if (shots.length === 0) return null;
+  try { return await p.keepPictures(shots); } catch { return null; }
+}
+
 /**
  * 🎮 GAME_PROOF — the four proofs of every game build the playtest reached (gameProof.ts): the contract, what it looked
  * like, what was played, and how long and how fast it ran in the sandbox (never called a phone). A game that was not
  * played still gets the section, with every played proof said as not taken and why. Evidence only; never throws.
  */
-function recordProof(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest> | null, ranMs: number | null, notPlayedWhy?: string): void {
+function recordProof(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest> | null, ranMs: number | null, notPlayedWhy?: string, kept?: KeepResult | null): void {
   try {
-    const issue = gameProofIssue(gameProof({ contract: p.contract, run, ranMs, files: p.files, notPlayedWhy }));
+    const issue = gameProofIssue(gameProof({ contract: p.contract, run, ranMs, files: p.files, notPlayedWhy, kept }));
     p.record({ phase: 'preview', severity: issue.severity, code: issue.code, message: issue.message, autoResolved: issue.autoResolved, detail: issue.detail });
   } catch { /* observation only */ }
 }

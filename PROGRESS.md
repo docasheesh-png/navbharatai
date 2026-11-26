@@ -6347,6 +6347,16 @@ stand-in clip), one "animates its moves" line for a model with no clips. Builder
 Locked: `tests/aCharacterMakesItsOwnMoves.test.ts`. Still not made when missing: jump, swim, dive, block, hit, die, slide.
 Also fixed on CI: openWorld.ts's `softwareRenderer` import kept on its own line (the no-GPU guard pins it).
 
+## 2026-11-26 — Q-3363: game proof pictures kept privately for 30 days, admin-only (#4557, not merged)
+
+The admin approved option A. What changed:
+- **Stored:** the playtest's start / moved / far JPEGs are copied out of the sandbox into the existing private workspace-asset bucket (`workspaceAssetBucketName`) under `game-proof-v1/<YYYY-MM-DD>/<buildId>/<view>-<id>.jpg` (`src/server/AgentV3/gameProofPictures.ts`). Each picture is checked first: a JPEG, at most 40 KB, at most 3 a build, and its bytes must hash to the id the playtest printed. The copy is bounded to 15 s. No new bucket, no ACL.
+- **Expiry:** a delete-after sweep, not a bucket lifecycle rule, because the server does not change bucket configuration. The day folder is the expiry: the sweep deletes folders older than 30 days (at most every 6 h per instance), and the admin route refuses an expired key with 410.
+- **Viewing:** `GET /api/admin/game-proof-picture?key=…` (`src/server/routes/gameProofPicturesAdmin.ts`) behind `verifyAdminToken`, streamed with `no-store`. Admin → Apps → "v" shows the latest build's pictures (`src/components/admin/GameProofPictures.tsx`).
+- **Report:** GAME_PROOF's `looks.taken[].stored` holds each key, and the line says how many were kept, or why none were.
+- **Kill switch:** `AGENTV3_GAME_PROOF_KEEP=off`.
+- **Proof:** `tests/gameProofPicturesAreKeptPrivately.test.ts` (20 tests). Seven separate reversions each fail it: no admin middleware, no hash check, no size cap, no count cap, no path guard, no `stored` key, a shifted expiry.
+- **Open:** Q-3410 (account erasure does not reach these pictures before the 30 days are up).
 ## 2026-11-26 — Asked-for enemies are put where the hero is, and the playtest proves they are on screen (Q-3401)
 
 The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attack kare, to builder pura kam kar deta hai … par real game me enemies show hi nahi hote".

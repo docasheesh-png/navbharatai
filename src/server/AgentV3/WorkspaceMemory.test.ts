@@ -342,3 +342,22 @@ describe('removeLastRequestTurn (UNSEND — purge the message from agent memory)
     expect(mem.snapshot().episodes).toHaveLength(1);
   });
 })
+
+// 🗺️ Kadam 3 (2026-11-26): a game's own files — the code that imports the kit — are on the map with what they export,
+// so the builder does not search for its own engine, scene or rules file before every edit (report #2538, Gully Cricket).
+describe('projectMap names the game\'s own files', () => {
+  it('lists a file that imports the kit, with its exports; never a kit file itself', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/cricket/engine.ts', "import { cricketLayout } from '../game/board/cricket';\nexport class CricketEngine {}\nexport function moveBatsman() {}");
+    mem.indexFile('src/game/board/cricket.ts', 'export function cricketLayout() {}');
+    mem.indexFile('src/App.tsx', "export const App = () => null;");
+    const map = mem.projectMap();
+    expect(map).toContain("Game files (the game's own code on the kit): src/cricket/engine.ts (CricketEngine, moveBatsman)");
+    expect(map).not.toMatch(/Game files[^\n]*src\/game\/board\/cricket\.ts/);
+  });
+  it('says nothing for an app that is not a game', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/App.tsx', "import { x } from './lib/x';\nexport const App = () => null;");
+    expect(mem.projectMap()).not.toContain('Game files');
+  });
+});

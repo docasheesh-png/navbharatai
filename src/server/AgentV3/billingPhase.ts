@@ -71,9 +71,10 @@ export const PHASE_PLANNER = 'planner';
 export const PHASE_EXPLORER_REPAIR = 'explorer-repair';
 
 /**
- * Game Engine Ultra Phase 3 (gameRepair.ts). Automatic repair is default on for one measured, replay-verified
- * attempt; set AGENTV3_GAME_AUTO_REPAIR=off to disable. This phase is ALWAYS barren — kept or undone, the
- * platform absorbs the repair and the user is never charged.
+ * The in-build game repair. Automatic repair of measured defects stays suspended (gameRepair.ts); the one pass that runs
+ * is the bounded placeholder repair (gamePlaceholderRepair.ts, Q-3374, admin-approved 2026-11-26), switched off with
+ * AGENTV3_GAME_PLACEHOLDER_REPAIR=off. This phase is ALWAYS barren — kept or undone, the platform absorbs the repair and
+ * the user is never charged (the route adds it to the barren set before the pass's first call).
  */
 export const PHASE_GAME_REPAIR = 'game-repair';
 

@@ -28,10 +28,14 @@ const GARMENTS: Record<string, string[]> = {
   'q16-man-pagdi': ['Kurta', 'Pajama', 'Pagdi'],
   'q16-man-dhoti': ['Kurta', 'Dhoti', 'Pagdi'],
   'q16-woman-saree': ['Blouse', 'Saree', 'Pallu'],
+  // 2026-11-26: salwar-kameez with dupatta, lungi with baniyan, sherwani with churidar and safa.
+  'q16-woman-salwar-kameez': ['Kameez', 'Salwar', 'Dupatta'],
+  'q16-man-lungi': ['Baniyan', 'Lungi'],
+  'q16-man-sherwani': ['Sherwani', 'Churidar', 'Pagdi'],
 };
 
 describe('library batch 16 — Indian garments made by NavBharatAI', () => {
-  it('four packaged CC0 models: exact bytes, valid, 16 clips with the villager roles, admitted live and proven to move', () => {
+  it('seven packaged CC0 models: exact bytes, valid, 16 clips with the villager roles, admitted live and proven to move', () => {
     validateCatalogue(REVIEWED_GAME_ASSETS);
     expect(REVIEWED_LIBRARY_BATCH_16.map(a => a.id).sort()).toEqual(Object.keys(GARMENTS).sort());
     for (const a of REVIEWED_LIBRARY_BATCH_16) {
@@ -57,7 +61,7 @@ describe('library batch 16 — Indian garments made by NavBharatAI', () => {
       for (const old of ['Arms', 'Body', 'Legs', 'Feet']) expect(meshNode(g, old), `${id} still wears ${old}`).toBeUndefined();
       expect(!!meshNode(g, 'Hair'), `${id} hair`).toBe(!garments.includes('Pagdi'));
     }
-    expect(model('q16-woman-saree').json.materials.some((m: { name?: string }) => m.name === 'Border')).toBe(true);
+    for (const id of ['q16-woman-saree', 'q16-woman-salwar-kameez', 'q16-man-lungi']) expect(model(id).json.materials.some((m: { name?: string }) => m.name === 'Border'), id).toBe(true);
   });
 
   it('the whole body is back under the clothes — the villager mesh had only its head\'s faces (1683 of 7281 vertices used)', () => {
@@ -89,8 +93,8 @@ describe('library batch 16 — Indian garments made by NavBharatAI', () => {
           for (let v = 0; v < w.length; v++) if (w[v] > 0.05) used.add(joints[j[v]]);
         }
         if (name === 'Pagdi') expect([...used]).toEqual(['Head']);
-        if (name === 'Saree' || name === 'Dhoti') for (const bone of ['pelvis', 'thigh_l', 'thigh_r']) expect(used.has(bone), `${id} ${name} ${bone}`).toBe(true);
-        if (name === 'Kurta') for (const bone of ['upperarm_l', 'lowerarm_r', 'spine_03', 'pelvis']) expect(used.has(bone), `${id} kurta ${bone}`).toBe(true);
+        if (['Saree', 'Dhoti', 'Lungi'].includes(name)) for (const bone of ['pelvis', 'thigh_l', 'thigh_r']) expect(used.has(bone), `${id} ${name} ${bone}`).toBe(true);
+        if (['Kurta', 'Kameez', 'Sherwani'].includes(name)) for (const bone of ['upperarm_l', 'lowerarm_r', 'spine_03', 'pelvis']) expect(used.has(bone), `${id} kurta ${bone}`).toBe(true);
       }
     }
   });
@@ -101,6 +105,10 @@ describe('library batch 16 — Indian garments made by NavBharatAI', () => {
     expect(req('पगड़ी वाला आदमी')).toEqual([{ subject: 'man in pagdi' }]);
     expect(req('साड़ी वाली महिला')).toEqual([{ subject: 'woman in saree' }]);
     expect(req('a walking woman in saree')).toEqual([{ subject: 'woman in saree', animation: 'walk' }]);
+    expect(req('lungi wala aadmi')).toEqual([{ subject: 'man in lungi' }]);
+    expect(req('सलवार सूट वाली')).toEqual([{ subject: 'woman in salwar kameez' }]);
+    expect(req('dulha aur dulhan')).toEqual([{ subject: 'man in sherwani' }]);
+    expect(req('man in sherwani walking')).toEqual([{ subject: 'man in sherwani', animation: 'walk' }]);
     expect(req('man in turban walking')).toEqual([{ subject: 'man in turban', animation: 'walk' }]);
     // The older recoloured rangers keep their own names; a bare man stays a man.
     expect(req('a saffron kurta ranger').map(r => r.subject)).toEqual(['saffron kurta', 'ranger']);

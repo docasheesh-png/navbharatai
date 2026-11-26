@@ -199,12 +199,12 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
   {
     id: 'game_indian_clothes',
-    name: 'Indian clothes for game characters (kurta-pajama, pagdi, dhoti, saree)',
+    name: 'Indian clothes for game characters (kurta-pajama, pagdi, dhoti, saree, salwar-kameez, lungi, sherwani)',
     path: 'NavBharatAI Pro → in a 3D game, ask for a person in Indian clothes',
-    description: 'Since 2026-11-25 the model library has four fully animated characters in Indian clothes, made by NavBharatAI itself (not downloaded): a man in a cream kurta and white pajama; a man in a white kurta-pajama with a saffron pagdi; a village man in a khadi kurta, white dhoti and white pagdi; and a woman in a maroon saree with a gold border, a pallu over the shoulder and a green blouse. They walk, run, jump, crouch and play the other character animations, and the clothes move with the body. Every garment is a separate part, so its colour can be changed or it can be hidden on its own (Kurta, Pajama, Pagdi, Dhoti, Blouse, Saree, Pallu, Border).',
+    description: 'Since 2026-11-25 the model library has four fully animated characters in Indian clothes, made by NavBharatAI itself (not downloaded): a man in a cream kurta and white pajama; a man in a white kurta-pajama with a saffron pagdi; a village man in a khadi kurta, white dhoti and white pagdi; a woman in a maroon saree with a gold border, a pallu over the shoulder and a green blouse; and since 2026-11-26 a woman in a magenta salwar-kameez with a yellow dupatta, a man in a white baniyan and blue lungi, and a groom in a gold sherwani, cream churidar and red safa. They walk, run, jump, crouch and play the other character animations, and the clothes move with the body. Every garment is a separate part, so its colour can be changed or it can be hidden on its own (Kurta, Pajama, Pagdi, Dhoti, Blouse, Saree, Pallu, Kameez, Salwar, Dupatta, Baniyan, Lungi, Sherwani, Churidar, Border).',
     howToUse: 'Ask in your own words, in any language ("a village with a man in dhoti and a woman in saree", "pagdi wala aadmi", "साड़ी वाली महिला"). To change a colour, ask for it ("make the saree blue", "pagdi ko laal karo").',
     relatedFeatures: ['agentv3_builder', 'game_big_worlds', 'pro_own_3d_models'],
-    keywords: ['kurta', 'kurta pajama', 'pagdi', 'pagri', 'turban', 'safa', 'dhoti', 'saree', 'sari', 'indian clothes', 'indian dress', 'desi kapde', 'saree wali', 'dhoti wala', 'पगड़ी', 'साड़ी', 'धोती', 'कुर्ता'],
+    keywords: ['kurta', 'kurta pajama', 'pagdi', 'pagri', 'turban', 'safa', 'dhoti', 'saree', 'sari', 'indian clothes', 'indian dress', 'desi kapde', 'saree wali', 'dhoti wala', 'पगड़ी', 'साड़ी', 'धोती', 'कुर्ता', 'salwar kameez', 'salwar suit', 'dupatta', 'lungi', 'sherwani', 'dulha', 'groom', 'सलवार सूट', 'लुंगी', 'शेरवानी', 'दूल्हा'],
   },
   {
     id: 'shared_free_daily_answers',

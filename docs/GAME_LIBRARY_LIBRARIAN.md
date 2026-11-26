@@ -29,7 +29,7 @@ No new finished maps, weapons, sound effects or nature/building packs were acqui
 The eleven acquired candidates subsequently passed permitted headless-shell rendering, normal acquisition/cache and actual builder-seed checks, plus a bounded local production artifact. Their initial quarantine record is historical. See `game-engine/library-admission-2026-11-13.md` for reproducible commands and exact limits. This candidate adds them to reviewed metadata without enabling rollout flags; final CI/merge and live availability remain separate.
 
 ## 2026-11-19: storage budget and MIT
-The 64-model count cap became a 320 MiB storage budget (same ceiling, measured in bytes; undeclared sizes count
+The 64-model count cap became a 320 MiB storage budget (raised to 400 MiB by the admin on 2026-11-26) (same ceiling, measured in bytes; undeclared sizes count
 as 5 MiB). MIT joins CC0 and CC-BY-4.0, with the full MIT notice shipped in `ATTRIBUTION.txt`. No new models were
 added by this change. Growth plan, subject list and source survey: `game-engine/library-growth-plan-2026-11-19.md`.
 

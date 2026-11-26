@@ -298,6 +298,14 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'wallet_balance_alerts', key: 'docId' },
   /** Their free-build credit (`OnboardingCreditStore.ts:67/85` — doc id IS the uid). */
   { collection: 'agentv3_onboarding_credits', key: 'docId' },
+  /**
+   * Their native .apk/.aab build jobs (`mobileBuild/nativeBuildStore.ts`, NativeBuildJob.userId) — Q-3702. The FILES
+   * are deleted first, by `eraseUserNativeArtifacts` (owner-hashed folder, running builds stopped), which DELETE
+   * /api/profile calls before this registry runs; a build that still finishes saving afterwards finds its row gone
+   * and deletes its own file (nativeBuildRunner). Invisible to the collection census until Q-3702, because the store
+   * is reached as `db().collection(BUILDS)` — a call receiver the census did not read.
+   */
+  { collection: 'mobile_native_builds', key: { field: 'userId' } },
   /** A .zip they uploaded (`zipUploadStore.ts:78`, SharedUploadRecord.uid). */
   { collection: 'zip_uploads', key: { field: 'uid' } },
   /** A spreadsheet they uploaded (`spreadsheetFileStore.ts:47` writes `uid`). */

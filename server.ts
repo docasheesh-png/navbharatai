@@ -1002,6 +1002,32 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             // schedule. See ROADMAP §12 #1 and lib/jobLease.ts.
             scheduler.register({ id: 'retention-purge', exclusive: true, schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
             /**
+             * EXPIRED SHARE LINKS (Q-3704) — a share stops working at its expiry and was never deleted: its record,
+             * its visitors' feedback and its offloaded page stayed for ever. Not a `RETENTION_POLICIES` entry on
+             * purpose: the generic purge deletes documents, and the page in the bucket is reachable only through the
+             * record, so a generic purge would orphan it. Same opt-in as the purge above (automated deletion of user
+             * data); `exclusive`, bounded per run, and it says what it kept and why.
+             */
+            scheduler.register({
+              id: 'expired-share-purge',
+              exclusive: true,
+              schedule: { kind: 'dailyAtUtc', hour: 3, minute: 25 },
+              handler: async () => {
+                await import('./src/server/lib/ShareStore')
+                  .then(async ({ liveExpiredShareDeps, purgeExpiredShares }) => {
+                    const deps = liveExpiredShareDeps();
+                    if (!deps) return;
+                    const r = await purgeExpiredShares(deps);
+                    if (r.error) { console.warn(`[share-purge] ${r.error}`); return; }
+                    if (r.scanned) {
+                      console.log(`[share-purge] purged ${r.purged} of ${r.scanned} expired share link(s) (${r.pagesDeleted} page(s), ${r.feedbackDeleted} feedback); `
+                        + `kept for retry ${r.kept}, refused (page outside its own path) ${r.refused}${r.more ? '; more are waiting for the next run' : ''}.`);
+                    }
+                  })
+                  .catch(() => { console.warn('[share-purge] could not complete; error details are not logged.'); });
+              },
+            });
+            /**
              * 🔒 THE BOOT RUN GOES THROUGH THE SCHEDULER TOO, and it waits for the claim to be wired.
              *
              * This used to be a bare `runPurge()` — the handler called directly, straight past the

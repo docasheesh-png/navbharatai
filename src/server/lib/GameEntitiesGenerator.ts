@@ -231,6 +231,9 @@ export class Entities {
           events.emit('ENTITY_REMOVED', { id: this.id, kind: this.kind });
         },
       };
+      // ANY ACTION ON ANY CHARACTER (2026-11-26): play/actions.ts finds this character — by its kind ('police',
+      // 'villager') or 'all' — through this getter. A function, so cloning the object never copies the body or health.
+      controller.object.userData.actor = () => ({ kind: e.kind, humanoid: e.humanoid, model: e.model, health: e.health });
       list.push(e);
       this.report.spawned++;
       events.emit('ENTITY_SPAWNED', { id: e.id, kind, position: { x: p.x, y: p.y, z: p.z } });
@@ -251,6 +254,13 @@ export class Entities {
       e.health.tick(dt);
       e.cooldown.tick(dt);
       if (e.health.isDead) { this.whileDead(e, dt); continue; }
+      // An action is playing on it (performAction — sit, dance, salute, swim …): it stands still and lets the action move
+      // it, instead of walking off mid-salute. The action clears the flag when it ends (or stopAction does).
+      if (e.object.userData.acting) {
+        e.controller.update(dt, { moveX: 0, moveZ: 0, sprint: false, jumpPressed: false, jumpHeld: false });
+        e.humanoid?.update(dt, 0, true);
+        continue;
+      }
       const pos = e.object.position;
       let vx = 0;
       let vz = 0;

@@ -127,9 +127,16 @@ describe('BR1955 F4: unsafe automatic repair is suspended without inventing game
   it('the production route supplies real replay proof and binds kept proof to both final consumers', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     const block = route.slice(route.indexOf('GAME ENGINE ULTRA PHASE 3'), route.indexOf('// 🔴 THE CARD IS EMITTED'));
-    expect(block).toContain("proof: v.score && outcome !== 'not-run'");
-    expect(block).toContain('gameProof = { ...outcome.proof }');
-    expect(block).toContain('gateEvidence.game = gameProof.outcome');
+    // Moved (Q-3365, 2026-11-26): the replay is the playtest phase's own play (`replayGamePlaytest` runs `playIt`, the
+    // same play, judge and proof as the first), and a kept replay reaches BOTH consumers through the one apply the first
+    // play uses — so its proof is real by construction, never a separately assembled one.
+    expect(block).toContain('if (repairedPlay) applyGamePlayed(repairedPlay);');
+    const apply = route.slice(route.indexOf('const applyGamePlayed = '), route.indexOf('const applyGamePlayed = ') + 700);
+    expect(apply).toContain('gameProof = played.proof;');
+    expect(apply).toContain('gateEvidence.game = played.gate;');
+    const phase = readFileSync('src/server/AgentV3/buildPhases/gamePlaytestPhase.ts', 'utf8');
+    const replay = phase.slice(phase.indexOf('export async function replayGamePlaytest('), phase.indexOf('export function playMeasure('));
+    expect(replay).toContain('const result = await playIt({');
     expect(block).not.toContain("gamePlayed.defects.length === 0) gateEvidence.game = 'passed'");
   });
 });

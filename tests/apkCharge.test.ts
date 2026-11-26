@@ -78,10 +78,14 @@ describe('download-route wiring', () => {
     const seg = code.slice(at, end);
     expect(seg).toContain('isChargeableApk(String(a.name))');                 // only a real built app file
     expect(seg).toContain('verifyFirebaseIdentity(req)');                     // only a real signed-in wallet
-    expect(seg).toContain('isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))'); // admin/tester exempt
+    expect(seg).toContain('mobileBuildBillingExempt(identity)');              // admin/tester exempt (shared rule)
     expect(seg).toContain('apkChargeRef(owner, repo, String(a.id))');         // idempotent per artifact
-    expect(seg).toContain('description: chargeDescription(String(a.name))');  // white-label ledger line
-    expect(seg).toContain('void debitWalletForBuild');                        // never blocks the response
+    expect(seg).toContain('void chargeMobileBuild(');                         // never blocks the response
+    // 2026-11-25: the debit body is the ONE shared charge both Android providers use (mobileBuildCharge.ts).
+    const shared = stripComments(readFileSync(join(__dirname, '..', 'src/server/lib/mobileBuildCharge.ts'), 'utf8'));
+    expect(shared).toContain('isAgentV3FreeUser(identity.uid, email)');      // admin/tester exempt
+    expect(shared).toContain('description: chargeDescription(fileName)');     // white-label ledger line
+    expect(shared).toContain('debitWalletForBuild(');
     expect(seg).toContain('break;');                                          // one charge per build, not per file
   });
 

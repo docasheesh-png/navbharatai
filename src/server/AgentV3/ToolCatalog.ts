@@ -2374,6 +2374,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket, business, match3. Default = all; every engine brings dice.' } } },
     },
     {
+      name: 'generate_genre_kits',
+      description:
+        'GENRE KITS (src/game/genres/): tested rules for the genres the rest of the kit has no system for. FIGHTING (fighting.ts — '
+        + 'a one-on-one fighter at 60 frames a second: startup / active / recovery frames, hit-stun and combos with scaled damage, '
+        + 'blocking with chip damage, lows blocked crouching and highs missing a crouch, throws that beat a block, motion specials '
+        + '(down, forward, attack), cancels, a super meter, rounds, the timer and a computer opponent at three strengths) and TOWER '
+        + 'DEFENSE (towerDefense.ts — a path found from the map, towers placed only on build tiles with money, targeting first / '
+        + 'strongest / nearest, splash, frost slow, armour, flyers, growing waves, an early-wave bonus, lives, victory and defeat). '
+        + 'Pure TypeScript: draw them in 2D or 3D. Use it for any fighting or tower-defense game; never re-implement these rules.',
+      input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
+        description: 'Optional subset: fighting, towerDefense. Default = all.' } } },
+    },
+    {
       name: 'generate_game_2d',
       description:
         'The 2D GAME KIT (src/game/2d/) for any 2D canvas game with movement — a platformer, side-scroller, runner, top-down or '
@@ -3836,6 +3849,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_world_2d',
   'generate_game_2d',
   'generate_board_games',
+  'generate_genre_kits',
   'author_object',
   'generate_game_shell',
   'generate_open_world',
@@ -4075,6 +4089,7 @@ export const RECIPE_TOOLS = [
   'generate_world_2d',
   'generate_game_2d',
   'generate_board_games',
+  'generate_genre_kits',
   'author_object',
   'generate_game_shell',
   'generate_open_world',

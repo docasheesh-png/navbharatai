@@ -11,6 +11,10 @@ API call work exactly as on the web. This is a genuine, store-installable app �
 
 ---
 
+> **Scope of this runbook:** publishing **NavBharatAI's own** Android/iOS app. Apps that users build *inside*
+> NavBharatAI are built by one of two providers the user chooses — **Native Cloud Build** or **GitHub Actions** —
+> documented in `MOBILE_NATIVE_BUILD.md` and `MOBILE_APK_PIPELINE.md`.
+
 ## 0. What is already done in this repo ✅
 
 - `capacitor.config.ts` — appId `com.navbharat.ai`, appName `NavBharatAI`, bundled mode, iOS + Android.

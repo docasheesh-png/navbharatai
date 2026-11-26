@@ -242,9 +242,13 @@ describe('apkRefusalForProject — asked of the real files, never of a stored id
   });
 
   it('is wired into the ship route BEFORE the GitHub repo is created', () => {
+    // 2026-11-25: the gate lives in the ONE preparation both Android providers share; the route runs that
+    // preparation before it creates the repository.
     const route = src('src/server/routes/mobileSetup.ts');
-    expect(route).toContain('const noUi = apkRefusalForProject(appFiles);');
-    const at = route.indexOf('apkRefusalForProject(appFiles)');
-    expect(at).toBeLessThan(route.indexOf('await ensureRepo('));
+    const prep = src('src/server/lib/mobileBuild/prepareMobileProject.ts');
+    expect(prep).toContain('const noUi = apkRefusalForProject(appFiles);');
+    expect(prep.indexOf('apkRefusalForProject(appFiles)')).toBeLessThan(prep.indexOf('assembleMobileProject('));
+    expect(route.indexOf('await prepareMobileProject(')).toBeGreaterThan(-1);
+    expect(route.indexOf('await prepareMobileProject(')).toBeLessThan(route.indexOf('await ensureRepo('));
   });
 });

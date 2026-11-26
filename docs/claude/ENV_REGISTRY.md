@@ -5334,6 +5334,24 @@ Map-request routing (`src/server/AgentV3/mapGrowthIntent.ts`, map expansion item
 
 A race on the world's city roads (`src/server/AgentV3/raceWorld.ts`, map expansion item 8). Only `on` (or 1/true/yes) enables it. When enabled, a road-library race (`<RacingRoadGame>`) asked for cities gets ONE question from the builder (mapGrowthIntent.ts) telling the user to reply "race shehar me karo". Only on that yes (or the same said plainly: "race ko shehar ki sadkon par le jao", "move the race onto city roads"; never a negation, a question, or a new-game request) does the platform add the world race files (`src/game/play/worldRace.ts`, `worldCourse.ts`) and the open-world layers they import by the kit's own rules, and set `TRACK.world = true` in `src/game/track.ts`, last. It refuses and changes nothing for a race on the user's own track model, a hand-edited race starter, an edited kit file the race would need names from, or a different file already at those paths. Unset or `off`: the race stays on the road library and the builder says cities on the route are not available yet (as before). No cost: no model call.
 
+## 2026-11-25 — Dual Android build providers: Native Cloud Build keys (code only; NONE set in Cloud Run yet)
+
+Names only. Full design, owner steps and rollback: `MOBILE_NATIVE_BUILD.md` §6.
+
+- `MOBILE_NATIVE_BUILD_ENABLED` — code default **OFF**. `on` offers Native Cloud Build in the two-option sheet. Turning it
+  off never touches the GitHub option. Read at call time (`providerRegistry.ts`).
+- `MOBILE_NATIVE_BUILD_TEMPLATE` — alias of the E2B worker template built from `infra/e2b/e2b-android-native.Dockerfile`
+  (workflow input `template_kind: android-native`, default alias `navbharat-android-native`). **Not** the older
+  `ANDROID_E2B_TEMPLATE_ID` idea, which named the Bubblewrap/TWA template and is still unused.
+- `MOBILE_BUILD_ARTIFACT_BUCKET` — private bucket for native `.apk`/`.aab` files; falls back to `FIREBASE_STORAGE_BUCKET`.
+- `MOBILE_GITHUB_BUILD_ENABLED` — code default **ON**. `off` greys out the GitHub option and makes `/api/mobile-ship/setup`
+  and `/api/mobile-ship/trigger` answer 503 `provider-disabled`.
+- `MOBILE_NATIVE_BUILD_MAX_ACTIVE_PER_USER` (default 1, 1–5), `MOBILE_NATIVE_BUILD_MAX_ACTIVE` (default 4, 1–50),
+  `MOBILE_NATIVE_BUILD_TIMEOUT_MIN` (default 25, 5–55), `MOBILE_NATIVE_BUILD_RETENTION_DAYS` (default 30, 1–365).
+- Reused, already set: `E2B_API_KEY` (machines), `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (upload keys are sealed with
+  it; without it only `.apk` is offered natively), `APK_CHARGE_INR` (the one build price for both providers — this name
+  was missing from this registry before; default 1, `off`/`0` = free).
+
 ### AGENTV3_ONLINE_MATCH (code default: OFF; not set in Cloud Run) — 2026-11-25
 
 The online Royale match service (`src/server/lib/royaleOnline/`, admin "sab karo" 2026-11-25). A server-authoritative 2–4 player match over a WebSocket at `/api/royale-online/ws` on `navbharat-ai-prod`, for games opened from the NavBharatAI App Store: movement validated (speed budget, arena bounds, cover), shots, loot, the zone, elimination and the single winner all decided on the server; reconnect within 15 s; empty seats filled by bots that are labelled as bots. Only `on` (or 1/true/yes) enables it. **Off (the default)** ⇒ a connecting game is told "Online matches are switched off right now" and the socket is closed; no session, room or tick exists. Practice is unaffected.
@@ -5345,6 +5363,23 @@ The online Royale match service (`src/server/lib/royaleOnline/`, admin "sab karo
 ### AGENTV3_GAME_PLACEHOLDER_PROBE (code default: ON; not set in Cloud Run) — 2026-11-25
 
 The placeholder look (`src/server/AgentV3/gamePlaceholderProbe.ts`). During the game playtest it checks whether the page shows placeholder art (a plain stand-in shape where a real model should be) and reports it, so a placeholder is not called finished. Only `off` (any case) disables it; the playtest then does not run this check. The check is read-only and costs no model call.
+
+### AGENTV3_GAME_PLACEHOLDER_REPAIR (code default: ON; not set in Cloud Run) — 2026-11-26
+
+The ONE bounded in-build game repair (Q-3374, admin-approved 2026-11-26: "baaki sab build karo";
+`src/server/AgentV3/gamePlaceholderRepair.ts`, wired through `buildPhases/gamePlaytestPhase.ts`). When the placeholder look
+above found ONLY a missing model and/or an empty map, the same build takes a byte-exact backup of the project
+(`gameWorkspaceBackup.ts`: a tar of the whole tree outside the project plus a sha256 manifest; it refuses on a special file,
+a control character in a name, a tree over 400 MB, too little free space or any tar warning), runs ONE pass with file tools
+only (read/write/edit/search — every other tool is refused), capped at 120 s and 160,000 tokens (8 steps, 12,000 output
+tokens per turn), then plays the game again. It is KEPT only if the replay has fewer placeholder findings, no new
+placeholder kind, no new measured defect and a playtest score not lower; otherwise every file is put back and the restore is
+checked against the backup's manifest (a restore that does not match is a warning line, and the backup is left in the
+sandbox). **Paid by the platform**: the pass runs in billing phase `game-repair`, which is barren — never on the user's bill,
+kept or undone. On the free tier it shares the explorer repair's daily allowance (`explorerRepairBudget.ts`). Every outcome is
+one `GAME_PLACEHOLDER_REPAIR` line in the admin report. Only `off` (any case) disables it; the finding then goes to the next
+game turn's builder exactly as before. It does NOT re-enable `AGENTV3_GAME_AUTO_REPAIR` (still ignored; repair of measured
+defects stays suspended).
 
 ### APP_FREE_AI_MODELS (code default: the two free text models; not set in Cloud Run) — 2026-11-25
 

@@ -70,8 +70,11 @@ describe('a time-boxed, platform-checked repair does not delegate', () => {
     expect(r.spawned()).toBe(1);
   });
 
-  it('all three platform-checked repairs in the route declare it', () => {
+  it('every platform-checked repair in the route declares it', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
-    expect((src.match(/withoutPlatformCheckTools\(baseRunnerOpts\.tools\), withheldTools: REPAIR_WITHHELD_TOOLS/g) ?? []).length).toBe(3);
+    // Two full-toolset repairs (the unreachable game-repair wiring was removed on 2026-11-26, Q-3374) …
+    expect((src.match(/withoutPlatformCheckTools\(baseRunnerOpts\.tools\), withheldTools: REPAIR_WITHHELD_TOOLS/g) ?? []).length).toBe(2);
+    // … and the placeholder repair, which is stricter: file tools only, every other name (task included) refused.
+    expect(src).toContain('withheldTools: onlyTheseTools(PLACEHOLDER_REPAIR_TOOLS)');
   });
 });

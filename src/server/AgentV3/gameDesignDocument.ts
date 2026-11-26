@@ -13,6 +13,7 @@
 import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects } from '../lib/heroObjectSpec';
 import { physicsProfileSpec, physicsRuntimeFor } from './physicsProfiles';
+import { GENRE_KITS, genreKitsFor } from '../lib/GameGenreKitsGenerator';
 import {
   asksForBattleRoyale,
   asksForEnterableHouses,
@@ -56,6 +57,8 @@ export interface GameDesignDocument {
   playtestAdapter: PlaytestAdapter;
   /** Existing rules module the builder must call. Null when the genre has no dedicated module. */
   rulesModule: string | null;
+  /** Genre kits whose rules the builder must call (GameGenreKitsGenerator.ts): fighting.ts, towerDefense.ts. */
+  genreKits?: readonly string[];
   genreSystems: readonly GenreSystem[];
   /** On-screen controls for a phone. Required unless the request refuses touch. */
   mobileControls: readonly string[];
@@ -297,6 +300,7 @@ export function analyzeGameRequirements(
     camera: scope.camera ?? 'unspecified',
     playtestAdapter: adapterFor(engine, scope.genre, text),
     rulesModule,
+    genreKits: genreKitsFor(text, scope.genre).map((k) => GENRE_KITS[k].path),
     genreSystems,
     mobileControls,
     mobileControlsState: refusesTouch(text) ? 'declined' : 'required',
@@ -333,6 +337,7 @@ export function gameDesignBlock(doc: GameDesignDocument): string {
     // and the sliding car. The measured numbers go in the handoff so there is nothing left to guess.
     physicsNumbersLine(doc),
     doc.rulesModule ? `Rules already exist in ${doc.rulesModule} — call that module. Do not reimplement them.` : '',
+    ...(doc.genreKits ?? []).map((path) => `The genre's rules already exist in ${path} — call that module. Do not reimplement them.`),
     requiredSystems.length ? `Genre systems that must really work: ${requiredSystems.join(', ')}.` : '',
     declinedSystems.length || declinedFeatures.length
       ? `Declined — do not build: ${refused.join(', ')}.`

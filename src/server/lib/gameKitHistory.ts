@@ -111,7 +111,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "db50858ac49f95fd4bbfc70cb874b2a45a0cc7b2a5c69201969c9486913f852a",
     "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad",
     "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d",
-    "a7fa43519a60883aa9d4f814ff9fcf801cff99a17a2c00c9caf72aa1868a0fef"
+    "63dd5f6dc7104b31d8867f37276f525c60d5304b57e6a61cf808ddb1f6ed9489",
+    "fbe6b3b4b71502dc1e81e4a15c836bcfcdd12ebb42e5f6a4df79c31449a6fcb4"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -516,10 +517,14 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/fx/synth.ts": [
     "f6ac6662b6e06e8616fa599b7aef37ccf0d6835e230f181efd8282b32633cf76"
   ],
+  "src/game/genres/fighting.ts": [
+    "b578b3395b4d87924fde12d40bbd69de702c32dbc77aca44202b5ab8ea68b689"
+  ],
+  "src/game/genres/towerDefense.ts": [
+    "6fc5ad77463c27b2c76f5e7fa87c707847a11e1623fda8f1f0724eb3def482b2"
+  ],
   "src/game/play/actions.ts": [
     "6d2cc3446adc5c8fcc69b5545002a31494f65d7dc7cde6604d1b001acca790e3",
-    "a8c9c75b050b4fb48419c8453a933a2fa6994649e4cb18c1fd474f1e9e3e86fe",
-    "73367a702054945280e6587b0b3d1fe0694bac4c832940ffff72e9d1e92f135a",
     "91e33f58029996a590cc262212f9df9e0f18d6fee04f5dee4e485407cf0faf8a"
   ],
   "src/game/play/aim.ts": [
@@ -805,7 +810,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/renderer.ts": [
     "e3bd063f8ab3ab10a658e8d808c0155a163ca15fb0d8744a4cd7d4fb902b7c19",
     "ec9599b1f6eedf372220c5ce2245c75ad53698bd983ebe90687debaad56fed50",
-    "a4eab150c392d6bbe183fbd647c080a6025334fc43f3952e67999ba68cf6b18f"
+    "a4eab150c392d6bbe183fbd647c080a6025334fc43f3952e67999ba68cf6b18f",
+    "fe280baa5b2469cacf2ac9d3bab6881ab872e387f127b32d544749ab4b4a993f"
   ],
   "src/game/three/splitscreen.ts": [
     "f3d3cd253e6e20134507928f6db8f71f8bbd2d9436f8dc4f806c4945632ec6de"

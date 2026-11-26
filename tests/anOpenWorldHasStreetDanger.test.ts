@@ -39,7 +39,7 @@ describe('the street-danger feature is real kit code', () => {
     const ours = ts.getPreEmitDiagnostics(program).filter((d) => d.file && (d.file.fileName.includes('/features/')))
       .map((d) => `${d.file!.fileName.split('/').slice(-2).join('/')}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`);
     expect(ours).toEqual([]);
-  });
+  }, 120_000); // a strict compile of the kit files from disk: seconds locally, past the 20 s default under CI coverage (#4595's red run)
   it('spawns hostile enemies and bystanders, lands the punch, and brings the police on a crime', () => {
     expect(GAME_STREET_DANGER_FEATURE).toContain("kind: 'enemy', hostile: true");
     expect(GAME_STREET_DANGER_FEATURE).toContain("kind: 'villager', hostile: false");
@@ -85,5 +85,18 @@ describe('the kit ground is the map ground (sibling found while wiring the enemi
   it('the open world registers the Athree height as groundHeightAt / standOnGround, in render metres, and clears it on dispose', () => {
     expect(GAME_OPEN_WORLD_BRIDGE).toContain('setGround((x, z) => { const h = map.world.heightAt(x + chunks.origin.x, z + chunks.origin.z);');
     expect(GAME_OPEN_WORLD_BRIDGE).toContain('setGround(null);');
+  });
+});
+
+describe('never a second set of enemies (found merging with the requested-enemies feature, 2026-11-26)', () => {
+  it('with the user\'s own enemies written, street danger brings bystanders and police but no enemies of its own', async () => {
+    const { streetDangerSource } = await import('../src/server/lib/GameOpenWorldGenerator');
+    expect(streetDangerSource()).toBe(GAME_STREET_DANGER_FEATURE);
+    const own = streetDangerSource({ ownEnemies: true });
+    expect(own).toMatch(/^\s*enemies: 0,/m);
+    expect(own).toMatch(/^\s*bystanders: 4,/m);
+    expect(own).not.toBe(GAME_STREET_DANGER_FEATURE);
+    const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
+    expect(src).toContain('streetDangerSource({ ownEnemies: !!enemyReq })');
   });
 });

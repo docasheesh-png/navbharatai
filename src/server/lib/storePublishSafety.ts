@@ -26,10 +26,10 @@
 // PURE. The route supplies the files and applies the decision; nothing here touches a database.
 
 import {
-  scanPublishedContent, publishScanBlocks, scannableText,
+  scanPublishedContent, publishScanBlocks, scannableFiles,
   type ContentScanResult, type ContentScanFinding, type ContentFindingSeverity,
 } from '../AgentV3/ContentSafetyScanner';
-import { classifyPublishedText, illegalRefusal, type PublishContentClass } from '../AgentV3/illegalContentRules';
+import { classifyPublishedFiles, type PublishContentClass } from '../AgentV3/illegalContentRules';
 
 /** What the publish route should do with this app. */
 export interface PublishSafetyDecision {
@@ -66,7 +66,26 @@ export interface PublishSafetyDecision {
    * would have made it ordinary.
    */
   adultWithoutOptIn: boolean;
+  /**
+   * HELD FOR A PERSON (admin 2026-11-26: "sex se sambandhit app publish apply ho jaye, admin ko saf saf
+   * bataya jaye, yeh problem hai, admin game khel ke dekhega! khud reject kar dega").
+   *
+   * True when the sexual/illegal TEXT classifier found a phrase. The publish is ACCEPTED, but the app
+   * is never served to anyone except its owner and a store admin until an admin lists it, and the
+   * matched phrases travel on the record for the admin's review screen. Before 2026-11-26 the illegal
+   * tier refused outright — which, while the classifier paired words across a whole bundle, refused
+   * every kit-built 3D game as CSAM (Q-3521). The malware / phishing rules are NOT part of this: they
+   * keep their own refuse-in-block-mode behaviour.
+   */
+  holdForReview: boolean;
+  /** What the creator reads when the app is held. Never names the rule or quotes the match. '' otherwise. */
+  heldMessage: string;
 }
+
+/** The sentence a held creator reads — honest that a check flagged it, no accusation, no match shown. */
+export const HELD_FOR_REVIEW_MESSAGE =
+  'Submitted. An automatic check flagged something in this app, so a person will review it before it can be '
+  + 'opened by anyone else. You can still open it yourself from My apps. You will be notified when it is approved.';
 
 /** At most this many findings travel onto the record — an admin acts on the first one anyway. */
 export const MAX_RECORDED_FINDINGS = 5;
@@ -98,64 +117,59 @@ export interface PublisherContext {
 /**
  * Decide, from a scan result. PURE, so the rule is testable without a publish.
  *
- * 🔒 THE ORDER IS THE POLICY. `illegal` is answered FIRST and ignores `blockMode` entirely — the
- * admin's instruction was "sirf saaf-saaf wale cases par publish BLOCK karo", and a category that is
- * unlawful for everyone must not be reachable by flipping an operations switch. `blockMode` continues
- * to govern only the older, judgement-call rules (phishing shapes and the like), where a false
- * positive costs an honest creator their app and caution is the right default.
+ * 🔁 POLICY CHANGE, admin 2026-11-26. Until then `illegal` refused unconditionally ("sirf saaf-saaf wale
+ * cases par publish BLOCK karo", 2026-09-12). That refusal is replaced by a HOLD: the admin's words were
+ * "sex se sambandhit app publish apply ho jaye, admin ko saf saf bataya jaye … admin game khel ke
+ * dekhega! khud reject kar dega". No switch can unhold an app — only an admin's listing decision.
+ * `blockMode` still governs only the older, judgement-call rules (phishing shapes and the like).
  */
 export function decideFromScan(
   scan: ContentScanResult,
   blockMode: boolean,
-  classified: ReturnType<typeof classifyPublishedText> = { findings: [], contentClass: 'general' },
+  classified: ReturnType<typeof classifyPublishedFiles> = { findings: [], contentClass: 'general' },
   publisher: PublisherContext = { adultOptIn: false },
 ): PublishSafetyDecision {
-  const illegal = classified.findings.filter((f) => f.contentClass === 'illegal');
   const adult = classified.contentClass === 'adult';
   const adultWithoutOptIn = adult && !publisher.adultOptIn;
+  const holdForReview = classified.findings.length > 0;
 
-  // Everything the admin queue shows, in one list. The illegal/adult findings carry NO matched text
-  // — see illegalContentRules.ts for why that differs from the phishing rules deliberately.
+  // Everything the admin queue shows, in one list. A classifier finding carries the phrase that paired
+  // and its file (admin 2026-11-26) — one row per phrase, so the admin sees exactly what the check saw.
   const findings: ContentScanFinding[] = [
-    ...classified.findings.map((f) => ({
-      severity: (f.contentClass === 'illegal' ? 'critical' : 'medium') as ContentFindingSeverity,
-      rule: f.id,
-      description: f.description,
-      matchSnippet: '',
-    })),
+    ...classified.findings.flatMap((f) => {
+      const severity = (f.contentClass === 'illegal' ? 'critical' : 'medium') as ContentFindingSeverity;
+      const evidence = f.evidence?.length ? f.evidence : [{ file: '', excerpt: '' }];
+      return evidence.map((e) => ({
+        severity,
+        rule: f.id,
+        description: f.description,
+        matchSnippet: e.excerpt ? `${e.file ? `${e.file}: ` : ''}${e.excerpt}` : '',
+      }));
+    }),
     ...scan.findings,
   ].slice(0, MAX_RECORDED_FINDINGS);
 
-  const flagged = !scan.safe || classified.findings.length > 0;
+  const flagged = !scan.safe || holdForReview;
   const parts: string[] = [];
   if (classified.findings.length) parts.push(classified.findings.map((f) => `${f.contentClass}:${f.id}`).join(', '));
   if (scan.findings.length) parts.push(scan.findings.map((f) => `${f.severity}:${f.rule}`).join(', '));
 
-  if (illegal.length > 0) {
-    return {
-      findings,
-      flagged: true,
-      refuse: true,               // unconditional — see the note above
-      forceUnlisted: true,
-      refusalMessage: illegalRefusal(illegal[0]),
-      summary: parts.join(' | '),
-      contentClass: 'illegal',
-      adultWithoutOptIn: false,
-    };
-  }
-
+  // 🔒 THE ORDER IS THE POLICY. The malware/phishing rules answer first and keep their block-mode refusal.
+  // A text-classifier finding never refuses (admin 2026-11-26) — it HOLDS: accepted, never served to
+  // anyone but the owner and a store admin, and never listed until a person lists it.
+  const refuse = !scan.safe && blockMode;
   return {
     findings,
     flagged,
-    refuse: !scan.safe && blockMode,
-    // NOT gated on block mode: a flagged app — including adult content published by somebody who has
-    // not turned the 18+ switch on — must lose its listing. Publishing is allowed; being featured is
-    // earned.
+    refuse,
+    // NOT gated on block mode: a flagged app must lose its listing. Being featured is earned.
     forceUnlisted: flagged,
-    refusalMessage: !scan.safe && blockMode ? refusalFor(scan.findings[0]) : '',
+    refusalMessage: refuse ? refusalFor(scan.findings[0]) : '',
     summary: parts.join(' | '),
     contentClass: classified.contentClass,
     adultWithoutOptIn,
+    holdForReview: !refuse && holdForReview,
+    heldMessage: !refuse && holdForReview ? HELD_FOR_REVIEW_MESSAGE : '',
   };
 }
 
@@ -176,13 +190,13 @@ export function assessPublishSafety(
     return decideFromScan(
       scanPublishedContent(scanned),
       blockMode,
-      classifyPublishedText(scannableText(scanned)),
+      classifyPublishedFiles(scannableFiles(scanned)),
       publisher,
     );
   } catch {
     return {
       findings: [], flagged: false, refuse: false, forceUnlisted: false, refusalMessage: '',
-      summary: '', contentClass: 'general', adultWithoutOptIn: false,
+      summary: '', contentClass: 'general', adultWithoutOptIn: false, holdForReview: false, heldMessage: '',
     };
   }
 }

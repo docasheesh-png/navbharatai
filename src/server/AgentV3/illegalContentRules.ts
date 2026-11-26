@@ -18,8 +18,23 @@
 // harmful: shipping a list of CSAM slang in a source file publishes a lookup table for the people
 // we are trying to stop, and puts that vocabulary into a repository forever.
 //
-// So each rule needs TWO independent signals in the same app — a subject AND a context — which is
-// what an actual offending page has and an innocent mention does not.
+// So each rule needs TWO independent signals — a subject AND a context — which is what an actual
+// offending page has and an innocent mention does not.
+//
+// ── 🔴 AND "IN THE SAME APP" WAS THE BUG: THE HALVES MUST SIT TOGETHER IN A PHRASE (Q-3521) ───────
+// Admin report 2026-11-26: a plain cricket game was refused from App Mart as CSAM. The publish text is
+// EVERY source file, and the pairing used to be "subject anywhere AND context anywhere" — so three.js's
+// `object.children` in one kit file and the word "hardcore" in a code comment of another, hundreds of
+// kilobytes apart, became "an app pairing a child with sexual words". Every kit-built 3D game carried
+// that pair. Whole-document co-occurrence of two word lists over source code is not evidence.
+//
+// What an offending page cannot avoid is the two halves CLOSE TOGETHER in a phrase a person reads —
+// the offer, the label, the search box. So on the publish path (`classifyPublishedFiles`) a pair counts
+// only when (1) both halves are in the same FILE, (2) in the same code statement
+// (`SEGMENT_BREAK`), (3) within `PAIR_WINDOW` characters of each other, and (4) neither half is a code
+// identifier (`obj.children`, `child.position`, `children[0]`). The protective stand-down still reads
+// the whole app, exactly as before. Prompt triage (`promptSafety.ts`) is a separate policy and keeps
+// its own whole-message test, unchanged.
 //
 // ── 🔴 AN HONEST LIMIT, STATED RATHER THAN HIDDEN (fourth absolute rule, step 6) ─────────────────
 // This reads TEXT. It cannot see images. Real CSAM detection is perceptual image hashing against
@@ -395,10 +410,22 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
   },
 ];
 
+/** Where a publish-path finding was seen: the file, and the short phrase around the pair. */
+export interface IllegalEvidence {
+  file: string;
+  excerpt: string;
+}
+
 export interface IllegalFinding {
   id: string;
   contentClass: Exclude<PublishContentClass, 'general'>;
   description: string;
+  /**
+   * The phrase(s) that paired, for the ADMIN's review screen only (admin 2026-11-26: "admin ko saf
+   * saf bataya jaye"). Never sent to the creator. Bounded: at most `MAX_EVIDENCE` excerpts of at most
+   * `EXCERPT_CHARS` characters each.
+   */
+  evidence?: IllegalEvidence[];
 }
 
 export interface IllegalScanResult {
@@ -410,25 +437,165 @@ export interface IllegalScanResult {
 /** How much text is examined. Bounded so a giant bundle cannot stall a publish. */
 export const SCAN_TEXT_CAP = 2_000_000;
 
+/** The most characters allowed BETWEEN a subject and its context for them to count as one phrase. */
+export const PAIR_WINDOW = 80;
 /**
- * Classify an app's own text. PURE.
- *
- * 🔒 NO MATCHED TEXT IS RETURNED. The other rules in this scanner carry a `matchSnippet` so an admin
- * can judge a phishing lure for themselves — right for that category and wrong for these. Quoting the
- * matched line back would mean storing, displaying and (through the takedown record) RETAINING the
- * very sentence we are acting on, in a Firestore document and on an admin screen. The rule id and its
- * description say enough to act; the app itself is there to be opened by anyone who needs more.
+ * A pair never crosses a code statement or block edge. A sentence end and a line break are
+ * deliberately NOT breaks: "Play Teen Patti now! Deposit ₹100" is one offer in two sentences, and a
+ * JSX page puts its heading and its button on separate lines. The 80-character window is what keeps
+ * a pair inside one short phrase (measured on the repo's own 3,162 source files: adding the line
+ * break as a separator removed one hit and caught nothing the window did not).
  */
-export function classifyPublishedText(text: string | null | undefined): IllegalScanResult {
-  const body = normalizeScanText(String(text ?? '').slice(0, SCAN_TEXT_CAP));
+const SEGMENT_BREAK = /[;{}]/g;
+/** Excerpts kept per finding, and their length — enough for an admin to judge, never a transcript. */
+export const MAX_EVIDENCE = 3;
+export const EXCERPT_CHARS = 200;
+/** A runaway match list (a minified bundle full of "app") is cut off, so pairing stays bounded. */
+const MAX_MATCHES_PER_LIST = 20_000;
+
+type Span = readonly [number, number];
+
+/**
+ * Is the token at [s, e) a CODE identifier rather than a word a person reads? `obj.children`,
+ * `child.position`, `children[0]`, `child(`, `_child`, `$child` are code. PURE. Deliberately narrow:
+ * a sentence-final "kids." (a dot then a space or the end) stays a word.
+ */
+export function isCodeToken(body: string, s: number, e: number): boolean {
+  const before = s > 0 ? body[s - 1] : '';
+  const after = body[e] ?? '';
+  if (before === '.' || before === '_' || before === '$') return true;
+  if (after === '(' || after === '[' || after === '_' || after === '$') return true;
+  if (after === '.' && /[A-Za-z_$]/.test(body[e + 1] ?? '')) return true;
+  return false;
+}
+
+/** What makes "explicit" / "hardcore" sexual rather than "explicit dispose" or a game's "hardcore mode". */
+const SEXUAL_NOUN_AFTER = /^\s+(?:porn\w*|sex\w*|nud\w*|naked|photos?|pictures?|pics?|images?|videos?|clips?|content|material|scenes?|movies?|films?|chats?|stories|story)\b/i;
+/** "sex" as a form field or a statistic ("Child sex: M/F", "sex ratio"), not a sexual word. */
+const SEX_AS_FIELD_AFTER = /^\s*(?:[:=/|(,]|\s+(?:ratio|m\/f|male|female|of\s+the\s+(?:child|baby|student)))/i;
+
+/**
+ * Is this match one of the words that are ambiguous ALONE in an app's text? PURE. Publish path only.
+ *
+ * A game has a "hardcore mode", a codebase says "explicit dispose of child meshes", a school form asks
+ * "Child sex: M/F". Each word is sexual only next to a sexual noun, so on its own it is not one half of
+ * a pair. Measured, not guessed: "a cricket game for kids with a hardcore mode" paired CSAM_SIGNAL and
+ * "Hardcore mode: watch the timer" paired ADULT_CONTENT before this (Q-3521). ⚠️ `triagePrompt` shares
+ * the same rule lists and still has these false blocks — recorded as an open, admin-decision item,
+ * because prompt triage is a separate policy that this change was told not to touch.
+ */
+export function isAmbiguousWordAlone(word: string, after: string): boolean {
+  const w = word.toLowerCase();
+  if (w === 'explicit' || w === 'hardcore') return !SEXUAL_NOUN_AFTER.test(after);
+  if (w === 'sex') return SEX_AS_FIELD_AFTER.test(after);
+  return false;
+}
+
+function humanSpans(re: RegExp, body: string): Span[] {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+  const out: Span[] = [];
+  for (const m of body.matchAll(g)) {
+    if (!m[0]) continue;
+    const s = m.index ?? 0;
+    const e = s + m[0].length;
+    if (isCodeToken(body, s, e)) continue;
+    if (isAmbiguousWordAlone(m[0], body.slice(e, e + 40))) continue;
+    out.push([s, e]);
+    if (out.length >= MAX_MATCHES_PER_LIST) break;
+  }
+  return out;
+}
+
+/** First index in sorted `xs` whose value is >= v. */
+function lowerBound(xs: readonly number[], v: number): number {
+  let lo = 0;
+  let hi = xs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] < v) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * The phrase-level pairs of `rule` in ONE file's text (already normalised). PURE + bounded.
+ * Returns the [start, end) of each paired phrase (subject through context), at most `limit` of them.
+ */
+export function pairedPhrases(rule: Pick<IllegalRule, 'subject' | 'context'>, body: string, limit = MAX_EVIDENCE): Span[] {
+  if (limit <= 0) return [];
+  const subjects = humanSpans(rule.subject, body);
+  if (subjects.length === 0) return [];
+  const contexts = humanSpans(rule.context, body);
+  if (contexts.length === 0) return [];
+  const breaks: number[] = [];
+  for (const m of body.matchAll(SEGMENT_BREAK)) breaks.push(m.index ?? 0);
+  // Global matches never overlap, so their ends are sorted — binary search the first one in reach.
+  const ctxEnds = contexts.map((c) => c[1]);
+  const out: Span[] = [];
+  for (const [ss, se] of subjects) {
+    for (let k = lowerBound(ctxEnds, ss - PAIR_WINDOW); k < contexts.length; k++) {
+      const [cs, ce] = contexts[k];
+      if (cs > se + PAIR_WINDOW) break;
+      const gapStart = Math.min(se, ce);
+      const gapEnd = Math.max(ss, cs);
+      if (gapEnd - gapStart > PAIR_WINDOW) continue;
+      // No segment break may sit in the gap between the two halves.
+      if (gapEnd > gapStart) {
+        const b = lowerBound(breaks, gapStart);
+        if (b < breaks.length && breaks[b] < gapEnd) continue;
+      }
+      out.push([Math.min(ss, cs), Math.max(se, ce)]);
+      break;
+    }
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function excerptOf(body: string, [s, e]: Span): string {
+  const pad = Math.max(0, Math.floor((EXCERPT_CHARS - (e - s)) / 2));
+  const raw = body.slice(Math.max(0, s - pad), Math.min(body.length, e + pad));
+  return raw.replace(/\s+/g, ' ').trim().slice(0, EXCERPT_CHARS);
+}
+
+/**
+ * Classify an app's own files — the PUBLISH path. PURE.
+ *
+ * A rule fires only on a phrase-level pair inside one file (see the Q-3521 note at the top). The
+ * protective stand-down reads the whole app, exactly as it always did. The total text read is capped
+ * at `SCAN_TEXT_CAP`, in file order, so a giant bundle cannot stall a publish.
+ *
+ * 🔁 POLICY CHANGE (admin 2026-11-26): each finding now carries the paired phrase(s) and their file,
+ * for the admin's review screen. The 2026-09-12 rule "no matched text is returned" is superseded by
+ * the admin's own instruction — a flagged app is now HELD for a person to review rather than refused,
+ * and that person must see exactly what the check saw. The excerpt is short, bounded, and never shown
+ * to the creator. See docs/claude/PRODUCT_POLICY_PRECEDENTS.md.
+ */
+export function classifyPublishedFiles(files: Iterable<readonly [string, string]>): IllegalScanResult {
+  const parts: Array<[string, string]> = [];
+  let budget = SCAN_TEXT_CAP;
+  for (const [file, text] of files) {
+    if (budget <= 0) break;
+    const body = normalizeScanText(String(text ?? '').slice(0, budget));
+    budget -= body.length;
+    if (body) parts.push([file, body]);
+  }
   const findings: IllegalFinding[] = [];
-  if (!body) return { findings, contentClass: 'general' };
+  if (parts.length === 0) return { findings, contentClass: 'general' };
+  let whole: string | null = null;
+  const wholeApp = (): string => (whole ??= parts.map(([, b]) => b).join('\n'));
 
   for (const rule of ILLEGAL_RULES) {
-    // BOTH halves, in the same app. Either alone is an innocent mention.
-    // A protective app (Q-320) is not the offence it protects against.
-    if (rule.subject.test(body) && rule.context.test(body) && !protectiveStandDown(rule, body)) {
-      findings.push({ id: rule.id, contentClass: rule.contentClass, description: rule.description });
+    const evidence: IllegalEvidence[] = [];
+    for (const [file, body] of parts) {
+      for (const span of pairedPhrases(rule, body, MAX_EVIDENCE - evidence.length)) {
+        evidence.push({ file, excerpt: excerptOf(body, span) });
+      }
+      if (evidence.length >= MAX_EVIDENCE) break;
+    }
+    // A protective app (Q-320) is not the offence it protects against — judged on the whole app.
+    if (evidence.length > 0 && !protectiveStandDown(rule, wholeApp())) {
+      findings.push({ id: rule.id, contentClass: rule.contentClass, description: rule.description, evidence });
     }
   }
 
@@ -440,10 +607,11 @@ export function classifyPublishedText(text: string | null | undefined): IllegalS
   return { findings, contentClass };
 }
 
-/** The sentence a blocked creator reads. Names the category and the way to appeal — never the match. */
-export function illegalRefusal(finding: IllegalFinding | undefined): string {
-  const what = finding?.description || 'breaks our Acceptable Use rules.';
-  return `This app was not published: it ${what} `
-    + 'Nothing was saved. If you believe this is a mistake, our Grievance Redressal page has the '
-    + 'address to write to and the time we must answer within.';
+/** Classify one block of published text (a single page): the same phrase-level test, file `''`. */
+export function classifyPublishedText(text: string | null | undefined): IllegalScanResult {
+  return classifyPublishedFiles([['', String(text ?? '')]]);
 }
+
+// `illegalRefusal` (the "This app was not published: it pairs words describing a child…" sentence) was
+// removed on 2026-11-26: a classifier finding no longer refuses a publish, it holds it for a person
+// (storePublishSafety.ts → HELD_FOR_REVIEW_MESSAGE). Nothing else ever called it.

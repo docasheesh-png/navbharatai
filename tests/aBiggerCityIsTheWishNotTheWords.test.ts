@@ -4,7 +4,7 @@
  *
  * The platform grows a city itself (worldTurn.ts), but only for the exact phrasings its patterns knew: "city badi karo" grew it;
  * "bigger city", "10x bigger", "badi city banao", "city bahut chhoti hai" and "make it bigger" — the same wish — did not, and a map
- * with no city yet answered "no-city". The wish is read now, not the words (queue Q-3355).
+ * with no city yet answered "no-city". The wish is read now, not the words (queue Q-3440).
  */
 import { describe, expect, it } from 'vitest';
 import { recipeFilePool } from '../src/server/lib/gameRecipeLayers';

@@ -6,7 +6,7 @@
  * The kit had enemies that chase and attack (systems/entities.ts) and a wanted level with police cars (systems/dispatch.ts), but a
  * GTA-style request never got the systems kit (the title implies no feature and the genre read "rpg"), and the open-world starter
  * created no enemies or police even when it did. An on-foot city world is an action game by nature: it gets the fight unless the
- * user asks for a peaceful one, and the platform writes the first feature — streetDanger.ts — that really spawns them (Q-3356).
+ * user asks for a peaceful one, and the platform writes the first feature — streetDanger.ts — that really spawns them (Q-3441).
  */
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';

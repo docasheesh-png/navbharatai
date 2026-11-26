@@ -10631,7 +10631,7 @@ export class ToolDispatcher {
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!listed) {
               // 🦹 A game with a fight in it (the seed passes danger: true when it laid the systems kit) starts with its enemies, bystanders
-              // and police as the first feature (problem 4, Q-3356) — only when the systems those need are really in the project.
+              // and police as the first feature (problem 4, Q-3441) — only when the systems those need are really in the project.
               if (owRec.danger === true) {
                 const has = async (p: string) => { try { await this.actuator.readFile(this.workspaceId, p); return true; } catch { return false; } };
                 if (await has('src/game/systems/entities.ts') && await has('src/game/systems/dispatch.ts')) {

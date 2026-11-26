@@ -172,7 +172,7 @@ export function growCity(worldSource: string, request: string, openWorldSource: 
   const cap = worldCapabilities(openWorldSource);
   if (!cap.joinTo) return { ok: false, reason: 'no-joinTo', cities: names };
   if (cityGrowthAsked(request) === 'mixed') return { ok: false, reason: 'mixed', cities: names };
-  // A map with no city yet (an open-country start, regions: []) grows by FIRST getting its city (Q-3355): the wish is a bigger
+  // A map with no city yet (an open-country start, regions: []) grows by FIRST getting its city (Q-3440): the wish is a bigger
   // city to play in, and "the map has no city" was a reason the user never sees and cannot act on.
   if (cities.length === 0) {
     const seeded = parseRegions(worldSource) ? appendRegionEntries(worldSource, [`{ id: 'main-city', kind: 'city' }`]) : null;

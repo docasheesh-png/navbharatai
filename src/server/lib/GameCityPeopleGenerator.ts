@@ -40,7 +40,7 @@ export interface CityPeopleOptions {
 /** The most people a light-tier city walks, whatever count asked (a full-tier city keeps up to 150). */
 export const LIGHT_PEOPLE = 12;
 
-export type WalkerState = 'walk' | 'toCrossing' | 'wait' | 'cross' | 'leave';
+export type WalkerState = 'walk' | 'toCrossing' | 'wait' | 'cross' | 'leave' | 'down';
 
 export interface Crossing {
   /** The near and far kerb on the zebra: a walker waits at a, crosses only the road, and steps off at b. */
@@ -61,6 +61,8 @@ export interface Walker {
   x: number; z: number; heading: number;
   crossing: Crossing | null;
   waited: number;
+  /** Seconds left lying on the ground after a punch (state 'down'), and the state to return to. */
+  downFor?: number;
   /** A stand-in body at the walker's feet — pass these to traffic.update so cars stop for people. */
   body: THREE.Object3D;
 }
@@ -71,8 +73,23 @@ export interface CityPeople {
   bodies: THREE.Object3D[];
   /** Advance. avoid: what people must not walk into (the player). */
   update(dt: number, avoid?: THREE.Object3D[]): void;
+  /**
+   * 🧍 NOBODY WALKS THROUGH A PERSON (admin 2026-11-25, open-world problem #6: "citizens aar paar ho jate hai"). The people
+   * stepped aside for the player, but the player walked straight through them. Anything inside a person (the player on
+   * foot) is pushed out the shortest way, in the crowd's frame, back to its own parent's frame. True when it was pushed.
+   */
+  pushOut(object: THREE.Object3D, radius?: number): boolean;
+  /**
+   * 👊 A PUNCH LANDS ("punch to maar hi nahi sakta"): the nearest standing person in front of origin (WORLD position, facing
+   * yaw, within range metres and arc radians) falls down, lies a few seconds, gets up and walks on. Returns where the person
+   * fell (WORLD metres), or null when nobody was in reach. The open world announces it as CITIZEN_HIT (a crime, a score).
+   */
+  hit(origin: THREE.Vector3, yaw: number, range?: number, arc?: number): THREE.Vector3 | null;
   dispose(): void;
 }
+
+/** How long a punched person lies on the ground, in seconds. */
+export const DOWN_SECONDS = 4;
 
 /** How fast people cross a road, at least (m/s). */
 export const CROSS_SPEED = 1.4;
@@ -182,14 +199,17 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   }
   root.add(bodies, heads);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
+  const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  const tmp = new THREE.Vector3();
   let clock = 0;
 
   const draw = () => {
     walkers.forEach((w, k) => {
       const moving = w.state === 'walk' || w.state === 'toCrossing' || w.state === 'cross' || w.state === 'leave';
       const bob = moving ? Math.abs(Math.sin(clock * 7 + k)) * 0.04 : 0;
-      const y = (w.state === 'cross' ? CITY_ROAD_Y : pave) + bob;
+      const y = (w.state === 'cross' || (w.state === 'down' && w.crossing) ? CITY_ROAD_Y : pave) + bob;
       q.setFromAxisAngle(up, w.heading);
+      if (w.state === 'down') q.multiply(lying);                       // flat on the ground, head where it fell
       m.compose(at.set(w.x, y, w.z), q, one);
       bodies.setMatrixAt(k, m); heads.setMatrixAt(k, m);
       w.body.position.set(w.x, y, w.z);
@@ -244,6 +264,12 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       clock += dt;
       for (const w of walkers) {
         const step = w.speed * dt;
+        if (w.state === 'down') {
+          w.downFor = (w.downFor ?? 0) - dt;
+          // Up again: back to the pavement it was on (a person knocked down mid-crossing finishes crossing first).
+          if (w.downFor <= 0) { w.downFor = 0; w.state = w.crossing ? 'cross' : 'leave'; if (!w.crossing) w.s = loopPosition(plan, w.block[0], w.block[1], w.x, w.z); }
+          continue;
+        }
         if (w.state === 'walk') {
           const L = pavementLoop(plan, w.block[0], w.block[1]);
           const next = pointOnLoop(plan, w.block[0], w.block[1], w.s + w.dir * Math.min(step, 0.5));
@@ -294,6 +320,42 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
         }
       }
       draw();
+    },
+    pushOut: (object, radius = 0.4) => {
+      if (!object.parent) return false;
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      inCity(object, tmp);
+      let pushed = false;
+      for (const w of walkers) {
+        if (w.state === 'down') continue;                               // a person on the ground is stepped over
+        const dx = tmp.x - w.x, dz = tmp.z - w.z, d = Math.hypot(dx, dz), min = radius + 0.25;
+        if (d >= min - 1e-4) continue;                                 // already outside (a hair's tolerance, so a push settles)
+        const ux = d > 1e-6 ? dx / d : Math.sin(w.heading + Math.PI / 2), uz = d > 1e-6 ? dz / d : Math.cos(w.heading + Math.PI / 2);
+        tmp.x = w.x + ux * min; tmp.z = w.z + uz * min;
+        pushed = true;
+      }
+      if (pushed) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
+      return pushed;
+    },
+    hit: (origin, yaw, range = 1.6, arc = Math.PI * 0.6) => {
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      const o = tmp.copy(origin).applyMatrix4(toCity);
+      // The facing, turned into the crowd's frame too (a city can stand rotated on the map).
+      const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).transformDirection(toCity);
+      let best: Walker | null = null, bestD = Infinity;
+      for (const w of walkers) {
+        if (w.state === 'down') continue;
+        const dx = w.x - o.x, dz = w.z - o.z, d = Math.hypot(dx, dz);
+        if (d > range || d >= bestD) continue;
+        if (d > 0.05 && Math.acos(Math.max(-1, Math.min(1, (dx * f.x + dz * f.z) / d))) > arc / 2) continue;
+        best = w; bestD = d;
+      }
+      if (!best) return null;
+      if (best.state !== 'cross') best.crossing = null;                 // only a person already crossing finishes crossing
+      best.state = 'down'; best.downFor = DOWN_SECONDS;
+      best.heading = Math.atan2(best.x - o.x, best.z - o.z);           // falls away from the punch
+      draw();
+      return root.localToWorld(new THREE.Vector3(best.x, pave, best.z));
     },
     dispose: () => {
       root.removeFromParent();

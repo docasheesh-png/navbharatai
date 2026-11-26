@@ -1249,6 +1249,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   };
   const anchored = new Map<THREE.Object3D, { x: number; z: number; lowest: number; lift: number }>();
   let time = 0;
+  const punchFrom = new THREE.Vector3();
   // LATE GROUND EDITS (on unless world: { lateEdits: false }): a pad, land or road laid after this point redraws the map's
   // chunks and plants it touches, the walkable ground under the player is sampled again at once, and everything put down with
   // world.place() inside the changed area stands on the new ground.
@@ -1622,6 +1623,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       // A place lives only while the player is near it: far ones are not drawn, and only the near ones run their streets.
       const seated = ctx.vehicles.seated;
+      const punched = !seated && !!(ctx as { input?: { wasPressed?: (a: string) => boolean } }).input?.wasPressed?.('attack');
       towns.forEach((t, i) => {
         const d = Math.hypot(at.x - t.centre.x, at.z - t.centre.z);
         roots[i].visible = d < t.radius + CITY_HIDE;
@@ -1632,6 +1634,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         // ⛔ NOTHING PASSES THROUGH A VEHICLE (admin 2026-11-22: "jab bhi 2 object takrayenge to aar paar nahi jane chahiye"):
         // the player on foot — or the car they drive — is pushed out of any traffic car it ran into, every frame.
         if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
+        // 🧍 …and nobody walks through a PERSON either (open-world problem #6): the player on foot is pushed out of the crowd,
+        // and the Attack button (F / J / a click, Attack on a phone) knocks down the person in front.
+        if (!seated && t.people) {
+          t.people.pushOut(ctx.player.object, 0.4);
+          const fell = punched ? t.people.hit(ctx.player.object.getWorldPosition(punchFrom), ctx.hero?.root.rotation.y ?? ctx.player.object.rotation.y) : null;
+          if (fell) { try { events.emit('CITIZEN_HIT', { position: { x: fell.x, y: fell.y, z: fell.z } }); } catch { /* a listener must not undo the hit */ } }
+        }
       });
       reapHidden(at);
     },
@@ -1994,6 +2003,8 @@ export default defineFeature<OpenWorld>({
     const offs = [
       events.on('PLAYER_DIED', () => { if (state.status === 'playing') respawn('died'); }),
       events.on('ENTITY_DIED', (p: { kind?: string; byPlayer?: boolean }) => { if (p?.kind === 'enemy' && p.byPlayer) addScore(STREET_DANGER.scorePerEnemy); }),
+      // Knocking down a passer-by in the city streets is a crime too (the city's crowd, play/openWorld.ts → CITIZEN_HIT).
+      events.on('CITIZEN_HIT', () => wanted.commit('assault')),
     ];
     const mine = new Set<Entity>();
     const gunmen = new Map<string, Entity>();

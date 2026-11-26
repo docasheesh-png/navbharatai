@@ -586,7 +586,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc",
     "13e2276d00f01f6a32d1172d9b0d85591bd5a27e0b1bcd1112880b0e910b6e54",
     "9086bb42de0932c667ba1d04f21ea89075b671339d4d0aac27ceb6234966a9da",
-    "9fc7c7814a9caca635963c9ba1cf6299fae344218583de97ec5816c58dfe86e7"
+    "9fc7c7814a9caca635963c9ba1cf6299fae344218583de97ec5816c58dfe86e7",
+    "3ffe68af528b831eb6b33fb5bf6a8eca981ce0d457ee1f4ffa6937a33421c130",
+    "44d0b404a439c54317d92f4b39ddff92f2b59eb597130f1bf3db28dfcf47af2e"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -605,7 +607,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/play/worldLayer.ts": [
     "69a8c2b7585219d586a8f3eb25b318bcf17b74d090125ac42347139bb08dacb8",
     "2c453f3d55a70eac745d625ab0e18c70bcfadeffd13752df16db94381f5a994d",
-    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8"
+    "5f9a5b1d30a394a60883a96f1d9116c1b84b46b5076a660d96448729ebf9bef8",
+    "740f6276018b1e41c36781d1c280c3aba5f6f6471cf78dadf7541f058add53f5",
+    "3541c247986062654210fe6e7c79baf1d751cd6994596b8a03bdd26a0895d03c"
   ],
   "src/game/royale/onlineClient.ts": [
     "34daf1faeaa0be26e95667fc095b16a40d4b0b62c53220ae2961d8a3a66e8f2b"
@@ -706,7 +710,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/citypeople.ts": [
     "6e42bc38b958c308de5c67dc663db25afba002b4ed2cb24b59292da67b34c6ee",
     "9aa32ad02cd425cc3b4a00eeea9ae1a21d35ac5142fae90c5b2c1da118517778",
-    "e3411c230fe3afdb7e7fe312a3707eca9a3858a1b98312439d8d8a785ae94745"
+    "e3411c230fe3afdb7e7fe312a3707eca9a3858a1b98312439d8d8a785ae94745",
+    "44087d681f16216a1278752793b763af4bc34be48db76a9b7aa439389f51f12a",
+    "d0ccb9f7c71e51f7d330691ef5d355e4d48e2907c34f5adeb7a6e1ad84b54d84"
   ],
   "src/game/three/citytraffic.ts": [
     "a1c64e0c58cd2a3975747dfd84bc554249b3b54f4b00568e1216f58b35946a76",

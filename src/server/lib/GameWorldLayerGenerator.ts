@@ -56,7 +56,7 @@ export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = 
       if (target() === ctx.player.object) ctx.player.reset(x, y, z);
       else if (!making || placeAtSpawn) target().position.set(x, y, z);
     },
-    setWater(level: number) { if (target() === ctx.player.object) ctx.player.setWater(level); },
+    setWater(level: Parameters<GameContext['player']['setWater']>[0]) { if (target() === ctx.player.object) ctx.player.setWater(level); },
   };
   const view = Object.create(ctx) as GameContext;
   Object.defineProperty(view, 'player', { get: () => (target() === ctx.player.object ? ctx.player : player) });
@@ -74,7 +74,10 @@ export function createWorldLayer(ctx: GameContext, options: WorldLayerOptions = 
   };
   for (const o of others()) before.set(o, o.position.clone());
   if (!placeAtSpawn && target() !== ctx.player.object) before.set(target(), target().position.clone());
-  const world = createOpenWorld(view, worldOptions);
+  // The edge of the map (OpenWorldOptions.boundary) belongs to the open world on foot — with nothing to follow this layer IS
+  // the open world, edge included. A race, a flight or a match that follows a car or a camera decides its own limits, so
+  // there it is off unless the game asks for it (worldOptions.boundary).
+  const world = createOpenWorld(view, follow === undefined ? worldOptions : { boundary: false, ...worldOptions });
   making = false;
   const origin = world.map.chunks!.origin;
   for (const [o, p] of before) { o.position.x = p.x - origin.x; o.position.z = p.z - origin.z; }

@@ -41,6 +41,7 @@ import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor, mistypedImport, nearlyHeldImport } from './tscErrorCause';
 import { suggestedTypeRenames, typeRenameAdvice, contractRenamesInSources, type ContractRename } from './contractRenames';
 import { isNotFoundError } from './fsErrors';
+import { buildTsconfigPath } from './TestGenerationAgent';
 
 /** Per-caller incremental cache. Never the one shared path two builds used to clobber (TD-18). */
 export function tsBuildInfoFile(id: string): string {
@@ -214,6 +215,29 @@ export function writeTypecheckCleanNote(written: string[]): string {
     + 'You do not need to run tsc yourself — every TypeScript write is checked like this.';
 }
 
+/** A test or mock source file — the kind a release config leaves out. */
+export const TEST_SOURCE_FILE = /(?:^|\/)(?:__tests__|__mocks__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/i;
+
+/**
+ * Does this project's RELEASE build leave test files out? true / false, or null when it cannot be told. PURE.
+ *
+ * 🔴 failedbr #2525 (Q-3462, 2026-11-26): the note told the builder that `src/game/controls.test.ts:6` "fail[s] the
+ * production build". The build script is `tsc -p tsconfig.build.json && vite build`, and that config excludes test
+ * files (FrameworkFoundation.ts, after a broken test once stopped an APK). It did not. Read from the project's own
+ * package.json and build config, never assumed: a `tsc` with no project compiles tsconfig.json, tests included.
+ */
+export function releaseSkipsTests(packageJson: string | null | undefined, buildTsconfig: string | null | undefined): boolean | null {
+  if (packageJson == null) return null;
+  let script = '';
+  try { const b = (JSON.parse(packageJson) as { scripts?: Record<string, unknown> })?.scripts?.build; script = typeof b === 'string' ? b : ''; } catch { return null; }
+  if (!script) return null;
+  if (!/\btsc\b/.test(script)) return /\bvite\s+build\b/.test(script) ? true : null; // vite compiles only what the app imports
+  if (!buildTsconfigPath(packageJson)) return false; // plain `tsc`: tsconfig.json, tests included
+  if (typeof buildTsconfig !== 'string') return null;
+  const exclude = /"exclude"\s*:\s*\[([\s\S]*?)\]/.exec(buildTsconfig)?.[1] ?? '';
+  return /\.test\./.test(exclude);
+}
+
 /**
  * The note appended to the write's tool result — '' when the tree is clean.
  *
@@ -229,7 +253,19 @@ export function writeTypecheckNote(
   written: string[],
   sources: Readonly<Record<string, string>> = {},
   renames: readonly ContractRename[] = contractRenamesInSources(sources),
+  release: { skipsTests?: boolean | null } = {},
 ): string {
+  // A test file's error is said as what it is when the release build leaves tests out (Q-3462): it stops the tests
+  // from running, never the production build — so it is reported on its own line and kept out of the "fails" notes.
+  if (release.skipsTests === true && errors.some((e) => TEST_SOURCE_FILE.test(normalizePath(e.file)))) {
+    const testOnly = errors.filter((e) => TEST_SOURCE_FILE.test(normalizePath(e.file)));
+    const shipped = errors.filter((e) => !TEST_SOURCE_FILE.test(normalizePath(e.file)));
+    const named = testOnly.slice(0, MAX_OTHER_ERRORS_NAMED).map((e) => `${normalizePath(e.file)}:${e.line} ${e.code}`).join(', ');
+    const more = testOnly.length > MAX_OTHER_ERRORS_NAMED ? `, …and ${testOnly.length - MAX_OTHER_ERRORS_NAMED} more` : '';
+    const testLine = `\n\n🧪 ${testOnly.length} error(s) in test file(s) (${named}${more}). The release build does not compile test files, `
+      + 'so these do NOT fail the production build — they stop the tests from running. Fix them when you work on the tests; they do not block finishing.';
+    return (shipped.length ? writeTypecheckNote(shipped, written, sources, renames) : '') + testLine;
+  }
   // 🔴 AN ERROR IN THIS FILE IS NOT ALWAYS AN ERROR OF THIS FILE (autopsy 2a7fa4b0). `BottomNav.tsx`
   // imported `Screen` from `../App` before App.tsx was rewritten to export it, and this note told the
   // model to fix it "before writing the next file" — when the next file WAS the fix. It rewrote BottomNav

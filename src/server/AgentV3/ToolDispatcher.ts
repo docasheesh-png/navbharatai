@@ -166,7 +166,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
-  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
+  splitByRemedy, releaseSkipsTests, TEST_SOURCE_FILE, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { hollowFeatureWriteNote } from './hollowFeature';
@@ -288,7 +288,7 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
-import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote, needsVitestVersionSelection } from './TestGenerationAgent';
+import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote, needsVitestVersionSelection, buildTsconfigPath } from './TestGenerationAgent';
 import { isAppAnalysisPath } from './appAnalysisPaths';
 import { angularValidationPlan, isAngularValidationCommand, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
 import { renderSeenThisBuild } from './renderProof';
@@ -4473,6 +4473,14 @@ export class ToolDispatcher {
 
   /** The previous whole-project write-time error count (failedbr #1248) — null until the first run. */
   private _lastWriteTscErrors: number | null = null;
+  /** Does the release build leave test files out? Read from package.json and its build config; null when unreadable. */
+  private async releaseSkipsTests(): Promise<boolean | null> {
+    const read = async (p: string) => { try { return await this.actuator.readFile(this.workspaceId, p); } catch { return null; } };
+    const pkg = await read('package.json');
+    const cfg = pkg ? buildTsconfigPath(pkg) : null;
+    return releaseSkipsTests(pkg, cfg ? await read(cfg) : null);
+  }
+
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -4631,8 +4639,10 @@ export class ToolDispatcher {
       }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
-      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);
+      // Whether a test file's error can fail the release is read from the project's own config (Q-3462), only when one exists.
+      const release = { skipsTests: errors.some((e) => TEST_SOURCE_FILE.test(e.file)) ? await this.releaseSkipsTests() : null };
+      if (members) return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, release) + members;
+      return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, release);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }

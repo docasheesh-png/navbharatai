@@ -16,6 +16,6 @@ describe('a write that made it worse says so (failedbr #1248)', () => {
   it('🔒 the dispatcher remembers the last count and puts the trend first', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
     expect(src).toContain('const trendNote = writeErrorTrendNote(this._lastWriteTscErrors, errors.length);');
-    expect(src).toContain('return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources);');
+    expect(src).toContain('return trendNote + healedNote + writeTypecheckNote(errors, tsPaths, sources, undefined, release);');
   });
 });

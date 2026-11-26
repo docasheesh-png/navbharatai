@@ -6399,6 +6399,14 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 ## 2026-11-26 — Online Royale go-live and the shared matchmaker are deferred (admin)
 - Admin, on Q-3390 (switch AGENTV3_ONLINE_MATCH / AGENTV3_ORIGINAL_ROYALE on) and Q-3391 (one matchmaker for every Cloud Run instance): "isko future ke liye yad rakho, mujhe yad dilana puchne par". Recorded in docs/claude/SCALE_PLAN.md §6 with its trigger: remind the admin when they ask; build/enable nothing until they say yes.
 
+## 2026-11-26 — PR A of the admin's 18-point game list: restart, a gun that fires, drowning, the map's edge, library ids
+
+- Q-3516 (was Q-3500; renumbered at merge — #4563 had taken it) Restart / Menu stand the player at the start (ctx.setRespawn; open world sets its own), out of any car.
+- Q-3517 (was Q-3501; renumbered at merge — #4563 had taken it) A held gun fires: Attack becomes Fire, shots along ctx.aim, SHOT_HIT hurts Entities characters.
+- Q-3502 Water drowns by default (WORLD.water), swimming only when asked.
+- Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
+- Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
+- KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.
 ## 2026-11-26 — Game maker: the places the user named, fighting and tower-defense kits, a 50-game benchmark
 
 Admin: "mujhe ek aisa game maker chahiye … sabhi prkar ke game … user jo bole wahi bane (village bole to city nahi)".
@@ -6429,3 +6437,7 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - Fix: `firebase.json` now lists both databases for `firestore.indexes.json`; rules still go only to `navbharat-prod`. Verified with firebase-tools 15.35.0's own config resolver that `--only firestore:indexes` targets both and `--only firestore:rules` deploys rules only where declared.
 - Lock: `tests/adminAnalyticsFirestoreIndex.test.ts` (both databases carry the index; rules not widened); `firestoreIndexSafe.test.ts` reads the array form.
 - Found on the way: `deploy-storage-rules` fails on every deploy (Q-3701, BLOCKED on the Cloud Build log).
+## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
+- Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
+- Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.
+- Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.

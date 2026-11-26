@@ -125,3 +125,18 @@ The Monitor's **Server load** panel (waiting time, CPU, memory against the conta
 requests in flight) is what tells the admin any of these triggers has fired. **The correct posture until
 one does is to watch that panel and build nothing.** A session that proposes work from this section
 without naming which trigger fired is proposing a bill, not an improvement.
+
+### 6 · ⏸️ Online Royale — switching it on, and one matchmaker for every instance (admin-deferred 2026-11-26)
+
+The first online match (#4544: server-authoritative 2–4 players, quota-bound, `AGENTV3_ONLINE_MATCH` OFF by default)
+is built and tested. Two decisions were put off by the admin, verbatim: *"isko future ke liye yad rakho, mujhe yad
+dilana puchne par"* — keep it for the future, and remind me when I ask.
+
+1. **Going live (Q-3390).** Set `AGENTV3_ONLINE_MATCH=on` and `AGENTV3_ORIGINAL_ROYALE=on` on Cloud Run. Cost: every
+   live match holds WebSocket connections on NavBharatAI's own instances (quotas in `docs/claude/ENV_REGISTRY.md`).
+2. **One matchmaker across instances (Q-3391).** Rooms live in one instance's memory (the same per-instance class as
+   item 2 above), so players who land on different instances never meet. Needs shared state (Redis / Firestore lobby,
+   or session affinity) — an infrastructure and cost decision.
+
+**TRIGGER: the admin asks about online play, multiplayer, Royale going live, or "what decisions are pending".** Then
+remind them of both, with the cost, and do nothing until they say yes. Do not switch either on unasked.

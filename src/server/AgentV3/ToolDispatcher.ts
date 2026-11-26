@@ -10633,7 +10633,7 @@ export class ToolDispatcher {
             try { await this.actuator.readFile(this.workspaceId, GAME_WORLD_FILE_PATH); mapped = true; }
             catch (error) { if (!isNotFoundError(error)) throw error; }
             if (!mapped) {
-              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, swim: owRec.swim === true, citizens: owRec.citizens && typeof owRec.citizens === 'object' ? { solid: (owRec.citizens as Record<string, unknown>).solid === true, hittable: (owRec.citizens as Record<string, unknown>).hittable === true } : undefined, runOver: owRec.runOver === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
+              const worldFile = await this.guardedWrite(GAME_WORLD_FILE_PATH, gameWorldFileSource({ city: owRec.city === true, swim: owRec.swim === true, citizens: owRec.citizens && typeof owRec.citizens === 'object' ? { solid: (owRec.citizens as Record<string, unknown>).solid === true, hittable: (owRec.citizens as Record<string, unknown>).hittable === true } : undefined, runOver: owRec.runOver === true, openBuildings: owRec.openBuildings === true, workspaceId: this.workspaceId }), { agent, source: 'generate_open_world' });
               this.state?.recordFileChange({ path: GAME_WORLD_FILE_PATH, kind: worldFile.kind }, agent);
               getWorkspaceMemory(this.workspaceId).indexFile(GAME_WORLD_FILE_PATH, worldFile.content);
             }

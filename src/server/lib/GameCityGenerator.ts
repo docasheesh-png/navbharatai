@@ -22,6 +22,7 @@
 export const GAME_CITY = String.raw`import * as THREE from 'three';
 import { markWorldCollider, type WorldColliderKind } from './collision';
 import { geometryTier, type GeometryTier } from './surfaces';
+import { createEnterableHouse } from './buildings';
 
 export type LotKind = 'apartment' | 'shop' | 'office' | 'house' | 'park';
 export type CityStyle = 'town' | 'mixed' | 'downtown';
@@ -64,6 +65,8 @@ export interface CityLot {
   /** Where the front door meets the pavement — a delivery, a mission, an NPC's home. */
   entrance: CityPoint;
   floors: number; height: number; color: number;
+  /** Opened with city.openLot: its ground floors are a walk-in building (the door opens with Use), not a solid block. */
+  open?: boolean;
   /** Shops only: the middle of the signboard's face, for the game to write the shop's name on. */
   sign?: { x: number; y: number; z: number; width: number; height: number; rotationY: number };
 }
@@ -229,6 +232,7 @@ export function cityHeightAt(plan: CityPlan, x: number, z: number): number {
 export function citySolidAt(plan: CityPlan, x: number, z: number, radius = 0.5): boolean {
   const rr = Math.max(0, radius);
   for (const lot of plan.lots) {
+    if (lot.open) continue;   // a walk-in building has its own walls (the door is the way in)
     const b = buildingFootprint(lot);
     if (Math.abs(x - b.x) <= b.w / 2 + rr && Math.abs(z - b.z) <= b.d / 2 + rr) return true;
   }
@@ -408,6 +412,14 @@ export interface City {
   lotAt(x: number, z: number): CityLot | null;
   /** The lots of one kind ('shop', 'apartment', …) — mission targets, deliveries, homes. */
   lotsOf(kind: LotKind): CityLot[];
+  /**
+   * 🚪 MAKE A BUILDING ENTERABLE (admin 2026-11-26: "painted door wala ghar, user kahe to andar ja sake"). The lot's ground
+   * floors become a real walk-in building on the same footprint, facing its street — a door that swings with Use, hollow
+   * rooms, walls that collide, a floor to stand on, a roof that fades while you are inside (three/buildings.ts) — and a tall
+   * building keeps its upper floors above it. Only that block is redrawn. Returns the building, or null for a park or a lot
+   * already open.
+   */
+  openLot(lot: CityLot | number): THREE.Group | null;
   /** Remove the city and free its geometry and materials. */
   dispose(): void;
 }
@@ -489,8 +501,13 @@ export function createCity(options: CityOptions = {}): City {
     box(batchFor(i, j).ground, x1 - x0, CITY_KERB, z1 - z0, (x0 + x1) / 2, CITY_ROAD_Y + CITY_KERB / 2, (z0 + z1) / 2, 0xb9b4aa);
   }
 
-  for (const lot of plan.lots) buildLot(batchFor(lot.block[0], lot.block[1]), lot, top, r, box, light);
-  for (const [i, j] of plan.parks) buildPark(batchFor(i, j), plan, i, j, top, r, box);
+  // Each block draws from its own random stream, so one block can be drawn again (openLot) exactly as it was.
+  const blockRng = (i: number, j: number) => rngOf(plan.seed * 7 + 3 + i * 131 + j * 977);
+  const blockRngs = new Map<string, () => number>();
+  const rngFor = (i: number, j: number) => { const k = i + ',' + j; let g = blockRngs.get(k); if (!g) { g = blockRng(i, j); blockRngs.set(k, g); } return g; };
+  void r;
+  for (const lot of plan.lots) buildLot(batchFor(lot.block[0], lot.block[1]), lot, top, rngFor(lot.block[0], lot.block[1]), box, light);
+  for (const [i, j] of plan.parks) buildPark(batchFor(i, j), plan, i, j, top, rngFor(i, j), box);
   for (const light of plan.lights) {
     const i = Math.min(plan.blocksX - 1, Math.max(0, X.findIndex((x, k) => k < X.length - 1 && light.x > x && light.x < X[k + 1])));
     const j = Math.min(plan.blocksZ - 1, Math.max(0, Z.findIndex((z, k) => k < Z.length - 1 && light.z > z && light.z < Z[k + 1])));
@@ -502,7 +519,8 @@ export function createCity(options: CityOptions = {}): City {
     box(b.lamp, 0.5, 0.16, 0.3, light.x + Math.sin(rot) * 1.5, top + 5.85, light.z + Math.cos(rot) * 1.5, 0xffffff, rot);
   }
 
-  for (const [key, b] of blockGroups) {
+  const blockMeshes = new Map<string, THREE.Group>();
+  const assemble = (key: string, b: Batches) => {
     const g = new THREE.Group();
     g.name = 'City block ' + key;
     const parts: Array<THREE.Mesh | null> = [
@@ -515,7 +533,52 @@ export function createCity(options: CityOptions = {}): City {
     ];
     for (const m of parts) if (m) g.add(m);
     root.add(g);
-  }
+    blockMeshes.set(key, g);
+  };
+  for (const [key, b] of blockGroups) assemble(key, b);
+  // The lamps of one block (drawn again with it).
+  const lampBlock = (lx: number, lz: number): [number, number] => [
+    Math.min(plan.blocksX - 1, Math.max(0, X.findIndex((x, k) => k < X.length - 1 && lx > x && lx < X[k + 1]))),
+    Math.min(plan.blocksZ - 1, Math.max(0, Z.findIndex((z, k) => k < Z.length - 1 && lz > z && lz < Z[k + 1]))),
+  ];
+  /** Draw block (i, j) again from its plan (open lots as their upper floors only). */
+  const redrawBlock = (i: number, j: number) => {
+    const key = i + ',' + j;
+    const old = blockMeshes.get(key);
+    if (old) { old.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { markWorldCollider(m, 'none'); m.geometry.dispose(); } }); root.remove(old); }
+    const b = batches();
+    const rr = blockRng(i, j);
+    const x0 = X[i] + road / 2, x1 = X[i + 1] - road / 2, z0 = Z[j] + road / 2, z1 = Z[j + 1] - road / 2;
+    box(b.ground, x1 - x0, CITY_KERB, z1 - z0, (x0 + x1) / 2, CITY_ROAD_Y + CITY_KERB / 2, (z0 + z1) / 2, 0xb9b4aa);
+    for (const lot of plan.lots) if (lot.block[0] === i && lot.block[1] === j) buildLot(b, lot, top, rr, box, light);
+    for (const [pi, pj] of plan.parks) if (pi === i && pj === j) buildPark(b, plan, pi, pj, top, rr, box);
+    for (const lamp of plan.lights) {
+      const [li, lj] = lampBlock(lamp.x, lamp.z);
+      if (li !== i || lj !== j) continue;
+      const rot = Math.atan2(lamp.towardX, lamp.towardZ);
+      box(b.solid, 0.16, 6, 0.16, lamp.x, top + 3, lamp.z, 0x4b5563);
+      const ax = lamp.x + Math.sin(rot) * 0.8, az = lamp.z + Math.cos(rot) * 0.8;
+      box(b.detail, 0.1, 0.1, 1.6, ax, top + 5.95, az, 0x4b5563, rot);
+      box(b.lamp, 0.5, 0.16, 0.3, lamp.x + Math.sin(rot) * 1.5, top + 5.85, lamp.z + Math.cos(rot) * 1.5, 0xffffff, rot);
+    }
+    assemble(key, b);
+  };
+  const opened: THREE.Group[] = [];
+  const openLot = (which: CityLot | number): THREE.Group | null => {
+    const lot = typeof which === 'number' ? plan.lots.find((l) => l.id === which) : which;
+    if (!lot || lot.kind === 'park' || lot.open) return null;
+    lot.open = true;
+    redrawBlock(lot.block[0], lot.block[1]);
+    const fp = buildingFootprint(lot);
+    const storeys = lot.height > 5.5 ? 2 : 1;
+    const house = createEnterableHouse({ width: Math.min(30, Math.max(5, fp.w)), depth: Math.min(30, Math.max(4, fp.d)), storeys, wallColor: lot.color });
+    house.position.set(fp.x, top, fp.z);
+    house.rotation.y = lot.facing.z > 0 ? 0 : Math.PI;   // its door (+Z) faces the street, where the painted one was
+    house.name = 'Open building ' + lot.id;
+    root.add(house);
+    opened.push(house);
+    return house;
+  };
 
   const toV = (p: CityPoint) => new THREE.Vector3(p.x, CITY_ROAD_Y, p.z);
   return {
@@ -527,6 +590,7 @@ export function createCity(options: CityOptions = {}): City {
     onStreet: (x, z) => onStreet(plan, x, z),
     lotAt: (x, z) => lotAt(plan, x, z),
     lotsOf: (kind) => plan.lots.filter((l) => l.kind === kind),
+    openLot,
     dispose: () => {
       root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); });
       paint.dispose(); glass.dispose(); lampMat.dispose(); facadeMat?.dispose(); windows?.dispose();
@@ -551,6 +615,12 @@ function buildLot(b: Batches, lot: CityLot, top: number, r: () => number, box: B
   // Local frame: origin at the footprint centre; front face at +d/2.
   const put = (bb: Batch, bw: number, bh: number, bd: number, lx: number, ly: number, lz: number, color: number) =>
     box(bb, bw, bh, bd, fp.x + lx * s, top + ly, fp.z + lz * s, color, rot);
+  // An open lot (city.openLot): its ground floors are the walk-in building; only the floors above it are drawn here.
+  if (lot.open) {
+    const shell = (H > 5.5 ? 2 : 1) * 3 + 0.35;
+    if (H > shell + 0.5) put(b.solid, w, H - shell, d, 0, shell + (H - shell) / 2, 0, lot.color);
+    return;
+  }
   put(b.solid, w, H, d, 0, H / 2, 0, lot.color);
   put(b.solid, w + 0.1, 0.4, d + 0.1, 0, 0.2, 0, shade(lot.color, 0.7));
   const glassTone = () => (r() < 0.25 ? 0x7a8c99 : 0x1f2d38);

@@ -98,6 +98,12 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * hittable crowd's people fall. Off by default.
    */
   runOver?: boolean;
+  /**
+   * EVERY BUILDING OPENS (admin 2026-11-26: "painted door wala ghar … user kahe to andar ja sake"). On: walking up to a city
+   * building's front door turns it into a walk-in building (city.openLot: a door that opens with Use, rooms, a floor, walls).
+   * Off by default — a city's buildings are scenery until the user asks.
+   */
+  openBuildings?: boolean;
 }
 
 export type RegionCity = CityOptions & { traffic?: CityTrafficOptions | false; people?: CityPeopleOptions | false; parkedCars?: number };
@@ -437,7 +443,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -1694,6 +1700,15 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (seated) t.traffic?.pushOut(seated, 1.2); else t.traffic?.pushOut(ctx.player.object, 0.45);
         // A solid crowd: the player on foot never walks through a person (citizens.solid).
         if (!seated) t.people?.pushOut(ctx.player.object.position);
+        // WORLD.openBuildings: the building whose front door the player walks up to opens (one per frame at most).
+        if (openBuildings && !seated) {
+          const lp = locals[i].position;
+          for (const lot of t.city.plan.lots) {
+            if (lot.open || lot.kind === 'park' || Math.hypot(lot.entrance.x - lp.x, lot.entrance.z - lp.z) > 4) continue;
+            t.city.openLot(lot);
+            break;
+          }
+        }
         if (struck) t.people?.hitAt(seated!.position, 1.8);
       });
       if (struck) events.emit('VEHICLE_STRUCK', { position: { x: seated!.position.x, y: seated!.position.y, z: seated!.position.z }, radius: 1.8, damage: RUN_OVER_DAMAGE });
@@ -2055,6 +2070,15 @@ export function citizensWanted(prompt: string | null | undefined): { solid?: tru
 }
 
 /** The user asked for a car to hurt what it drives into (admin 2026-11-26 #18: default off). PURE. */
+/** The user asked to go inside the city's buildings (admin 2026-11-26 #2). PURE. */
+export function openBuildingsWanted(prompt: string | null | undefined): boolean {
+  const t = String(prompt ?? '');
+  const building = /\b(?:ghar|gharon|ghaar|house|houses|building|buildings|imarat|dukaan|dukan|shop|shops|makaan|makan|office)\b|घर|बिल्डिंग|दुकान|मकान/i;
+  const inside = /\b(?:andar|ander|enter\w*|inside|go\s+in|get\s+in|walk\s+in|khul\w*|open\w*|door\s+khule|darwaza)\b|अंदर|दरवाज/i;
+  if (!building.test(t) || !inside.test(t)) return false;
+  return !/\b(?:andar|ander|enter\w*|inside)\b[^.!?\n]{0,16}\b(?:nahi|nahin|mat|no|not)\b|\b(?:no|not|don'?t|mat|nahi)\b[^.!?\n]{0,12}\b(?:andar|enter|inside)\b/i.test(t);
+}
+
 export function runOverWanted(prompt: string | null | undefined): boolean {
   const t = String(prompt ?? '');
   const car = /\b(?:car|cars|gaadi|gadi|gaari|vehicle|truck|bike|bus)\b|गाड़ी|गाडी/i;
@@ -2063,7 +2087,7 @@ export function runOverWanted(prompt: string | null | undefined): boolean {
   return !/\b(?:no|not|don'?t|never|bina|nahi|nahin|mat)\b[^.!?\n]{0,20}\b(?:takkar|run\s*over|kuchal\w*|kill\w*|mare)\b|\b(?:takkar|kuchal\w*|mare)\b[^.!?\n]{0,12}\b(?:nahi|nahin|mat)\b/i.test(t);
 }
 
-export function gameWorldFileSource(options: { city?: boolean; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; workspaceId?: string } = {}): string {
+export function gameWorldFileSource(options: { city?: boolean; swim?: boolean; citizens?: { solid?: boolean; hittable?: boolean }; runOver?: boolean; openBuildings?: boolean; workspaceId?: string } = {}): string {
   const seed = options.workspaceId
     ? varietySeed(options.workspaceId, 'world')
     : 7;
@@ -2091,6 +2115,7 @@ export function gameWorldFileSource(options: { city?: boolean; swim?: boolean; c
         '  citizens: { solid: ' + (options.citizens.solid === true) + ', hittable: ' + (options.citizens.hittable === true) + ' },']
       : []),
     ...(options.runOver ? ['  // A car the player drives hurts the people and characters it hits (the user asked for it).', '  runOver: true,'] : []),
+    ...(options.openBuildings ? ['  // Walk up to any city building\'s front door and it opens: you can go inside (the user asked for it).', '  openBuildings: true,'] : []),
     '};',
     '',
   ].join('\n');
@@ -2139,6 +2164,8 @@ export function generateOpenWorld(): RecipeOutput {
       'user asks for an endless map; "map / jagah bada karo" → a bigger margin or more regions (it moves out by itself). RESTART puts the player',
       'back at the start by itself (ctx.setRespawn) — never write your own restart. PEOPLE: the city crowd is scenery unless the user asks —',
       '"log solid hon / aar paar na jaye" → WORLD.citizens = { solid: true }; "punch se gire / log ko maar sake" → { solid: true, hittable: true }.',
+      'BUILDINGS: "ghar / building ke andar ja sake" → WORLD.openBuildings = true (walking up to a front door opens it as a walk-in',
+      'building: door with Use, rooms, floor, walls); never draw your own interior over a city building.',
       'CARS: "gaadi ki takkar se log mare" → WORLD.runOver = true (off by default). A punch (the Attack button without a gun) already hurts any',
       'character in reach; never write your own punch hit test. CAMERA SHOTS: "hero marne ke baad cinematic camera / game over animation" →',
       '<OpenWorldGame options={{ cinematics: { death: true } }} />; "start se pahle pura map ka drone shot" → { intro: true, introRadius: 400 };',

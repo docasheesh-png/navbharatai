@@ -6378,3 +6378,7 @@ Stacked on PR B. Queue Q-3509 (fix in PR) and Q-3510..Q-3514 (still OPEN, honest
 ## 2026-11-26 — Q-3515: the cricket bat meets the ball (admin)
 
 Stacked on PR C. Roots: the timing windows (30/70 ms) were tighter than a phone's touch delay, and the kit had no play between the rules engine and the 3D layout (the arrival moment, the ball leaving the bat and the scoring were each game's own code; deliveryPath ran the ball through the batter). Fix: CRICKET_TIMING by difficulty, battedBallPath, createCricketPlay, and src/game/cricketRules.ts as the user's own rules file (changed by asking). tests/theBatMeetsTheBall.test.ts plays it on the real engine, proven by two reversions.
+
+## 2026-11-26 — Q-3510 (#2): a city building opens when the user asks
+
+Stacked on the cricket branch. city.openLot redraws one block without the lot's ground floors and stands a walk-in building (three/buildings.ts) there; WORLD.openBuildings opens the door the player walks up to. Each city block now draws from its own random stream (window tones per block change once, deterministically). tests/aCityBuildingOpensWhenAsked.test.ts.

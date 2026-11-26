@@ -24,6 +24,7 @@ import type { GameFeature, GameScopeContract, ScopeMatch } from './gameIntent';
 import { scopeMatch } from './gameIntent';
 import { PLAYTEST_BUDGET_MS, STILL_BELOW, type PlaytestRun, type ProofShot, type RuleProbe } from './gamePlaytest';
 import { withoutComments } from '../lib/codeOnly';
+import type { KeepResult } from './gameProofPictures';
 
 /** The features a playthrough PROVED, each with the state change it observed. {} for a run that did not play. PURE. */
 export function playedFeatureEvidence(run: PlaytestRun | null | undefined): Partial<Record<GameFeature, string>> {
@@ -105,14 +106,21 @@ export function playedActions(run: PlaytestRun | null | undefined): PlayedAction
   return out;
 }
 
-/** A picture the playtest kept in the sandbox (PROOF_PICTURES). */
-export type ProofShotRead = ProofShot;
+/**
+ * A picture the playtest kept in the sandbox (PROOF_PICTURES). `stored` is its object key in the private store when it
+ * was copied there for the admin report (gameProofPictures.ts, Q-3363) — the admin route serves it by that key.
+ */
+export type ProofShotRead = ProofShot & { stored?: string };
 
 export interface GameProof {
   /** (a) What the game was built from. */
   contract: string;
   /** (b) What it looked like. */
-  looks: { taken: ProofShotRead[]; notTaken: Array<{ view: string; why: string }>; startToMoved: number | null; nearToFar: number | null };
+  looks: {
+    taken: ProofShotRead[]; notTaken: Array<{ view: string; why: string }>; startToMoved: number | null; nearToFar: number | null;
+    /** Q-3363: whether the taken pictures were kept privately for the admin, for how long, and why any was not. */
+    kept?: { retainDays: number; notKept: Array<{ view: string; why: string }> };
+  };
   /** (c) What was played, and what each action changed. */
   actions: PlayedAction[];
   /** (d) How long it ran and how fast it drew — in the sandbox, never a phone. */
@@ -146,7 +154,7 @@ const RENDERER_LABEL = 'the build sandbox\'s software renderer — NOT a real ph
  * The four proofs of one game build. `run` null: the game was not played — every played proof is said as not taken,
  * with `notPlayedWhy`. PURE.
  */
-export function gameProof(input: { contract: GameScopeContract | null | undefined; run: PlaytestRun | null; ranMs: number | null; files: Record<string, string>; notPlayedWhy?: string }): GameProof {
+export function gameProof(input: { contract: GameScopeContract | null | undefined; run: PlaytestRun | null; ranMs: number | null; files: Record<string, string>; notPlayedWhy?: string; kept?: KeepResult | null }): GameProof {
   const { run } = input;
   const why = (input.notPlayedWhy || (run && !run.ok ? (run.error || 'the playtest did not finish') : '') || 'the game was not played').replace(/\.+$/, '');
   const played = !!run && run.ok;
@@ -155,7 +163,10 @@ export function gameProof(input: { contract: GameScopeContract | null | undefine
   const shots = (played ? run!.proofShots ?? [] : []).filter((s): s is NonNullable<typeof s> => !!s);
   for (const view of ['start', 'moved', 'far']) {
     const s = shots.find((x) => x.view === view) as (ProofShotRead & { error?: string }) | undefined;
-    if (s && !s.error && s.id) taken.push({ view, id: s.id, w: s.w, h: s.h, bytes: s.bytes, path: s.path, colors: s.colors ?? null, edges: s.edges ?? null });
+    if (s && !s.error && s.id) {
+      const stored = input.kept?.kept.find((k) => k.view === view && k.id === s.id)?.key;
+      taken.push({ view, id: s.id, w: s.w, h: s.h, bytes: s.bytes, path: s.path, colors: s.colors ?? null, edges: s.edges ?? null, ...(stored ? { stored } : {}) });
+    }
     else {
       const note = run?.proofNotes?.[view] || run?.proofNotes?.all;
       notTaken.push({ view, why: s?.error ? `not taken: ${s.error}` : !played ? `not taken: ${why}` : note || 'not taken: the playtest did not reach that point (an older playtest, or it ran out of time first)' });
@@ -166,7 +177,10 @@ export function gameProof(input: { contract: GameScopeContract | null | undefine
     : 'not taken: the game has no day-night clock' });
   return {
     contract: gameContractSummary(input.contract),
-    looks: { taken, notTaken, startToMoved: played && typeof run!.proofStartMoved === 'number' ? run!.proofStartMoved : null, nearToFar: played && typeof run!.proofNearFar === 'number' ? run!.proofNearFar : null },
+    looks: {
+      taken, notTaken, startToMoved: played && typeof run!.proofStartMoved === 'number' ? run!.proofStartMoved : null, nearToFar: played && typeof run!.proofNearFar === 'number' ? run!.proofNearFar : null,
+      ...(input.kept && taken.length ? { kept: { retainDays: input.kept.retainDays, notKept: input.kept.notKept.filter((n) => taken.some((t) => t.view === n.view)) } } : {}),
+    },
     actions: playedActions(run),
     run: {
       ranMs: typeof input.ranMs === 'number' && Number.isFinite(input.ranMs) ? Math.round(input.ranMs) : null,
@@ -177,10 +191,20 @@ export function gameProof(input: { contract: GameScopeContract | null | undefine
   };
 }
 
+/** Where the pictures are now (Q-3363): kept privately for the admin for N days, or why they stay in the sandbox. PURE. */
+function keptSentence(l: GameProof['looks']): string {
+  if (l.taken.length === 0) return 'No picture to keep.';
+  const stored = l.taken.filter((t) => t.stored).length;
+  const why = (l.kept?.notKept ?? []).map((n) => `${n.view} — ${n.why}`).join('; ');
+  if (!l.kept) return 'The pictures stay in the sandbox for this build only.';
+  if (stored === 0) return `The pictures were not kept (${why || 'no reason recorded'}), so they stay in the sandbox for this build only.`;
+  return `${stored} of ${l.taken.length} picture(s) kept privately for ${l.kept.retainDays} days, visible to the admin only${why ? `; not kept: ${why}` : ''}.`;
+}
+
 /** The report line for GAME_PROOF — the four proofs in order, every gap said. PURE. */
 export function gameProofMessage(proof: GameProof): string {
   const l = proof.looks;
-  const pics = l.taken.map((t) => `${t.view} ${t.w}×${t.h} (${Math.round(t.bytes / 1024)} KB, id ${t.id}, sandbox ${t.path})`).join('; ');
+  const pics = l.taken.map((t) => `${t.view} ${t.w}×${t.h} (${Math.round(t.bytes / 1024)} KB, id ${t.id}, ${t.stored ? `kept as ${t.stored}` : `sandbox ${t.path}`})`).join('; ');
   const changes = [
     l.startToMoved !== null ? `start → after moving changed ${l.startToMoved}%` : '',
     l.nearToFar !== null ? (l.nearToFar < STILL_BELOW ? `near → far changed only ${l.nearToFar}% (the pull-back could not move this game's camera)` : `near → far changed ${l.nearToFar}%`) : '',
@@ -195,7 +219,7 @@ export function gameProofMessage(proof: GameProof): string {
   ].join(', ');
   return [
     `Game proof. (a) Built from: ${proof.contract}.`,
-    `(b) What it looked like: ${pics || 'no picture taken'}${changes ? `; ${changes}` : ''}. Not taken: ${l.notTaken.map((n) => `${n.view} — ${n.why.replace(/^not taken: /, '')}`).join('; ')}. The pictures stay in the sandbox for this build only.`,
+    `(b) What it looked like: ${pics || 'no picture taken'}${changes ? `; ${changes}` : ''}. Not taken: ${l.notTaken.map((n) => `${n.view} — ${n.why.replace(/^not taken: /, '')}`).join('; ')}. ${keptSentence(l)}`,
     `(c) Played: ${acts}.`,
     `(d) Ran: ${ran} — measured in ${r.renderer}.`,
     'The playtest score measures whether the game can be played (runs, controls, phone, stability, smoothness) — it is not a judgement of how realistic its graphics are.',

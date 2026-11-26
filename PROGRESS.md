@@ -6190,6 +6190,23 @@ Ledger (one row each in BUILD_REPORT_QUEUE.md, Q-3330 … Q-3343). Fixed in this
 - Old games: their places move closer at the next kit refresh, which is what the admin asked for. The spawn stays in the first place, and tiles keep their cells.
 - Siblings updated: the world race's own default towns (`GameWorldCourseGenerator` TOWNS) now name their distances (600 / 850 / 1050 m, what the spiral gave them), so a default world race is still a real drive. A race on a game's own compact world.ts gets a shorter route and finishes at the route's end — an open product choice, recorded in Q-3350. Updated, with reasons: the race test regions now name distances, the bridge source guard reads highwayTree(), and the 1,000-village test no longer requires a rescue.
 
+## 2026-11-25 — Autopsy failedbr #2523 + #2525 (FPS shooter, server lost, continue build)
+
+**Billing check (code read, not assumed):** both build debits (`debitWalletForBuild`, agentv3.ts settle and watchdog
+finalizer) run only at the END of a build, and a build with `!result.ok` bills 0. #2523's server died without running
+JS, so it never reached a debit: it was not charged. #2525 is charged only if it settles ok, for its own spend (estimate
+₹0.10).
+
+**Fixed in PR #4554:** Q-3460 — the seeded game kit failed its own first typecheck (6 errors
+across playerBody, externalAssets ×2, RacingRoadGame, openWorld, worldLayer, plus the LOD block). New census
+`tests/theKitTypechecksInTheAppItShipsTo.test.ts` compiles the whole kit under the scaffold tsconfig and strict; each
+fix reverted-and-failed; a scratch app with three@0.180 + @types/three + TS 5.9.3 compiles it with 0 errors.
+
+**Recorded in BUILD_REPORT_QUEUE.md:** Q-3461 (vitest declared, never installed — decision), Q-3462 (typecheck note says
+test errors fail the release), the four lost servers are main's Q-3354 (recorded first by another session, same evidence), Q-3463 (no live dead-build sweep), Q-3464 (Surplus 404 on six models → provider
+breaker; evidence for Q-3316), Q-3465 (fallbackMs 0), Q-3466 (COMPLEX vs cheapest band), Q-3467 (fallback message names
+the wrong ladder), Q-3468 (HERO_OBJECTS "table"), Q-3469 (Surplus on COMPLEX game builds — decision), Q-3470 (no
+continue hand-off), Q-3471 (seed assets serial after recipes).
 ## 2026-11-25 — "FREE AI CHALU KAREIN": an app's AI, free, in three steps under the ❗ button
 
 Admin, verbatim: *"navbharatai me jab bhi koi user ai banwaye, koi bhi ai. to header me ❗ button me 2
@@ -6304,6 +6321,55 @@ kitni der me aye (avg) aur kitne fail huye … fallback system kam kyu nahi kiya
 - **Tried and reverted:** "one model, one requirement" deduping. Two names of one model (for example "groom" and "man in sherwani") each give the game a key, and the file downloads once. Dropping a name would make a builder's `loadRequestedAsset('groom')` fall back to a code-built stand-in, so the duplicate name is harmless and stays.
 - **Matching:** Hindi and Hinglish aliases for salwar suit, lungi and sherwani/dulha. The knowledge-base entry `game_indian_clothes` is updated.
 
+## 2026-11-26 — Q-3363: game proof pictures kept privately for 30 days, admin-only (#4557, not merged)
+
+The admin approved option A. What changed:
+- **Stored:** the playtest's start / moved / far JPEGs are copied out of the sandbox into the existing private workspace-asset bucket (`workspaceAssetBucketName`) under `game-proof-v1/<YYYY-MM-DD>/<buildId>/<view>-<id>.jpg` (`src/server/AgentV3/gameProofPictures.ts`). Each picture is checked first: a JPEG, at most 40 KB, at most 3 a build, and its bytes must hash to the id the playtest printed. The copy is bounded to 15 s. No new bucket, no ACL.
+- **Expiry:** a delete-after sweep, not a bucket lifecycle rule, because the server does not change bucket configuration. The day folder is the expiry: the sweep deletes folders older than 30 days (at most every 6 h per instance), and the admin route refuses an expired key with 410.
+- **Viewing:** `GET /api/admin/game-proof-picture?key=…` (`src/server/routes/gameProofPicturesAdmin.ts`) behind `verifyAdminToken`, streamed with `no-store`. Admin → Apps → "v" shows the latest build's pictures (`src/components/admin/GameProofPictures.tsx`).
+- **Report:** GAME_PROOF's `looks.taken[].stored` holds each key, and the line says how many were kept, or why none were.
+- **Kill switch:** `AGENTV3_GAME_PROOF_KEEP=off`.
+- **Proof:** `tests/gameProofPicturesAreKeptPrivately.test.ts` (20 tests). Seven separate reversions each fail it: no admin middleware, no hash check, no size cap, no count cap, no path guard, no `stored` key, a shifted expiry.
+- **Open:** Q-3410 (account erasure does not reach these pictures before the 30 days are up).
+## 2026-11-26 — Asked-for enemies are put where the hero is, and the playtest proves they are on screen (Q-3401)
+
+The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attack kare, to builder pura kam kar deta hai … par real game me enemies show hi nahi hote".
+
+- **Evidence:** BR2519 ("Knight Boxer enemy show nahi ho rahe hai"). The builder said the enemies were visible and attacking.
+  - Its enemies were hand-made: a custom GLTFLoader dressed bots of a `criminal-mobs` feature, around a fixed centre of a 1000-house city.
+  - It wrote that it "could not test by playing". The playtest ran out of time while starting the game (Q-3332).
+- **Earlier work, merged 2026-11-25 (#4532/#4533):** the kit already had `Entities`, which verifies each spawn: in the scene, at a finite position, with a visible body. The admin's game was built the day before.
+- **Two gaps were still open:**
+  1. Nothing PROVED that asked-for enemies are on screen. The played evidence covered score, level, sound, restart and a vehicle.
+  2. There was no primitive to put characters where the hero is.
+- **Fix:**
+  - `Entities.spawnAround(n, spec, {near, far})` rings characters round the PLAYER, on the ground, at golden-angle spacing.
+  - `window.__nbEntities` is a read-only list of live characters plus the player's position. It is added by the constructor and removed by `dispose`.
+  - The playtest's existing placeholder page hook measures, with the game's own camera: hostiles alive, the nearest one's distance, and how many are in the frame.
+  - `MISSING_ENEMIES` is said only when the contract asked for enemies. It fires when none is alive (with the failed-spawn count), when all are more than 60 m away and none is in view, or when the enemies are made outside Entities. It goes to the builder through the existing placeholder repair note.
+  - The system prompt and the systems instructions say "enemies go where the hero is".
+- **Proof:** `tests/enemiesAreWhereTheHeroIs.test.ts`, 8 tests, run on the real emitted kit and the real page hook. Each of three reversions made it fail: rings round the origin, no hook, no camera check. The related suites pass: 3906 tests in 164 files.
+- **What it does NOT fix:**
+  - A game the playtest never plays gets no page read (Q-3332, owned elsewhere).
+  - The admin's existing city game keeps its hand-made enemies until a turn moves them onto Entities. With this change, the next turn's playtest says so, and the builder is told the fix.
+
+## 2026-11-26 — Q-3402 (BR2532): a repair pass never breaks a file that was clean
+
+- **Report:** admin, "isme game ban gaya par enemy aa hi nahi rahe". The game built, but no enemy appeared.
+- **What happened:**
+  - The builder wrote `src/game/features/monsters.ts`. The write-time typecheck said that file was clean, with 3 errors left in old kit files.
+  - After the summary, the typecheck-gate repair pass was shown every written file and asked to fix those 3 errors. It rewrote `monsters.ts` with APIs that do not exist (`world.scene`, `controller.position`).
+  - The re-check failed, and the pass's writes were kept. No monster reached the scene, and the production build named the monsters.ts errors.
+  - The builder's summary blamed old kit files.
+- **Root cause:** a model repair's writes were kept even when they made the project worse. The typecheck-gate pass reverted nothing. The agentic endgame reverted only when the TOTAL error count rose, so 3 errors fixed in one file plus 3 new ones in another passed.
+- **Also:** the turn was an edit, and an edit turn records no game contract. So the playtest never looked for the asked-for enemies.
+- **Fix:**
+  - `repairBreakage.ts` holds one pure rule. A touched file that gained its first error goes back. A raised total puts back every touched file.
+  - `buildPhases/typecheckGateRepair.ts` (moved out of the route) snapshots, writes, re-checks, puts back what the rule names, records `REPAIR_REVERTED`, and re-checks.
+  - `EndgameRepair` applies the same per-file rule beside its count rule.
+  - `asksForEnemies` (gameIntent.ts) reads enemies from the turn's own words (English, Hinglish, Hindi; a declined sentence and "chatbot" do not count). The playtest uses it when there is no contract.
+- **Proof:** `tests/aRepairNeverBreaksACleanFile.test.ts`, 9 tests, replaying BR2532 on the real helper and the real endgame. Three reversions each made it fail: the rule, the endgame rule, the Hindi words. The related suites pass: 774 tests in 45 files.
+- **Watch:** the next game edit that asks for enemies. `REPAIR_REVERTED` shows if a repair broke a file; `MISSING_ENEMIES` shows if none is on screen.
 ### 2026-11-26 — Q-3392: the online Royale daily match-start cap is shared across instances (PR #4559)
 
 - **Problem:** the per-app daily cap (300) lived in each Cloud Run instance's memory, so N instances allowed N × 300 starts a day.

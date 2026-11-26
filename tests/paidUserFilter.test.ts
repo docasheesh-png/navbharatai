@@ -179,7 +179,11 @@ describe('the wiring — both lists, one control, one meaning', () => {
   });
 
   it('both server lists resolve the tier from the ACCOUNT', () => {
-    expect(routes.split('accountTier({').length - 1).toBe(2);
+    // 2026-11-26: ONE helper feeds the identity into the rule (identityTier.ts) for every list — the build reports,
+    // All builds and now the built apps — so three lists can never disagree on who is paid.
+    expect(routes.split('accountTier({').length - 1).toBe(0);
+    expect(routes.split('tierOfIdentity(').length - 1).toBeGreaterThanOrEqual(3);
+    expect(readFileSync(join(__dirname, '..', 'src/server/lib/identityTier.ts'), 'utf8').split('accountTier({').length - 1).toBe(1);
     expect(routes).toContain('const tierFilter = parseTierFilter(req.query.tier);');
     expect(routes).toContain('matchesTier(b.tier, tierFilter)');
   });

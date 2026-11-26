@@ -17,7 +17,7 @@ vi.mock('firebase-admin', async (original) => ({
       bucketCalls.names.push(name);
       return {
         file: (key: string) => ({ save: async (_b: Buffer, opts: any) => { bucketCalls.saved.push({ key, opts }); } }),
-        getFiles: async () => [[], null, { prefixes: ['game-proof-v1/2026-10-01/', 'game-proof-v1/2026-11-20/'] }],
+        getFiles: async ({ prefix }: { prefix: string }) => [[], null, { prefixes: ['game-proof-v2/2026-10-01/', 'game-proof-v2/2026-11-25/', 'game-proof-v1/2026-10-01/', 'game-proof-v1/2026-11-20/'].filter((p) => p.startsWith(prefix)) }],
         deleteFiles: async ({ prefix }: { prefix: string }) => { bucketCalls.deleted.push(prefix); },
       };
     },
@@ -37,6 +37,8 @@ import { proofPicturesFromIssues, proofPictureError } from '../src/components/ad
 import { readWorkspaceReports } from '../src/components/admin/WorkspaceBuildReports';
 
 const NOW = Date.parse('2026-11-26T10:00:00Z');
+/** base64url('u1') — the verified owner segment (verifiedOwnerKeySegment). */
+const U1 = 'dTE';
 const jpeg = (fill: number, size = 2000) => { const b = Buffer.alloc(size, fill); b[0] = 0xff; b[1] = 0xd8; b[2] = 0xff; return b; };
 const idOf = (b: Buffer) => createHash('sha256').update(b).digest('hex').slice(0, 12);
 const shotFor = (view: string, b: Buffer): ProofShot => ({ view, id: idOf(b), w: 480, h: 270, bytes: b.length, path: `/tmp/nbai-playtest-proof/${view}-${idOf(b)}.jpg` });
@@ -49,7 +51,7 @@ function memoryStore(): ProofPictureStore & { objects: Map<string, { bytes: Buff
     async save(key, bytes, meta) { objects.set(key, { bytes, meta }); },
     async read(key, max) { const o = objects.get(key); if (!o) return null; if (o.bytes.length > max) throw new Error('cap'); return o.bytes; },
     async listDays() { return [...new Set([...objects.keys()].map((k) => k.split('/').slice(0, 2).join('/') + '/'))]; },
-    async deleteDay(day) { deletedDays.push(day); for (const k of [...objects.keys()]) if (k.startsWith(day)) objects.delete(k); },
+    async deletePrefix(day) { deletedDays.push(day); for (const k of [...objects.keys()]) if (k.startsWith(day)) objects.delete(k); },
   };
 }
 const files = (m: Record<string, Buffer>) => async (p: string) => m[p] ?? null;
@@ -57,20 +59,20 @@ const files = (m: Record<string, Buffer>) => async (p: string) => m[p] ?? null;
 beforeEach(() => { bucketCalls.names.length = 0; bucketCalls.saved.length = 0; bucketCalls.deleted.length = 0; __resetProofPictureSweepForTests(); });
 
 describe('keeping the pictures: the existing private bucket, three a build, each checked', () => {
-  it('three valid pictures are stored under game-proof-v1/<day>/<build>/, each with its delete-after date', async () => {
+  it('three valid pictures are stored under game-proof-v2/<day>/<verified owner>/<build>/, each with its delete-after date', async () => {
     const pics = [jpeg(1), jpeg(2), jpeg(3)];
     const shots = [shotFor('start', pics[0]), shotFor('moved', pics[1]), shotFor('far', pics[2])];
     const store = memoryStore();
-    const r = await keepProofPictures({ buildId: 'b-123', shots, read: files(Object.fromEntries(shots.map((s, i) => [s.path, pics[i]]))), store, nowMs: NOW });
+    const r = await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b-123', shots, read: files(Object.fromEntries(shots.map((s, i) => [s.path, pics[i]]))), store, nowMs: NOW });
     expect(r.notKept).toEqual([]);
-    expect(r.kept.map((k) => k.key)).toEqual(shots.map((s) => `game-proof-v1/2026-11-26/b-123/${s.view}-${s.id}.jpg`));
+    expect(r.kept.map((k) => k.key)).toEqual(shots.map((s) => `game-proof-v2/2026-11-26/${U1}/b-123/${s.view}-${s.id}.jpg`));
     expect(store.objects.get(r.kept[0].key)?.meta.deleteAfter).toBe('2026-12-26T10:00:00.000Z');
   });
 
   it('a picture over the size cap is not stored, and says so', async () => {
     const big = jpeg(4, MAX_PICTURE_BYTES + 1);
     const s = shotFor('start', big);
-    const r = await keepProofPictures({ buildId: 'b', shots: [s], read: files({ [s.path]: big }), store: memoryStore(), nowMs: NOW });
+    const r = await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b', shots: [s], read: files({ [s.path]: big }), store: memoryStore(), nowMs: NOW });
     expect(r.kept).toEqual([]);
     expect(r.notKept[0].why).toMatch(/over the 40 KB size cap/);
   });
@@ -78,23 +80,29 @@ describe('keeping the pictures: the existing private bucket, three a build, each
   it('a fourth picture is over the per-build cap', async () => {
     const pics = [jpeg(1), jpeg(2), jpeg(3), jpeg(5)];
     const shots = [shotFor('start', pics[0]), shotFor('moved', pics[1]), shotFor('far', pics[2]), shotFor('far', pics[3])];
-    const r = await keepProofPictures({ buildId: 'b', shots, read: files(Object.fromEntries(shots.map((s, i) => [s.path, pics[i]]))), store: memoryStore(), nowMs: NOW });
+    const r = await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b', shots, read: files(Object.fromEntries(shots.map((s, i) => [s.path, pics[i]]))), store: memoryStore(), nowMs: NOW });
     expect(r.kept).toHaveLength(3);
     expect(r.notKept).toEqual([{ view: 'far', why: 'over the 3-picture cap for one build' }]);
   });
 
   it('bytes that do not hash to the id the playtest printed (a truncated or swapped file) are refused', async () => {
     const s = shotFor('start', jpeg(1));
-    const r = await keepProofPictures({ buildId: 'b', shots: [s], read: files({ [s.path]: jpeg(9) }), store: memoryStore(), nowMs: NOW });
+    const r = await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b', shots: [s], read: files({ [s.path]: jpeg(9) }), store: memoryStore(), nowMs: NOW });
     expect(r.notKept[0].why).toMatch(/not the picture the playtest described/);
   });
 
   it('no bucket, the kill switch, no build id: nothing stored, each reason said', async () => {
     const s = shotFor('start', jpeg(1));
     const read = files({ [s.path]: jpeg(1) });
-    expect((await keepProofPictures({ buildId: 'b', shots: [s], read, store: null })).notKept[0].why).toMatch(/no private storage bucket/);
-    expect((await keepProofPictures({ buildId: 'b', shots: [s], read, store: memoryStore(), enabled: false })).notKept[0].why).toMatch(/switched off/);
-    expect((await keepProofPictures({ buildId: '', shots: [s], read, store: memoryStore() })).notKept[0].why).toMatch(/no id/);
+    expect((await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b', shots: [s], read, store: null })).notKept[0].why).toMatch(/no private storage bucket/);
+    expect((await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b', shots: [s], read, store: memoryStore(), enabled: false })).notKept[0].why).toMatch(/switched off/);
+    expect((await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: '', shots: [s], read, store: memoryStore() })).notKept[0].why).toMatch(/no id/);
+    // No VERIFIED owner (an anonymous build): not kept, because the account eraser could never find it (Q-3410).
+    for (const owner of [null, undefined, 'anon', 'bad/uid']) {
+      const store = memoryStore();
+      expect((await keepProofPictures({ verifiedOwnerUid: owner, buildId: 'b', shots: [s], read, store })).notKept[0].why).toMatch(/no verified owner/);
+      expect(store.objects.size).toBe(0);
+    }
     expect(proofPictureKeepEnabled({ AGENTV3_GAME_PROOF_KEEP: 'OFF' })).toBe(false);
     expect(proofPictureKeepEnabled({})).toBe(true);
   });
@@ -104,7 +112,7 @@ describe('keeping the pictures: the existing private bucket, three a build, each
     try {
       const s = shotFor('start', jpeg(1));
       const hang: ProofPictureStore = { ...memoryStore(), save: () => new Promise(() => {}) };
-      const p = keepProofPictures({ buildId: 'b', shots: [s], read: files({ [s.path]: jpeg(1) }), store: hang });
+      const p = keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b', shots: [s], read: files({ [s.path]: jpeg(1) }), store: hang });
       await vi.advanceTimersByTimeAsync(KEEP_BUDGET_MS + 10);
       expect((await p).notKept[0].why).toMatch(/ran past its 15 s budget/);
     } finally { vi.useRealTimers(); }
@@ -113,12 +121,13 @@ describe('keeping the pictures: the existing private bucket, three a build, each
   it('the private bucket is the existing workspace-asset bucket; with none configured there is no store', async () => {
     expect(privateProofPictureStore({})).toBeNull();
     const store = privateProofPictureStore({ WORKSPACE_ASSETS_BUCKET: 'private-assets' })!;
-    await store.save('game-proof-v1/2026-11-26/b/start-aaaaaaaaaaaa.jpg', jpeg(1), { view: 'start' });
+    await store.save(`game-proof-v2/2026-11-26/${U1}/b/start-aaaaaaaaaaaa.jpg`, jpeg(1), { view: 'start' });
     expect(bucketCalls.names).toEqual(['private-assets']);
     expect(bucketCalls.saved[0].opts).toMatchObject({ contentType: 'image/jpeg', metadata: { cacheControl: 'private, no-store' } });
     expect(JSON.stringify(bucketCalls.saved[0].opts)).not.toMatch(/public/i);
     await expect(store.save('../escape.jpg', jpeg(1), {})).rejects.toThrow();
-    await expect(store.deleteDay('workspace-assets/')).rejects.toThrow();
+    await expect(store.deletePrefix('workspace-assets/')).rejects.toThrow();
+    await expect(store.save('game-proof-v1/2026-11-26/b/start-aaaaaaaaaaaa.jpg', jpeg(1), {})).rejects.toThrow(); // the owner-less layout is never written again
   });
 });
 
@@ -139,6 +148,8 @@ describe('30 days: the day in the key is the expiry, swept and refused', () => {
   it('the whole 30th day is kept; the 31st is expired', () => {
     expect(proofPictureExpired('game-proof-v1/2026-10-27/b/start-aaaaaaaaaaaa.jpg', NOW)).toBe(false);
     expect(proofPictureExpired('game-proof-v1/2026-10-26/b/start-aaaaaaaaaaaa.jpg', NOW)).toBe(true);
+    expect(proofPictureExpired(`game-proof-v2/2026-10-27/${U1}/b/start-aaaaaaaaaaaa.jpg`, NOW)).toBe(false);
+    expect(proofPictureExpired(`game-proof-v2/2026-10-26/${U1}/b/start-aaaaaaaaaaaa.jpg`, NOW)).toBe(true);
   });
 
   it('the sweep deletes only the day folders past 30 days', async () => {
@@ -151,8 +162,9 @@ describe('30 days: the day in the key is the expiry, swept and refused', () => {
 
   it('the real bucket sweep lists the day folders and deletes the old one by prefix; throttled per instance', async () => {
     const store = privateProofPictureStore({ WORKSPACE_ASSETS_BUCKET: 'private-assets' })!;
-    expect(await sweepExpiredProofPictures(store, NOW)).toEqual(['game-proof-v1/2026-10-01/']);
-    expect(bucketCalls.deleted).toEqual(['game-proof-v1/2026-10-01/']);
+    // Both layouts are swept: the owner-filed one and the legacy owner-less one (Q-3410).
+    expect(await sweepExpiredProofPictures(store, NOW)).toEqual(['game-proof-v2/2026-10-01/', 'game-proof-v1/2026-10-01/']);
+    expect(bucketCalls.deleted).toEqual(['game-proof-v2/2026-10-01/', 'game-proof-v1/2026-10-01/']);
     expect(maybeSweepProofPictures(store, NOW)).toBe(true);
     expect(maybeSweepProofPictures(store, NOW + 1000)).toBe(false);
   });
@@ -221,10 +233,10 @@ describe('the report carries the stored ids, and the admin view reads them', () 
   const shots = [shotFor('start', pics[0]), shotFor('moved', pics[1])];
 
   it('GAME_PROOF names each kept picture by its key and says 30 days, admin only', async () => {
-    const kept = await keepProofPictures({ buildId: 'b-9', shots, read: files({ [shots[0].path]: pics[0] }), store: memoryStore(), nowMs: NOW });
+    const kept = await keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b-9', shots, read: files({ [shots[0].path]: pics[0] }), store: memoryStore(), nowMs: NOW });
     const issue = gameProofIssue(gameProof({ contract: null, run: { ok: true, proofShots: shots }, ranMs: 1000, files: {}, kept }));
     const detail = JSON.parse(issue.detail);
-    expect(detail.looks.taken[0].stored).toBe(`game-proof-v1/2026-11-26/b-9/start-${shots[0].id}.jpg`);
+    expect(detail.looks.taken[0].stored).toBe(`game-proof-v2/2026-11-26/${U1}/b-9/start-${shots[0].id}.jpg`);
     expect(detail.looks.taken[1].stored).toBeUndefined();
     expect(issue.message).toMatch(/1 of 2 picture\(s\) kept privately for 30 days, visible to the admin only; not kept: moved — it could not be read from the sandbox/);
     expect(isProofPictureKey(detail.looks.taken[0].stored)).toBe(true);
@@ -242,7 +254,7 @@ describe('the report carries the stored ids, and the admin view reads them', () 
 
   it('the build phase copies the played pictures and GAME_PROOF records the keys', async () => {
     const issues: PlaytestIssue[] = [];
-    const keep = vi.fn(async (s: ProofShot[]) => keepProofPictures({ buildId: 'b-7', shots: s, read: files({ [shots[0].path]: pics[0], [shots[1].path]: pics[1] }), store: memoryStore(), nowMs: NOW }));
+    const keep = vi.fn(async (s: ProofShot[]) => keepProofPictures({ verifiedOwnerUid: 'u1', buildId: 'b-7', shots: s, read: files({ [shots[0].path]: pics[0], [shots[1].path]: pics[1] }), store: memoryStore(), nowMs: NOW }));
     await runGamePlaytestPhase({
       facts: { enabled: true, buildOk: true, isCanvasGame: true, isImportTurn: false, aborted: false, hasRunCommand: true, hasPreviewUrl: true, awaitsShell: false, platformDone: false, timeLeft: true },
       files: {}, contract: null,
@@ -252,13 +264,13 @@ describe('the report carries the stored ids, and the admin view reads them', () 
     });
     expect(keep).toHaveBeenCalledWith(shots);
     const proof = JSON.parse(issues.find((i) => i.code === 'GAME_PROOF')!.detail!);
-    expect(proof.looks.taken.map((t: { stored?: string }) => t.stored)).toEqual(shots.map((s) => `game-proof-v1/2026-11-26/b-7/${s.view}-${s.id}.jpg`));
+    expect(proof.looks.taken.map((t: { stored?: string }) => t.stored)).toEqual(shots.map((s) => `game-proof-v2/2026-11-26/${U1}/b-7/${s.view}-${s.id}.jpg`));
   });
 
   it('the build route hands the phase the keeper (a helper call only)', () => {
     const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toMatch(/keepPictures: gameProofKeeper\(\{ buildId, run: /);
-    expect(typeof gameProofKeeper({ buildId: 'b', run: undefined })).toBe('function');
+    expect(route).toMatch(/keepPictures: gameProofKeeper\(\{ buildId, verifiedOwnerUid: verified\?\.uid, run: /);
+    expect(typeof gameProofKeeper({ buildId: 'b', verifiedOwnerUid: 'u1', run: undefined })).toBe('function');
   });
 
   it('the admin view says a refused picture plainly', () => {

@@ -158,7 +158,8 @@ describe('the dispatcher brings an untouched older kit file up to date, and neve
     await d.dispatch({ id: 't3', name: 'generate_game_shell', input: {} }, 'architect');
     const shellOwn = new Set(Object.keys(GAME_RECIPES.generate_game_shell().files));
     // src/game/player.ts is the game's OWN file (who the player is), created once — so whether it exists is the one read.
-    expect(act.reads.filter((p) => p !== 'package.json' && p !== 'src/game/player.ts' && !shellOwn.has(p))).toEqual([]);
+    // src/game/gameSeed.ts likewise (this game's own town and road, Q-3373): read once to add to it, never a kit file.
+    expect(act.reads.filter((p) => p !== 'package.json' && p !== 'src/game/player.ts' && p !== 'src/game/gameSeed.ts' && !shellOwn.has(p))).toEqual([]);
   });
 });
 

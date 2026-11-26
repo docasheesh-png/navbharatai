@@ -16,6 +16,7 @@ import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
 import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
 import { registerTrafficControlAdminRoutes } from './trafficControlAdmin';
 import { registerGameAssetsAdminRoutes } from './gameAssetsAdmin';
+import { registerGameProofPicturesAdminRoutes } from './gameProofPicturesAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -474,6 +475,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerApiProvidersAdminRoutes(app, verifyAdminToken);
   registerProviderSwitchesAdminRoutes(app, verifyAdminToken);
   registerGameAssetsAdminRoutes(app, verifyAdminToken);
+  registerGameProofPicturesAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerTestChatBotRoutes(app, verifyAdminToken);

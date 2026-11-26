@@ -223,7 +223,12 @@ describe('what it does when it really runs', () => {
 });
 
 describe('the wiring', () => {
-  const route = codeOnly(read('src/server/routes/mobileSetup.ts'));
+  // 2026-11-25: the check lives in the ONE preparation both Android providers share (the setup route and
+  // the Native Cloud Build call it), so this reads that function — and the route must still call it.
+  const route = codeOnly(read('src/server/lib/mobileBuild/prepareMobileProject.ts'));
+  it('the setup route still runs the shared preparation', () => {
+    expect(codeOnly(read('src/server/routes/mobileSetup.ts'))).toContain('await prepareMobileProject(');
+  });
 
   it('runs AFTER the heal, on the healed files, and refuses only a BLOCKING failure', () => {
     expect(route).toContain('await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)');

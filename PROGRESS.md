@@ -6176,16 +6176,16 @@ finalizer) run only at the END of a build, and a build with `!result.ok` bills 0
 JS, so it never reached a debit: it was not charged. #2525 is charged only if it settles ok, for its own spend (estimate
 ₹0.10).
 
-**Fixed in PR #4554:** Q-3420 — the seeded game kit failed its own first typecheck (6 errors
+**Fixed in PR #4554:** Q-3460 — the seeded game kit failed its own first typecheck (6 errors
 across playerBody, externalAssets ×2, RacingRoadGame, openWorld, worldLayer, plus the LOD block). New census
 `tests/theKitTypechecksInTheAppItShipsTo.test.ts` compiles the whole kit under the scaffold tsconfig and strict; each
 fix reverted-and-failed; a scratch app with three@0.180 + @types/three + TS 5.9.3 compiles it with 0 errors.
 
-**Recorded in BUILD_REPORT_QUEUE.md:** Q-3421 (vitest declared, never installed — decision), Q-3422 (typecheck note says
-test errors fail the release), the four lost servers are main's Q-3354 (recorded first by another session, same evidence), Q-3423 (no live dead-build sweep), Q-3424 (Surplus 404 on six models → provider
-breaker; evidence for Q-3316), Q-3425 (fallbackMs 0), Q-3426 (COMPLEX vs cheapest band), Q-3427 (fallback message names
-the wrong ladder), Q-3428 (HERO_OBJECTS "table"), Q-3429 (Surplus on COMPLEX game builds — decision), Q-3430 (no
-continue hand-off), Q-3431 (seed assets serial after recipes).
+**Recorded in BUILD_REPORT_QUEUE.md:** Q-3461 (vitest declared, never installed — decision), Q-3462 (typecheck note says
+test errors fail the release), the four lost servers are main's Q-3354 (recorded first by another session, same evidence), Q-3463 (no live dead-build sweep), Q-3464 (Surplus 404 on six models → provider
+breaker; evidence for Q-3316), Q-3465 (fallbackMs 0), Q-3466 (COMPLEX vs cheapest band), Q-3467 (fallback message names
+the wrong ladder), Q-3468 (HERO_OBJECTS "table"), Q-3469 (Surplus on COMPLEX game builds — decision), Q-3470 (no
+continue hand-off), Q-3471 (seed assets serial after recipes).
 ## 2026-11-25 — "FREE AI CHALU KAREIN": an app's AI, free, in three steps under the ❗ button
 
 Admin, verbatim: *"navbharatai me jab bhi koi user ai banwaye, koi bhi ai. to header me ❗ button me 2

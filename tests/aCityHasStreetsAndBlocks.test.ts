@@ -29,7 +29,8 @@ describe('🏙️ city blocks', () => {
   it('ships in the 3D kit with what it imports, and the instructions say how to use it', () => {
     expect(GAME_3D_MODULES).toContain('city');
     const r = generateGame3D(['city']);
-    expect(Object.keys(r.files).sort()).toEqual(['src/game/three/city.ts', 'src/game/three/collision.ts']);
+    // surfaces.ts (and what it pulls in) since Q-2698: the city reads the device's geometry tier from it.
+    expect(Object.keys(r.files).sort()).toEqual(['src/game/three/city.ts', 'src/game/three/collision.ts', 'src/game/three/environment.ts', 'src/game/three/groundContact.ts', 'src/game/three/surfaces.ts']);
     expect(r.instructions).toMatch(/createCity\(/);
     expect(r.instructions).toMatch(/city\.solidAt/);
     expect(generateGame3D(['objects']).instructions).not.toMatch(/createCity\(/);

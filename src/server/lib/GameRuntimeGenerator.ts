@@ -1648,7 +1648,7 @@ export interface GameSettings {
   sfxVolume: number;
   /** Silence everything without losing the volumes. */
   muted: boolean;
-  /** low = fewer pixels and no shadows (smoother on a weak phone); high = full resolution and shadows. */
+  /** low = fewer pixels and no shadows (smoother on a weak phone) — with Auto quality off, also a big world's light geometry tier (three/surfaces geometryTier, read as each city is built); high = full resolution and shadows. */
   quality: Quality;
   /** Camera look speed, 0.25..3 (1 = default). */
   lookSensitivity: number;

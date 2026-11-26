@@ -34,6 +34,8 @@ import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../th
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
+import { geometryTier } from '../three/surfaces';
+import { settings } from '../core/settings';
 import { localLowestY, setGround } from '../three/surfaces';
 import { restOriginY } from '../three/groundContact';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
@@ -905,13 +907,17 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   /** Build one planned place's city now (buildings, traffic, people, parked cars) and put it on the map. */
   const buildPlace = (p: PlannedPlace): OpenWorldCity => {
     const { traffic: trafficOption, people: peopleOption, parkedCars = p.preset.parkedCars } = p.region.city || {};
-    const city = createCity(p.cityOptions);
+    // 🏙️ The geometry tier (queue Q-2698), read as each place is built: the device decides, the player's Settings override it
+    // (Auto quality off + Graphics low = light), and a place a game gave its own tier keeps it. The light tier stands the same
+    // streets, buildings and colliders with fewer draw calls and triangles; a device with a real GPU draws exactly what it did.
+    const tier = geometryTier(settings.get());
+    const city = createCity({ tier, ...p.cityOptions });
     const plan = city.plan;
     const root = new THREE.Group(); root.name = 'Region ' + p.region.id;
     root.add(city.root);
-    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: p.preset.traffic, ...(trafficOption || {}) });
+    const traffic = trafficOption === false ? null : createCityTraffic(city, { count: p.preset.traffic, tier: city.tier, ...(trafficOption || {}) });
     if (traffic) root.add(traffic.root);
-    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, ...(peopleOption || {}) });
+    const people = peopleOption === false ? null : createCityPeople(city, { traffic, count: p.preset.people, tier: city.tier, ...(peopleOption || {}) });
     if (people) root.add(people.root);
     const local = new THREE.Object3D(); root.add(local);
     // Built again after it was freed: the same cars, where they were (never a second set handed to ctx.vehicles).

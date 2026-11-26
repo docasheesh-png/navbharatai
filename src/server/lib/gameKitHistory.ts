@@ -110,7 +110,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "52a0b7dcdbf65860a9081c975fd6e6d903b1f3609a9b40145627e17b58c82159",
     "db50858ac49f95fd4bbfc70cb874b2a45a0cc7b2a5c69201969c9486913f852a",
     "e4823c78e761edc9f421efcd638535573ba61b9812d164f9f312a69054d0adad",
-    "92a2ef00238808ecb588daa90d7218d52606832cc264a25a161c07ae9c3390fe"
+    "1e18e74ef6769c13428d6fbd9125f7d6a47ecdfa3498eae0ee1d82a4cdd7e33d",
+    "d083400e9e28eac41868b349a9517ffab70dfffa4f9436b0d21bbb86e57a1a04"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -427,7 +428,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a29d92726e4fd0baf3be8ce978ae3f638d5979892d63416aafa59e6a536e0e86",
     "b2ebe8820b3607824a3e023398f54a691206d1652af01e7eade1f20f762a860c",
     "45c6d252315b9e4df6315e78303c5002517a5ca52a11ee9deb2410e78355f737",
-    "689046399d03be5eb84138750a993d3745f086c8b1b2253e04ee8c127113cace"
+    "689046399d03be5eb84138750a993d3745f086c8b1b2253e04ee8c127113cace",
+    "5f0b2f4a606e2962cc7eed2d00312566b13f862682d9c2aef13a9c4d35c9c20e"
   ],
   "src/game/core/state.ts": [
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
@@ -579,8 +581,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2978e707c64f5a091ac68a1a7593c23923a9bcbdab144a88c77963eeb40552db",
     "f3a713a9f3c4b93f25190f8c65af7222d607bf8af7ce91edd998a23ea232846e",
     "133e265b9f26af830d218c5bdefcf0320a8b4bd1b6f5e0cf56ac30858f7cd5b6",
-    "b759f15602fd1dd28974ddd0dce9a0e8168163c040e5cdd307ed1eb712b81599",
-    "f4fd78f5f541d9d1334e3fa6f6370d0b864aade95cb8f1126d28f1879e3ca353"
+    "36d7b7fc4cddfb35e1389301c9c05611483b09401a2f6d85bba86fdd2e2dccdc",
+    "fc0a474059883279377d06b67340e25c5cf8042fa3cc5755c804b105a14335ac"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -589,7 +591,6 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c60fff089f93a0ceada4afb3f70cd1daeb7c60e6782de352ef01e74906a49026",
     "6534e7fec5a7c5352589a3e14abca6fa96ecf5c2b5ad1458d64e01f39428e171",
     "957e902936a70614c14515606e73f981754db803a8041408865fa30ed0266957",
-    "b274bdec3004aa98d968685df1c8dc3648eef53ad7b651d20f9f45cd4580372a",
     "95e38d06a39e2a9b1f849e8cb26ae3261929b3805da2a73663e0de18b59c8d1d"
   ],
   "src/game/play/raceCustom.ts": [
@@ -692,16 +693,19 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/three/city.ts": [
     "f81e49558a350f1975c90e33da0f956e83d8bc57bb1291ae85d44b214f32f8df",
-    "ce12e8c67bd8e0ece77212415facfa2468fc5404a05701d9c743ddc877ccfe6c"
+    "ce12e8c67bd8e0ece77212415facfa2468fc5404a05701d9c743ddc877ccfe6c",
+    "e0bc5f6b3aeef13568f57cc600643c6b97a5c329589d050eb2d81fab199ba31d"
   ],
   "src/game/three/citypeople.ts": [
     "6e42bc38b958c308de5c67dc663db25afba002b4ed2cb24b59292da67b34c6ee",
-    "9aa32ad02cd425cc3b4a00eeea9ae1a21d35ac5142fae90c5b2c1da118517778"
+    "9aa32ad02cd425cc3b4a00eeea9ae1a21d35ac5142fae90c5b2c1da118517778",
+    "e3411c230fe3afdb7e7fe312a3707eca9a3858a1b98312439d8d8a785ae94745"
   ],
   "src/game/three/citytraffic.ts": [
     "a1c64e0c58cd2a3975747dfd84bc554249b3b54f4b00568e1216f58b35946a76",
     "78f1ec87615b536a1e215a87ae7d53b867177f856f9a5633027777c0d9587f32",
-    "22f70211b7897386f45827c28fd2763b0a95e67d70fb62000de18163fd278e45"
+    "22f70211b7897386f45827c28fd2763b0a95e67d70fb62000de18163fd278e45",
+    "c4bf75fa8790755061b51a7b9a2db56463246a557108463a3e1eea633ed1bfc8"
   ],
   "src/game/three/collision.ts": [
     "17d7db8f5f5aee65d637043365d0b94e67e4f7bdcd9f92da616b77928fdd3866",
@@ -808,7 +812,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "952c80ee927308f832f6cee85e6aa3598cdf671475be3275631d237c66c22728",
     "8d7336891cc7fcc5116800d769c44c3ddc4cf4310bcb03c02a5113785c5e47bd",
     "b37a78903ecf9dbfd2b8eca5f5578c82476a29143ba3bf9c92cb34cdb9fdba80",
-    "1fa05f6a3cf43e268f233225274c562729938b2952080a05f5c5dc23ef5fc8f8"
+    "1fa05f6a3cf43e268f233225274c562729938b2952080a05f5c5dc23ef5fc8f8",
+    "91dd603671d17b6e4f51206abe9811203b74e431d0a7f8f2ff41d7445285d3ef"
   ],
   "src/game/three/world.ts": [
     "b759efdbb75d4b37ad32b20ab87bd6cbb46ff106d34ba56567c8d8b73b2ace0f",

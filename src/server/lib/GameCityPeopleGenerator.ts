@@ -12,6 +12,7 @@
  */
 export const GAME_CITY_PEOPLE = String.raw`import * as THREE from 'three';
 import { CITY_KERB, CITY_ROAD_Y, CITY_ZEBRA, type City, type CityPlan } from './city';
+import { geometryTier, type GeometryTier } from './surfaces';
 
 /** What the walkers need from city traffic (createCityTraffic returns it): the lights and where the cars are. */
 export interface TrafficLike {
@@ -29,7 +30,15 @@ export interface CityPeopleOptions {
   /** Chance, at a corner, of crossing to the next block (default 0.35). */
   crossChance?: number;
   seed?: number;
+  /**
+   * 'light' (queue Q-2698: a device with no GPU or a weak phone): at most LIGHT_PEOPLE walkers, with plainer bodies and heads
+   * (6-sided, not 8; a 6 x 4 head, not 10 x 8). 'full': up to 150. Left out: geometryTier().
+   */
+  tier?: GeometryTier;
 }
+
+/** The most people a light-tier city walks, whatever count asked (a full-tier city keeps up to 150). */
+export const LIGHT_PEOPLE = 12;
 
 export type WalkerState = 'walk' | 'toCrossing' | 'wait' | 'cross' | 'leave';
 
@@ -141,16 +150,17 @@ export function crossingsAt(plan: CityPlan, i: number, j: number, sx: 1 | -1, sz
 export function createCityPeople(city: City, options: CityPeopleOptions = {}): CityPeople {
   const plan = city.plan;
   const rand = rngOf(options.seed ?? plan.seed + 303);
-  const count = Math.max(1, Math.min(150, Math.round(options.count ?? 30)));
+  const light = (options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier()) === 'light';
+  const count = Math.max(1, Math.min(light ? LIGHT_PEOPLE : 150, Math.round(options.count ?? 30)));
   const baseSpeed = Math.max(0.3, options.speed ?? 1.3);
   const crossChance = Math.min(1, Math.max(0, options.crossChance ?? 0.35));
   const traffic = options.traffic ?? null;
   const pave = CITY_ROAD_Y + CITY_KERB;
   const root = new THREE.Group();
   root.name = 'City people';
-  const bodyGeo = new THREE.CylinderGeometry(0.2, 0.24, 1.15, 8);
+  const bodyGeo = new THREE.CylinderGeometry(0.2, 0.24, 1.15, light ? 6 : 8);
   bodyGeo.translate(0, 0.78, 0);
-  const headGeo = new THREE.SphereGeometry(0.15, 10, 8);
+  const headGeo = light ? new THREE.SphereGeometry(0.15, 6, 4) : new THREE.SphereGeometry(0.15, 10, 8);
   headGeo.translate(0, 1.55, 0);
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
   const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 });

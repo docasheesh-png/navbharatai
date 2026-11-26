@@ -6481,3 +6481,10 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Class:** our checker's browser behaves unlike a person's browser, and the app is judged on it. The siblings #4553 never hunted were the playtest's phone context (it taps the canvas), journey pages, the sign-in context, and the Engineer AI shared CDP browser.
 - **Fix:** `NO_POINTER_LOCK_INIT` and `noPointerLockInstall()` in `sandboxBrowserScript.ts` are the one source, installed on every page or context opened by every browser that sends input. The CDP browser also runs it on the document that is already open, because its context outlives each action script. Visit-only browsers (PageRouteCheck, mobileLayoutCheck, assetBrowserProof) are listed with a reason: Chromium refuses pointer lock without user activation.
 - **Lock:** `tests/aPlaytestBrowserNeverLocksThePointer.test.ts` runs a source census and a generated-script census across 7 scripts. Proved by reversion: it failed when the journey install was removed, when the phone install was removed, when the old copied `clickExplorer.ts` was restored, and when a new browser file was added.
+
+### 2026-11-26 (same branch, #4562) — an admin's App Mart pin is invisible to users
+Admin, with a phone screenshot of App Mart's "Pinned by NavBharatAI" shelf: *"admin jis app ko pin kare users ko pata bhi nahi
+lage … user ko naturally woh app top par show ho"*. Root cause: the public lists already put pinned apps first, and then also
+sent `pinned` / `pinOrder` on every row, which NavAppStore drew as its own amber shelf. Now the order is the only trace: no pin
+field in `/api/nav-store/apps` or the web-apps list (Newest and For You keep pinned first), no shelf, the same tile as every
+app; the admin's Pin / Unpin is unchanged. Locked: `tests/anAdminPinIsInvisibleToUsers.test.ts` (reverted-and-failed).

@@ -465,9 +465,10 @@ export function registerNavStoreRoutes(app: Express): void {
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
       const pins = await getAppMartPins().catch(() => []);
       const rank = new Map<string, number>(pins.map((p, index) => [`${p.kind}:${p.id}`, index] as const));
-      const publicApps = filtered.map(toPublic).map((a) => ({
-        ...a, pinned: rank.has(`apk:${a.id}`), pinOrder: rank.get(`apk:${a.id}`) ?? null,
-      }));
+      // 📌 A PIN IS NEVER SAID TO THE PUBLIC (admin 2026-11-26: "admin jis app ko pin kare users ko pata bhi nahi lage … user ko
+      // naturally woh app top par show ho"). The ORDER carries it — a pinned app simply comes first — and no field of the
+      // public list says it was pinned (the admin's own Pin / Unpin reads /api/nav-store/admin/pins).
+      const publicApps = filtered.map(toPublic);
       publicApps.sort((a, b) => {
         const ar = rank.get(`apk:${a.id}`), br = rank.get(`apk:${b.id}`);
         return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
@@ -1130,7 +1131,7 @@ export function registerNavStoreRoutes(app: Express): void {
           const ar = webPinRank.get(`web:${a.row.id}`), br = webPinRank.get(`web:${b.row.id}`);
           return (ar === undefined ? 1 : 0) - (br === undefined ? 1 : 0)
             || (ar === undefined ? a.index - b.index : (ar - (br ?? 0)));
-        }).map(({ row }) => ({ ...row, pinned: webPinRank.has(`web:${row.id}`), pinOrder: webPinRank.get(`web:${row.id}`) ?? null }));
+        }).map(({ row }) => row);                                        // the order says it; no "pinned" field (see /api/nav-store/apps)
       visible = pinnedFirst(visible);
       // FOR YOU (admin 2026-10-14). `?sort=newest` or no `sort` = the list exactly as before (newest
       // first). `?sort=foryou&seed=…` = personalised + trending, seed-stable so paging never reshuffles.

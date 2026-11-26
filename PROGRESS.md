@@ -6431,3 +6431,7 @@ Honest scope: this PR builds what can be built and verified in the repo; the inf
 - **Sibling class fixed:** the paid/free tier was spelled out twice in `admin.ts` (build reports, All builds) and the apps list would have been a third copy → one `src/server/lib/identityTier.ts` (`tierOfIdentity`) used by all three.
 - **Tests:** `tests/adminAppsSortAndFilter.test.ts` (10; reversion-proven: the cursor rule and unknown≠failed fail when broken). Re-pointed guards in `everyBuiltAppHasAPreview`, `paidUserFilter`, `BuiltAppsPanel.render`.
 - Registry statuses (Banned / Held / Paused / Unpublished) keep their own list and ignore the other filters, with a note on screen.
+## 2026-11-26 — queue: close Q-3363 and Q-3380 (resolved by merged PRs)
+- Q-3363 (game proof pictures kept privately for 30 days, admin-only view) resolved by #4557, merged and live.
+- Q-3380 (every platform browser that sends input installs one shared no-pointer-lock stub) resolved by #4568, merged.
+- Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.

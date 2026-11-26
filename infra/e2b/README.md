@@ -43,6 +43,7 @@ here pins Node 22, so MODE A will run the same way in the sandbox.
 |------|---------|
 | `e2b.Dockerfile` | The DEFAULT sandbox image recipe (used by every v3.0 build): Node 22 (pinned) + git, netcat, python3, build tools + pre-warmed `create-vite` / `create-next-app` |
 | `e2b-android.Dockerfile` | A SEPARATE, on-demand template for the Android APK builder (JDK 17 + Android SDK + Bubblewrap CLI) — see "Android APK builder template" below |
+| `e2b-android-native.Dockerfile` | The **Native Cloud Build** worker (2026-11-25): Capacitor + Gradle + JDK 17/21 + Android SDK 35/36 + signing tools. Wired: `MOBILE_NATIVE_BUILD_TEMPLATE`. See `MOBILE_NATIVE_BUILD.md` |
 | `e2b-fullstack.Dockerfile` | A SEPARATE, on-demand POLYGLOT / MULTI-SERVICE template (AB-1 / AB-2): the default image PLUS JDK 17 + Maven, Go, MongoDB and Redis — see "Polyglot / multi-service builder template" below |
 | `build.mjs` | **Build system v2** script — builds ANY template (env-var selected) via `fromDockerfile()` + `Template.build()`. Defaults to the original `e2b.Dockerfile` behavior unchanged. |
 | `package.json` | Declares the `e2b` SDK dependency for `build.mjs` |

@@ -34,6 +34,12 @@ export interface DurableRateResult {
   allowed: boolean;
   used: number;
   limit: number;
+  /**
+   * Set only when the store did not answer and the result is the fail-open default. A caller that must not treat
+   * "the store is down" as "the count is zero" (the online Royale daily cap, Q-3392) reads this to fall back to
+   * its own bound instead.
+   */
+  unavailable?: true;
 }
 
 /**
@@ -66,8 +72,29 @@ export async function consumeWithStore(store: RateCounterStore, limit: number): 
     const used = await store.incrementAndRead();
     return { allowed: decideAfterIncrement(used, limit), used, limit };
   } catch {
-    return { allowed: true, used: 0, limit }; // fail-open — never block on an infra hiccup
+    return { allowed: true, used: 0, limit, unavailable: true }; // fail-open — never block on an infra hiccup
   }
+}
+
+/**
+ * The Firestore counter behind every durable window: one document per (name, key, window) in `rate_limits_v1`, an
+ * atomic `increment(1)` and a read of the result. Shared by `consumeDurableRate` and any caller that needs the
+ * same counter with its own handling of an unavailable store (the online Royale daily cap). Each write carries
+ * `expireAt` (a day after the window ends) for the TTL policy on `rate_limits_v1.expireAt`.
+ */
+export function firestoreRateCounter(db: unknown, name: string, key: string, windowMs: number, now: number): RateCounterStore {
+  const ref = doc(db, COLLECTION, windowKey(name, key, now, windowMs));
+  return {
+    async incrementAndRead() {
+      await setDoc(ref, {
+        name, key, windowMs, updatedAt: now,
+        count: admin.firestore.FieldValue.increment(1),
+        expireAt: admin.firestore.Timestamp.fromDate(windowExpiry(now, windowMs)),
+      }, { merge: true });
+      const snap = await getDoc(ref);
+      return Number(snap.data()?.count || 0);
+    },
+  };
 }
 
 /**
@@ -90,16 +117,5 @@ export async function consumeDurableRate(
   if (process.env.VITEST || !name || !key || !(limit > 0)) return { allowed: true, used: 0, limit };
   const db = getDb() as any;
   if (!db) return { allowed: true, used: 0, limit };
-  const ref = doc(db, COLLECTION, windowKey(name, key, now, windowMs));
-  return consumeWithStore({
-    async incrementAndRead() {
-      await setDoc(ref, {
-        name, key, windowMs, updatedAt: now,
-        count: admin.firestore.FieldValue.increment(1),
-        expireAt: admin.firestore.Timestamp.fromDate(windowExpiry(now, windowMs)),
-      }, { merge: true });
-      const snap = await getDoc(ref);
-      return Number(snap.data()?.count || 0);
-    },
-  }, limit);
+  return consumeWithStore(firestoreRateCounter(db, name, key, windowMs, now), limit);
 }

@@ -152,6 +152,8 @@ interface WebApp {
   safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
   /** PUBLIC, unlike the findings: a viewer has to be able to see that an app is 18+. */
   contentClass?: 'general' | 'adult';
+  /** Owner/admin views only: the automatic content check flagged it, so nobody else can open it until an admin lists it. */
+  heldForReview?: boolean;
   /** Who made it — a display name and a public creator code (never the account uid). */
   creatorName?: string;
   creatorId?: string;
@@ -624,6 +626,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         setPubResult({ ok: false, message: data?.error || 'Publishing failed — nothing was published.' });
+        return;
+      }
+      // HELD (the automatic content check flagged it): there is no link to share yet — nobody but the
+      // creator and an admin can open it until a person approves it. Say so plainly; no link is offered.
+      if (data.heldForReview) {
+        setPubResult({ ok: true, message: typeof data.heldNotice === 'string' && data.heldNotice
+          ? data.heldNotice
+          : 'Submitted. A person will review this app before anyone else can open it.' });
+        void loadWebMine();
         return;
       }
       const shareUrl = `${window.location.origin}${data.shareUrl}`;
@@ -1549,7 +1560,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                       {a.status === 'listed' ? <CheckCircle2 size={10} /> : a.status === 'unlisted' ? <Link2 size={10} /> : <X size={10} />}
                       {/* 'unlisted' is a REAL state, said honestly: the link works now; the store
                           listing needs a person's review — same discipline as the APK store. */}
-                      {a.status === 'listed' ? 'On the store' : a.status === 'unlisted' ? 'Live via link · store listing under review' : 'Removed'}
+                      {a.status === 'listed' ? 'On the store'
+                        : a.status === 'unlisted' && a.heldForReview ? 'Held for review · only you can open it'
+                        : a.status === 'unlisted' ? 'Live via link · store listing under review' : 'Removed'}
                     </span>
                   </div>
                   <p className="text-[11px] text-faint mt-1">{a.runs} run{a.runs === 1 ? '' : 's'} · {a.requiresPassword ? 'private (password)' : 'public'}</p>
@@ -1789,6 +1802,21 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                       {reviewStatusLabel(a.status)}
                     </span>
                   </div>
+                  {/* HELD FOR REVIEW (admin 2026-11-26) — the first thing on the card, in red: the automatic
+                      sexual/illegal content check fired, so nobody but the creator and an admin can open
+                      this app. The admin plays it ("Try it"), reads the matched text below, then decides. */}
+                  {a.heldForReview && (
+                    <div role="alert" className="mt-2 px-2.5 py-2 rounded-lg border-2 border-current text-danger">
+                      <p className="text-xs font-bold flex items-center gap-1.5">
+                        <ShieldAlert size={12} /> Held for your review: the automatic content check flagged this app
+                      </p>
+                      <p className="text-[11px] mt-1 leading-relaxed">
+                        Nobody except the creator can open it until you decide. The check matched the text shown below
+                        (file and the exact words). Press Try it to play the app, then press List on the store to approve
+                        it, or Remove to reject it.
+                      </p>
+                    </div>
+                  )}
                   <p className="text-xs text-muted mt-0.5">{a.description || '—'}</p>
                   {/* WHAT THE SCAN SAW — shown BEFORE the List button, deliberately. A reviewer who
                       has already decided is not going to scroll back for a warning. The matched text

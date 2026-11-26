@@ -15,7 +15,7 @@ function runtime(include?:string[]) {
   if(cache.has(name))return cache.get(name);
   const source=generated.files[name];if(!source)throw Error('Missing module '+name);
   const out:any={};cache.set(name,out);
-  new Function('exports','require',ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText)(out,(id:string)=>id.startsWith('.')?load(path.posix.normalize(path.posix.join(path.posix.dirname(name),id))+'.ts'):load(id));
+  new Function('exports','require',ts.transpileModule(source.replace(/import\.meta\.glob\(/g,'((..._glob: unknown[]) => ({}))('),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText)(out,(id:string)=>id.startsWith('.')?load(path.posix.normalize(path.posix.join(path.posix.dirname(name),id))+'.ts'):load(id));
   return out;
  };
  return load('src/game/athree/requestedWorld.ts');

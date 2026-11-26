@@ -88,7 +88,8 @@ export async function resolveTarget(k: AppKey): Promise<SocialTarget | null> {
   try {
     if (k.kind === 'web') {
       const a = await getWebApp(k.id);
-      return a ? { ownerUid: a.uid, name: a.name, live: a.status !== 'removed' } : null;
+      // A HELD app (admin 2026-11-26) is not on the store for anyone else, so nobody can react to it.
+      return a ? { ownerUid: a.uid, name: a.name, live: a.status !== 'removed' && !a.heldForReview } : null;
     }
     const a = await getApp(k.id);
     return a ? { ownerUid: a.uid, name: a.appName, live: a.status === 'approved' } : null;

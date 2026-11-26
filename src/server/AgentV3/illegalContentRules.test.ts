@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { classifyPublishedText, illegalRefusal, ILLEGAL_RULES, SCAN_TEXT_CAP } from './illegalContentRules';
+import { classifyPublishedFiles, classifyPublishedText, EXCERPT_CHARS, ILLEGAL_RULES, MAX_EVIDENCE, SCAN_TEXT_CAP } from './illegalContentRules';
 
 const cls = (text: string) => classifyPublishedText(text).contentClass;
 const ids = (text: string) => classifyPublishedText(text).findings.map((f) => f.id);
@@ -94,20 +94,21 @@ describe('the adult tier — lawful, and governed by the 18+ switch rather than 
   });
 });
 
-describe('🔒 no matched text ever leaves this module', () => {
-  it('a finding carries an id and a description — never the sentence it matched', () => {
-    const f = classifyPublishedText('underage porn gallery').findings[0];
+describe('what a finding carries (admin 2026-11-26: the admin sees exactly what the check saw)', () => {
+  it('a finding names the rule AND the short phrase that paired, with its file — for the admin only', () => {
+    const r = classifyPublishedFiles([['src/App.tsx', '<h1>underage porn gallery</h1>']]);
+    const f = r.findings[0];
     expect(f.id).toBe('CSAM_SIGNAL');
-    expect(Object.keys(f).sort()).toEqual(['contentClass', 'description', 'id']);
-    expect(JSON.stringify(f)).not.toContain('underage');
+    expect(f.evidence?.[0]).toEqual({ file: 'src/App.tsx', excerpt: '<h1>underage porn gallery</h1>' });
   });
 
-  it('and neither does the refusal the creator reads', () => {
-    const msg = illegalRefusal(classifyPublishedText('MDMA in stock — discreet shipping').findings[0]);
-    expect(msg).not.toContain('MDMA');
-    expect(msg.toLowerCase()).toContain('not published');
-    // A refusal with no way back is how an honest creator gets silently lost.
-    expect(msg).toContain('Grievance');
+  it('the evidence is bounded: a few short excerpts, never a transcript', () => {
+    const line = `${'filler words here '.repeat(40)}underage porn gallery${' more filler text'.repeat(40)}`;
+    const files: Array<[string, string]> = Array.from({ length: 10 }, (_, i) => [`p${i}.html`, line]);
+    const f = classifyPublishedFiles(files).findings[0];
+    expect(f.evidence!.length).toBeLessThanOrEqual(MAX_EVIDENCE);
+    for (const e of f.evidence!) expect(e.excerpt.length).toBeLessThanOrEqual(EXCERPT_CHARS);
+    expect(f.evidence![0].excerpt).toContain('underage porn gallery');
   });
 });
 

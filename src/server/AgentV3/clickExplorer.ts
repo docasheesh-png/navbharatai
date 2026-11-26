@@ -895,6 +895,9 @@ function pickSearchWord(items) {
 async function freshPage(browser) {
   // Reduced motion (the one definition every lane uses — signInExplore.ts), plus the saved session.
   const page = await browser.newPage(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState ? { storageState: cfg.storageState } : {}));
+  // No pointer lock under automation (Q-3380): a click on a game canvas would lock the pointer and flood this
+  // headless page with synthetic input, starving the game's frames. The game keeps the mouse free instead.
+  await page.addInitScript(() => { try { Element.prototype.requestPointerLock = function () { return Promise.resolve(); }; } catch (_e) { /* read-only */ } });
   // Remember every element the app gives a click-type listener, before any of its code runs, so collect()
   // can find a div that acts as a button. A WeakSet, not an attribute: the app's DOM is not touched.
   await page.addInitScript(() => {

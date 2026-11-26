@@ -99,6 +99,15 @@ export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant
 function touchDevice(): boolean {
   try { return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches; } catch { return false; }
 }
+/**
+ * A browser driven by automation (navigator.webdriver: the build's playtest, explorer and screenshot browsers), where no
+ * person holds the mouse. Pointer lock there floods the page with synthetic input: measured on the open-world starter in the
+ * build sandbox's headless Chromium (queue Q-2698), 36,000 input messages a second and 4–6 frames a second with the lock,
+ * 14–16 without it, same scene. A person's own browser never sets the flag, so their mouse is captured exactly as before.
+ */
+function automatedBrowser(): boolean {
+  try { return typeof navigator !== 'undefined' && (navigator as Navigator & { webdriver?: boolean }).webdriver === true; } catch { return false; }
+}
 
 export interface GameOptions {
   /** Additional world-space NPC/remote bodies that must block door swings. */
@@ -1179,7 +1188,7 @@ export class Game {
 
   /** Desktop mouse-look: capture the pointer on a click during play (a phone has no pointer to capture). */
   private capturePointer(): void {
-    if (this.options.pointerLock === false || touchDevice()) return;
+    if (this.options.pointerLock === false || touchDevice() || automatedBrowser()) return;
     const c = this.canvas as HTMLCanvasElement & { requestPointerLock?: () => unknown };
     try { const r = c.requestPointerLock?.(); if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined); } catch { /* refused: the mouse still looks, just not captured */ }
   }

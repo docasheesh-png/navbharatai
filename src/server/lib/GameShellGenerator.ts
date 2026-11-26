@@ -509,7 +509,7 @@ export class Game {
     if (options.touchControls !== false) {
       // The player's own layout (Settings → Edit controls) is saved per game, under the same id as its leaderboard.
       // A gun in the hand: the Attack button is the Fire button (the layout stays the kit's own).
-      const buttons = this.handGun && this.touchLayoutIsOurs ? DEFAULT_TOUCH_BUTTONS.map((b) => (b.action === 'attack' ? { ...b, label: 'Fire' } : b)) : undefined;
+      const buttons = this.handGun && this.touchLayoutIsOurs ? [...DEFAULT_TOUCH_BUTTONS.map((b) => (b.action === 'attack' ? { ...b, label: 'Fire' } : b)), { action: 'zoom', label: 'Zoom' }] : undefined;
       const touch = new TouchControls(options.container, this.input, { gameId: options.gameId, ...touchOptions, ...(buttons ? { buttons } : {}) });
       this.touch = touch;
       this.disposers.push(() => touch.dispose());
@@ -881,6 +881,7 @@ export class Game {
         try { this.asGame(() => fn(delta)); } catch (error) { this.stepHooks.delete(fn); console.error('[game] a step hook failed and was stopped', error); }
       }
       this.fireHandGun(delta);
+      this.zoomScope();
       this.poseActionButtons();
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
@@ -1001,6 +1002,46 @@ export class Game {
     if (a.hit) events.emit('SHOT_HIT', { object: a.hit, point: { x: a.point.x, y: a.point.y, z: a.point.z }, damage: g.damage, byPlayer: true });
   }
 
+  /** The scope's steps (admin 2026-11-26: "zoom button 2x, 4x, 8x"): each Zoom press goes to the next, then back to 1x. */
+  static readonly ZOOM_STEPS: readonly number[] = [1, 2, 4, 8];
+  private zoomLevel = 0;
+  private baseFov = 0;
+
+  /**
+   * 🔭 THE HELD GUN'S SCOPE. With a gun in the hand (handGunFor) the Zoom button (Z on a keyboard) steps the view 1x → 2x →
+   * 4x → 8x → 1x by narrowing the camera's field of view, so a shot lands where the crosshair is at any distance (ctx.aim
+   * reads the same camera). Back to 1x in a seat, outside play, or with no gun. A game that reads 'zoom' itself keeps its own.
+   */
+  private zoomScope(): void {
+    const cam = this.rig.camera;
+    if (!this.baseFov) this.baseFov = cam.fov;
+    const usable = !!this.handGun && !this.seated && state.status === 'playing' && !this.gameReadActions.has('zoom');
+    let level = usable ? this.zoomLevel : 0;
+    if (usable && this.input.wasPressed('zoom')) level = (level + 1) % Game.ZOOM_STEPS.length;
+    if (level === this.zoomLevel && cam.fov === this.baseFov / Game.ZOOM_STEPS[level]) return;
+    this.zoomLevel = level;
+    cam.fov = this.baseFov / Game.ZOOM_STEPS[level];
+    cam.updateProjectionMatrix();
+  }
+
+  /** The scope's zoom now (1, 2, 4 or 8). */
+  get zoom(): number { return Game.ZOOM_STEPS[this.zoomLevel]; }
+
+  /** Kit damage of one bare-fist punch, and how far it reaches (metres). */
+  static readonly PUNCH = { damage: 10, range: 1.6 };
+
+  /**
+   * A punch is a blow, not only a pose (admin 2026-11-26: "hero ke punch se kuch nahi hota"): PLAYER_PUNCHED names where
+   * the fist is and which way it goes, and every character (systems/entities.ts) and a hittable crowd takes it. Not when
+   * the game reads its own attack (it has its own fight), nor from a seat, nor outside play.
+   */
+  private landPunch(): void {
+    if (this.seated || state.status !== 'playing' || this.gameReadActions.has('attack')) return;
+    const p = this.player.object.position;
+    const yaw = this.hero?.root.rotation.y ?? this.player.object.rotation.y;
+    events.emit('PLAYER_PUNCHED', { position: { x: p.x, y: p.y, z: p.z }, yaw, damage: Game.PUNCH.damage, range: Game.PUNCH.range });
+  }
+
   /**
    * Every action button the player pressed this step plays its pose (actionPoses). Runs AFTER the game's update, so
    * an 'auto' attack knows whether that press fired a gun (recoil), swung a sword (sweep) or neither (a punch).
@@ -1011,7 +1052,7 @@ export class Game {
       if (!pose || !this.input.wasPressed(action)) continue;
       if (pose !== 'auto') { this.heroAct(pose); continue; }
       // The event already posed a shot or a swing this step; only a press that did neither is a punch.
-      if (!this.firedThisStep && !this.swungThisStep) this.heroAct('punch');
+      if (!this.firedThisStep && !this.swungThisStep) { this.heroAct('punch'); this.landPunch(); }
     }
     this.firedThisStep = false;
     this.swungThisStep = false;

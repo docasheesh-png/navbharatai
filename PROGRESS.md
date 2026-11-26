@@ -6358,3 +6358,12 @@ The admin reported: "jab user kahta hai yeh enemy bana, aur hero par enemy attac
 - Q-3503 Every open world has an edge (WORLD.boundary): a wall past the farthest place, holding player and car.
 - Q-3504 A Game Library pick inserts a mention at the cursor; the build reads it into the exact model.
 - KIT_CONTRACT_BUDGET 13_000 → 13_100 for ctx.setRespawn.
+
+## 2026-11-26 — PR B of the admin's 18-point game list: enemies in one step, a punch that lands, solid/hittable crowds, run-over, scope
+
+Stacked on PR A (claude/game-play-fixes-a). Queue Q-3505..Q-3508.
+- #4 enemies: GameEnemiesFeature.ts — the platform writes src/game/features/enemies.ts from the request and lists it (first open-world build via the seed; later turns via growthTurn.addEnemiesAtTurnStart). Root: the kit had every part of an enemy and nothing put them in a game; each request asked a model to assemble them by hand. The written file is compiled against the real kit in tests/enemiesComeWhenAsked.test.ts.
+- #1 punch + crowd: the shell's punch emits PLAYER_PUNCHED; Entities hurt the first character in reach; city people gain solid/hittable (WORLD.citizens, only when asked).
+- #18 run-over: WORLD.runOver (off by default) → VEHICLE_STRUCK.
+- #14 scope: with a held gun, a Zoom button (Z) steps 1x/2x/4x/8x.
+Remaining from the list: PR C (#2 enterable buildings, #7/8/11 vehicle ground census, #17 variety, #9 cinematic camera) and PR D (#10 multiplayer on the user's backend, #20 real-3D tier).

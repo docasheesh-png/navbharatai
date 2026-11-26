@@ -60,7 +60,7 @@ import { largeWorldIntent } from './largeWorldIntent';
 import { MAX_PLACES, OLD_MAX_PLACES } from './worldGrow';
 import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { GAME_STARTERS } from '../lib/gameStarters';
-import { wantsSwimming } from '../lib/GameOpenWorldGenerator';
+import { wantsSwimming, citizensWanted, runOverWanted } from '../lib/GameOpenWorldGenerator';
 import { athreeMapIntent, mapProfileFor } from '../lib/athreeMap/athreeMapIntent';
 import { findGameTitles, namesGameTitleOfKind, namesGtaTitle } from '../lib/wellKnownGameTitles';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
@@ -308,7 +308,14 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   // Enemies the request asks for go in with the first build (GameEnemiesFeature.ts), not in a later "enemy banao" turn.
   if (recipe === 'generate_open_world') {
     const enemies = enemyRequestFrom(request);
-    return { mount: true, city: openWorldWantsCity(request), ...(wantsSwimming(request) ? { swim: true } : {}), ...(enemies ? { enemies } : {}) };
+    const citizens = citizensWanted(request);
+    return {
+      mount: true, city: openWorldWantsCity(request),
+      ...(wantsSwimming(request) ? { swim: true } : {}),
+      ...(enemies ? { enemies } : {}),
+      ...(citizens.solid || citizens.hittable ? { citizens } : {}),
+      ...(runOverWanted(request) ? { runOver: true } : {}),
+    };
   }
   // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
   // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers

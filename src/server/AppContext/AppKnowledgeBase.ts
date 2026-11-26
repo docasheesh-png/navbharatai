@@ -899,6 +899,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['fire button', 'gun fire', 'goli chalao', 'bandook', 'pistol', 'rifle', 'punch instead of fire', 'gun hai par punch', 'crosshair', 'map boundary', 'map ka kinara', 'map ke bahar gir gaya', 'zameen khatam', 'boundary', 'deewar', 'pani me doob', 'drown', 'tairna', 'swim', 'restart', 'restart kaam nahi karta', 'character atak gaya', 'game library', 'library id', 'input box mit gaya', 'character choose', '@model'],
   },
   {
+    id: 'game_enemies_and_crowd',
+    name: 'Enemies on request, a punch that lands, solid city people, run-over and a gun scope',
+    path: 'NavBharatAI Pro → chat → ask for it in an open-world 3D game (first build or any later message)',
+    description: 'Asking for enemies ("10 zombie banao", "gun wale villain", "dushman chaaron taraf se ghere", "mushkil wale") puts them in the game at once: they appear around the hero on the ground, chase and hit, fall when killed, and come back in waves; later changes ("15 karo", "waves band karo") change their numbers. The Attack button without a gun is a real punch that hurts a character in reach. City people are scenery by default; on request they are solid (the hero cannot walk through them) and can be knocked down by a punch, a shot or a car, then get up and walk on. A car hurting what it hits is off by default and on when asked. Holding a gun adds a Zoom button (Z key) that steps 2x, 4x, 8x and back.',
+    howToUse: 'In an open-world game say "enemy banao" (with a number, a type or a difficulty if you like), "city ke log solid hon aur punch se gire", "gaadi ki takkar se log mare", or give the hero a gun and tap Zoom.',
+    relatedFeatures: ['game_play_basics'],
+    keywords: ['enemy', 'enemies', 'enemy banao', 'enemy nahi aa rahe', 'dushman', 'villain', 'villen', 'bot', 'zombie', 'gunde', 'waves', 'punch', 'punch se kuch nahi hota', 'log solid', 'aar paar', 'citizens', 'people solid', 'log gire', 'takkar', 'run over', 'gaadi se kuchal', 'zoom', 'scope', '2x', '4x', '8x', 'sniper zoom'],
+  },
+  {
     id: 'game_2d_kit',
     name: '2D games that feel right — platformers, side-scrollers, runners',
     path: 'NavBharatAI Pro → chat → ask for any 2D game with movement (for example "Mario jaisa platformer banao", "2D runner game", "side scrolling shooter")',

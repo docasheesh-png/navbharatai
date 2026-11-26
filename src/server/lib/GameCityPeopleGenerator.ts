@@ -35,12 +35,24 @@ export interface CityPeopleOptions {
    * (6-sided, not 8; a 6 x 4 head, not 10 x 8). 'full': up to 150. Left out: geometryTier().
    */
   tier?: GeometryTier;
+  /**
+   * The player cannot walk through people (pushOut keeps it a shoulder's width away). Default false: the crowd is scenery
+   * unless the user asked for it to be solid ("log solid hon", "hero log ke aar paar na jaye").
+   */
+  solid?: boolean;
+  /** A punch, a shot or a car knocks a person down (hitAt); they get up and walk on after DOWN_SECONDS. Default false. */
+  hittable?: boolean;
 }
+
+/** How long a knocked-down person lies before getting up, seconds. */
+export const DOWN_SECONDS = 6;
+/** How far the player is kept from a person's centre when the crowd is solid, metres. */
+export const PERSON_RADIUS = 0.45;
 
 /** The most people a light-tier city walks, whatever count asked (a full-tier city keeps up to 150). */
 export const LIGHT_PEOPLE = 12;
 
-export type WalkerState = 'walk' | 'toCrossing' | 'wait' | 'cross' | 'leave';
+export type WalkerState = 'walk' | 'toCrossing' | 'wait' | 'cross' | 'leave' | 'down';
 
 export interface Crossing {
   /** The near and far kerb on the zebra: a walker waits at a, crosses only the road, and steps off at b. */
@@ -61,6 +73,9 @@ export interface Walker {
   x: number; z: number; heading: number;
   crossing: Crossing | null;
   waited: number;
+  /** Seconds left lying down after a hit (state 'down'); the state to go back to when up. */
+  downFor?: number;
+  upTo?: WalkerState;
   /** A stand-in body at the walker's feet — pass these to traffic.update so cars stop for people. */
   body: THREE.Object3D;
 }
@@ -71,6 +86,16 @@ export interface CityPeople {
   bodies: THREE.Object3D[];
   /** Advance. avoid: what people must not walk into (the player). */
   update(dt: number, avoid?: THREE.Object3D[]): void;
+  /**
+   * Knock down every person within radius of a point in the SCENE's frame (a punch, a shot, a car). Returns how many fell.
+   * Does nothing unless the crowd is hittable.
+   */
+  hitAt(point: { x: number; y: number; z: number }, radius?: number): number;
+  /**
+   * Keep a position (the scene's frame, e.g. the player's) out of every standing person; moves it in place and says whether
+   * it moved. Does nothing unless the crowd is solid.
+   */
+  pushOut(position: THREE.Vector3, radius?: number): boolean;
   dispose(): void;
 }
 
@@ -182,14 +207,18 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   }
   root.add(bodies, heads);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
+  const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  const solid = options.solid === true, hittable = options.hittable === true;
+  const local = new THREE.Vector3();
   let clock = 0;
 
   const draw = () => {
     walkers.forEach((w, k) => {
       const moving = w.state === 'walk' || w.state === 'toCrossing' || w.state === 'cross' || w.state === 'leave';
       const bob = moving ? Math.abs(Math.sin(clock * 7 + k)) * 0.04 : 0;
-      const y = (w.state === 'cross' ? CITY_ROAD_Y : pave) + bob;
+      const y = (w.state === 'cross' || (w.state === 'down' && w.upTo === 'cross') ? CITY_ROAD_Y : pave) + bob;
       q.setFromAxisAngle(up, w.heading);
+      if (w.state === 'down') q.multiply(lying);           // flat on the ground, along the way they faced
       m.compose(at.set(w.x, y, w.z), q, one);
       bodies.setMatrixAt(k, m); heads.setMatrixAt(k, m);
       w.body.position.set(w.x, y, w.z);
@@ -244,6 +273,16 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       clock += dt;
       for (const w of walkers) {
         const step = w.speed * dt;
+        if (w.state === 'down') {
+          w.downFor = (w.downFor ?? 0) - dt;
+          if (w.downFor <= 0) {
+            // Hit mid-road: finish crossing. On the pavement: walk on.
+            const next: WalkerState = w.upTo === 'cross' && w.crossing ? 'cross' : 'leave';
+            w.state = next; w.downFor = 0;
+            if (next === 'leave') w.s = loopPosition(plan, w.block[0], w.block[1], w.x, w.z);
+          }
+          continue;
+        }
         if (w.state === 'walk') {
           const L = pavementLoop(plan, w.block[0], w.block[1]);
           const next = pointOnLoop(plan, w.block[0], w.block[1], w.s + w.dir * Math.min(step, 0.5));
@@ -294,6 +333,33 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
         }
       }
       draw();
+    },
+    hitAt: (point, radius = 0.9) => {
+      if (!hittable) return 0;
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      local.set(point.x, point.y, point.z).applyMatrix4(toCity);
+      let fell = 0;
+      for (const w of walkers) {
+        if (w.state === 'down' || Math.hypot(w.x - local.x, w.z - local.z) > radius + PERSON_RADIUS) continue;
+        w.upTo = w.state; w.state = 'down'; w.downFor = DOWN_SECONDS; fell++;
+      }
+      if (fell) draw();
+      return fell;
+    },
+    pushOut: (position, radius = PERSON_RADIUS) => {
+      if (!solid) return false;
+      root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
+      local.copy(position).applyMatrix4(toCity);
+      let moved = false;
+      for (const w of walkers) {
+        if (w.state === 'down') continue;
+        const dx = local.x - w.x, dz = local.z - w.z, d = Math.hypot(dx, dz), min = radius + PERSON_RADIUS;
+        if (d >= min) continue;
+        const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
+        local.x = w.x + nx * min; local.z = w.z + nz * min; moved = true;
+      }
+      if (moved) position.copy(local.applyMatrix4(root.matrixWorld));
+      return moved;
     },
     dispose: () => {
       root.removeFromParent();

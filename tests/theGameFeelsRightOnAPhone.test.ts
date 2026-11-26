@@ -243,6 +243,48 @@ describe('🔁 restart brings the player back to the start, and 🔫 a held gun 
     game.dispose();
   });
 
+  it('without a gun the Attack press is a punch that LANDS (PLAYER_PUNCHED); with a gun it is a shot, not a punch', () => {
+    const punches: any[] = [];
+    const off = EV.events.on('PLAYER_PUNCHED', (p: any) => punches.push(p));
+    const bare = new SHELL.Game({ container: new FakeEl('div'), setup: () => [] });
+    bare.start();
+    bare.input.setVirtualButton('attack', true);
+    bare.loop.step(1);
+    expect(punches).toHaveLength(1);
+    expect(punches[0]).toMatchObject({ damage: SHELL.Game.PUNCH.damage, range: SHELL.Game.PUNCH.range });
+    bare.dispose();
+    const armed = new SHELL.Game({ container: new FakeEl('div'), player: { holds: { right: 'pistol' } }, setup: () => [] });
+    armed.start();
+    armed.input.setVirtualButton('attack', true);
+    armed.loop.step(1);
+    expect(punches).toHaveLength(1);
+    off();
+    armed.dispose();
+  });
+
+  it('holding a gun: a Zoom button steps the scope 1x → 2x → 4x → 8x → 1x; without a gun there is no zoom', () => {
+    const container = new FakeEl('div');
+    const game = new SHELL.Game({ container, player: { holds: { right: 'sniper rifle' } }, setup: () => [] });
+    expect(textsOf(container)).toContain('Zoom');
+    game.start();
+    game.loop.step(1);
+    const base = game.rig.camera.fov;
+    const seen: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      game.input.setVirtualButton('zoom', true); game.loop.step(1);
+      game.input.setVirtualButton('zoom', false); game.loop.step(1);
+      seen.push(game.zoom);
+      expect(game.rig.camera.fov).toBeCloseTo(base / game.zoom, 6);
+    }
+    expect(seen).toEqual([2, 4, 8, 1]);
+    game.dispose();
+    const bare = new SHELL.Game({ container: new FakeEl('div'), setup: () => [] });
+    bare.start();
+    bare.input.setVirtualButton('zoom', true); bare.loop.step(1);
+    expect(bare.zoom).toBe(1);
+    bare.dispose();
+  });
+
   it('without a gun nothing fires and the button stays Attack', () => {
     const container = new FakeEl('div');
     const game = new SHELL.Game({ container, setup: () => [] });

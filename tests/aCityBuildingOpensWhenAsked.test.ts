@@ -81,3 +81,12 @@ describe('#2 only when the user asks', () => {
     expect(GAME_OPEN_WORLD_BRIDGE).toMatch(/if \(openBuildings && !seated\)[\s\S]{0,300}t\.city\.openLot\(lot\)/);
   });
 });
+
+describe('#2 the reader never fires on words about the map', () => {
+  it('failedbr #2485\'s own request ("open-world", "khule maidan", "buildings") does not ask to go inside', () => {
+    const R = 'ek bada open-world 3D game banao jisme PUBG, GTA aur racing game teeno ka mazaa ho.\n\n- Bahut bada map ho: shehar ki sadkein, buildings, traffic wali gaadiyan aur footpath par chalte log, shehar ke bahar khule maidan aur pahad.';
+    expect(openBuildingsWanted(R)).toBe(false);
+    expect(openBuildingsWanted('building ka darwaza khule aur andar ja sake')).toBe(true);
+    expect(openBuildingsWanted('open the door of the house')).toBe(true);
+  });
+});

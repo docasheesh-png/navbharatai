@@ -2074,7 +2074,8 @@ export function citizensWanted(prompt: string | null | undefined): { solid?: tru
 export function openBuildingsWanted(prompt: string | null | undefined): boolean {
   const t = String(prompt ?? '');
   const building = /\b(?:ghar|gharon|ghaar|house|houses|building|buildings|imarat|dukaan|dukan|shop|shops|makaan|makan|office)\b|घर|बिल्डिंग|दुकान|मकान/i;
-  const inside = /\b(?:andar|ander|enter\w*|inside|go\s+in|get\s+in|walk\s+in|khul\w*|open\w*|door\s+khule|darwaza)\b|अंदर|दरवाज/i;
+  // Words for going IN — never a bare "open" or "khule" ("open-world", "khule maidan" are about the map, failedbr #2485).
+  const inside = /\b(?:andar|ander|enter|enters|entering|enterable|inside|go\s+in|get\s+in|walk\s+in|(?:door|darwaza|darwaaza|gate)\s+(?:khule|khulna|khul\s+jaye|open\w*)|(?:open|khol)\w*\s+(?:the\s+)?(?:door|darwaza|darwaaza))\b|अंदर|दरवाज/i;
   if (!building.test(t) || !inside.test(t)) return false;
   return !/\b(?:andar|ander|enter\w*|inside)\b[^.!?\n]{0,16}\b(?:nahi|nahin|mat|no|not)\b|\b(?:no|not|don'?t|mat|nahi)\b[^.!?\n]{0,12}\b(?:andar|enter|inside)\b/i.test(t);
 }

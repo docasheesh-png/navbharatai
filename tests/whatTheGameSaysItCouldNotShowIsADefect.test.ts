@@ -4,12 +4,13 @@
  * was called done while the user's ask was not on screen.
  *
  * Class: the game reports that what the code asked for could not be shown, and nobody reads it. Now the playtest records those
- * sentences, they become GAME_DEFECT_NOT_SHOWN (a hard defect, so the repair runs and the build is not called finished).
+ * sentences as GAME_DEFECT_NOT_SHOWN, and the completion gate refuses to call the build finished (release gate RED).
+ * It is NOT a hard (unplayable) defect: the game still plays, and that set drives the "Go back" offer.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { KIT_NOT_SHOWN, playtestDefects, gamePlaytestScript } from '../src/server/AgentV3/gamePlaytest';
-import { HARD_DEFECTS, gameRepairPrompt } from '../src/server/AgentV3/gameRepair';
+import { HARD_DEFECTS, gameRepairPrompt, gameIncompleteReason } from '../src/server/AgentV3/gameRepair';
 
 /** The exact sentences the kit writes (GamePlayerBodyGenerator / GameRaceCustomGenerator). */
 const SAID = {
@@ -35,11 +36,12 @@ describe('the kit sentence for "not on screen" is recognised', () => {
   });
 });
 
-describe('it becomes a hard defect the repair is told how to fix', () => {
+describe('it blocks completion, and the repair hint names the fix', () => {
   it('BR #2535 run → GAME_DEFECT_NOT_SHOWN with the game\'s own words', () => {
     const defects = playtestDefects({ ok: true, notShown: [SAID.holdMissing] } as never, null);
     expect(defects).toContainEqual({ code: 'GAME_DEFECT_NOT_SHOWN', evidence: SAID.holdMissing });
-    expect(HARD_DEFECTS.has('GAME_DEFECT_NOT_SHOWN')).toBe(true);
+    expect(HARD_DEFECTS.has('GAME_DEFECT_NOT_SHOWN')).toBe(false); // the game still plays — not "unplayable"
+    expect(gameIncompleteReason(defects, [], { played: true })).toMatch(/something the game was asked to show is not on screen — the game said: \[player\] The rifle/);
     const prompt = gameRepairPrompt('hero kr hath me ek badi gun banao', defects, []);
     expect(prompt).toMatch(/GAME_DEFECT_NOT_SHOWN: .*add_library_models/);
     expect(prompt).toMatch(/never claim it is shown/);

@@ -31,9 +31,6 @@ export function gameCompleteGateEnabled(env: NodeJS.ProcessEnv = process.env): b
 export const HARD_DEFECTS: ReadonlySet<GameDefectCode> = new Set([
   'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH', 'GAME_DEFECT_START_STUCK',
   'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_CAMERA_WRONG', 'GAME_DEFECT_VEHICLE_STALLED', 'GAME_DEFECT_MISSING_LAYER',
-  // BR #2535: what the user asked for (a gun in the hand, a library character, their own car) is not on screen — the game
-  // itself said so. A build whose requested thing did not appear is not a finished build.
-  'GAME_DEFECT_NOT_SHOWN',
 ]);
 
 /** Every measured defect the repair can address. */
@@ -151,5 +148,11 @@ export function gameIncompleteReason(defects: readonly GameDefect[], scopeMissin
   }
   if (fromCode.length) parts.push(`its code imports game-kit files that are not in the project (${fromCode.join(', ')})`);
   if (scopeMissing.length) parts.push(`features you asked for are missing (${scopeMissing.join(', ')})`);
+  // BR #2535: the game itself said something it was asked to show is not on screen (a gun not in the hand, a library
+  // character or a custom car it could not use). Not "unplayable" — the game still plays — but the ask was not met, so the
+  // build is not finished. Kept OUT of HARD_DEFECTS on purpose: that set means unplayable, and gameRegression's "Go back"
+  // offer reads it.
+  const notShown = defects.filter((d) => d.code === 'GAME_DEFECT_NOT_SHOWN').map((d) => d.evidence).filter(Boolean);
+  if (notShown.length) parts.push(`something the game was asked to show is not on screen — the game said: ${notShown.join(' · ').slice(0, 300)}`);
   return parts.length ? parts.join('; ') : null;
 }

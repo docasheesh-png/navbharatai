@@ -322,6 +322,8 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'zip_uploads', key: { field: 'uid' } },
   /** A spreadsheet they uploaded (`spreadsheetFileStore.ts:47` writes `uid`). */
   { collection: 'agentv3_sheet_files', key: { field: 'uid' } },
+  /** A game map they saved to their library (`mapLibraryStore.ts` writes `uid`): its plan, seed, name and top-down picture. */
+  { collection: 'user_saved_maps', key: { field: 'uid' } },
   /**
    * A share link of their app (`ShareStore.ts`, ShareRecord.ownerId).
    *

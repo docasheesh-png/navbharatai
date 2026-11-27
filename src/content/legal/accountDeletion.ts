@@ -97,6 +97,7 @@ When ownership is independently verified and your deletion request is completed,
   people get stuck. They are deleted after 30 days anyway; closing your account removes yours now;
 - your **professional pass**, if you had one, and which admin notices you had already read;
 - the **files you uploaded** — .zip archives and spreadsheets you gave to a build;
+- your **saved game maps** — every map you kept in My maps, with its name, its plan and its picture;
 - your **share links** — a page you shared stops opening;
 - your **phone app builds** — each .apk / .aab build record and the file it made (a build still running is stopped first);
 - your **saved app signing keys** — the upload key NavBharatAI kept, encrypted, for each app you build as a Google Play bundle, and the record of when each key was used. **This cannot be undone: without that key you can never again publish an update to that app under the same Google Play listing.** Before you confirm, the Danger zone lists every key you have saved and lets you **download** each one (the key file and its passwords) — keep that copy safe;

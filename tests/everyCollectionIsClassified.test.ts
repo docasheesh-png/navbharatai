@@ -248,6 +248,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   agentv3_onboarding_credits: { kind: 'user', why: 'their free-build credit — doc id IS the uid' },
   zip_uploads:             { kind: 'user', why: 'a .zip they uploaded to a build — a `uid` field' },
   agentv3_sheet_files:     { kind: 'user', why: 'a spreadsheet they uploaded — a `uid` field' },
+  user_saved_maps:         { kind: 'user', why: 'a game map they saved to their map library (plan, seed, name, picture) — a `uid` field' },
   shares:                  { kind: 'user', why: 'a share link of their app — an `ownerId` field holding the verified uid' },
   custom_domains:          { kind: 'user', why: "NavBharatAI's record of a domain they connected — a `userId` field. Erasing it removes OUR record only; the registrar and host are not ours to touch, and the deletion page says so" },
   pwa_apps:                { kind: 'user', why: 'an instantly-hosted app of theirs — a `userId` field. Unlike an App Mart listing it has no buyer, so it is a plain erase' },

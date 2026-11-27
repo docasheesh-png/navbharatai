@@ -213,6 +213,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'ONESHOT_SCOPE_YIELD',
   'RUNTIME_UNCHECKED',           // our console capture failed — the class `VERIFY_DID_NOT_RUN` above already names
   'CLAIM_UNSUPPORTED',           // OUR closing summary over-claimed, and the summary is corrected in place — the class of SUMMARY_OFF_TOPIC
+  'SUMMARY_SUPERSEDED',          // OUR closing summary predates a later finding / the cap, and the summary now says so (staleSummary.ts, #2566)
   'TIMELINE_TRUNCATED',          // our diagnostics timeline hit its own entry cap
   'PREVIEW_REVIVAL_RECIPE',      // our storage could not keep the wake-up recipe; the preview itself rendered
   'GUARD_REPEAT',                // our mistake guard did not hold — "needs an upstream/architectural fix" (its own message)
@@ -1136,6 +1137,10 @@ export class BuildDiagnostics {
   private endedAt?: number;
   private ok?: boolean;
   private summary?: string;
+  /** Every closing reply a runner emitted (`done`), dated — so a later finding can be compared with it (staleSummary.ts, #2566). */
+  private readonly repliesWritten: Array<{ ts: number; text: string }> = [];
+  /** The last clean real-browser preview check (recordPreviewVerified) — it answers every finding before it. */
+  private previewVerifiedAt: number | null = null;
   /** Tool calls that have STARTED but not yet returned — used to name what a hang is stuck on. */
   private readonly pending = new Map<string, { tool: string; ts: number }>();
   /** Last thing the agent was doing — surfaced in the minute-by-minute heartbeat. */
@@ -2325,6 +2330,10 @@ export class BuildDiagnostics {
       case 'done':
         this.ok = e.ok;
         this.summary = e.summary;
+        if (typeof e.summary === 'string' && e.summary.trim()) {
+          this.repliesWritten.push({ ts: this.now(), text: e.summary.slice(0, 2000) });
+          if (this.repliesWritten.length > 40) this.repliesWritten.shift();
+        }
         if (e.readiness) {
           for (const b of e.readiness.blockers ?? []) {
             this.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: b, autoResolved: false });
@@ -3011,7 +3020,14 @@ export class BuildDiagnostics {
    * RUNTIME_FAILED, and it no-ops when there is no outcome yet or the app already reads BUILD_SUCCESS.
    * Returns whether an upgrade was recorded (for tests / callers).
    */
+  /** What staleSummary.ts needs: the dated replies, the timeline and the last clean preview check. A copy — read-only. */
+  laterEvidenceInput(): { replies: Array<{ ts: number; text: string }>; issues: BuildIssue[]; lastCleanAt: number | null } {
+    return { replies: [...this.repliesWritten], issues: [...this.issues], lastCleanAt: this.previewVerifiedAt };
+  }
+
   recordPreviewVerified(): boolean {
+    // Every caller has just watched a real browser render the app with a clean console (staleSummary.ts, #2566).
+    this.previewVerifiedAt = this.now();
     const last = [...this.issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
     if (!last) return false; // no classification yet — nothing to upgrade
     if (last.code !== 'OUTCOME_BUILD_PARTIAL' && last.code !== 'OUTCOME_PREVIEW_FAILED') return false;

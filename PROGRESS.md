@@ -6760,3 +6760,50 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+## 2026-11-27 — Q-3464 (failedbr #2525): the route refusing two models trips Surplus for this build — admin option A (PR #4615)
+- Admin decision 2026-11-27, option A ("sabhi apke sujhao ke anusar banao"). A SECOND distinct Surplus model answering HTTP 404
+  at response_validation (no market-refusal code) trips Surplus for THIS build only: `isSurplusRouteRefusal` + `routeTrip` on the
+  build session in `src/server/AI/SurplusRegistry/buildSession.ts`. No in-turn retry, no stay-alive retry, and `authorize` refuses
+  any further Surplus call in that build; the turn falls open to the Weak chain at once. The next build tries Surplus afresh
+  ("Surplus marna nahi chahiye"). Q-3234's per-model bench is unchanged for every other failure.
+- Admin report: the tripping attempt's line adds "Surplus skipped for the rest of THIS build: 2 different models (…) each answered
+  HTTP 404 at response_validation …" and drops the false "the next turn moves to …".
+- Sibling (Q-3729): a parallel turn failing after another turn already dropped Surplus threw out of the build; it now continues on
+  the Weak chain (`surplusPreWriteFailOpen.ts`), and a policy refusal stays terminal.
+- Sibling hunt, checked and not the same class: MultiProviderTurnRunner retires a model only on an explicit model-not-found text
+  (one round trip, no backoff); surplusAdmitCircuit deliberately ignores 404; FreeChain and AIRouter have no per-model 404 bench.
+- Test: `src/server/AI/SurplusRegistry/theRouteRefusingTwoModelsTripsSurplus.test.ts` (11 tests, each proven by reversion).
+- Watch: the next 404 route shows two attempt lines, the skip line, then SURPLUS_FALLBACK, in seconds instead of ~87 s. Root cause
+  of the 404 itself still needs the engine's own error body (Q-3316).
+## 2026-11-27 — failedbr #2555: Q-3720, Q-3721, Q-3722 closed (#4607 merged)
+#4607 merged on a green CI. Q-3720 (unstyled screens no longer score design 100/A), Q-3721 (prompt-only CYBER_INTRUSION
+triage rule) and Q-3722 (one 120%-of-balance wallet limit, read by the admission gate, decideAffordability and the mid-build
+stop) are resolved and removed from the open queue; their IDs are in BUILD_REPORT_QUEUE_CLOSED.txt. Q-3723..Q-3728 stay 🟡.
+
+## 2026-11-27 — autopsy of failedbr #2558–#2561 (PUBG game): "characters sink, a layer over the road, cars in the air"
+- **Q-3750 (root cause, reproduced in a real browser on the seeded game):** the game shell's per-frame `groundScene` clamp lifted
+  the open world's own containers — the map's chunk group (terrain, sea, plants, roads) at render (0,0,0) rose to the land's height
+  there (1.3–135 m by project, ratcheting with origin shifts), so everything on the true ground looked sunk under it and the
+  highways floated. Fix: `userData.ground = false` on the chunk group at creation and on Highways, the map edge, place, venue and
+  user-map roots. Locked by `tests/theShellNeverLiftsTheWorldItself.test.ts` (runs the real shell clamp; fails reverted: 11.08 m).
+- **Q-3751:** the playtest probe called it a late ground edit; the kit's report now measures moved world containers and the probe
+  names a KIT fault. **Q-3752:** `hollowFeature.ts` now names a game feature that does nothing (the builder's `groundFix.ts`).
+- **Q-3753 (blocked, recurrence of Q-3323/Q-3354):** five server losses in a row, two at once, no memory band; `BUILD_UNWATCHED`
+  evidence added. **Q-3754** = Q-3334 (#4536). **Q-3755** (2–5 km cities) awaits the admin's choice. **Q-3756** (road-edge
+  stair-steps) is open.
+
+## 2026-11-27 — characters hold things the way people do (admin: "character apne hath me gun theek se nahi pakadta … ek dam natural")
+- **Root cause:** every hold path (kit person `humanoid.hold`, a model character's `hold`, `holdInHand` for NPCs) hung the item
+  from the hand by its OWN origin, scaled to a third of the person's height, in whatever direction its model faced — a library
+  pistol 0.6 m long through the wrist, pointing sideways; nothing found a grip.
+- **Fix (one implementation, `humanoid.ts`):** `gripFor` (what it is: real size + how people hold it — pistol, rifle, handle,
+  two-hand handle, palm, bow, shield; ~120 names incl. cricket bat/ball), `gripFrame` (reads THIS model's shape from area-spread
+  surface samples: long axis, the part hanging under a gun's barrel, the thinner end of a handle → grip point at the origin,
+  barrel/blade +Z, top +Y, a support point), `holdPose` (gun along the forearm, handle through the fist past the thumb, ball in
+  the palm), `reachWith` (two-bone IK). The kit person carries a rifle at the low ready / aims it at the chest with the wrist
+  pointing it and the left hand on the fore-grip every frame; a model character gets the same via its arm bones.
+  `createWeapon` marks its models as already in the frame. The builder is told to name the thing in `holdInHand(…, subject)`.
+- **Locked:** `tests/aCharacterHoldsThingsTheWayPeopleDo.test.ts` (wrong-way library pistol, upside-down bat, ball, rifle both
+  hands over 40 walk frames, a mixamo-rigged arm; 7 of 8 fail with the fix reverted). Four older hold tests updated to the
+  grip frame (the item now sits inside a `grip` group in the hand) and to real sizes.

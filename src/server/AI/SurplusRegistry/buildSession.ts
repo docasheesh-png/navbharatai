@@ -1,6 +1,7 @@
 import { addFallbackMs } from '../../AgentV3/fallbackTime';
 import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { strongOffersOnly } from './strongOffers';
+import { surplusCodingQuality } from './config';
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
@@ -94,6 +95,20 @@ export function isSurplusReasoningModel(model: string): boolean {
   if (/flash|instruct|chat|non-?reason|turbo/.test(m)) return false;
   return /(^|\/)(gpt-5|o[1-9])|-(sol|terra)\b|think|reason|\br1\b/.test(m);
 }
+/**
+ * 🔝 THE NEXT MODEL WHEN THE STICKY ONE IS BENCHED — the strongest left, never the first in the list (admin 2026-11-27: "jo
+ * sabse strong ho woh build kare"). It used to take the first un-benched model in the snapshot's order, which follows the
+ * static registry list, so a build that lost its strong model dropped to whatever came first (often a flash model) while
+ * stronger ones were still eligible. Same rules as the opening choice: never Claude on Weak, a plain (non-reasoning) model
+ * before a reasoning one, and the reviewed coding-quality order (surplusCodingQuality) inside each group. PURE.
+ */
+export function nextStrongestSurplusModel(models: readonly string[], benched: ReadonlySet<string>, tier: string): string | undefined {
+  // Same permission as every other Surplus choice (surplusModelPermitted: Claude only on Weak at the ≥90% floor).
+  const left = [...new Set(models)].filter((m) => !benched.has(m) && surplusModelPermitted(m, tier));
+  const byQuality = (a: string, b: string) => surplusCodingQuality(b) - surplusCodingQuality(a);
+  const plain = left.filter((m) => !isSurplusReasoningModel(m)).sort(byQuality);
+  return plain[0] ?? left.sort(byQuality)[0];
+}
 /** Switched off or keyless is a strict no-I/O path. A key with the switch not off uses live admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
   buildId: string; tier: string; initialWorkload?: Workload; enabled?: boolean; adapter?: SurplusReviewedAdapter; now?: () => number;
@@ -138,6 +153,10 @@ export async function createSurplusBuildSession(options: {
   // this session; the retry in between stays on the same model and keeps its warm cache. A policy refusal stays terminal.
   const failuresByModel = new Map<string, number>();
   let terminalPolicyFailure: PublicBuildEngineError | undefined;
+  // Q-3464 (failedbr #2525; admin decision 2026-11-27, option A): distinct models that answered the route refusal, and
+  // the trip once a second one did. Lives on THIS session only, so it ends with the build — never global, never stored.
+  const routeRefusalModels: string[] = [];
+  let routeTrip: SurplusRouteTrip | undefined;
   // Owner 2026-11-16 ("ek bar me ek call wali limit hatao, 100+ call ek saath"): model calls of one build
   // used to be fully serialized here, so a build's agents waited on each other. They now run in parallel up
   // to `SURPLUS_PARALLEL_CALLS_PER_BUILD` (default 128; `1` restores the old one-at-a-time order). A queued
@@ -162,6 +181,8 @@ export async function createSurplusBuildSession(options: {
       const marketRefusedPermits = new WeakSet<object>();
       async function authorize(params: RunTurnParams, previous?: SurplusTurnPermit) {
           if (terminalPolicyFailure) throw terminalPolicyFailure;
+          // Q-3464: the route refused two different models — no further Surplus call in this build (the trip is per build).
+          if (routeTrip) throw publicBuildEngineError('terminal_fold');
           const workload = estimate(params), state = await adapter.readState(), at = now();
           // A winning model stays sticky. Only a durably resolved safe failed turn may change it.
           // After a market refusal only the PAIR is out (surplusPairRefusals): the same model on another seller stays eligible.
@@ -262,6 +283,14 @@ export async function createSurplusBuildSession(options: {
           // Recorded first: a retried attempt returns from inside the try below, and its retry must already skip the pair.
           const marketRefusal = isSurplusMarketRefusal(failure?.engineCode);
           if (marketRefusal) { recordSurplusPairRefusal(permit.model, permit.providerId, now()); marketRefusedPermits.add(permit); }
+          // Q-3464: counted before the retry decision below, so the attempt that trips Surplus is never retried on a third model.
+          let trippedNow: SurplusRouteTrip | undefined;
+          if (!routeTrip && !marketRefusal && isSurplusRouteRefusal(failure)) {
+            if (!routeRefusalModels.includes(permit.model)) routeRefusalModels.push(permit.model);
+            if (routeRefusalModels.length >= SURPLUS_ROUTE_REFUSAL_DISTINCT_MODELS) {
+              routeTrip = trippedNow = Object.freeze({ models: Object.freeze([...routeRefusalModels]), httpStatus: SURPLUS_ROUTE_REFUSAL_STATUS, stage: SURPLUS_ROUTE_REFUSAL_STAGE });
+            }
+          }
           const result: TurnResult = { text: '', toolUses: [], rawContent: [], stopReason: null, model: permit.model,
             // A FAILED attempt (Q-2920): it did not answer, so it is not "a provider that returned no usage".
             usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, measured: false, failedAttempt: true } };
@@ -276,7 +305,7 @@ export async function createSurplusBuildSession(options: {
               // A retried attempt used to RETURN here, skipping the bench decision and the notice below — so a retried
               // refusal never reached the report (the Q-3019 class, on the adapter path production uses). It now falls
               // through and returns the retry at the end.
-              if (resolution.canRetry === true && failure.attempt < 3) { authorizedFallbacks.add(permit); retry = true; }
+              if (resolution.canRetry === true && failure.attempt < 3 && !routeTrip) { authorizedFallbacks.add(permit); retry = true; }
             } else {
               result.usage.surplusReceipt = await adapter.receipt(raw, permit, result);
               callbacks.onTurnComplete?.(result, 'SURPLUS');
@@ -295,7 +324,7 @@ export async function createSurplusBuildSession(options: {
           if (bench) {
             benchedModels.add(permit.model);
             if (model === permit.model) {
-              const alt = (initialState.snapshot?.offers ?? []).map(o => o.model).find(m => !benchedModels.has(m) && surplusModelPermitted(m, options.tier));
+              const alt = nextStrongestSurplusModel((initialState.snapshot?.offers ?? []).map(o => o.model), benchedModels, options.tier);
               if (alt) model = alt;
             }
           }
@@ -303,7 +332,7 @@ export async function createSurplusBuildSession(options: {
           // slower "ok" call — the report said no engine wasted any time. It is now said, with codes only.
           attemptNotices++;
           notifyAttemptFailed(callbacks, { model: permit.model, stage: failure?.stage ?? 'dispatch', reason: failure?.reason ?? 'dispatch_failed',
-            attempt: failure?.attempt ?? 1, ...(typeof failure?.httpStatus === 'number' ? { httpStatus: failure.httpStatus } : {}), ...(failure?.engineCode ? { engineCode: failure.engineCode } : {}), benched: bench, ...(bench && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure ? { sameModelRetry: true } : {}) });
+            attempt: failure?.attempt ?? 1, ...(typeof failure?.httpStatus === 'number' ? { httpStatus: failure.httpStatus } : {}), ...(failure?.engineCode ? { engineCode: failure.engineCode } : {}), benched: bench, ...(bench && !routeTrip && model !== permit.model ? { nextModel: model } : {}), ...(!bench && !terminalPolicyFailure && !routeTrip ? { sameModelRetry: true } : {}), ...(trippedNow ? { routeTripped: trippedNow } : {}) });
           if (retry) return { retry: true as const, receiptDurablyRecorded: true as const };
         },
         onProviderUsed: permit => { model = permit.model; recordSurplusPairServed(permit.model, permit.providerId, now()); try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
@@ -347,7 +376,7 @@ export async function createSurplusBuildSession(options: {
               return addFallbackMs(await native.runTurn({ ...params, deadlineAt }), now0 - turnStartedAt);
             } catch (error) {
               lastError = error;
-              if (!isSurplusTurnRetryable(error) || params.signal?.aborted || terminalPolicyFailure) throw error;
+              if (!isSurplusTurnRetryable(error) || params.signal?.aborted || terminalPolicyFailure || routeTrip) throw error;
               if (attempt >= policy.retries) break;
               const wait = policy.backoffMs[Math.min(attempt, policy.backoffMs.length - 1)];
               try { console.warn(`[SURPLUS] stay-alive: turn retry ${attempt + 1}/${policy.retries} in ${wait}ms`); } catch { /* best-effort */ }
@@ -390,6 +419,39 @@ export interface SurplusAttemptFailure {
   engineCode?: string;
   /** First failure of this model in the session: the retry stays on it, cache warm (Q-3019). */
   sameModelRetry?: boolean;
+  /** Set on the ONE attempt that tripped Surplus for this build (Q-3464): the route refused a second distinct model. */
+  routeTripped?: SurplusRouteTrip;
+}
+
+/** Why Surplus was skipped for the rest of one build (Q-3464). Model ids are admin-report data, never user-facing text. */
+export interface SurplusRouteTrip {
+  readonly models: readonly string[];
+  readonly httpStatus: number;
+  readonly stage: string;
+}
+
+/**
+ * 🧯 THE ROUTE, NOT THE MODEL (failedbr #2525, Q-3464; admin decision 2026-11-27, option A). Six models answered the same
+ * HTTP 404 at response_validation and were benched ONE BY ONE — 87 s and no work — because the per-model bench (Q-3234,
+ * kept as it is for every other failure) only ever sees one model. One 404 can be a retired model id; the SAME 404 from a
+ * second, different model is the route refusing, so Surplus is tripped for THIS build at that second model and the turn
+ * falls open to the Weak chain. Owner's standing words, "Surplus marna nahi chahiye": the trip is per build only (it lives
+ * on the build session), never global, never persisted — the next build tries Surplus afresh. A market refusal
+ * (`no_sellers_for_model`, …) is one (model, seller) pair and is excluded; so is every other status and stage.
+ */
+export const SURPLUS_ROUTE_REFUSAL_DISTINCT_MODELS = 2;
+export const SURPLUS_ROUTE_REFUSAL_STATUS = 404;
+export const SURPLUS_ROUTE_REFUSAL_STAGE = 'response_validation';
+
+/** Does this failed attempt count toward the route trip? PURE. */
+export function isSurplusRouteRefusal(failure: Pick<SurplusAttemptFailure, 'stage' | 'httpStatus' | 'engineCode'> | undefined): boolean {
+  return !!failure && failure.stage === SURPLUS_ROUTE_REFUSAL_STAGE && failure.httpStatus === SURPLUS_ROUTE_REFUSAL_STATUS
+    && !isSurplusMarketRefusal(failure.engineCode);
+}
+
+/** The admin-report line that says why Surplus was skipped for the rest of the build. PURE. */
+export function describeSurplusRouteTrip(trip: SurplusRouteTrip): string {
+  return `Surplus skipped for the rest of THIS build: ${trip.models.length} different models (${trip.models.join(', ')}) each answered HTTP ${trip.httpStatus} at ${trip.stage} — the refusal is the route's, not one model's, so no further Surplus model is tried in this build (the next build tries Surplus again)`;
 }
 
 /**
@@ -414,6 +476,7 @@ export function describeSurplusAttemptFailure(f: SurplusAttemptFailure): string 
   if (f.benched) parts.push(f.nextModel ? `— ${f.model} is benched for this build; the next turn moves to ${f.nextModel}, whose cache is cold` : `— ${f.model} is benched for this build`);
   if (f.sameModelRetry) parts.push(`— retried on the same model (its cache stays warm); a second failure benches it`);
   if (typeof f.retryInMs === 'number') parts.push(`— retrying in ${Math.round(f.retryInMs / 1000)}s`);
+  if (f.routeTripped) parts.push(`· ${describeSurplusRouteTrip(f.routeTripped)}`);
   return parts.join(' ');
 }
 

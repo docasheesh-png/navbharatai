@@ -152,6 +152,8 @@ export const EDGE_MARGIN = 800;
 export const EDGE_MIN_HALF = 600;
 const EDGE_STEP = 8;
 const EDGE_HEIGHT = 3.2;
+/** Metres above the sea a spot must stand to count as dry land for a character (the sea's own waves reach above its level). */
+const DRY_MARGIN_M = 0.6;
 /** Health lost each second in water when the game is not a swimming one (WORLD.water). */
 export const DROWN_PER_SECOND = 20;
 /** WORLD.runOver: a driven car faster than this (m/s) strikes what it touches, for this much damage. */
@@ -365,6 +367,12 @@ export interface OpenWorld {
   playerWorld(): { x: number; y: number; z: number };
   /** Ground height at a WORLD place — the same height the terrain is drawn at. */
   heightAt(x: number, z: number): number;
+  /**
+   * Dry land a character can stand and be seen on at a WORLD place: above the sea (with a margin) and not in a river. Every
+   * spawn on the open world asks this first (build #2565/#2566: enemies were put in the sea, shot from under the water and
+   * were never seen; on a map that is 44% sea, half of them).
+   */
+  dryAt(x: number, z: number): boolean;
   /** Put an object on the ground at a WORLD place (lift = metres above it). It then follows origin shifts by itself. */
   place(object: THREE.Object3D, x: number, z: number, lift?: number): void;
   /** Stop tracking an object placed with place(). */
@@ -1015,6 +1023,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     p.built = towns.length;
     towns.push(built); roots.push(root); locals.push(local);
     root.position.set(centre.x - chunks.origin.x, centre.y, centre.z - chunks.origin.z);
+    root.userData.ground = false;   // the place stands on its own levelled pad; its bodies are grounded one by one
     ctx.scene.add(root); root.updateMatrixWorld(true);
     return built;
   };
@@ -1028,7 +1037,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const stops: Array<{ x: number; z: number; r: number; hw?: number; hd?: number }> = [...planned.map((p) => { const pl = planCity(p.cityOptions); return { x: p.centre.x, z: p.centre.z, r: p.reach, hw: pl.width / 2, hd: pl.depth / 2 }; }), ...landList.map((l) => ({ x: l.centre.x, z: l.centre.z, r: Math.min(120, l.radius * 0.3) })), ...userMaps.map((m) => ({ x: m.centre.x, z: m.centre.z, r: m.size / 2 })),
     // A venue's road ends on the edge of its pad (never on the field).
     ...venueList.map((v) => ({ x: v.centre.x, z: v.centre.z, r: Math.max(v.width, v.depth) / 2, hw: v.width / 2 + 8, hd: v.depth / 2 + 8 }))];
-  const roadGroup = new THREE.Group(); roadGroup.name = 'Highways';
+  const roadGroup = new THREE.Group(); roadGroup.name = 'Highways'; roadGroup.userData.ground = false;   // drawn on the land, never lifted by its origin (world 0, 0)
   // Pulled a little towards the camera in the depth test (polygonOffset), so the ribbon never flickers against the carved
   // ground under it when seen from far away.
   const asphalt = new THREE.MeshStandardMaterial({ color: 0x34363a, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
@@ -1230,7 +1239,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // sea). A box in WORLD metres around every place, land, venue and user map, margin metres wider; the player and its car are
   // held inside it every frame, and a wall that follows the ground marks it. Its group moves with the floating origin like
   // the highways. More places make the box bigger by themselves.
-  const edgeGroup = new THREE.Group(); edgeGroup.name = 'World edge group';
+  const edgeGroup = new THREE.Group(); edgeGroup.name = 'World edge group'; edgeGroup.userData.ground = false;   // each segment stands on its own ground
   const edge: { minX: number; maxX: number; minZ: number; maxZ: number } | null = (() => {
     if (edgeOption === false) return null;
     const margin = Math.max(150, Math.min(50000, Number(edgeOption?.margin) || EDGE_MARGIN));
@@ -1455,6 +1464,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     }
     root.scale.set(v.scale, 1, v.scale);
     root.position.set(v.centre.x - chunks.origin.x, v.centre.y, v.centre.z - chunks.origin.z);
+    root.userData.ground = false;   // on its own levelled pad
     ctx.scene.add(root); venueRoots.push(root); v.root = root;
   };
   // 🗺️ THE MAP KNOWS THE WORLD (admin 2026-11-22: "jaise PUBG/Free Fire me location map … tap kar kar pura map aur location").
@@ -1593,7 +1603,13 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         if (stale) dirty++;
       }
     }
-    return { terrain: { samples, off, worst: r1(worst), notNumber }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
+    // 0. The world's own containers where the world put them (failedbr #2559–#2561): the terrain, highways and edge at y 0, each
+    // place on its pad. A container moved off its place moves everything in it — the whole drawn ground — so this is said first.
+    let moved = 0, movedName = '';
+    const movedBy = (obj: THREE.Object3D | null | undefined, y: number, label: string) => { const d = obj ? Math.abs(obj.position.y - y) : 0; if (d > moved) { moved = d; movedName = label; } };
+    movedBy(chunks.group, 0, 'the terrain'); movedBy(roadGroup, 0, 'the highways'); movedBy(edgeGroup, 0, 'the map edge');
+    towns.forEach((t, i) => movedBy(roots[i], t.centre.y, 'the place ' + t.id));
+    return { terrain: { samples, off, worst: r1(worst), notNumber }, moved: { worst: r1(moved), name: movedName }, slabs, roads, player, seams: { samples: seamSamples, worst: r1(seamWorst) }, venues: venuesOff, pending: { dirty }, ms: Math.round(performance.now() - t0) };
   };
   // 🔎 Where the player stands, for the placeholder look (gamePlaceholderProbe.ts): the feet, the land under them and the
   // water over that land (the sea where the land is below sea level, else a river or lake). Read-only.
@@ -1647,6 +1663,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       return found;
     },
     heightAt: (x, z) => map.world.heightAt(x, z),
+    dryAt: (x, z) => { const h = map.world.heightAt(x, z); return Number.isFinite(h) && h >= map.world.seaLevel + DRY_MARGIN_M && !map.world.waterAt(x, z); },
     place(object, x, z, lift = 0) {
       object.userData.nbBody = true;
       object.position.set(x - chunks.origin.x, 0, z - chunks.origin.z);
@@ -1728,6 +1745,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           object.position.set(m.centre.x - chunks.origin.x - (fit.min.x + fit.max.x) / 2, m.centre.y - fit.min.y, m.centre.z - chunks.origin.z - (fit.min.z + fit.max.z) / 2);
           object.traverse((o) => { if ((o as THREE.Mesh).isMesh) markWorldCollider(o, 'solid'); });
           object.name = 'User map ' + m.id;
+          object.userData.ground = false;   // the user's map IS ground: it stands where it was fitted
           ctx.scene.add(object); userRoots.push(object); m.root = object; m.status = 'loaded';
         }).catch((error) => { m.status = 'failed'; m.reason = String(error instanceof Error ? error.message : error).slice(0, 200); console.error('[world] the map "' + m.id + '" could not be loaded from ' + userMapUrl(m.model) + ': ' + m.reason); });
       }
@@ -2194,10 +2212,15 @@ export default defineFeature<OpenWorld>({
     /** One person in the spawn ring around the player, on the map's own ground, kept through origin shifts. */
     const bring = (kind: 'enemy' | 'villager') => {
       const pp = ctx.player.object.position, pw = world.playerWorld();
-      const a = Math.random() * Math.PI * 2, r = STREET_DANGER.near + Math.random() * (STREET_DANGER.far - STREET_DANGER.near);
-      const x = pp.x + Math.sin(a) * r, z = pp.z + Math.cos(a) * r;
-      const wx = x + (pw.x - pp.x), wz = z + (pw.z - pp.z);
-      if (!Number.isFinite(world.heightAt(wx, wz))) return;
+      // A few tries for DRY land in the ring: a character in the sea is never seen (build #2565/#2566), so it is never spawned.
+      let x = 0, z = 0, wx = 0, wz = 0, found = false;
+      for (let tries = 0; tries < 12 && !found; tries++) {
+        const a = Math.random() * Math.PI * 2, r = STREET_DANGER.near + Math.random() * (STREET_DANGER.far - STREET_DANGER.near);
+        x = pp.x + Math.sin(a) * r; z = pp.z + Math.cos(a) * r;
+        wx = x + (pw.x - pp.x); wz = z + (pw.z - pp.z);
+        found = world.dryAt(wx, wz);
+      }
+      if (!found) return;
       const armed = kind === 'enemy' && Math.random() < STREET_DANGER.gunmen;
       const e = npcs.spawn(kind === 'enemy'
         ? { x, z, kind: 'enemy', hostile: true, ai: armed ? 'ranged' : Math.random() < 0.3 ? 'flanker' : 'melee', damage: armed ? STREET_DANGER.shotDamage : STREET_DANGER.enemyDamage, health: 100 }

@@ -8,6 +8,7 @@
 // tested agentV3Reducer rebuilds the narration feed + workspaceId with no new reducer logic.
 
 import type { AgentV3WireEvent, AgentRole, SheetFileRef } from './agentV3Types';
+import { parseMapPreviewCard } from '../../lib/mapPreview';
 
 /** The shape returned by GET /api/agentv3/conversations/:id (mirror of the server record). */
 export interface PersistedConversation {
@@ -119,6 +120,11 @@ function timelineToWireEvent(e: unknown): AgentV3WireEvent | null {
     case 'diff':
       if (typeof t.path !== 'string' || typeof t.patch !== 'string') return null;
       return { type: 'diff', agent, diff: { path: t.path, patch: t.patch }, ts };
+    case 'map': {
+      // The map picture a build showed, replayed on reopen — checked exactly as the live event is.
+      const card = parseMapPreviewCard(t.card);
+      return card ? { type: 'map_preview', card, ts } : null;
+    }
     default:
       return null;
   }

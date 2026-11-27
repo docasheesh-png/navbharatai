@@ -201,3 +201,8 @@ export function mapSideLabel(sideMeters: number): string {
   const side = sideMeters >= 1000 ? `${Math.round(sideMeters / 100) / 10} km` : `${Math.round(sideMeters)} m`;
   return `${side} x ${side}`;
 }
+
+/** The message the map library's Use button puts in the composer; the server reads the name back (athreeMap/savedMapRequest.ts). */
+export function useSavedMapPrompt(name: string): string {
+  return `Use my saved map "${String(name).replace(/["\n\r]/g, ' ').trim()}" for this game.`;
+}

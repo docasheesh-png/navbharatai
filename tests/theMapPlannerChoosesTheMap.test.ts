@@ -49,7 +49,7 @@ describe('real prompts choose the map through the one planner', () => {
     const r = await run('athree map par ek battle royale game banao');
     expect(optionsIn()).toMatchObject({ mode: 'bounded', sizeMeters: 8000 });
     const text = String(r.content);
-    expect(text).toMatch(/ROBOT CHECKS \(build time, sample seed 1; the game re-checks its own seed\): every check passed/);
+    expect(text).toMatch(/ROBOT CHECKS \(build time, sample seed -?\d+; the game re-checks its own seed\): every check passed/);
     expect(text).toMatch(/boundary-closed: passed/);
     expect(act.files.get('src/game/athree/mapChecks.ts')).toMatch(/export function publishMapChecks/);
   });

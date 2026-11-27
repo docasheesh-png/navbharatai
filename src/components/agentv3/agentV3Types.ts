@@ -5,6 +5,7 @@
 // the final {type:'result'} line streamed by /api/agentv3/chat. Client and server
 // communicate only via this JSON contract — normal client/server decoupling.
 
+import type { MapPreviewCard } from '../../lib/mapPreview';
 import type { BuildPhase } from './previewReloadPolicy';
 import type { QueueContinuationTicket } from '../../lib/queueContinuation';
 
@@ -80,6 +81,8 @@ export type AgentV3WireEvent =
   | { type: 'build_meta'; buildId: string; promptHash: string; workspaceId?: string; ts?: number }
   // `file` — a spreadsheet the engine made for this reply (server spreadsheetTurn.ts); the line shows its Download buttons.
   | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string; file?: SheetFileRef }
+  /** A top-down picture of the game's map (or why it could not be drawn), after a build step made or changed it (server mapPreviewRun.ts). */
+  | { type: 'map_preview'; card: MapPreviewCard; ts: number }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: string; input: unknown; callId: string; ts: number }
@@ -220,6 +223,8 @@ export interface NarrationLine {
   ts: number;
   /** The spreadsheet this reply carries, when it made one. */
   file?: SheetFileRef;
+  /** The map picture this line carries (a `map_preview` event), checked by parseMapPreviewCard. */
+  mapPreview?: MapPreviewCard;
   /** Ties a line to its streamed deltas so a final narration finalizes (not dupes) it. */
   id?: string;
   /** 'text' = visible reply, 'thinking' = dim/italic thinking summary. */

@@ -5,6 +5,8 @@
 // fig) nothing in AgentV3 imports from the live Pro/Engineer build paths, so the
 // module cannot affect the live app until v5.0 is explicitly enabled and proven.
 
+import type { MapPreviewCard } from '../../lib/mapPreview';
+
 /** Current build phase of the v5.0 engine. Bumped as phases land. */
 export const AGENTV3_PHASE = 'P3' as const;
 
@@ -172,6 +174,8 @@ export type AgentEvent =
    * the report files it as a plain step, never a second warning/error (adversarial review of autopsy 303e8a6f).
    */
   | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string; file?: SheetFileRef; filed?: boolean }
+  /** A top-down picture of the game's map (or why it could not be drawn), after a build step made or changed it (lib/athreeMap/mapPreviewRun.ts). */
+  | { type: 'map_preview'; card: MapPreviewCard; ts: number }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }

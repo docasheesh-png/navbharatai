@@ -203,7 +203,8 @@ describe('the models, and a hand to hold them', () => {
     const hero = H.createHumanoid();
     const rifle = O.createWeapon({ kind: 'rifle' });
     hero.hold(rifle.root);
-    expect(hero.joints.rightHand.children).toContain(rifle.root);
+    // In the hand inside its grip frame (humanoid.ts gripFrame: the kit's weapon is already in it, so it is only seated).
+    expect(rifle.root.parent?.parent).toBe(hero.joints.rightHand);
     hero.aim(true);
     hero.root.updateMatrixWorld(true);
     const grip = rifle.root.getWorldPosition(new THREE.Vector3());

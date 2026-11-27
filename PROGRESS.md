@@ -6776,6 +6776,34 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   which now waits its turn instead of falling back.
 - Tests: `assetProviderBudget.test.ts` (+5), `tests/assetsAndSoundsArePreparedSideBySide.test.ts` (8; #2523 cold-cache
   shape). Every test was reverted and seen to fail.
+### 2026-11-27 — the map planner ("naksha banane wala dimaag") and the robot checks (admin's map order, wave 1 part 1)
+- **What:** `src/server/lib/athreeMap/mapPlan.ts` — ONE pure reader turns the request (English / Hinglish / Devanagari input) into a
+  nine-field MapPlan: area km² ("5 km" = side → 25 km²; "5 km²/sq km/varg km" = area), archetype, boundary
+  (`sea|mountains|canyon|forest-river|dunes|wall`, from "se ghira / surrounded by", else per archetype), water
+  (`{sea, rivers, lakes, ponds, canals}` with counts, or refused), roadStyle (`grid|highway|organic|hill|straight`, default grid),
+  density (`sparse|normal|dense`), region flavour (Rajasthan, Kerala, Mumbai, Goa, Himalaya, Ladakh, Sundarbans, Punjab, Deccan,
+  North-East), game type, time of day.
+- **Defaults (admin-approved):** on foot / shooter / RPG 5 km², driving / racing 25 km², flight 100 km²; battle royale keeps its 8 km
+  island; a game that needs roads (circuit, runway) is raised to the world's own `MIN_ROAD_SIZE` (read from the emitted world source,
+  so it follows when small-map roads land); the user's stated size ALWAYS wins, over the builder's `size_km` too.
+- **Wired:** `generate_athree_map` (ToolDispatcher) uses the planner instead of `mapChoiceFor` / `sizeKmIn` / builder picking.
+  `mapPlanWiring.ts` (additive; AthreeMapGenerator.ts untouched because #4608/#4612 are on it) appends `MAP_PLAN` to config.ts and
+  `Object.assign(MAP_OPTIONS, {areaKm2, boundary, water, roadStyle, density})` — the shared option names reach createAthreeWorld
+  through the existing spread and are ignored until the world reads them. The build note says per layer APPLIED vs "recorded, not
+  built yet", decided by reading the emitted world source (`appliedMapLayers`), never assumed.
+- **Robot checks:** `athreeMapCheckSource.ts` emitted as `src/game/athree/mapChecks.ts` (spawn on dry land, no lot in water or on a
+  road, road graph connected, nothing below ground, bounded boundary ring closed; `publishMapChecks` leaves `window.__nbMapChecks`).
+  `mapRobotRun.ts` runs the SAME emitted code at build time on the generated files (seed 1) in a WORKER THREAD with an 8 s budget
+  (a 500 km world costs ~2 s of CPU; never on the main thread) and puts the verdict in the build note; a crash or timeout reads
+  "could not run", never a pass. `tests/helpers/loadAthree.ts` now delegates to the same loader.
+- **Defect found on the way (fixed, test-locked):** "mere game ka map bahut chhota hai, bada karo" (a too-small complaint) was read by
+  `sizeKmIn` as "bahut chhota" → a 1 km map. The planner now reads the wish (`largeWorldIntent` too-small) and gives a large map.
+- **Superseded test expectation:** `theAthreeMapKindsAreWired` — an unsized racing request is no longer the 100 km default world; it is
+  the racing default raised to the 20 km road floor (admin-approved defaults).
+- **Honest limits / open:** boundary, water wishes, road style and density are passed but NOT consumed by the world yet (wave 1 agents
+  W and R build them; the notes flip to APPLIED by themselves). Time of day is only an instruction to the builder (skyOptions.hours).
+  The playtest does not yet read `window.__nbMapChecks` into its findings. Lots-clear has no lots to check until the colonies layer
+  exists. The racing/flight defaults are 400 km² today because roads need 20 km — they shrink when small-map roads land.
 ## 2026-11-27 — Athree map wave-1 PART W: natural boundaries, sea shelf, ponds, water/ground rules for every mover (branch `claude/feat/map-boundaries-water`)
 
 Admin plan (frame → natural boundary nobody can cross → water → ground sheet nobody can fall through → roads → colonies); this is
@@ -6929,3 +6957,19 @@ stop) are resolved and removed from the open queue; their IDs are in BUILD_REPOR
 feature that does nothing is named; characters hold things the way people do). Q-3750..Q-3752 removed from the open queue and
 added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud Run logs), Q-3754 (Surplus recurrence), Q-3755
 (admin choice on 2–5 km cities) and Q-3756 (road-edge stair-steps) stay open.
+
+### 2026-11-27 (later) — map planner (#4625) follow-up: the true circuit/runway floor after #4626
+- **Integration defect:** after #4626 (roads on every map size) the planner still read `MIN_ROAD_SIZE` (now "where the regional network
+  takes over"), so an unsized race was inflated to 400 km² and flight past 100 km². Class: a planner reading a constant whose meaning
+  changed. Fix: a dedicated emitted `CIRCUIT_RUNWAY_MIN_SIZE = { loop: 5000, bounded: 2000 }` (measured: circuit + runway on every land
+  kind tried at the floor), read by the planner; only racing / flight are raised; driving needs no floor. `MIN_ROAD_SIZE` stays exported
+  (kit refresh for older games) and the planner no longer reads it (test-locked).
+- **Circuit placement on planned maps** (patch from the roads agent, reviewed): a planned map now tries smaller circuit radii and 16
+  candidate sites; before, a 5 km racing map got a circuit on ~1 seed in 24, which would have made the floor false.
+- **Water honesty:** the water layer counts as APPLIED only when the world reads its ponds (#4624's `options.water … .ponds`); river,
+  lake and canal counts stay "recorded" (the world makes its own rivers and lakes). roadStyle now reads APPLIED (main has #4626).
+- **Locked:** unsized racing → 25 km² with a circuit (4 seeds), flight → 100 km² with a runway, on foot → 5 km² with roads; each
+  fix reverted → its test fails. Kit history regenerated.
+- **After #4624 merged (natural edges, ponds):** the plan's `boundary` and `water.ponds` now read APPLIED (names match: `options.boundary`,
+  `options.water … .ponds`); density stays recorded. The robot boundary check now reads the world's own `boundary.limitAt` (an island
+  ringed by mountains is land at the frame edge, so the sea-only ring would have called a closed edge open — reverted → test fails).

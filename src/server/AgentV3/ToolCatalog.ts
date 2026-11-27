@@ -2334,7 +2334,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
         size_km: {
           type: 'number',
-          description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km", "chhota", "huge"); none = 100.',
+          description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km" is a side, "5 sq km" an area); with none, the map planner sizes it by game type (5 km² on foot, 25 km² driving, 100 km² flight, raised to the road floor when the game needs roads). A size the user stated always wins over this.',
         },
         composition: { type: 'object', description: 'Optional explicit user-shaped runtime world. Additive only; refuses replacing existing source. Procedural visual modules, not NPC AI or driving. Width 1–100km, mobile performance unverified.', additionalProperties: false,
           required: ['seed','profile','widthKm','quality','rivers','vegetation','objects'],

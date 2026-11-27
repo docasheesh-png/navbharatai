@@ -6760,3 +6760,8 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+## 2026-11-27 — failedbr #2555: Q-3720, Q-3721, Q-3722 closed (#4607 merged)
+#4607 merged on a green CI. Q-3720 (unstyled screens no longer score design 100/A), Q-3721 (prompt-only CYBER_INTRUSION
+triage rule) and Q-3722 (one 120%-of-balance wallet limit, read by the admission gate, decideAffordability and the mid-build
+stop) are resolved and removed from the open queue; their IDs are in BUILD_REPORT_QUEUE_CLOSED.txt. Q-3723..Q-3728 stay 🟡.

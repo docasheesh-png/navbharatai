@@ -59,6 +59,14 @@ export class NativeBuildFirestore {
       const tx = {
         get: async (r: any) => { reads.set(`${r.__col}/${r.__id}`, this.version(r.__col, r.__id)); return r.get(); },
         set: (r: any, v: Row) => { writes.push(() => { this.col(r.__col).set(r.__id, structuredClone(v)); this.bump(r.__col, r.__id); }); },
+        // Like the real SDK: an update of a missing document fails the commit — it never creates one.
+        update: (r: any, patch: Row) => {
+          writes.push(() => {
+            const cur = this.col(r.__col).get(r.__id);
+            if (!cur) throw new Error('NOT_FOUND');
+            this.col(r.__col).set(r.__id, { ...cur, ...structuredClone(patch) }); this.bump(r.__col, r.__id);
+          });
+        },
         create: (r: any, v: Row) => {
           if (this.col(r.__col).has(r.__id)) throw new Error('ALREADY_EXISTS');
           writes.push(() => { this.col(r.__col).set(r.__id, structuredClone(v)); this.bump(r.__col, r.__id); });

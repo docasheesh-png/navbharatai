@@ -21,8 +21,10 @@
 // The user's stated size ALWAYS wins. Two honest exceptions to the defaults, both written into the plan's notes:
 //   • battle royale keeps the 8 km island it already had (64 km²) — the admin's list does not name it, and "a royale gets the big
 //     map" is behaviour users already rely on;
-//   • a game whose play NEEDS roads (a race circuit, a runway) is raised to the smallest map the world can build roads on, read from
-//     the emitted world's own MIN_ROAD_SIZE (so the floor follows the world when small-map roads land, with no edit here).
+//   • a game whose play needs a RACE CIRCUIT (racing) or a RUNWAY (flight) is raised to the smallest map on which the world really
+//     fits one, read from the emitted world's own CIRCUIT_RUNWAY_MIN_SIZE. Roads themselves exist at every size (#4626), so a game
+//     that only drives needs no floor. (Until #4626 this read MIN_ROAD_SIZE, "no roads below 20 km", which raised every unsized race
+//     to 400 km²; that name now means where the planned town network takes over, and the planner must never read it.)
 //
 // What the world does with the plan is NOT claimed here. `appliedMapLayers` reads the emitted world's source and says which of the
 // plan's fields it really consumes; everything else is "recorded, not yet built" in the build notes (the honesty rule).
@@ -93,10 +95,10 @@ export interface MapPlanInput {
   /** What the builder model passed to the tool (archetype, size_km). A field it gives wins over the words for that field only. */
   builder?: { archetype?: Archetype | null; sizeKm?: number | null } | null;
   /**
-   * The smallest side, in metres, the world builds roads on, per mode (the emitted world's MIN_ROAD_SIZE). When given, a game that
-   * needs roads gets at least this; when not, no floor is applied and the plan says so.
+   * The smallest side, in metres, on which the world fits a race circuit and a runway, per mode (the emitted world's
+   * CIRCUIT_RUNWAY_MIN_SIZE). When given, a racing or flight game gets at least this; when not, no floor is applied and the plan says so.
    */
-  roadFloorMeters?: { loop: number; bounded: number } | null;
+  circuitRunwayFloorMeters?: { loop: number; bounded: number } | null;
 }
 
 /**
@@ -106,8 +108,8 @@ export interface MapPlanInput {
 export const DEFAULT_AREA_KM2: Record<Exclude<MapGameType, 'unknown'>, number> = {
   'on-foot': 5, shooter: 5, rpg: 5, explore: 5, driving: 25, racing: 25, boating: 25, flight: 100, 'battle-royale': 64,
 };
-/** Games whose play needs a road network (a circuit, a runway, streets to drive). */
-const NEEDS_ROADS: ReadonlySet<MapGameType> = new Set<MapGameType>(['driving', 'racing', 'flight']);
+/** Games whose play needs a race circuit or a runway (roads to drive on exist on every map, so driving needs no floor). */
+const NEEDS_CIRCUIT_OR_RUNWAY: ReadonlySet<MapGameType> = new Set<MapGameType>(['racing', 'flight']);
 
 /** The natural edge each kind of land has when the user names none. */
 export const DEFAULT_BOUNDARY: Record<Archetype, BoundaryKind> = {
@@ -356,15 +358,16 @@ export function planMap(input: MapPlanInput): MapPlan {
     notes.push(gameType === 'battle-royale'
       ? 'No size was named: a battle royale keeps its 8 km island (64 km²).'
       : `No size was named: the default for a ${gameType} game is ${area} km² (admin-approved defaults: on foot / shooter / RPG 5 km², driving / racing 25 km², flight 100 km²).`);
-    if (NEEDS_ROADS.has(gameType)) {
+    if (NEEDS_CIRCUIT_OR_RUNWAY.has(gameType)) {
       const mode = ARCHETYPES[archetype].mode;
-      const floorM = input?.roadFloorMeters?.[mode];
+      const floorM = input?.circuitRunwayFloorMeters?.[mode];
+      const what = gameType === 'flight' ? 'a runway' : 'a race circuit';
       if (typeof floorM === 'number' && Number.isFinite(floorM) && floorM > side * 1000) {
         const floorKm = floorM / 1000;
-        notes.push(`A ${gameType} game needs roads (${gameType === 'flight' ? 'a runway' : 'a circuit and highways'}), and this world builds roads only on a map at least ${floorKm} km across, so the map was raised to ${floorKm} x ${floorKm} km (${round2(floorKm * floorKm)} km²) instead of ${area} km². It shrinks to the default by itself once roads are built on smaller maps.`);
+        notes.push(`A ${gameType} game needs ${what}, which this world fits only on a map at least ${floorKm} km across, so the map was raised to ${floorKm} x ${floorKm} km (${round2(floorKm * floorKm)} km²) instead of ${area} km².`);
         side = floorKm;
       } else if (floorM === undefined || floorM === null) {
-        notes.push(`The smallest map this world builds roads on could not be read, so the ${area} km² default may have no roads.`);
+        notes.push(`The smallest map that holds ${what} could not be read from this world, so the ${area} km² default may have none.`);
       }
     }
   } else { side = null; areaSource = 'default'; }
@@ -422,16 +425,18 @@ export function appliedMapLayers(worldSource: string, plan: MapPlan): Record<Map
     frame: true,
     land: true,
     boundary: reads('boundary'),
-    water: reads('water'),
+    // Water counts as applied only when the world reads the part the plan sets per map — the ponds count (the sea is always the
+    // world's own; the world makes its own rivers and lakes, so their counts stay recorded, and the note says so).
+    water: reads('water') && /\.ponds\b/.test(worldSource),
     roadStyle: reads('roadStyle'),
     density: reads('density'),
     timeOfDay: false,
   };
 }
 
-/** The smallest map the emitted world builds roads on (its own MIN_ROAD_SIZE), or null when it cannot be read. */
-export function roadFloorFromWorldSource(worldSource: string): { loop: number; bounded: number } | null {
-  const m = /MIN_ROAD_SIZE[^=]*=\s*\{\s*loop:\s*(\d+)\s*,\s*bounded:\s*(\d+)\s*\}/.exec(String(worldSource ?? ''));
+/** The smallest map on which the emitted world fits a race circuit and a runway (its own CIRCUIT_RUNWAY_MIN_SIZE), or null. */
+export function circuitRunwayFloorFromWorldSource(worldSource: string): { loop: number; bounded: number } | null {
+  const m = /CIRCUIT_RUNWAY_MIN_SIZE[^=]*=\s*\{\s*loop:\s*(\d+)\s*,\s*bounded:\s*(\d+)\s*\}/.exec(String(worldSource ?? ''));
   return m ? { loop: Number(m[1]), bounded: Number(m[2]) } : null;
 }
 
@@ -454,7 +459,7 @@ export function describeMapPlan(plan: MapPlan, applied: Record<MapLayer, boolean
   lines.push(layer('frame', plan.choice ? `${plan.sideKm} km across` : 'the default 100 km loop'));
   lines.push(layer('land', plan.archetype));
   lines.push(layer('boundary', BOUNDARY_WHAT[plan.boundary] + (plan.boundarySource === 'user' ? ' (asked for)' : '')));
-  lines.push(layer('water', waterWhat(plan.water, plan.waterRefused)));
+  lines.push(layer('water', waterWhat(plan.water, plan.waterRefused)) + (applied.water && (plan.water.rivers || plan.water.lakes || plan.water.canals) ? ' (the ponds; the world makes its own rivers and lakes, so their counts and canals are recorded only)' : ''));
   lines.push(layer('roadStyle', ROAD_WHAT[plan.roadStyle] + (plan.roadStyleSource === 'user' ? ' (asked for)' : ' (default)')));
   lines.push(layer('density', plan.density));
   if (plan.timeOfDay) lines.push(`  - timeOfDay: ${plan.timeOfDay} — not set by the map: pass skyOptions { hours: ${plan.hours} } to createAthreeMap (the sky module) to show it.`);

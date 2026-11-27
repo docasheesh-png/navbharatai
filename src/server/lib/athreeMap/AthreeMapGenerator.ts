@@ -295,6 +295,12 @@ export const REFERENCE_SIZE: Record<AthreeWorldMode, number> = { loop: 100000, b
 // refresh that brings an older game up to date refuses a file that does, so dropping it would strand every older game without roads).
 /** Below these sizes a map's roads are the planned town network of roads.ts (no longer "no roads"); from them up, the regional network. */
 export const MIN_ROAD_SIZE: Record<AthreeWorldMode, number> = { loop: 20000, bounded: 6000 };
+/**
+ * 🏁 The smallest map side, in metres, on which a racing game gets its race circuit and a flight game its 900 m runway (measured on the
+ * planned network: from these sizes every kind of land tried has both; below them some do not). Roads themselves exist at EVERY size,
+ * so a game that only drives needs no floor. The map planner reads this (never MIN_ROAD_SIZE) to raise an unsized racing or flight game.
+ */
+export const CIRCUIT_RUNWAY_MIN_SIZE: Record<AthreeWorldMode, number> = { loop: 5000, bounded: 2000 };
 
 export interface Spawn {
   x: number;

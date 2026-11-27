@@ -2,13 +2,15 @@
 // made or approved — the default area by game type, "5 km" is a side and "5 sq km" an area, the user's size always wins, the boundary
 // follows the land unless the user names one — and the plan never claims a layer the world does not build.
 import { describe, it, expect } from 'vitest';
-import { planMap, areaKm2In, boundaryIn, waterIn, roadStyleIn, densityIn, timeOfDayIn, regionIn, mapGameTypeIn, appliedMapLayers, describeMapPlan, roadFloorFromWorldSource, mapPlanWorldOptions, DEFAULT_AREA_KM2 } from './mapPlan';
-import { athreeRoadFloor, planAthreeMap, applyMapPlanToFiles, MAP_CHECKS_PATH } from './mapPlanWiring';
+import { planMap, areaKm2In, boundaryIn, waterIn, roadStyleIn, densityIn, timeOfDayIn, regionIn, mapGameTypeIn, appliedMapLayers, describeMapPlan, circuitRunwayFloorFromWorldSource, mapPlanWorldOptions, DEFAULT_AREA_KM2 } from './mapPlan';
+import { athreeCircuitRunwayFloor, planAthreeMap, applyMapPlanToFiles, MAP_CHECKS_PATH } from './mapPlanWiring';
+import { loadEmittedAthree } from './mapRobotRun';
 import { generateAthreeMap } from './AthreeMapGenerator';
 import { mapChoiceFor } from './athreeMapKinds';
 
-const FLOOR = { loop: 20000, bounded: 6000 };
-const plan = (prompt: string, builder?: Parameters<typeof planMap>[0]['builder']) => planMap({ prompt, builder, roadFloorMeters: FLOOR });
+// The world's real floor (CIRCUIT_RUNWAY_MIN_SIZE): a race circuit or a runway fits from 5 km across on a loop map, 2 km on an island.
+const FLOOR = { loop: 5000, bounded: 2000 };
+const plan = (prompt: string, builder?: Parameters<typeof planMap>[0]['builder']) => planMap({ prompt, builder, circuitRunwayFloorMeters: FLOOR });
 
 describe('area: a side or an area, said honestly', () => {
   it('"5 km ka map" is a 5 x 5 km frame (25 km²), and the note says it was read as a side', () => {
@@ -53,24 +55,30 @@ describe('the default area by game type (admin-approved) — and the user\'s siz
       expect(p.areaSource, t).toBe('game-default'); expect(p.areaKm2, t).toBe(5); expect(p.notes.join(' '), t).not.toMatch(/raised/);
     }
   });
-  it('"car racing game": 25 km², raised to the world\'s road floor because a race needs roads, and the note says so', () => {
+  // Roads exist at every size since #4626, so the floor is only the real minimum for a race circuit or a runway: the admin's 25 km² race
+  // and 100 km² flight defaults already hold one, and are NOT raised (they used to be raised to 400 km², the old "no roads below 20 km").
+  it('"car racing game": 25 km², not raised — a race circuit fits on a 5 km map', () => {
     const p = plan('car racing game');
-    expect(p.gameType).toBe('racing'); expect(p.sideKm).toBe(20);
+    expect(p.gameType).toBe('racing'); expect(p.sideKm).toBe(5); expect(p.areaKm2).toBe(25);
     expect(p.notes.join(' ')).toMatch(/default for a racing game is 25 km²/);
-    expect(p.notes.join(' ')).toMatch(/raised to 20 x 20 km/);
+    expect(p.notes.join(' ')).not.toMatch(/raised/);
   });
-  it('with no road floor known, the 25 km² default stands and the plan says roads may be missing', () => {
-    const p = planMap({ prompt: 'car racing game' });
-    expect(p.sideKm).toBe(5); expect(p.notes.join(' ')).toMatch(/could not be read/);
-  });
-  it('a floor at or under the default changes nothing (when small-map roads land, the default takes over by itself)', () => {
-    const p = planMap({ prompt: 'car racing game', roadFloorMeters: { loop: 3000, bounded: 3000 } });
-    expect(p.sideKm).toBe(5); expect(p.areaKm2).toBe(25);
-  });
-  it('"plane game": flight, 100 km² default, raised to the road floor for a runway', () => {
+  it('"plane game": flight, 100 km², not raised — a runway fits', () => {
     const p = plan('plane game');
-    expect(p.gameType).toBe('flight'); expect(p.notes.join(' ')).toMatch(/100 km²/); expect(p.notes.join(' ')).toMatch(/runway/); expect(p.sideKm).toBe(20);
-    expect(planMap({ prompt: 'plane game', roadFloorMeters: { loop: 1000, bounded: 1000 } }).areaKm2).toBe(100);
+    expect(p.gameType).toBe('flight'); expect(p.notes.join(' ')).toMatch(/100 km²/); expect(p.areaKm2).toBe(100); expect(p.notes.join(' ')).not.toMatch(/raised/);
+  });
+  it('a floor above the default raises a racing or flight game to it and says why (a circuit, a runway); driving needs no floor', () => {
+    const big = { loop: 12000, bounded: 12000 };
+    const r = planMap({ prompt: 'car racing game', circuitRunwayFloorMeters: big });
+    expect(r.sideKm).toBe(12); expect(r.notes.join(' ')).toMatch(/needs a race circuit, which this world fits only on a map at least 12 km across/);
+    const f = planMap({ prompt: 'plane game', circuitRunwayFloorMeters: { loop: 15000, bounded: 15000 } });
+    expect(f.sideKm).toBe(15); expect(f.notes.join(' ')).toMatch(/needs a runway/);
+    const d = planMap({ prompt: 'GTA 5 jaisa game', circuitRunwayFloorMeters: big });
+    expect(d.gameType).toBe('driving'); expect(d.areaKm2).toBe(25); expect(d.notes.join(' ')).not.toMatch(/raised/);
+  });
+  it('with no floor known, the 25 km² default stands and the plan says a circuit may be missing', () => {
+    const p = planMap({ prompt: 'car racing game' });
+    expect(p.sideKm).toBe(5); expect(p.notes.join(' ')).toMatch(/race circuit could not be read/);
   });
   it('a battle royale keeps its 8 km island', () => {
     const p = plan('battle royale game banao');
@@ -167,23 +175,44 @@ describe('boundary, water, roads, density, region, time of day', () => {
 
 describe('honesty: what the world applies is read from its source, never assumed', () => {
   const p = plan('5 km ka registan shooter, pahaadon se ghira, do talab');
-  it('today\'s world reads none of boundary / water / roadStyle / density, so none is claimed', () => {
+  it('today\'s world builds the road style (#4626) and is reported as applying it; what it does not read is not claimed', () => {
     const world = generateAthreeMap().files['src/game/athree/world.ts'];
     const a = appliedMapLayers(world, p);
-    expect(a).toMatchObject({ frame: true, land: true, boundary: false, water: false, roadStyle: false, density: false });
+    expect(a).toMatchObject({ frame: true, land: true, roadStyle: true, density: false });
+    expect(describeMapPlan(p, a)).toMatch(/roadStyle: .* — APPLIED/);
     const note = describeMapPlan(p, a);
     expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — recorded, not built into this world yet/);
     expect(note).toMatch(/do not claim them/);
+  });
+  it('the water layer is APPLIED only when the world reads its ponds (the #4624 shape: options.water ?? {} … .ponds); counts it does not use are said', () => {
+    const p2 = plan('do nadiyan aur ek talab wala explore game');
+    expect(appliedMapLayers('const w = options.water ?? {};', p2).water).toBe(false);
+    const a = appliedMapLayers('const waterOpt = options.water ?? {}; placePonds(waterOpt.ponds);', p2);
+    expect(a.water).toBe(true);
+    expect(describeMapPlan(p2, a)).toMatch(/water: .* — APPLIED \(the ponds; the world makes its own rivers and lakes/);
   });
   it('a world that reads an option is reported as applying it (the day the boundary layer lands)', () => {
     const a = appliedMapLayers('const b = options.boundary ?? "sea"; const { roadStyle, density } = options;', p);
     expect(a).toMatchObject({ boundary: true, roadStyle: true, density: true, water: false });
     expect(describeMapPlan(p, a)).toMatch(/boundary: .* — APPLIED/);
   });
-  it('the road floor is read from the emitted world, not copied', () => {
-    expect(athreeRoadFloor()).toEqual(roadFloorFromWorldSource(generateAthreeMap().files['src/game/athree/world.ts']));
-    expect(athreeRoadFloor()).not.toBeNull();
-    expect(roadFloorFromWorldSource('nothing here')).toBeNull();
+  it('the circuit/runway floor is read from the emitted world (CIRCUIT_RUNWAY_MIN_SIZE), never from MIN_ROAD_SIZE', () => {
+    const world = generateAthreeMap().files['src/game/athree/world.ts'];
+    expect(athreeCircuitRunwayFloor()).toEqual(circuitRunwayFloorFromWorldSource(world));
+    expect(athreeCircuitRunwayFloor()).toEqual({ loop: 5000, bounded: 2000 });
+    expect(circuitRunwayFloorFromWorldSource('export const MIN_ROAD_SIZE: Record<AthreeWorldMode, number> = { loop: 20000, bounded: 6000 };')).toBeNull();
+    expect(circuitRunwayFloorFromWorldSource('nothing here')).toBeNull();
+  });
+  it('END TO END: the planned road style reaches the world — MAP_OPTIONS from the plan is what createAthreeMap lays roads with', () => {
+    const p = planAthreeMap('athree map par 3 km ka explore game, curvy hill roads');
+    expect(p.roadStyle).toBe('hill');
+    const out = applyMapPlanToFiles(generateAthreeMap(undefined, p.choice).files, p, p.choice);
+    expect(out.applied.roadStyle).toBe(true);
+    expect(out.note).toMatch(/roadStyle: .* — APPLIED/);
+    const A = loadEmittedAthree(out.files) as any;
+    const map = A.createAthreeMap({ seed: 5 });
+    expect(map.world.roadNetwork().style()).toBe('hill');
+    expect(map.world.homeRoads().roads.some((r: any) => r.planned)).toBe(true);
   });
 });
 

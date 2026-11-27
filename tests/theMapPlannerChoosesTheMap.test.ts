@@ -53,11 +53,12 @@ describe('real prompts choose the map through the one planner', () => {
     expect(text).toMatch(/boundary-closed: passed/);
     expect(act.files.get('src/game/athree/mapChecks.ts')).toMatch(/export function publishMapChecks/);
   });
-  it('"athree map par plane game": flight, raised to the road floor for a runway, said in the note', async () => {
+  // Roads exist on every size since #4626; a runway fits a 100 km² flight map, so it is not raised (it was raised to 400 km² before).
+  it('"athree map par plane game": flight, 100 km² (10 km across), with its runway, and not raised', async () => {
     const r = await run('athree map par ek plane game banao');
-    expect(optionsIn().sizeMeters).toBe(20000);
+    expect(optionsIn().sizeMeters).toBe(10000);
     expect(String(r.content)).toMatch(/default for a flight game is 100 km²/);
-    expect(String(r.content)).toMatch(/runway/);
+    expect(String(r.content)).not.toMatch(/raised to/);
   });
   it('the user\'s size wins over the game default: "athree map par 2 sq km ka car racing game"', async () => {
     const r = await run('athree map par 2 sq km ka open world car racing game');

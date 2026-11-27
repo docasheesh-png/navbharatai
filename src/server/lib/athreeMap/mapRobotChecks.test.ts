@@ -146,3 +146,32 @@ describe('the build-time run happens in a worker thread, within a budget', () =>
     expect(run.ran).toBe(false); expect(run.error).toMatch(/mapChecks|entry point/);
   });
 });
+
+describe('the planned default sizes really hold what the game needs (no floor inflation, no missing circuit or runway)', () => {
+  const worldFor = (prompt: string, profile: string, seed: number) => {
+    const { plan, files } = filesFor(prompt);
+    return { plan, roads: (loadEmittedAthree(files) as any).createAthreeMap({ seed, profile }).world.homeRoads() };
+  };
+  it('unsized racing: 25 km² (5 km across) with a race circuit on every seed tried', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      const { plan, roads } = worldFor('athree map par 3D racing game banao', 'racing', seed);
+      expect(plan.areaKm2).toBe(25); expect(plan.sideKm).toBe(5);
+      expect(roads.circuit, `seed ${seed}`).not.toBeNull();
+    }
+  });
+  it('unsized flight: 100 km² (10 km across) with a runway on every seed tried', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      const { plan, roads } = worldFor('athree map par ek plane game banao', 'flight', seed);
+      expect(plan.areaKm2).toBe(100);
+      expect(roads.roads.filter((r: any) => r.kind === 'runway').length, `seed ${seed}`).toBeGreaterThanOrEqual(1);
+    }
+  });
+  it('unsized on foot: 5 km² with roads', () => {
+    for (const seed of [1, 2]) {
+      const { plan, roads } = worldFor('open world game jisme paidal ghoom sakun', 'explore', seed);
+      expect(plan.areaKm2).toBe(5);
+      expect(roads.roads.length, `seed ${seed}`).toBeGreaterThan(0);
+    }
+  });
+});
+

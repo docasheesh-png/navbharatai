@@ -12,22 +12,22 @@
 
 import { athreeFiles } from './AthreeMapGenerator';
 import { MAP_CHECKS } from './athreeMapCheckSource';
-import { appliedMapLayers, describeMapPlan, mapPlanWorldOptions, planMap, roadFloorFromWorldSource, type MapLayer, type MapPlan, type MapPlanInput } from './mapPlan';
+import { appliedMapLayers, circuitRunwayFloorFromWorldSource, describeMapPlan, mapPlanWorldOptions, planMap, type MapLayer, type MapPlan, type MapPlanInput } from './mapPlan';
 import type { MapChoice } from './athreeMapKinds';
 
 const DIR = 'src/game/athree';
 export const MAP_CHECKS_PATH = `${DIR}/mapChecks.ts`;
 
 let floorCache: { loop: number; bounded: number } | null | undefined;
-/** The emitted world's own MIN_ROAD_SIZE (read once from the world source it emits). */
-export function athreeRoadFloor(): { loop: number; bounded: number } | null {
-  if (floorCache === undefined) floorCache = roadFloorFromWorldSource(athreeFiles([])[`${DIR}/world.ts`] ?? '');
+/** The emitted world's own CIRCUIT_RUNWAY_MIN_SIZE (read once from the world source it emits). */
+export function athreeCircuitRunwayFloor(): { loop: number; bounded: number } | null {
+  if (floorCache === undefined) floorCache = circuitRunwayFloorFromWorldSource(athreeFiles([])[`${DIR}/world.ts`] ?? '');
   return floorCache;
 }
 
-/** Plan the map for a request, with the world's real road floor. */
+/** Plan the map for a request, with the world's real circuit and runway floor. */
 export function planAthreeMap(prompt: string, builder?: MapPlanInput['builder']): MapPlan {
-  return planMap({ prompt, builder, roadFloorMeters: athreeRoadFloor() });
+  return planMap({ prompt, builder, circuitRunwayFloorMeters: athreeCircuitRunwayFloor() });
 }
 
 export interface AppliedMapPlan {

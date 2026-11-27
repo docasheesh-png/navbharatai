@@ -6789,6 +6789,14 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   W and R build them; the notes flip to APPLIED by themselves). Time of day is only an instruction to the builder (skyOptions.hours).
   The playtest does not yet read `window.__nbMapChecks` into its findings. Lots-clear has no lots to check until the colonies layer
   exists. The racing/flight defaults are 400 km² today because roads need 20 km — they shrink when small-map roads land.
+### 2026-11-27 (later) — autopsy of failedbr #2566 (7ac680e1) — Q-3757…Q-3760 (#4620)
+A "continue … finish/fix the build" turn, weak tier, STOPPED by the 25-min cap while a preview-render repair was still investigating.
+- Q-3757 (in this PR): the user got the 830 s reply ("The clean console confirms it.") although a later check still saw
+  `[world] no dry ground was found for "riverside-town"`. Root: `adoptHealResult` keeps the build's reply through repairs and an
+  unfinished repair changes nothing, so no step compared the reply's moment with later findings. Class fix: `staleSummary.ts`.
+- Q-3759 (in this PR): `probe.test.ts` shipped. Root: no net knew probe files, and the scratch-copy net ran before the repair that
+  wrote it. Class fix: `scratchProbes.ts` + a turn-end sweep (`turnEndScratch.ts`) after every writer, before the durable save.
+- Q-3758 BLOCKED (admin): `ok:true`/"succeeded" beside STOPPED — options in the queue row. Q-3760 OPEN: claim-audit sibling.
 ## 2026-11-27 — Q-3703: saved signing keys leave with the account, warned first, with a real download (PR #4616)
 - Admin decision (a), 2026-11-27. `mobile_signing_keys` and `mobile_signing_key_events` are now erased by DELETE /api/profile
   (`USER_SCOPED_COLLECTIONS`, keys before events); the census reclassifies both from `blocked` to `user`.

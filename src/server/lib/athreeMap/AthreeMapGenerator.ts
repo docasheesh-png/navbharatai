@@ -126,6 +126,8 @@ export interface MapOptions {
   sizeMeters?: number;
   style?: { relief?: number; seaShift?: number; aridity?: number; warmth?: number; rivers?: number };
   roads?: boolean;
+  /** How the roads are laid on a map up to 25 km (see roads.ts): grid (default), highway, organic, hill or straight. */
+  roadStyle?: 'grid' | 'highway' | 'organic' | 'hill' | 'straight';
   /** false: plain ground colours and no bushes or stones (see AthreeWorldOptions.nature). Default on. */
   nature?: boolean;
 }
@@ -202,7 +204,7 @@ import { fieldNoise, mulberry32 } from './noise';
 import { PROFILE_DEFAULTS, type AthreeProfile, type AthreeWorldMode } from './config';
 import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
 import { createDunes } from './dunes';
-import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region } from './roads';
+import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
@@ -220,8 +222,15 @@ export interface AthreeWorldOptions {
   sizeMeters?: number;
   /** Set false for a world without rivers and lakes. Default true. */
   rivers?: boolean;
-  /** Set false for a world without roads, a circuit, runways and village plazas. Default true, except on a map too small to hold one. */
+  /** Set false for a world without roads, a circuit, runways and village plazas. Default true on every size: a map under 20 km (an island
+   * under 6 km) gets a planned town network instead of the regional one (see roadStyle). */
   roads?: boolean;
+  /**
+   * 🛣️ How the roads are laid (admin 2026-11-27), on any map up to 25 km: 'grid' (the default: a smart-city grid with a highway ring round
+   * it and a highway through it), 'highway' (superblocks between highways), 'organic' (an old town of lanes), 'hill' (winding roads on
+   * the slopes) or 'straight' (long straight roads across the land). A bigger map keeps its regional village network.
+   */
+  roadStyle?: RoadStyle;
   /** The character of the land. Every field is optional; the neutral style is the original world, exactly. */
   style?: Partial<AthreeStyle>;
   /**
@@ -268,8 +277,8 @@ function clampTo(v: unknown, lo: number, hi: number, fallback: number): number {
 
 /** The size the terrain functions are written for (a loop of 100 km, an island 8 km across). Any other size is this world, stretched. */
 export const REFERENCE_SIZE: Record<AthreeWorldMode, number> = { loop: 100000, bounded: 8000 };
-/** Below these a map cannot hold a road network (its regions are 12.5 km and its runways 900 m), so roads default to off. */
-export const MIN_ROAD_SIZE: Record<AthreeWorldMode, number> = { loop: 20000, bounded: 6000 };
+// EVERY MAP SIZE HAS ROADS (admin 2026-11-27). Below 20 km (an island below 6 km) the 12.5 km regions do not fit, so roads.ts lays ONE
+// planned network over the land instead (PLAN_BELOW there); the old MIN_ROAD_SIZE, under which a map had no roads at all, is gone.
 
 export interface Spawn {
   x: number;
@@ -504,7 +513,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return c + (withRivers ? d * smoothstep(0, 20, rivers.edgeDistance(x, z)) : d);
   }
 
-  const withRoads = options.roads ?? sizeMeters >= MIN_ROAD_SIZE[mode];
+  const withRoads = options.roads ?? true;
   const noRoads: RoadNetwork = {
     regionAt: () => ({ roads: [], sites: [], circuit: null }),
     carve: (_x, _z, h) => h,
@@ -512,15 +521,22 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     drivableHeightAt: (_x, _z, h) => h,
     home: () => ({ roads: [], sites: [], circuit: null }),
     regionsNear: () => [],
+    style: () => null,
+    blocks: () => [],
+    graph: () => ({ nodes: [], edges: [] }),
+    route: () => [],
   };
   let roadNet: RoadNetwork | null = null;
   const roadsOf = (): RoadNetwork => {
     if (!withRoads) return noRoads;
     if (!roadNet) {
-      roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers, {
-        seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile,
+      // A small map squeezes its heights (vs < 1), so its sea line is squeezed with them: 1.5 m at the reference size.
+      const landLine = 1.5 * Math.min(1, vs);
+      roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + (options.roadStyle ?? '') + '|' + landLine, {
+        seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile, roadStyle: options.roadStyle, landLine,
         terrain: terrainNoRoads,
         water: (x, z) => { const w = waterAt(x, z); return w ? { surface: w.surface, kind: w.kind } : null; },
+        bodies: waterBodies,
       });
     }
     return roadNet;
@@ -1406,13 +1422,13 @@ export function athreeFiles(chosen: readonly string[], excludedModules: readonly
   return files;
 }
 
-const RULE_CORE = 'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. The world is always there: terrain, biomes, wind, spawns, heightfield colliders, desert dunes (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), rivers and lakes as DATA (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real; rivers always end in the sea, a lake or another river; the water level only goes down along a river; nothing grows or spawns in the water; pass rivers: false for a world without them), roads as DATA (map.world.homeRoads() gives the villages, highways and, for the racing profile, the closed banked race circuit with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; roads are made region by region (12.5 km) as you travel, with no junctions; pass roads: false for a world without them) and map.world.surfaceAt (what a wheel runs on).';
+const RULE_CORE = 'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. The world is always there: terrain, biomes, wind, spawns, heightfield colliders, desert dunes (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), rivers and lakes as DATA (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real; rivers always end in the sea, a lake or another river; the water level only goes down along a river; nothing grows or spawns in the water; pass rivers: false for a world without them), roads as DATA (map.world.homeRoads() gives the villages, highways and, for the racing profile, the closed banked race circuit with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; on a map over 20 km roads are made region by region (12.5 km) as you travel; EVERY map under 20 km (an island under 6 km), and any map up to 25 km given roadStyle, has ONE connected planned town network instead: roadStyle grid (default: smart-city blocks, a highway ring and a highway through), highway, organic (old-town lanes), hill (winding) or straight; highways 4 to 6 lanes, main roads, colony streets and lanes, junction pads, roundabouts and zebra crossings; map.world.roadNetwork().blocks() gives the land enclosed by roads (polygons on the road centre lines, each side with its road half-width: build colonies inside, inset by it), .graph() the junctions and roads, and .route(from, to) a driving path in the LEFT lane (India) at road height; pass roads: false for a world without them) and map.world.surfaceAt (what a wheel runs on).';
 const RULE_BY_MODULE: Record<string, string> = {
   sea: 'SEA: a real wave ocean (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour) and map.ocean.floatAt for boats. Do not add your own water plane: the ocean is already in map.chunks.group.',
   plants: 'PLANTS: grass, trees, bushes and stones (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, bushes and stones scattered in clumps, placed by biome and slope, streamed in tiles, three levels of budget per quality tier; the ground colour is patchy — lush, dry, bare earth — never one flat green; an open grass field holds a few lone trees). Never on a road, levelled ground (a city, a venue), water or where the player starts. Trees, bushes and stones are visual only: they have no collider yet, so a car drives through them (treesInRect / propsInRect(world, x0, z0, x1, z1, cell) give their positions if you need to keep clear of them); pass nature: false for the plain look (one colour per land, no bushes or stones, no tree in an open field) and vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map; a flower bed or bush you must add goes only where map.world.plantableAt(x, z) is true (never on a road, a city street or water).',
   rivers: 'RIVERS: map.riverWater draws the rivers and lakes with a flowing-water shader and gives boats floatAt; they are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Do not draw your own rivers or lakes.',
   sky: 'SKY: map.sky gives the sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. Do not draw your own sky.',
-  roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers. Do not draw your own roads.',
+  roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, junction pads, roundabout islands, zebra crossings, bridge decks, rails and piers. Do not draw your own roads.',
   vehicles: 'VEHICLES: createVehicle(THREE, map.world, {kind: car or bike, color, quality}) gives a lofted sports car or bike with four or two wheels that spin and steer, brake lights, headlights (setLights) and its own driving physics: engine that fades with speed, braking limited by the surface, steering that narrows with speed, a grip limit, a handbrake slide, pitch and roll from the ground, flight off a crest, water that stops it; you call vehicle.update(dt, {throttle -1..1, steer -1..1, brake 0..1, handbrake}, map.chunks.origin) every frame and read vehicle.state (speed, slip, position). Vehicles do not collide with trees or other vehicles yet.',
 };
 const NOT_BUILT = 'NOT built yet — do not draw them by hand: buildings, animals, birds and people, sand ripple textures and heat haze. A plane to fly comes from the game kit (createAircraft / flyAircraft in three/flight.ts).';

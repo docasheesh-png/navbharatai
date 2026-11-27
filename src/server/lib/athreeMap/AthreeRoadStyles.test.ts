@@ -200,9 +200,11 @@ describe('the invariants, on every style at 1, 2.2, 5 and 25 km', () => {
     expect(islands).toBeGreaterThan(3);
   });
   it('is deterministic per seed, and another seed is another network', () => {
+    const fresh = loadAthree();
     for (const s of STYLES) {
       const a = planned(world(s, 2.2));
-      const again = planned(A.createAthreeWorld({ seed: 5, ...mapOptionsFor({ archetype: 'island', sizeKm: 2.2 }), roadStyle: s }));
+      // A freshly loaded kit: the same world must not come back from the network cache, it must be MADE again and come out the same.
+      const again = planned(fresh.createAthreeWorld({ seed: 5, ...mapOptionsFor({ archetype: 'island', sizeKm: 2.2 }), roadStyle: s }));
       expect(JSON.stringify(again.map((r: any) => r.points))).toBe(JSON.stringify(a.map((r: any) => r.points)));
       const other = planned(world(s, 2.2, 'island', 6));
       expect(JSON.stringify(other.map((r: any) => r.points))).not.toBe(JSON.stringify(a.map((r: any) => r.points)));

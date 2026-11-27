@@ -95,7 +95,7 @@ export interface ColonyPlot {
   /** Top of the building above the pad, metres (0 for a park or a playground). */
   height: number;
   color: number;
-  /** 0 at the town centre, 1 at the farthest plot. */
+  /** 0 at the town centre, 1 at the farthest block corner, measured at the plot's gate. */
   ring: number;
 }
 
@@ -161,6 +161,8 @@ export const COLONY_SPAN = 400;
 export const COLONY_NEEDS: ReadonlyArray<[ColonyKind, number]> = [['park', 3], ['school', 3], ['temple', 2], ['clinic', 2], ['playground', 2]];
 /** A colony smaller than this many plots joins the nearest colony (so each colony can hold its park, school, temple and clinic). */
 export const COLONY_MIN_PLOTS = 10;
+/** A colony of at least this many plots may hold the town's hospital. */
+export const COLONY_HOSPITAL_PLOTS = 24;
 
 const WASH = [0xe9c46a, 0xf4a6a6, 0x9ec9e6, 0xf1e3c8, 0xc7e0b4, 0xe8b07a, 0xd7c3e6, 0xf6f1e7];
 const OFFICE = [0x8fa3b0, 0xa7b4bd, 0x6f8796, 0xc9d3d9, 0x9aa5ad];
@@ -350,14 +352,23 @@ export function planColonies(input: ColonyInput): ColonyPlan {
     // Dry: no river, lake or pond under or beside it, and no sea.
     for (const g of riverGrid.near(rect.cx - rr, rect.cz - rr, rect.cx + rr, rect.cz + rr)) if (segRectDistance(g.ax, g.az, g.bx, g.bz, rect) < g.reach) return 'water';
     for (const p of poolGrid.near(rect.cx - rr, rect.cz - rr, rect.cx + rr, rect.cz + rr)) if (pointRectDistance(p.x, p.z, rect) < p.radius + 3) return 'water';
-    const pts = samples(rect, COLONY_PAD_MARGIN);
+    // Water at the plot and just round it (where its pad eases back into the land); the road asked at the centre and the two front
+    // corners (the geometry above already keeps every corner off the roads round the block, the lanes inside it and the junctions).
+    const ring5 = samples(rect, COLONY_PAD_MARGIN);
+    for (const p of ring5) if (input.wet(p.x, p.z)) return 'water';
+    for (const k of [0, 1, 2]) if (input.onRoad(ring5[k].x, ring5[k].z)) return 'road';
+    // The ground on a 5 x 5 grid over the plot: the nine points of its 3 x 3 sub-grid (corners, edge middles, centre) set the pad.
+    const grid: number[] = [];
+    const at = (i: number, j: number): number => {
+      const u = (i / 4 - 0.5) * rect.w, v = (j / 4 - 0.5) * rect.d;
+      return input.ground(rect.cx + rect.ux * u + rect.nx * v, rect.cz + rect.uz * u + rect.nz * v);
+    };
     let lo = Infinity, hi = -Infinity, sum = 0;
-    for (const p of pts) {
-      if (input.wet(p.x, p.z)) return 'water';
-      const g = input.ground(p.x, p.z);
+    for (let i = 0; i <= 4; i += 2) for (let j = 0; j <= 4; j += 2) {
+      const g = at(i, j);
       if (!Number.isFinite(g) || g < input.landLine + 0.3) return 'water';
-      if (input.onRoad(p.x, p.z)) return 'road';
       lo = Math.min(lo, g); hi = Math.max(hi, g); sum += g;
+      grid.push(g);
     }
     for (const p of c) if (!input.inside(p.x, p.z)) return 'outside';
     // Road access: the road the front faces is right in front of the gate.
@@ -375,10 +386,18 @@ export function planColonies(input: ColonyInput): ColonyPlan {
     if (!input.onRoad(qx + ((gx - qx) / (best || 1)) * Math.max(0, run.half - 1), qz + ((gz - qz) / (best || 1)) * Math.max(0, run.half - 1))) return 'access';
     // Level ground: the pad sits near the mean, within a step of the footpath in front, and cuts or fills no more than the limit.
     const front = input.ground(tx, tz);
-    const y = Math.min(front + 1.2, Math.max(front - 1.2, sum / pts.length));
+    const y = Math.min(front + 1.2, Math.max(front - 1.2, sum / grid.length));
     const diag = Math.hypot(rect.w, rect.d);
     if (hi - lo > COLONY_MAX_SLOPE * diag || Math.max(hi - y, y - lo) > COLONY_MAX_CUT) return 'steep';
     if (y < input.landLine + 0.5) return 'water';
+    // A plot that passed every test above is read at the other 16 points of the 5 x 5 grid: a bump or a road's fill between the nine
+    // points must not hide a cut or fill past the limit (a hill town's ground is not a plane).
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+      if (i % 2 === 0 && j % 2 === 0) continue;
+      const g = at(i, j);
+      if (!Number.isFinite(g) || g < input.landLine + 0.3) return 'water';
+      if (Math.abs(g - y) > COLONY_MAX_CUT) return 'steep';
+    }
     return { y, access: { x: tx, z: tz } };
   }
 
@@ -430,12 +449,14 @@ export function planColonies(input: ColonyInput): ColonyPlan {
       let s = 4;
       while (s < L - 6) {
         // A main road is a bazaar near the centre and mostly homes farther out (shops on it, never on a colony street).
-        const ring0 = ringAt(a.x + ux * (s + 5) + nx * inset, a.z + uz * (s + 5) + nz * inset);
-        const commercial = mainRoad && (ring0 < COLONY_BAZAAR_RING || r() < 0.4);
-        const front = commercial ? rule.shop : rule.home;
-        const w = front[0] + (front[1] - front[0]) * r();
+        // The ring is measured at the gate (the middle of the plot's front), for a shop-wide and a home-wide plot alike.
+        const wShop = rule.shop[0] + (rule.shop[1] - rule.shop[0]) * r();
+        const wHome = rule.home[0] + (rule.home[1] - rule.home[0]) * r();
+        const gateRing = (w: number): number => ringAt(a.x + ux * (s + w / 2) + nx * inset, a.z + uz * (s + w / 2) + nz * inset);
+        const commercial = mainRoad && (Math.min(gateRing(wShop), gateRing(wHome)) < COLONY_BAZAAR_RING || r() < 0.4);
+        const w = commercial ? wShop : wHome;
         if (s + w > L - 3) break;
-        const ring = ringAt(a.x + ux * (s + w / 2) + nx * inset, a.z + uz * (s + w / 2) + nz * inset);
+        const ring = gateRing(w);
         if (!commercial && r() > rule.fill) { s += w + COLONY_GAP; continue; }
         const dTarget = (rule.depth[0] + (rule.depth[1] - rule.depth[0]) * r()) * (commercial ? 0.85 : 1);
         let placed = false;
@@ -510,8 +531,13 @@ export function planColonies(input: ColonyInput): ColonyPlan {
   // ---- 3. every colony's park, school, temple, clinic and playground (a hospital nearest the centre, a market where shops are) -------
   const colonyBlocks = [...groups.values()].filter((bl) => plotsIn(bl).length > 0).sort((p, q) => Math.min(...p) - Math.min(...q));
   const colonyCentres = colonyBlocks.map(centreOf);
-  let central = 0;
-  colonyCentres.forEach((c, i) => { if (Math.hypot(c.x - centre.x, c.z - centre.z) < Math.hypot(colonyCentres[central].x - centre.x, colonyCentres[central].z - centre.z)) central = i; });
+  // The hospital goes to the colony nearest the centre that is big enough for one (or, when none is, the biggest).
+  let central = -1;
+  colonyCentres.forEach((c, i) => {
+    if (countIn(colonyBlocks[i]) < COLONY_HOSPITAL_PLOTS) return;
+    if (central < 0 || Math.hypot(c.x - centre.x, c.z - centre.z) < Math.hypot(colonyCentres[central].x - centre.x, colonyCentres[central].z - centre.z)) central = i;
+  });
+  if (central < 0) colonyBlocks.forEach((bl, i) => { if (central < 0 || countIn(bl) > countIn(colonyBlocks[central])) central = i; });
   const runOf = new Map<Draft, Run>();
   for (const block of blocks) {
     const runs = blockRuns(block, input.roadKind);
@@ -558,7 +584,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
     const r = mulberry32((input.seed * 31 + ci * 977 + 5) | 0);
     const c = colonyCentres[ci];
     const needs: Array<[ColonyKind, number]> = [...COLONY_NEEDS];
-    if (ci === central && plotsIn(bl).length >= 24) needs.splice(3, 0, ['hospital', 3]);
+    if (ci === central) needs.splice(3, 0, ['hospital', 3]);
     for (const [kind, k] of needs) if (!convert(bl, kind, k, isHome, c, r)) convert(bl, kind, 1, notCivic, c, r);
     if (plotsIn(bl).filter((d) => d.kind === 'shop').length >= 6) convert(bl, 'market', 3, (d) => d.kind === 'shop', c, r);
   });
@@ -580,7 +606,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         id, colony: ci, block: d.block, kind, zone: COLONY_ZONE[kind], x: d.rect.cx, z: d.rect.cz, width: d.rect.w, depth: d.rect.d,
         facing: { x: -d.rect.nx, z: -d.rect.nz }, corners: c, y: d.y, road: d.road, roadKind: d.roadKind, gate,
         entrance: { x: d.access.x, y: input.ground(d.access.x, d.access.z), z: d.access.z }, floors: kind === 'park' || kind === 'playground' ? 0 : d.floors,
-        height, color: d.color, ring: ringAt(d.rect.cx, d.rect.cz),
+        height, color: d.color, ring: ringAt(gate.x, gate.z),
       });
     }
     colonies.push({ id: ci, centre: colonyCentres[ci], blocks: bl.slice().sort((p, q) => p - q), plots: ids, ring: ringAt(colonyCentres[ci].x, colonyCentres[ci].z) });

@@ -876,7 +876,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     // How far outside the plot's rectangle a point is (negative inside), in the plot's own frame.
     const ux = -p.facing.z, uz = p.facing.x;
     const dx = x - p.x, dz = z - p.z;
-    return Math.max(Math.abs(dx * ux + dz * uz) - p.width / 2, Math.abs(dx * p.facing.x + dz * p.facing.z) - p.depth / 2);
+    const du = Math.abs(dx * ux + dz * uz) - p.width / 2, dv = Math.abs(dx * p.facing.x + dz * p.facing.z) - p.depth / 2;
+    // Outside, the TRUE distance (round at the corners): two plots kept 1.6 m apart never reach into each other's pad over 1.5 m,
+    // whatever their angle. A square margin did, at the corner of a plot turned against its neighbour.
+    return du <= 0 && dv <= 0 ? Math.max(du, dv) : Math.hypot(Math.max(du, 0), Math.max(dv, 0));
   }
   /** True when ground the game levelled, or a road it laid, reaches the plot (its pad or its margin). */
   function colonyHitByGame(p: ColonyPlot): boolean {

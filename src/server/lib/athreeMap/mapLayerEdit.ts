@@ -126,7 +126,7 @@ export function describeWater(w: WaterPlan): string {
   return parts.length ? parts.join(', ') : 'no water of its own';
 }
 
-const FACTOR_RE = /(\d+(?:[.,]\d+)?)\s*(?:x|guna|gunaa|times|गुना)\b|\b(?:x|×)\s*(\d+(?:[.,]\d+)?)\b/u;
+const FACTOR_RE = /(\d+(?:[.,]\d+)?)\s*(?:(?:x|guna|gunaa|times)\b|गुना)|\b(?:x|×)\s*(\d+(?:[.,]\d+)?)\b/u;
 function frameFactor(t: string): number | null {
   const m = FACTOR_RE.exec(t);
   const n = m ? Number((m[1] ?? m[2]).replace(',', '.')) : NaN;

@@ -46,6 +46,7 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 const memory = new Map<string, SavedMap>();
+const MEMORY_CAP = 2000;
 
 export function newSavedMapId(): string {
   return randomBytes(12).toString('hex');
@@ -109,7 +110,10 @@ export async function saveMap(uid: string, input: { name: unknown; plan: unknown
   if (mine.length >= MAX_MAPS_PER_USER) return { ok: false, status: 409, error: `You can keep up to ${MAX_MAPS_PER_USER} maps. Delete one to save another.` };
   const map: SavedMap = { id: newSavedMapId(), uid, name, plan, preview, createdAt: now };
   const db = getDb();
-  if (!db) memory.set(map.id, map);
+  if (!db) {
+    memory.set(map.id, map);
+    if (memory.size > MEMORY_CAP) memory.delete(memory.keys().next().value as string);
+  }
   else await db.collection(SAVED_MAPS_COLLECTION).doc(map.id).set({ uid, name, plan, preview, createdAt: now });
   return { ok: true, map };
 }

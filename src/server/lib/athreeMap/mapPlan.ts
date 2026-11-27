@@ -33,6 +33,7 @@ import { ARCHETYPES, archetypeIn, clampSizeKm, sizeKmIn, type Archetype, type Ma
 import { mapProfileFor } from './athreeMapIntent';
 import { buildGameContract } from '../../AgentV3/gameIntent';
 import { namesGtaTitle } from '../wellKnownGameTitles';
+import { largeWorldIntent } from '../../AgentV3/largeWorldIntent';
 
 export type BoundaryKind = 'sea' | 'mountains' | 'canyon' | 'forest-river' | 'dunes' | 'wall';
 export type RoadStyle = 'grid' | 'highway' | 'organic' | 'hill' | 'straight';
@@ -333,7 +334,13 @@ export function planMap(input: MapPlanInput): MapPlan {
 
   // area: builder > user words > game default (with the road floor) > the legacy default world
   const builderSide = typeof input?.builder?.sizeKm === 'number' && Number.isFinite(input.builder.sizeKm) ? input.builder.sizeKm : null;
-  const said = areaKm2In(prompt);
+  let said = areaKm2In(prompt);
+  // "map bahut chhota hai, bada karo" is a COMPLAINT that the map is too small — a wish for a bigger one. The size WORD in it
+  // ("bahut chhota") describes the old map, not the new one, so it must never shrink the map to 1 km (largeWorldIntent reads the wish).
+  if (said && said.said === 'word' && largeWorldIntent(prompt).wish === 'too-small') {
+    notes.push('The request says the map is too small, so a size word in it describes the old map: the new map is a large one (100 km across).');
+    said = { areaKm2: 100 * 100, said: 'word' };
+  }
   let side: number | null; let areaSource: PlanSource;
   // The size the USER states always wins — over the builder's size_km too (the builder picks a size only when the user named none).
   if (said) {

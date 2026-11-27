@@ -32,6 +32,11 @@ describe('area: a side or an area, said honestly', () => {
     expect(areaKm2In('chhota map')).toEqual({ areaKm2: 25, said: 'word' });
     expect(areaKm2In('ek racing game')).toBeNull();
   });
+  it('"map bahut chhota hai, bada karo" is a complaint: the size word describes the OLD map, so the new one is large, never 1 km', () => {
+    const p = plan('mere 3D game ka map bahut chhota hai, bada karo');
+    expect(p.sideKm).toBe(100); expect(p.notes.join(' ')).toMatch(/too small/);
+    expect(plan('ek chhota map banao').sideKm).toBe(5); // a small map asked for on purpose stays small
+  });
   it('the 1 to 1000 km limit is held and said', () => {
     const p = plan('0.2 sq km arena shooter');
     expect(p.sideKm).toBe(1); expect(p.notes.join(' ')).toMatch(/held to 1 km/);

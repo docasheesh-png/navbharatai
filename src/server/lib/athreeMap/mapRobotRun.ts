@@ -18,12 +18,12 @@ import { Worker } from 'node:worker_threads';
 import type { MapProfile as AthreeProfile } from './athreeMapLibrary';
 
 /**
- * The loader and the runner as plain JavaScript (they must run inside a worker, which has no bundler): `loadEmitted(ts, files, entry)`
- * transpiles each emitted module and resolves its relative imports among the set; `runChecks(ts, files, profile, seeds)` builds the
+ * The loader and the runner as plain JavaScript (they must run inside a worker, which has no bundler): `loadEmitted(compile, files, entry)`
+ * compiles each emitted module and resolves its relative imports among the set; `runChecks(compile, files, profile, seeds)` builds the
  * world for each seed and runs the emitted checks on it.
  */
 const RUNNER_SOURCE = String.raw`
-function loadEmitted(ts, files, entry) {
+function loadEmitted(compile, files, entry) {
   var DIR = 'src/game/athree/';
   var cache = new Map();
   function load(name) {
@@ -31,7 +31,7 @@ function loadEmitted(ts, files, entry) {
     if (hit) return hit;
     var source = files[DIR + name + '.ts'];
     if (!source) throw new Error('athree module not emitted: ' + name);
-    var js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    var js = compile(source);
     var exports = {};
     cache.set(name, exports);
     var req = function (id) {
@@ -43,10 +43,10 @@ function loadEmitted(ts, files, entry) {
   }
   return load(entry || 'index');
 }
-function runChecks(ts, files, profile, seeds) {
+function runChecks(compile, files, profile, seeds) {
   try {
-    var index = loadEmitted(ts, files, 'index');
-    var checks = loadEmitted(ts, files, 'mapChecks');
+    var index = loadEmitted(compile, files, 'index');
+    var checks = loadEmitted(compile, files, 'mapChecks');
     if (typeof index.createAthreeMap !== 'function' || typeof checks.runMapChecks !== 'function') {
       return { ran: false, seeds: seeds.slice(), ok: false, results: [], error: 'the emitted map or its checks have no entry point' };
     }
@@ -63,15 +63,30 @@ function runChecks(ts, files, profile, seeds) {
 }
 `;
 
-type LoadFn = (t: typeof ts, files: Readonly<Record<string, string>>, entry?: string) => Record<string, unknown>;
-type RunFn = (t: typeof ts, files: Readonly<Record<string, string>>, profile: string, seeds: number[]) => RobotRun;
+type Compile = (source: string) => string;
+type LoadFn = (compile: Compile, files: Readonly<Record<string, string>>, entry?: string) => Record<string, unknown>;
+type RunFn = (compile: Compile, files: Readonly<Record<string, string>>, profile: string, seeds: number[]) => RobotRun;
 // Our own constant source (above), evaluated once — the same text the worker runs.
 // eslint-disable-next-line no-new-func
 const RUNNER = new Function(RUNNER_SOURCE + '\nreturn { loadEmitted: loadEmitted, runChecks: runChecks };')() as { loadEmitted: LoadFn; runChecks: RunFn };
 
+/**
+ * TypeScript → JavaScript, cached by source text. The Athree modules are constants (only config.ts carries the map's choice), so a
+ * server transpiles each one once in its life (a few hundred milliseconds, the first time) and the worker never loads TypeScript.
+ */
+const transpiled = new Map<string, string>();
+function transpile(source: string): string {
+  const hit = transpiled.get(source);
+  if (hit !== undefined) return hit;
+  const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  if (transpiled.size > 400) transpiled.clear();
+  transpiled.set(source, js);
+  return js;
+}
+
 /** Load the emitted Athree modules from a file set: transpile each and resolve its relative imports among the set. */
 export function loadEmittedAthree(files: Readonly<Record<string, string>>, entry = 'index'): Record<string, unknown> {
-  return RUNNER.loadEmitted(ts, files, entry);
+  return RUNNER.loadEmitted(transpile, files, entry);
 }
 
 export interface RobotCheckLine { id: string; applicable: boolean; ok: boolean; detail: string }
@@ -83,14 +98,14 @@ export const ROBOT_BUDGET_MS = 8000;
 
 /** Run the emitted robot checks on the emitted world, in this thread (tests). Never throws. */
 export function runRobotChecksOnFiles(files: Readonly<Record<string, string>>, profile: AthreeProfile, seeds: readonly number[] = ROBOT_SAMPLE_SEEDS): RobotRun {
-  return RUNNER.runChecks(ts, files, profile, [...seeds]);
+  return RUNNER.runChecks(transpile, files, profile, [...seeds]);
 }
 
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
 ${RUNNER_SOURCE}
 let result;
-try { result = runChecks(require('typescript'), workerData.files, workerData.profile, workerData.seeds); }
+try { result = runChecks(function (js) { return js; }, workerData.files, workerData.profile, workerData.seeds); }
 catch (error) { result = { ran: false, seeds: workerData.seeds, ok: false, results: [], error: error && error.message ? error.message : String(error) }; }
 parentPort.postMessage(result);
 `;
@@ -105,7 +120,10 @@ export function runRobotChecksInWorker(files: Readonly<Record<string, string>>, 
   const failed = (error: string): RobotRun => ({ ran: false, seeds, ok: false, results: [], error });
   return new Promise<RobotRun>((resolve) => {
     let worker: Worker;
-    try { worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { files: { ...files }, profile, seeds } }); }
+    let compiled: Record<string, string>;
+    try { compiled = Object.fromEntries(Object.entries(files).map(([p, src]) => [p, transpile(src)])); }
+    catch (error) { resolve(failed('the map could not be compiled: ' + (error instanceof Error ? error.message : String(error)))); return; }
+    try { worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { files: compiled, profile, seeds } }); }
     catch (error) { resolve(failed('the check worker could not start: ' + (error instanceof Error ? error.message : String(error)))); return; }
     let settled = false;
     const finish = (run: RobotRun): void => {

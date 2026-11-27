@@ -1,0 +1,99 @@
+name: Weekly game bench (smoke set, production)
+
+# Kadam 6 (admin decision 2026-11-27): run the game benchmark's SMOKE set — 15 prompts, one repetition
+# each — against PRODUCTION once a week, so a slide in game quality shows up within a week instead of in a
+# user's complaint. Budget: about $6 a week. Every build is a REAL build and spends real provider money.
+#
+# What it runs: scripts/agentv3-reliability-bench.ts with BENCH_FIXTURE=game, BENCH_SET=smoke, BENCH_RUNS=1,
+# BENCH_POWER_LEVEL=weak and BENCH_CONFIRM=yes. The bench itself stops at the first failed or unreconciled
+# build (it never retries a paid build), so one bad week costs at most the builds sent before it stopped.
+# The result JSON is uploaded as an artifact and summarised on the run page (runs by class incl.
+# ask-not-met, mean GQS, seconds, real cost) by scripts/game-bench-summary.ts.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions) — NAMES only, values never in the repo:
+#   GAME_BENCH_BASE_URL       — production origin, https only, no path (e.g. https://<app host>)
+#   GAME_BENCH_REFRESH_TOKEN  — Firebase REFRESH token of the dedicated bench test account. A refresh token,
+#                               not an ID token: an ID token lives about an hour and a smoke run lasts
+#                               longer, so the bench mints a fresh ID token before each build.
+# Optional: GAME_BENCH_FIREBASE_API_KEY (defaults to the public web key in src/firebase-applet-config.json).
+# Documented in docs/claude/ENV_REGISTRY.md ("CI secrets — weekly game bench").
+#
+# If the required secrets are absent the job SKIPS with a notice — never a red run, never a fake result —
+# so it is safe to merge before they are configured. This workflow never runs on a pull request or a push.
+on:
+  schedule:
+    # Sunday 20:37 UTC = Monday 02:07 IST: the quietest hour for the app's users.
+    - cron: '37 20 * * 0'
+  workflow_dispatch: {}
+
+# Two paid runs must never overlap; a second one waits rather than cancelling a run that is spending money.
+concurrency:
+  group: game-bench-weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  game-bench:
+    runs-on: ubuntu-latest
+    # Hard cap. 15 builds × BENCH_TIMEOUT_S (1200 s) = 300 min, plus setup; GitHub's own ceiling is 360.
+    timeout-minutes: 330
+    steps:
+      - name: Check for bench credentials
+        id: guard
+        env:
+          BASE_URL: ${{ secrets.GAME_BENCH_BASE_URL }}
+          REFRESH_TOKEN: ${{ secrets.GAME_BENCH_REFRESH_TOKEN }}
+        run: |
+          if [ -n "$BASE_URL" ] && [ -n "$REFRESH_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GAME_BENCH_BASE_URL / GAME_BENCH_REFRESH_TOKEN not set — skipping the weekly game bench. No build was sent and no result is reported."
+            echo "Weekly game bench SKIPPED: GAME_BENCH_BASE_URL / GAME_BENCH_REFRESH_TOKEN are not set. No build was sent." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.ready == 'true'
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        if: steps.guard.outputs.ready == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.guard.outputs.ready == 'true'
+        run: npm ci
+
+      - name: Run the game bench smoke set
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          BENCH_BASE_URL: ${{ secrets.GAME_BENCH_BASE_URL }}
+          BENCH_FIREBASE_REFRESH_TOKEN: ${{ secrets.GAME_BENCH_REFRESH_TOKEN }}
+          BENCH_FIREBASE_API_KEY: ${{ secrets.GAME_BENCH_FIREBASE_API_KEY }}
+          BENCH_FIXTURE: game
+          BENCH_SET: smoke
+          BENCH_RUNS: '1'
+          BENCH_POWER_LEVEL: weak
+          BENCH_TIMEOUT_S: '1200'
+          BENCH_LABEL: weekly-${{ github.run_id }}
+          BENCH_OUTPUT_DIR: ${{ runner.temp }}/game-bench
+          BENCH_CONFIRM: 'yes'
+        run: npx tsx scripts/agentv3-reliability-bench.ts
+
+      - name: Write the job summary
+        if: always() && steps.guard.outputs.ready == 'true'
+        run: npx tsx scripts/game-bench-summary.ts "$RUNNER_TEMP/game-bench" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the result
+        if: always() && steps.guard.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: game-bench-${{ github.run_id }}
+          path: ${{ runner.temp }}/game-bench/*.json
+          if-no-files-found: warn
+          retention-days: 90

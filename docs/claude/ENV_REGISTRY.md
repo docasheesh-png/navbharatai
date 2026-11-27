@@ -437,6 +437,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   not shippable. It does not flip `ok` or change billing. See `docs/security/game-auto-repair-suspension.md`.
   **Phase 4 — bench-runner env only (local script, never Cloud Run):** `BENCH_FIXTURE` (`reliability` default | `game`)
   for `scripts/agentv3-reliability-bench.ts`; spends real money only with `BENCH_CONFIRM=yes`.
+  **CI secrets — weekly game bench (Kadam 6, admin 2026-11-27; GitHub Actions repo secrets, NOT Cloud Run):**
+  `.github/workflows/game-bench-weekly.yml` runs the game SMOKE set (15 prompts, one repetition, tier `weak`,
+  `BENCH_CONFIRM=yes`) against production every Sunday 20:37 UTC (Monday 02:07 IST), about $6 a week, and
+  uploads the result JSON + a job summary. Required: `GAME_BENCH_BASE_URL` (production https origin, no path)
+  and `GAME_BENCH_REFRESH_TOKEN` (Firebase refresh token of a dedicated bench test account; the bench mints a
+  fresh ID token before every build, because an ID token expires in about an hour and the run lasts longer).
+  Optional: `GAME_BENCH_FIREBASE_API_KEY` (defaults to the public web key in `src/firebase-applet-config.json`).
+  Without the two required secrets the job SKIPS with a notice — no build is sent, nothing is reported.
+  New runner env read from them: `BENCH_FIREBASE_REFRESH_TOKEN`, `BENCH_FIREBASE_API_KEY`.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

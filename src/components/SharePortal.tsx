@@ -116,7 +116,7 @@ export function SharePortal() {
       <iframe
         title="Shared app preview"
         srcDoc={html}
-        sandbox="allow-scripts allow-forms"
+        sandbox="allow-scripts allow-forms allow-pointer-lock"
         style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }}
       />
 

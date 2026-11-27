@@ -29,7 +29,7 @@ import { V3_ACTIVE_FLAG, V3_TAB_FLAG } from '../agentv3/v3TabPersistence';
 // module served with `Access-Control-Allow-Origin: *` — which /api/esm/* sends — and fails without
 // the header. The player page inlines its compiler and loads dependencies only from that mirror, so
 // the opaque origin costs nothing.
-const PLAYER_SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
+const PLAYER_SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock';   // a store game captures the mouse on a click (Esc frees it)
 
 /**
  * THE PLAYER OWNS THE WHOLE SCREEN — above every piece of NavBharatAI's own chrome.

@@ -6755,3 +6755,8 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   outside the declared ladder); Q-3726 ENGINE_DT silence (external).
 - Q-3727, Q-3728: not defects, with evidence — waiting for the admin's agreement.
 
+### 2026-11-27 (later) — the admin's two #2555 decisions, built (#4607)
+- Q-3721: `cyberIntrusionRule.ts` — prompts to break into other people's systems are refused at the prompt (prompt-only rule).
+- Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
+  no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
+

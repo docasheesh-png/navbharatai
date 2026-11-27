@@ -949,3 +949,12 @@ into the admin report's `SURPLUS_FALLBACK` detail (stripped for users). Locked b
 ## Pro Chain V2 safety containment
 
 The experimental chain is unavailable for every newly constructed production build context, including the test profile. Flags cannot activate it. Existing builder and chat routing remain unchanged. This does not cancel already-created V2 contexts or in-flight requests. Builder-specific data/spend admission and exact accounting evidence must be implemented and reviewed before a later activation change. This containment does not change Router One billing policy. See docs/PRO_CHAIN_V2.md.
+
+## 2026-11-27 — A build may run up to 20% past the balance (Q-3722, failedbr #2555)
+Admin: *"user ke pas balance nahi hai, to build mat chalao. agar build me anuman kharcha > user balance — 10-20% tak negative ham
+rah lenge … usse thoda jyada bill bane to bhi chalegi"*. One limit, `walletSpendLimitInr` (120% of a positive balance,
+`WALLET_OVERDRAFT_SHARE = 0.2`, in `balanceRechargeNotice.ts`), read by the admission gate (`shouldRefuseBuildForBalance`), the
+shared `decideAffordability`, and the mid-build wallet stop in the route. No positive balance → no build. The wallet may end up to
+20% negative, settled at the real bill; the account is then blocked for the next build until top-up. Not decided (and not built):
+pricing only the real cost, without the markup, before a preview exists.
+

@@ -211,6 +211,12 @@ export function wrapSurplusRunnerPreWriteFailOpen(
       } catch (error) {
         try { hooks.onSurplusError?.(error); } catch { /* observer must never alter the turn */ }
         if (!params.signal?.aborted) { try { hooks.onSurplusAttemptWasted?.(Date.now() - startedAt); } catch { /* telemetry only */ } }
+        // Q-3464 sibling: turns of one build run in parallel. When ANOTHER turn already dropped Surplus while this one was
+        // in flight, the fail-open has happened (once, reported once) — this turn continues on the Weak chain too, instead
+        // of throwing out of the build because "already dropped" refused a second consume.
+        if (hooks.state.dropped && !params.signal?.aborted && isSurplusPublicBuildEngineFailure(error)) {
+          return addFallbackMs(await getWeak().runTurn(params), Date.now() - startedAt);
+        }
         if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error, { allowAfterWrite: true, nextRung: () => getWeak().plannedModel })) throw error;
         // 🔴 failedbr #2525 (Q-3465): the answered call recorded latencyMs 83888, answerMs 4378 and fallbackMs 0 — the 79 s
         // Surplus spent refusing before this retry were part of the call and were reported as no fallback time at all.

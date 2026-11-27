@@ -472,6 +472,8 @@ import { continueFastLaneGeneration, isTruncatedStop, MAX_CONTINUATIONS } from '
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
+import { withLaterEvidence } from '../AgentV3/buildPhases/staleSummaryPhase';
+import { sweepScratchAtTurnEnd } from '../AgentV3/buildPhases/turnEndScratch';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gameAssets/assetSeed';
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
@@ -21263,11 +21265,9 @@ async function noteBuildOutcome(
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
-      // 🧹 THE NET UNDER THE ORPHAN HAND-BACK (autopsy db07e0af): a component this build wrote, that the import graph
-      // proves nothing reaches and the request never named, is removed instead of shipped — the model was handed it
-      // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
-      // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
-      // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
+      // 🧹 THE NET UNDER THE ORPHAN HAND-BACK (autopsy db07e0af): an unreachable component this build wrote and the request
+      // never named is removed, not shipped (leftoverComponents.ts, which holds the guard: TS2563 crossed once, #3698).
+      // Scratch copies are swept here AND again at the end of the turn (turnEndScratch.ts), after every later writer.
       await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest, process.env, { existedAtStart: durableFilePaths }); // + scratch copies (scratchCopies.ts)
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
@@ -27513,6 +27513,7 @@ async function noteBuildOutcome(
       // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
       // A write a tool made without recording it reaches the save too (autopsy 1389f0d5, recordedWrites.ts).
       try { dispatcher.flushUnrecordedWrites(); } catch { /* the durable record is best-effort */ }
+      await sweepScratchAtTurnEnd({ importTurn: isImportTurn, dispatcher, run: (c) => actuator.runCommand(workspaceId, c), report: buildDiag, request: checksRequest, existedAtStart: durableFilePaths }); // after every pass that writes (turnEndScratch.ts, #2566)
       try {
         const toSave: Record<string, string> = {};
         // Kept apart from `toSave` so the snapshot check can tell a sandbox that MOVED after the copy
@@ -28853,7 +28854,7 @@ async function noteBuildOutcome(
           );
           buildDiag.recordManifest(manifest);
         } catch { /* manifest is best-effort — never blocks the build or report */ }
-        buildDiag.finish(result.ok, result.summary);
+        result = withLaterEvidence(result, buildDiag); buildDiag.finish(result.ok, result.summary); // a reply older than a later finding or the cap says so (staleSummaryPhase.ts, #2566)
         diagnostics = buildDiag.report();
         lastDiagnostics.set(buildKey, diagnostics);
         // DURABLE: persist the final report keyed by workspaceId so the "Build report" download

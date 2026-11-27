@@ -35,7 +35,7 @@
 // PURE: no clock, no environment, no I/O. Every rule here is unit-testable and cannot lie.
 
 import { realProviderCostUsd, type ProviderCostEntry } from './providerRates';
-import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, type BarrenPhases } from './billingPhase';
+import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_GAME_PHOTO_JUDGE, PHASE_POST_FIX_REVIEW, type BarrenPhases } from './billingPhase';
 
 /** The token counts of one turn, in the shape the ledger and the rate card both already use. */
 export interface UnbilledTokens {
@@ -261,4 +261,5 @@ const PHASE_WORDS: Record<string, string> = {
   [PHASE_EXPLORER_REPAIR]: 'a button repair was undone, so the app kept nothing it wrote',
   [PHASE_GAME_REPAIR]: 'the in-build game repair after the playtest is absorbed by the platform, kept or undone (admin decision 2026-11-26)',
   [PHASE_POST_FIX_REVIEW]: 'the review after a repair gave no verdict (no time left, or it could not finish)',
+  [PHASE_GAME_PHOTO_JUDGE]: 'the photo check of the game gave no clear answer (no reply, out of time, or every answer unclear)',
 };

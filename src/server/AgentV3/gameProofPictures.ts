@@ -185,6 +185,20 @@ export function sandboxPictureReader(run: ((command: string) => Promise<{ exitCo
   };
 }
 
+/**
+ * One proof picture's bytes, read back and checked exactly as `keepProofPictures` checks them (the path the playtest
+ * writes, the size cap, a JPEG, and the content id the playtest printed), or null. The photo judge (gamePhotoJudge.ts)
+ * looks only at a picture that passed. Never throws.
+ */
+export async function verifiedProofPicture(shot: ProofShot, read: SandboxPictureReader): Promise<Buffer | null> {
+  try {
+    if (!shot || typeof shot.path !== 'string' || !SANDBOX_PATH.test(shot.path)) return null;
+    const bytes = await read(shot.path);
+    if (!bytes || bytes.length === 0 || bytes.length > MAX_PICTURE_BYTES) return null;
+    return isJpeg(bytes) && contentId(bytes) === shot.id ? bytes : null;
+  } catch { return null; }
+}
+
 export interface KeptPicture { view: string; id: string; key: string; bytes: number }
 export interface KeepResult { kept: KeptPicture[]; notKept: Array<{ view: string; why: string }>; retainDays: number }
 

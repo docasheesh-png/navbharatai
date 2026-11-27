@@ -6761,6 +6761,14 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
 
+### 2026-11-27 — Kadam 1: the game photo judge (`gamePhotoJudge.ts`)
+- After a game turn's playtest, at most 3 yes/no questions from THIS request (item in hand, enemies, ground/road not hazed or
+  under water, houses) go with the proof pictures to the vision chain in one call (25 s hard limit). A clear NO →
+  `GAME_DEFECT_ASK_NOT_MET` with the question as evidence; unclear / no reply / timeout says nothing.
+- Billed like every build cost (admin decision): real reported tokens via `captureTurnUsage` in phase `game-photo-judge`; unreported
+  tokens recorded as unmeasured; a judge with no clear answer is barren. `runVisionChain` now returns the model and reported usage.
+- Weak/Normal: free vision chain (no Claude); Strong may reach Claude last. Kill switch `AGENTV3_GAME_PHOTO_JUDGE=off`.
+- Watch on the next real game builds: the admin-only `GAME_PHOTO_JUDGE` line (questions, answers, provider, tokens).
 ### 2026-11-27 (later) — autopsy #2565/#2566: cities on real land, no sea over the road (branch claude/cities-on-dry-land)
 - **Cities left out ("no dry ground … anywhere on the map").** Root cause: the plan's "10 km × 10 km map" became the project's
   athree `MAP_OPTIONS` loop of 10–11 km, i.e. the 100 km continent squeezed ×9 in plan and ×0.137 in height. On seed 90551631 at

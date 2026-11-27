@@ -12,9 +12,10 @@ import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 import { chargeHint } from '../../lib/apkChargeNotice';
 import {
   FINISHED, androidVersionLabel, architectureLabel, isBuildAnswer, isGeneratedKeyAnswer, isHistoryAnswer, isKeyAnswer, isLogsAnswer,
-  newIdempotencyKey, realProgress, stateLabel,
-  type ArtifactKind, type BuildView, type KeyBackup, type SigningKeyMeta,
+  keystoreFileName, newIdempotencyKey, realProgress, stateLabel,
+  type ArtifactKind, type BuildView, type ExportedKey, type KeyBackup, type SigningKeyMeta,
 } from '../../lib/mobileBuildClient';
+import { downloadSigningKey } from '../../lib/signingKeyDownload';
 
 export interface NativeBuildPanelProps {
   sessionId: string | null;
@@ -70,6 +71,7 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
   const [neverPublished, setNeverPublished] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [exported, setExported] = useState<ExportedKey | null>(null);
   // One request id per press of "Build": a double click or a retried network call is the SAME build.
   const pendingKey = useRef<string | null>(null);
 
@@ -217,7 +219,7 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
           setKey(a.value.key);
           setBackup(a.value.backup);
           const bytes = Uint8Array.from(atob(a.value.backup.base64), (c) => c.charCodeAt(0));
-          await deliverFile(`${appId}-upload.keystore`, new Blob([bytes], { type: 'application/x-pkcs12' }));
+          await deliverFile(keystoreFileName(appId), new Blob([bytes], { type: 'application/x-pkcs12' }));
         } else setError(a.sentence);
       }
     } catch {
@@ -238,6 +240,14 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
     } finally {
       setKeyBusy(false);
     }
+  }, [appId]);
+
+  // The user's own copy of the saved key (Q-3703) — the same helper the account-deletion warning uses.
+  const exportKey = useCallback(async () => {
+    setKeyBusy(true); setError(null);
+    const r = await downloadSigningKey(appId);
+    if (r.ok) { setExported(r.key); setNote(r.message); } else setError(r.sentence);
+    setKeyBusy(false);
   }, [appId]);
 
   const needsKey = kind === 'aab' && key === null;
@@ -287,6 +297,16 @@ export const NativeBuildPanel: React.FC<NativeBuildPanelProps> = ({
               ) : (
                 <button onClick={() => setConfirmDelete(true)} className="mt-1.5 text-[11px] text-accent-text font-semibold">Delete saved key</button>
               )
+            )}
+            <button onClick={() => void exportKey()} disabled={keyBusy} className="mt-1.5 ml-3 inline-flex items-center gap-1 text-[11px] text-accent-text font-semibold disabled:opacity-40">
+              <Download size={11} /> Download my key
+            </button>
+            {exported && (
+              <div className="mt-2 text-[11px] text-body space-y-0.5">
+                <p className="break-all">Keystore password: <span className="font-mono text-ink">{exported.storePassword}</span></p>
+                <p className="break-all">Key password: <span className="font-mono text-ink">{exported.keyPassword}</span> · Alias: <span className="font-mono text-ink">{exported.keyAlias}</span></p>
+                <p className="text-muted">Keep the key file and these passwords safe: Google Play only accepts updates signed with this key.</p>
+              </div>
             )}
           </div>
         )}

@@ -13,7 +13,7 @@
 // is erased is worse than no page, because people rely on it and stop asking.
 
 export const ACCOUNT_DELETION_TITLE = 'Delete your NavBharatAI account';
-export const ACCOUNT_DELETION_UPDATED = '20 October 2026';
+export const ACCOUNT_DELETION_UPDATED = '27 November 2026';
 
 export const ACCOUNT_DELETION = `# Delete your NavBharatAI account
 
@@ -99,6 +99,7 @@ When ownership is independently verified and your deletion request is completed,
 - the **files you uploaded** — .zip archives and spreadsheets you gave to a build;
 - your **share links** — a page you shared stops opening;
 - your **phone app builds** — each .apk / .aab build record and the file it made (a build still running is stopped first);
+- your **saved app signing keys** — the upload key NavBharatAI kept, encrypted, for each app you build as a Google Play bundle, and the record of when each key was used. **This cannot be undone: without that key you can never again publish an update to that app under the same Google Play listing.** Before you confirm, the Danger zone lists every key you have saved and lets you **download** each one (the key file and its passwords) — keep that copy safe;
 - your **instantly-hosted apps** — an app you published with instant hosting stops being served;
 - your **referral record** — your own code and the claims against it. (A payout already recorded under
   somebody else's referral is their record, and is kept — see below.);

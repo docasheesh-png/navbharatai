@@ -28,6 +28,7 @@ import * as THREE from 'three';
 import type { GameContext } from '../Game';
 import { markWorldCollider } from '../three/collision';
 import { createAthreeMap, type AthreeMap, type AthreeMapOptions } from '../athree';
+import * as athreeConfig from '../athree/config';
 import type { LandBiome } from '../athree/world';
 import { createCity, planCity, type City, type CityOptions, type CityPlan } from '../three/city';
 import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
@@ -70,7 +71,9 @@ export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
    * HOW FAR THE PLACES SPREAD, in metres (admin 2026-11-22, failedbr #2495: "map ko 40km*40km banao"). The places and lands
    * that do not name a distance are laid across a square this many metres wide around the first place, instead of next to
    * each other — open country between them, joined by highways. Left out: each place stands close to the others (PLACE_GAP).
-   * Clamped to 1 km .. 1000 km; a loop world is never smaller than the spread (sizeMeters is raised to it when needed).
+   * Clamped to 1 km .. 1000 km; a loop world is never smaller than the spread (sizeMeters is raised to it when needed), and never
+   * smaller than the 100 km reference loop: a smaller sizeMeters (or the project's map of "10 km") is the land the places stand on,
+   * never a squeezed continent whose islands are narrower than a city (failedbr #2565/#2566).
    */
   spreadMeters?: number;
   /**
@@ -152,6 +155,8 @@ export const EDGE_MARGIN = 800;
 export const EDGE_MIN_HALF = 600;
 const EDGE_STEP = 8;
 const EDGE_HEIGHT = 3.2;
+/** Metres above the sea a spot must stand to count as dry land for a character (the sea's own waves reach above its level). */
+const DRY_MARGIN_M = 0.6;
 /** Health lost each second in water when the game is not a swimming one (WORLD.water). */
 export const DROWN_PER_SECOND = 20;
 /** WORLD.runOver: a driven car faster than this (m/s) strikes what it touches, for this much damage. */
@@ -162,6 +167,26 @@ export const RUN_OVER_DAMAGE = 60;
  * road ho"): a village keeps about 150 m, a big city up to 300 m — a short drive on the road between them.
  */
 export const PLACE_GAP = { min: 150, max: 300 } as const;
+/**
+ * 🏝️ THE GROUND A PLACE MAY STAND ON IS MEASURED IN ITS OWN MAP'S METRES (failedbr #2565/#2566). Every place, venue and land
+ * asked for ground at least 2 m above the sea. That number was right for the map it was written on (the reference world, where
+ * 2 m is the shoreline itself), but a smaller map is that world stretched flat (athree world.heightScale), so the same 2 m
+ * became a hill and threw land away: on seed 90551631 squeezed to 11 km (heightScale 0.137) it was the reference world's
+ * 14.6 m, and 19% of the whole map — half its land — was dry ground under it. The open world no longer squeezes a loop (see
+ * createOpenWorld), but an island smaller than 8 km still is one: there the 2 m shrinks with the map's height scale, never
+ * below a character's dry margin (DRY_MARGIN_M). At the reference size and above it is exactly the 2 m it always was, so every
+ * place on such a map stands where it always stood.
+ */
+const PLACE_DRY_M = 2;
+/** The reference loop (athree REFERENCE_SIZE.loop): an open world's loop is never smaller than this (see createOpenWorld). */
+export const LOOP_REFERENCE = 100000;
+/** The height above which ground is dry enough for a place (PLACE_DRY_M) on a map: its sea level, its own height scale. PURE. */
+export function placeDryHeight(world: { seaLevel: number; heightScale?: unknown }): number {
+  const scale = Number(world.heightScale);
+  return world.seaLevel + Math.max(DRY_MARGIN_M, PLACE_DRY_M * Math.min(1, Number.isFinite(scale) && scale > 0 ? scale : 1));
+}
+/** Metres kept between a road's centre line and a place's levelled rectangle: the pad's eased edge (60), the road's half width and shoulder. */
+const ROAD_PAD_CLEAR = 100;
 /** How many cities stand built at once, by the map's quality tier (owner decision 2026-11-23: phone 2, mid 5, desktop 8). */
 export const LIVE_CITIES = { phone: 2, mid: 5, desktop: 8 } as const;
 /** A standing city is freed for a nearer one only when it is this many metres farther from the player — never back and forth. */
@@ -460,12 +485,28 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
-  const loopSize = Number(mapOptions.sizeMeters) > 0 ? Number(mapOptions.sizeMeters) : 100000;
+  // The map this project chose (src/game/athree/config.ts MAP_OPTIONS: its kind and size, from "a 10 km map" in the request) is
+  // the map createAthreeMap makes when the game names none, so its mode and size are this world's unless the game names its own.
+  // An older athree config has no MAP_OPTIONS: then only the game's own options count, as before.
+  const projectMap = ((athreeConfig as unknown as { MAP_OPTIONS?: { mode?: unknown; sizeMeters?: unknown } }).MAP_OPTIONS) ?? {};
+  const askedSize = Number(mapOptions.sizeMeters ?? projectMap.sizeMeters);
+  const loopSize = askedSize > 0 ? askedSize : LOOP_REFERENCE;
   // 🏝️ A BOUNDED MAP (a battle royale's island) is NEVER made bigger by a size asked (owner decision 2026-11-23: it stays an
   // 8 km island). Only a looping world is raised; the places of an island stand on its dry land, and that is said.
-  const mapMode = (mapOptions as { mode?: unknown }).mode;
+  const mapMode = (mapOptions as { mode?: unknown }).mode ?? projectMap.mode;
   const looping = mapMode === 'loop' || (mapMode !== 'bounded' && (mapOptions as { profile?: unknown }).profile !== 'battle-royale');
-  const sized = looping && spread > loopSize ? { sizeMeters: spread } : {};
+  // 🗺️ AN OPEN WORLD IS NEVER A SQUEEZED CONTINENT (failedbr #2565/#2566: "a 10 km × 10 km map with 3–4 cities of 2–5 km" — five of
+  // the cities were "left out: no dry ground anywhere on the map"). A loop smaller than the reference loop is the SAME 100 km
+  // continent squeezed into it: at 10–11 km every coast, bay and island is 9–10 times narrower (land and sea alternate every
+  // 1.5 km) and every height is 0.13 of what it was, so half the land lies less than 2 m above the sea. A city of 2.2 km needs
+  // one dry, level square that big: on seed 90551631 at 11 km, 18 of 3,025 spots on the whole map had one (2 of them level), so
+  // four such cities could never all stand on it, whatever the planner did. The size a user asks of an OPEN WORLD is the size
+  // of the land they play on — the places spread across it and the edge holds them in — not a smaller continent. So a smaller
+  // loop is made at the reference size, its places stand on real land within the size asked, and the map's kind (its style:
+  // archipelago, desert …) is kept. A loop is never made smaller here; a size bigger than the reference is kept as it was.
+  const askedArea = looping && loopSize < LOOP_REFERENCE ? loopSize : 0;
+  const worldSize = Math.max(looping && loopSize < LOOP_REFERENCE ? LOOP_REFERENCE : loopSize, looping ? spread : 0);
+  const sized = looping && worldSize !== loopSize ? { sizeMeters: worldSize } : {};
   // A browser with no GPU gets the map's phone tier (failedbr #2487 — see Game.ts applyQuality); a game may still ask for any tier.
   // 🧱 LATE GROUND EDITS ARE REDRAWN BY DEFAULT here (lateEdits: false opts out). The kit lays every pad, land and road before
   // the first draw, but a game feature that levels ground later used to leave the drawn terrain at the old height while the
@@ -474,6 +515,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, lateEdits, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
+  // Dry ground for a place (PLACE_DRY_M), one test for every planner below: above the sea in this map's own metres, and not in a
+  // river or a lake. An older athree world has no heightScale: it is 1 there, the 2 m it always was.
+  const placeDryAbove = placeDryHeight(map.world);
+  const dryGround = (x: number, z: number, h: number = map.world.heightAt(x, z)): boolean => h >= placeDryAbove && !map.world.waterAt(x, z);
   if (!looping && spread > map.world.sizeMeters) console.error('[world] this map is an island of ' + Math.round(map.world.sizeMeters / 1000) + ' km and is never made bigger; the size asked (' + Math.round(spread / 1000) + ' km) is not used — the places stand on the island\'s dry land.');
   const tier = (mapOptions as { quality?: string }).quality ?? deviceTier();
   const liveBudget = liveCities === false ? Infinity
@@ -700,7 +745,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     let wet = 0;
     for (const [dx, dz] of [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
       const x = at.x + dx * r, z = at.z + dz * r;
-      if (!(map.world.heightAt(x, z) >= 2) || map.world.waterAt(x, z)) wet++;
+      if (!dryGround(x, z)) wet++;
     }
     if (wet >= 3) console.error('[world] the ' + what + ' "' + id + '" lies mostly in the sea or a river (no dry ground there on this map); it is on the map, but ask for it in another direction or nearer.');
   };
@@ -739,7 +784,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       let dry = 0;
       for (const [dx, dz] of [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
         const x = at.x + dx * r, z = at.z + dz * r;
-        if (map.world.heightAt(x, z) >= 2 && !map.world.waterAt(x, z)) dry++;
+        if (dryGround(x, z)) dry++;
       }
       if (dry >= 4) return at;
     }
@@ -764,7 +809,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       let low = Infinity, high = -Infinity;
       for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
         const x = cx + (i / 2) * hw, z = cz + (j / 2) * hd, h = map.world.heightAt(x, z);
-        if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) return Infinity;
+        if (!dryGround(x, z, h) || map.world.roadAt(x, z)) return Infinity;
         low = Math.min(low, h); high = Math.max(high, h);
       }
       return high - low;
@@ -834,7 +879,12 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     venueList.push({ id: region.id, venue, centre: { x: at.x, y, z: at.z }, width: hw * 2, depth: hd * 2, scale, ...(joinedTo ? { joinedTo } : {}) });
   };
   let overCap = 0;
-  const waiting: Array<{ region: WorldRegion; preset: PlannedPlace['preset']; cityOptions: CityOptions; hx: number; hz: number; reach: number; angle: number }> = [];
+  const waiting: Array<{ region: WorldRegion; preset: PlannedPlace['preset']; cityOptions: CityOptions; hx: number; hz: number; reach: number; angle: number; footprint: Footprint }> = [];
+  // 🏙️ A GROWN CITY WAITS AS ONE CITY (failedbr #2565/#2566: "tech-city-west … left out", "riverside-town-north-east … left out").
+  // A tile whose city had to wait for ground found no base to join, so it was planned as a city of its own: it looked for its
+  // own ground somewhere else, or was left out on its own, and the city it belonged to came back in pieces. Now a tile of a city
+  // that waits waits with it, and stands in its own cell of that city once the city has its ground (below).
+  const waitingTiles = new Map<string, Array<{ region: WorldRegion; cell: [number, number] }>>();
   for (const region of wanted) {
     if (region && planned.length + landList.length + userMaps.length + venueList.length >= MAX_REGIONS) { overCap++; continue; }
     if (!region || typeof region.id !== 'string' || !region.id || seenIds.has(region.id) || planned.length + landList.length + userMaps.length + venueList.length >= MAX_REGIONS) continue;
@@ -902,6 +952,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     const joinBase = typeof region.joinTo === 'string' ? planned.find((q) => q.region.id === region.joinTo) : undefined;
     const pre = tileCells.get(region.id);
     const rootOfBase = joinBase ? joinBase.cluster?.root ?? joinBase.region.id : '';
+    if (!joinBase && pre && pre.root !== region.id && waiting.some((w) => w.region.id === pre.root)) {
+      (waitingTiles.get(pre.root) || waitingTiles.set(pre.root, []).get(pre.root)!).push({ region, cell: pre.cell });
+      continue;
+    }
     if (joinBase && pre && pre.root !== region.id && pre.root === rootOfBase) {
       const rootId = rootOfBase;
       const root = planned.find((q) => q.region.id === rootId)!;
@@ -940,7 +994,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY;
         for (let i = -samples; i <= samples; i++) for (let j = -samples; j <= samples; j++) {
           const x = cx + (i / samples) * hx, z = cz + (j / samples) * hz, h = map.world.heightAt(x, z);
-          if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) return Number.POSITIVE_INFINITY;
+          if (!dryGround(x, z, h) || map.world.roadAt(x, z)) return Number.POSITIVE_INFINITY;
           low = Math.min(low, h); high = Math.max(high, h);
         }
         return high - low;
@@ -964,7 +1018,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
       for (let i = -samples; i <= samples && !wet; i++) for (let j = -samples; j <= samples; j++) {
         const x = cx + (i / samples) * hx, z = cz + (j / samples) * hz, h = map.world.heightAt(x, z);
-        if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) { wet = true; break; }
+        if (!dryGround(x, z, h) || map.world.roadAt(x, z)) { wet = true; break; }
         low = Math.min(low, h); high = Math.max(high, h);
       }
       const cost = wet ? Number.POSITIVE_INFINITY : (high - low) + r * 0.01;
@@ -974,7 +1028,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     }
     // No dry ground in that direction: it waits, and is given the nearest free dry ground once every other place has its own
     // (below) — so the places that did find ground stand exactly where they always stood.
-    if (!Number.isFinite(best.cost) && !first) { waiting.push({ region, preset, cityOptions, hx, hz, reach, angle }); continue; }
+    if (!Number.isFinite(best.cost) && !first) { waiting.push({ region, preset, cityOptions, hx, hz, reach, angle, footprint }); continue; }
     const y = map.world.levelGround(best.x, best.z, hx, hz, 60);
     taken.push({ x: best.x, z: best.z, r: reach, box: boxAt(best.x, best.z, footprint), gap });
     planned.push({ region, preset, cityOptions, centre: { x: best.x, y, z: best.z }, reach, built: -1 });
@@ -1108,6 +1162,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   if (waiting.length && planned[0]) {
     const home = planned[0].centre;
     const limit = map.world.mode === 'bounded' ? map.world.sizeMeters / 2 : Math.min(50000, map.world.sizeMeters * 0.45);
+    // Inside the size asked first (a play area, or a spread): a place of a "10 km map" looks within 4.5 km of the first place
+    // before it may stand anywhere else on the map — never left out while the map has ground for it.
+    const asked = Math.max(askedArea, spread);
+    const within = asked > 0 ? Math.min(limit, asked * 0.45) : limit;
     // The planned roads in 1 km cells (by the box each one spans), so a spot looks only at the roads near it.
     const roadCells = new Map<string, number[]>(), RC = 1000;
     const indexRoad = (r: (typeof roads)[number], i: number): void => {
@@ -1116,24 +1174,32 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           (roadCells.get(cx + ',' + cz) || roadCells.set(cx + ',' + cz, []).get(cx + ',' + cz)!).push(i);
     };
     roads.forEach(indexRoad);
-    const nearRoad = (x: number, z: number, clear: number): boolean => {
-      for (let cx = Math.floor((x - clear) / RC); cx <= Math.floor((x + clear) / RC); cx++)
-        for (let cz = Math.floor((z - clear) / RC); cz <= Math.floor((z + clear) / RC); cz++) {
-          for (const i of roadCells.get(cx + ',' + cz) ?? []) {
-            const r = roads[i], dx = r.to.x - r.from.x, dz = r.to.z - r.from.z, l2 = dx * dx + dz * dz || 1;
-            const t = Math.max(0, Math.min(1, ((x - r.from.x) * dx + (z - r.from.z) * dz) / l2));
-            if (Math.hypot(x - (r.from.x + dx * t), z - (r.from.z + dz * t)) < clear) return true;
-          }
-        }
-      return false;
-    };
     const angDiff = (a: number, b: number): number => { let d = Math.abs(a - b) % (Math.PI * 2); return d > Math.PI ? Math.PI * 2 - d : d; };
     const CONE = Math.PI / 4;                                                                // 45°: "in the direction it was asked"
     // A ring every rejected spot of which stays rejected for a place of the same size (taken ground only grows; water and
     // roads stay): the next place of that size starts there — only for the any-side fallback, so a later place can still
     // take nearer ground in its own direction.
-    const fromRing = new Map<number, number>();
-    const roadClear = (reach: number) => reach * 1.5 + 150;                                  // pad and slopes stay off the road
+    const fromRing = new Map<string, number>();
+    // 🛣️ THE PAD AND ITS SLOPES STAY OFF EVERY ROAD, MEASURED FROM THE PAD ITSELF (failedbr #2565/#2566). The test used to be a
+    // circle around the centre, 1.5 × the place's reach + 150 m wide: for a city of 1.1 km that kept every spot within 920 m of a
+    // highway out, and for a grown city of 2.2 km 1.8 km — on an 11 km map nearly every spot. A road only needs the pad's
+    // eased edge (60 m), its own half width and its shoulder (ROAD_PAD_CLEAR) between it and the pad's rectangle.
+    const nearRoadBox = (cx: number, cz: number, f: Footprint): boolean => {
+      const x0 = cx + f.x0, x1 = cx + f.x1, z0 = cz + f.z0, z1 = cz + f.z1, c = ROAD_PAD_CLEAR;
+      const toBox = (x: number, z: number) => Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(z0 - z, 0, z - z1));
+      for (let gx = Math.floor((x0 - c) / RC); gx <= Math.floor((x1 + c) / RC); gx++)
+        for (let gz = Math.floor((z0 - c) / RC); gz <= Math.floor((z1 + c) / RC); gz++) {
+          for (const i of roadCells.get(gx + ',' + gz) ?? []) {
+            const r = roads[i], dx = r.to.x - r.from.x, dz = r.to.z - r.from.z, l2 = dx * dx + dz * dz || 1;
+            // The nearest the segment comes to the rectangle: an end, a corner's nearest point, or a crossing (distance 0).
+            const near = (px: number, pz: number) => { const t = Math.max(0, Math.min(1, ((px - r.from.x) * dx + (pz - r.from.z) * dz) / l2)); return { x: r.from.x + dx * t, z: r.from.z + dz * t }; };
+            let d = Math.min(toBox(r.from.x, r.from.z), toBox(r.to.x, r.to.z));
+            for (const [px, pz] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1], [(x0 + x1) / 2, (z0 + z1) / 2]]) { const q = near(px, pz); d = Math.min(d, toBox(q.x, q.z)); }
+            if (d < c) return true;
+          }
+        }
+      return false;
+    };
     const segmentHitsAPad = (ax: number, az: number, bx: number, bz: number, ignoreX: number, ignoreZ: number, ignoreR: number): boolean => {
       const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
       return taken.some((ax + bx) / 2, (az + bz) / 2, Math.hypot(dx, dz) / 2 + 400, (t) => {
@@ -1144,21 +1210,26 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       });
     };
     for (const w of waiting) {
-      const step = w.reach + 200, key = Math.round(w.reach);
-      const look = (maxAng: number, start: number): { x: number; z: number; cost: number; ring: number } | null => {
+      // A city with tiles waiting for it looks for ground for the whole city (every tile's cell), not for its first tile only.
+      const tiles = waitingTiles.get(w.region.id) ?? [];
+      const f = w.footprint, grown = tiles.length > 0, extent = Math.max(-f.x0, f.x1, -f.z0, f.z1);
+      const nx = Math.max(5, Math.round((f.x1 - f.x0) / (w.hx / 2)) + 1), nz = Math.max(5, Math.round((f.z1 - f.z0) / (w.hz / 2)) + 1);
+      const step = w.reach + 200, key = String(Math.round(w.reach)) + (grown ? ':' + f.x0 + ',' + f.x1 + ',' + f.z0 + ',' + f.z1 : '');
+      const look = (maxAng: number, start: number, reach: number): { x: number; z: number; cost: number; ring: number } | null => {
         let found: { x: number; z: number; cost: number; ring: number } | null = null;
-        for (let ring = start; ring * step <= limit && !found; ring++) {
+        for (let ring = start; ring * step <= reach && !found; ring++) {
           const r = ring * step, spots = Math.max(8, Math.ceil((2 * Math.PI * r) / step));
           for (let k = 0; k < spots; k++) {
             const a = w.angle + (k / spots) * Math.PI * 2, ad = angDiff(a, w.angle);
             if (ad > maxAng) continue;
             const cx = home.x + Math.sin(a) * r, cz = home.z - Math.cos(a) * r;
             if (taken.some(cx, cz, w.reach + 140, (t) => Math.hypot(cx - t.x, cz - t.z) < t.r + w.reach + 140)) continue;
-            if (nearRoad(cx, cz, roadClear(w.reach))) continue;
+            if (grown && taken.some(cx, cz, extent + 140, (t) => { const b = t.box ?? boxAt(t.x, t.z, square(t.r)); return Math.max(cx + f.x0 - b.x1, b.x0 - cx - f.x1, cz + f.z0 - b.z1, b.z0 - cz - f.z1) < 140; })) continue;
+            if (nearRoadBox(cx, cz, f)) continue;
             let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY, wet = false;
-            for (let i = -2; i <= 2 && !wet; i++) for (let j = -2; j <= 2; j++) {
-              const x = cx + (i / 2) * w.hx, z = cz + (j / 2) * w.hz, h = map.world.heightAt(x, z);
-              if (h < 2 || map.world.waterAt(x, z) || map.world.roadAt(x, z)) { wet = true; break; }
+            for (let i = 0; i < nx && !wet; i++) for (let j = 0; j < nz; j++) {
+              const x = cx + f.x0 + ((f.x1 - f.x0) * i) / (nx - 1), z = cz + f.z0 + ((f.z1 - f.z0) * j) / (nz - 1), h = map.world.heightAt(x, z);
+              if (!dryGround(x, z, h) || map.world.roadAt(x, z)) { wet = true; break; }
               low = Math.min(low, h); high = Math.max(high, h);
             }
             if (wet || high - low > 25) continue;                                             // a cliff is not a place to build
@@ -1168,11 +1239,11 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
         }
         return found;
       };
-      let found = look(CONE, 1) || look(Math.PI, fromRing.get(key) ?? 1);
+      let found = look(CONE, 1, within) || look(Math.PI, fromRing.get(key) ?? 1, within) || (within < limit ? look(CONE, 1, limit) || look(Math.PI, fromRing.get(key) ?? 1, limit) : null);
       if (found) fromRing.set(key, found.ring);
-      if (!found) { console.error('[world] no dry ground was found for "' + w.region.id + '" anywhere on the map; it was left out.'); continue; }
+      if (!found) { console.error('[world] no dry ground was found for "' + w.region.id + '"' + (grown ? ' (a city of ' + (tiles.length + 1) + ' tiles: ' + tiles.map((t) => '"' + t.region.id + '"').join(', ') + ' wait with it)' : '') + ' anywhere on the map; it was left out.'); continue; }
       const y = map.world.levelGround(found.x, found.z, w.hx, w.hz, 60);
-      taken.push({ x: found.x, z: found.z, r: w.reach });
+      taken.push({ x: found.x, z: found.z, r: w.reach, ...(grown ? { box: boxAt(found.x, found.z, f) } : {}) });
       const p: PlannedPlace = { region: w.region, preset: w.preset, cityOptions: w.cityOptions, centre: { x: found.x, y, z: found.z }, reach: w.reach, built: -1 };
       rescued.push(p);
       // One road to the nearest stop that does not cut through another place (a place that waited before it is already a stop).
@@ -1192,6 +1263,18 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       }
       stops.push(me);
       planned.push(p);
+      // Its tiles, each in the cell worked out for it, on the same ground level — exactly as a tile of a city that found ground.
+      if (grown) {
+        const rootPlan = planCity(w.cityOptions), stepX = rootPlan.width - rootPlan.road, stepZ = rootPlan.depth - rootPlan.road;
+        for (const t of tiles) {
+          const own = t.region.city || {};
+          const cityOptions: CityOptions = { ...w.cityOptions, ...(own.style ? { style: own.style } : {}), ...(own.maxFloors ? { maxFloors: own.maxFloors } : {}), seed: placeLook(worldSeed, w.region.kind, planned.length).seed };
+          const x = found!.x + t.cell[0] * stepX, z = found!.z + t.cell[1] * stepZ;
+          map.world.levelGround(x, z, w.hx, w.hz, 60, y);
+          const tile: PlannedPlace = { region: { ...t.region, kind: w.region.kind }, preset: w.preset, cityOptions, centre: { x, y, z }, reach: w.reach, built: -1, cluster: { root: w.region.id, gx: t.cell[0], gz: t.cell[1], stepX, stepZ } };
+          planned.push(tile); rescued.push(tile);
+        }
+      }
     }
   }
   if (rescued.length) {
@@ -1909,7 +1992,8 @@ export function createExploration(ctx: GameContext, world: OpenWorld, options: E
   const keep = () => { try { storage?.setItem(key, JSON.stringify(save)); } catch { /* storage can be blocked */ } };
   const nameOf = (id: string) => options.names?.[id] ?? placeName(id);
   const first = world.places[0];
-  const onLand = (p: Flat) => world.heightAt(p.x, p.z) >= 2 && !world.map?.world?.waterAt?.(p.x, p.z);
+  const dryAbove = Number.isFinite(world.map?.world?.seaLevel) ? placeDryHeight(world.map.world) : PLACE_DRY_M;
+  const onLand = (p: Flat) => world.heightAt(p.x, p.z) >= dryAbove && !world.map?.world?.waterAt?.(p.x, p.z);
   const spots = relicSpots(options.relics ?? 12, world.highways, world.spawn, options.seed ?? world.map.world.seed, first && world.places.length === 1 ? first.radius : 0, onLand);
   const reach = Math.max(0.5, options.reach ?? 2.5);
   // RELIC LOOK: a slowly turning golden gem on a soft glow. Change it here.

@@ -70,9 +70,21 @@ describe('what the user said chooses the map', () => {
     await run('athree map par ek huge island battle royale');
     expect(optionsIn().mode).toBe('bounded'); expect(optionsIn().sizeMeters).toBeGreaterThanOrEqual(250000);
   });
-  it('a request that names no size and no kind of land gets the default world (empty MAP_OPTIONS)', async () => {
-    await run('athree map par 3D racing game banao');
-    expect(act.files.get(CONFIG)).toMatch(/export const MAP_OPTIONS: MapOptions = \{\};/);
+  // SUPERSEDED 2026-11-27 (admin-approved map planner defaults): a request that names no size gets the default AREA for its game type
+  // (racing 25 km²), not the 100 km world. Roads exist at every size (#4626) and a race circuit fits a 5 km map, so the 25 km² default
+  // stands (until #4626 it was raised to 20 km = 400 km², the old "no roads below 20 km"). The old expectation (empty MAP_OPTIONS for
+  // every unsized game) was the scattered default this replaced.
+  it('a request that names no size gets its game type\'s default (a race: 25 km², 5 km across, which holds its circuit), not raised', async () => {
+    const r = await run('athree map par 3D racing game banao');
+    expect(optionsIn()).toMatchObject({ mode: 'loop', sizeMeters: 5000 });
+    expect(String(r.content)).toMatch(/default for a racing game is 25 km²/);
+    expect(String(r.content)).not.toMatch(/raised to/);
+  });
+  it('an on-foot world with no size named gets 5 km² (a frame about 2.24 km across), with no road floor', async () => {
+    const r = await run('athree map use karo, ek 3D open world jisme paidal ghoom sakun');
+    expect(optionsIn()).toMatchObject({ sizeMeters: 2240 });
+    expect(String(r.content)).toMatch(/5 km²/);
+    expect(String(r.content)).not.toMatch(/raised to/);
   });
 });
 
@@ -81,13 +93,15 @@ describe('what the builder chose wins over the words', () => {
     await run('athree map par racing game banao', { archetype: 'tundra', size_km: 40 });
     expect(optionsIn()).toMatchObject({ mode: 'loop', sizeMeters: 40000, style: { warmth: -0.45 } });
   });
-  it('a size alone gets the default kind; a kind alone gets 100 km', async () => {
+  // The size half of this changed 2026-11-27 with the admin-approved defaults: a kind alone gets its GAME's default area (racing →
+  // 25 km²), not the old flat 100 km.
+  it('a size alone gets the default kind; a kind alone gets the game type\'s default size', async () => {
     await run('athree map par racing game banao', { size_km: 12 });
     expect(optionsIn()).toMatchObject({ sizeMeters: 12000, style: {} });
     const b = new Fake(); act = b;
     const stream = new AgentEventStream(); d = new ToolDispatcher(b, 'ws-kinds2', new WorkspaceState(stream), stream);
     await run('athree map par racing game banao', { archetype: 'jungle' });
-    expect(optionsIn()).toMatchObject({ sizeMeters: 100000 });
+    expect(optionsIn()).toMatchObject({ sizeMeters: 5000, style: { rivers: 2 } });
   });
   it('a size out of range is held to 1..1000 km, never refused and never passed through', async () => {
     await run('athree map par racing game banao', { archetype: 'desert', size_km: 99999 });

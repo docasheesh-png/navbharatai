@@ -1065,8 +1065,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       request decides, and a request that names no feature gets all of them. Never draw by hand what a chosen module',
     '       brings (ocean, rivers, grass, trees, sky, roads, cars, bikes). The map comes in 12 kinds (continental, plains, hills, alpine, desert,',
     '       tundra, jungle, savanna, archipelago, island, wetland, coast) at any size from 1 to 1000 km: pass archetype and size_km from what the',
-    '       user said ("5 km ka registan" -> archetype desert, size_km 5), or leave them out and their words decide. A map under 20 km has no roads',
-    '       or runway (too small to hold one): say so. People and animals are made with author_object (the Object Forge); a plane to fly is createAircraft + flyAircraft (three/flight.ts); buildings are not built yet.',
+    '       user said ("5 km ka registan" -> archetype desert, size_km 5), or leave them out and their words decide. Every size has roads: a map under 20 km gets one planned town road network',
+    '       (a smart-city grid with a highway ring; roadStyle highway, organic, hill or straight on request), and a map under 5 km has no runway unless it is a flight game: say so. People and animals are made with author_object (the Object Forge); a plane to fly is createAircraft + flyAircraft (three/flight.ts); buildings are not built yet.',
     // 🗺️ 2D WORLD (admin 2026-11-19): the big map for a 2D game, joined from pre-made sample chunks.
     '    7b. run_recipe({ name: "generate_world_2d" }) — the big map for a 2D game whose user wants a big world in any words',
     '       (src/game/world2d/): an endless top-down map joined seamlessly from pre-made sample chunks, with roads, collision,',

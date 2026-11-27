@@ -6769,6 +6769,26 @@ A "continue … finish/fix the build" turn, weak tier, STOPPED by the 25-min cap
 - Q-3759 (in this PR): `probe.test.ts` shipped. Root: no net knew probe files, and the scratch-copy net ran before the repair that
   wrote it. Class fix: `scratchProbes.ts` + a turn-end sweep (`turnEndScratch.ts`) after every writer, before the durable save.
 - Q-3758 BLOCKED (admin): `ok:true`/"succeeded" beside STOPPED — options in the queue row. Q-3760 OPEN: claim-audit sibling.
+## 2026-11-27 — Map maker wave 1, PART R: roads on every map size, in a style (branch `claude/feat/map-roads-styles`)
+The admin's map order is frame → natural boundary → water → ground → ROADS → colonies. This is the ROADS step (P, the wish→plan
+planner, and W, boundaries/sea depth/ponds, are other sessions).
+- **The limit that is gone:** a map under 20 km (an island under 6 km) had NO roads (`MIN_ROAD_SIZE`, "a 1 to 5 km map has no roads"),
+  because the only network was villages + A-star highways in 12.5 km regions. The default game map is now ~2.2 km a side.
+- **New:** `athreeRoadPlanSource.ts`, appended to the emitted `roads.ts` (no new kit file). A map under 20 km (island under 6 km), or
+  any map up to 25 km with `roadStyle`, gets ONE planned network: `grid` (default: smart-city blocks, highway ring + a highway through),
+  `highway` (superblocks), `organic` (old-town lanes, jittered, links missing), `hill` (serpentines), `straight` (long roads at a seeded
+  angle). Hierarchy highway (4 lanes, 6 from 5 km) / main (4) / street (2) / lane; junction pads, roundabouts, zebra crossings; villages
+  on flat ground joined to the ring on bigger maps. Maps over 25 km keep the regional network unchanged (byte-for-byte default worlds).
+- **Data for the colony step:** `roadNetwork().blocks()` (polygons on road centre lines, CCW, per-side road half-width, dead-end
+  `inner` roads), `.graph()` (one connected graph), `.route(from, to)` (left lane, India; roundabouts with the island on the right).
+- **Root causes fixed on the way (with tests):** on a planned road a neighbouring segment's end vertex was blended into the carve (the
+  ground was up to 1.8 m off the drawn asphalt) — the carve now returns the nearest planned ribbon's bed on its paved width; river
+  crossings on small maps (rivers < 1 m wide) were missed by point sampling — crossings now come from the river geometry, moved to
+  the right copy of a loop world; a long road now splits at joints so only the wet stretch is lost.
+- **Honest limits:** small loop maps are shrunken coastlines (seed 5 continental 2.2 km is rugged islets), so the network there is
+  small — W's boundary work changes the land, not this step. `roadStyle` above 25 km is ignored (regional network). Circuit/runway are
+  separate facilities, not part of the connected graph. No real-browser athree check exists in `scripts/checks/`; the drive is proven
+  with the kit's own vehicle physics in vitest. `roadStyle` must still be written into `MAP_OPTIONS` by the wish→plan step (P).
 ## 2026-11-27 — Q-3464 (failedbr #2525): the route refusing two models trips Surplus for this build — admin option A (PR #4615)
 - Admin decision 2026-11-27, option A ("sabhi apke sujhao ke anusar banao"). A SECOND distinct Surplus model answering HTTP 404
   at response_validation (no market-refusal code) trips Surplus for THIS build only: `isSurplusRouteRefusal` + `routeTrip` on the

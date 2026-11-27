@@ -6760,3 +6760,19 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+## 2026-11-27 — Q-3464 (failedbr #2525): the route refusing two models trips Surplus for this build — admin option A (PR #4615)
+- Admin decision 2026-11-27, option A ("sabhi apke sujhao ke anusar banao"). A SECOND distinct Surplus model answering HTTP 404
+  at response_validation (no market-refusal code) trips Surplus for THIS build only: `isSurplusRouteRefusal` + `routeTrip` on the
+  build session in `src/server/AI/SurplusRegistry/buildSession.ts`. No in-turn retry, no stay-alive retry, and `authorize` refuses
+  any further Surplus call in that build; the turn falls open to the Weak chain at once. The next build tries Surplus afresh
+  ("Surplus marna nahi chahiye"). Q-3234's per-model bench is unchanged for every other failure.
+- Admin report: the tripping attempt's line adds "Surplus skipped for the rest of THIS build: 2 different models (…) each answered
+  HTTP 404 at response_validation …" and drops the false "the next turn moves to …".
+- Sibling (Q-3729): a parallel turn failing after another turn already dropped Surplus threw out of the build; it now continues on
+  the Weak chain (`surplusPreWriteFailOpen.ts`), and a policy refusal stays terminal.
+- Sibling hunt, checked and not the same class: MultiProviderTurnRunner retires a model only on an explicit model-not-found text
+  (one round trip, no backoff); surplusAdmitCircuit deliberately ignores 404; FreeChain and AIRouter have no per-model 404 bench.
+- Test: `src/server/AI/SurplusRegistry/theRouteRefusingTwoModelsTripsSurplus.test.ts` (11 tests, each proven by reversion).
+- Watch: the next 404 route shows two attempt lines, the skip line, then SURPLUS_FALLBACK, in seconds instead of ~87 s. Root cause
+  of the 404 itself still needs the engine's own error body (Q-3316).

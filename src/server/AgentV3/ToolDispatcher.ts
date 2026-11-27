@@ -424,6 +424,7 @@ import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionReques
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { applyMapPlanToFiles, planAthreeMap } from '../lib/athreeMap/mapPlanWiring';
+import { describeRobotRun, runRobotChecksOnFiles } from '../lib/athreeMap/mapRobotRun';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
@@ -10615,7 +10616,9 @@ export class ToolDispatcher {
           }
         }
         this.scheduleCheckpoint('athree map');
-        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${athPlanned.note}\n\n${ath.instructions}${athLayers}`;
+        // The robot checks run once here, on the exact files this recipe generated (sample seeds; the game re-checks its own seed).
+        const athRobots = describeRobotRun(runRobotChecksOnFiles(ath.files, athreeDecision.profile ?? 'open-world'));
+        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${athPlanned.note}\n${athRobots}\n\n${ath.instructions}${athLayers}`;
       }
 
       case 'generate_game_2d': {

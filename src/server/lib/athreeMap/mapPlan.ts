@@ -184,9 +184,22 @@ export function boundaryIn(text: string): BoundaryKind | null {
   if (/\b(?:walled|qila\s+band)\b/u.test(t)) return 'wall';
   const m = SURROUND.exec(t);
   if (!m) return null;
-  // The kind is named in the same clause as the surround word (either side of it, a few words away).
-  const clause = t.slice(Math.max(0, m.index - 60), m.index + m[0].length + 60).split(/[.!?;\n]/u).find((c) => SURROUND.test(c)) ?? '';
-  for (const [kind, re] of BOUNDARY_WORDS) if (re.test(clause)) return kind;
+  // The kind is the one named NEAREST the surround word, in the same sentence ("registan shooter, pahaadon se ghira" is ringed by
+  // mountains, not by dunes): the land word and the edge word are often in one sentence.
+  const from = Math.max(0, m.index - 60);
+  const near = t.slice(from, m.index + m[0].length + 60);
+  const centre = m.index - from;
+  let best: { kind: BoundaryKind; d: number } | null = null;
+  for (const [kind, re] of BOUNDARY_WORDS) {
+    for (const hit of near.matchAll(new RegExp(re.source, 'gu'))) {
+      const i = hit.index ?? 0;
+      const between = i < centre ? near.slice(i, centre) : near.slice(centre, i);
+      if (/[.!?;\n]/u.test(between)) continue;
+      const d = i < centre ? centre - (i + hit[0].length) : i - centre;
+      if (!best || d < best.d) best = { kind, d };
+    }
+  }
+  if (best) return best.kind;
   return null;
 }
 

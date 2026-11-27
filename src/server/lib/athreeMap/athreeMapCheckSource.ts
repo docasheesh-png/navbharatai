@@ -177,9 +177,9 @@ export function runMapChecks(world: AthreeWorld, options: MapCheckOptions = {}):
  */
 export function publishMapChecks(world: AthreeWorld, options: MapCheckOptions = {}): MapChecksReport {
   const report = runMapChecks(world, options);
-  const g = globalThis as unknown as { __nbMapChecks?: () => MapChecksReport };
+  const g = globalThis as unknown as { __nbMapChecks?: () => MapChecksReport; console?: { warn(message: string): void } };
   g.__nbMapChecks = () => report;
-  for (const r of report.results) if (!r.ok) console.warn('[map check] ' + r.id + ': ' + r.detail);
+  for (const r of report.results) if (!r.ok) g.console?.warn('[map check] ' + r.id + ': ' + r.detail);
   return report;
 }
 `;

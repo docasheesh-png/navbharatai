@@ -84,10 +84,13 @@ describe('reading the user\'s words', () => {
     expect(sizeKmIn('0 km')).toBe(1); expect(sizeKmIn('-5 km')).toBe(5);
   });
   it('describes a choice honestly, including what a small or huge map cannot give', () => {
-    expect(describeMap({ archetype: 'desert', sizeKm: 2 })).toMatch(/no roads and no runway/);
+    // Every size has roads now (admin 2026-11-27): a small map's are a planned town network, and only the runway needs room.
+    expect(describeMap({ archetype: 'desert', sizeKm: 2 })).toMatch(/planned town network/);
+    expect(describeMap({ archetype: 'desert', sizeKm: 2 })).toMatch(/too small for a runway/);
+    expect(describeMap({ archetype: 'desert', sizeKm: 2 })).not.toMatch(/no roads/);
     expect(describeMap({ archetype: 'desert', sizeKm: 500 })).toMatch(/mostly open land/);
-    expect(describeMap({ archetype: 'island', sizeKm: 3 })).toMatch(/too small for roads/);
-    expect(describeMap({ archetype: 'island', sizeKm: 10 })).not.toMatch(/too small/);
+    expect(describeMap({ archetype: 'island', sizeKm: 3 })).toMatch(/planned town network/);
+    expect(describeMap({ archetype: 'island', sizeKm: 10 })).not.toMatch(/too small|planned town/);
   });
 });
 

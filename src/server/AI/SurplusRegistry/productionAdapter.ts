@@ -209,7 +209,8 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       permit.assertCurrent?.();
       if (signal.aborted || record.review.expiresAt <= Date.now()) throw new Error('Surplus dispatch expired or stopped');
       // Capture this reviewed credential generation, never a key retained by an older transport.
-      return createSurplusBuildTransport(dispatchEnv)(request, signal);
+      // The request is sent on the permit's own floor route (min85, or min90 for Claude on Weak), already validated above.
+      return createSurplusBuildTransport(dispatchEnv, globalThis.fetch, permit.endpoint)(request, signal);
     },
     identify(raw, expectedModel?: string) {
       const { wire, body, telemetry } = envelope(raw);
@@ -243,7 +244,10 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
         modelId: permit.model, modelVersion: record.review.modelVersion, providerId: permit.providerId,
         endpoint: permit.endpoint, offerId: null, startedAt: record.startedAt };
       const requestId = typeof body.id === 'string' && body.id ? body.id : permit.callId;
+      // The list-price cap (admin 2026-11-27) reads the rates of the exact offer this call was bound to.
+      const boundOffer = record.state.snapshot?.offers.find(o => o.offerId === permit.offerId && o.model === permit.model && o.providerId === permit.providerId);
       const decision = evaluateSurplusReceipt({ provider: 'surplus', product: 'app-builder', binding,
+        listPrice: boundOffer ? { rates: boundOffer.rates, referenceRates: boundOffer.referenceRates } : null,
         disposition: result.truncated ? 'partially_discarded' : result.text || result.toolUses.length ? 'accepted' : 'failed',
         tariff, now: Date.now(), receipt: {
           ...binding, modelId: returnedModel,

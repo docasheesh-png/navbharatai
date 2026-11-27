@@ -1077,14 +1077,14 @@ describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin
     expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(0.3, 2.5) }));
   });
 
-  it('calls Surplus once on its min90 price route, never the retrying builder transport, reserved at the Sonnet ceiling', async () => {
+  it('calls Surplus once on the builder floor route (min85 for a non-Claude model), never the retrying builder transport, reserved at the Sonnet ceiling', async () => {
     vi.stubEnv('SURPLUS_API_KEY', 'synthetic-surplus-key');
     expect(testChatStatus().providers.find(p => p.id === 'surplus')).toMatchObject({ enabled: true, model: 'deepseek-v4.1-flash' });
     fake.officialOpenAi.mockResolvedValue(okReply('deepseek-v4.1-flash'));
     await runTestChat({ ...action, provider: 'surplus' }, 'actor', new AbortController().signal);
     expect(fake.officialOpenAi).toHaveBeenCalledOnce();
     expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
-      url: 'https://api.surplusintelligence.ai/min90/v1/chat/completions', model: 'deepseek-v4.1-flash',
+      url: 'https://api.surplusintelligence.ai/min85/v1/chat/completions', model: 'deepseek-v4.1-flash',
       extraBody: { si_route: { objective: 'price' } },
     }));
     expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(3, 15) }));

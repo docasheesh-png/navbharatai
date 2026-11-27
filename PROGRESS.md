@@ -6769,6 +6769,14 @@ existing 'aim' action (2.3 m, side 0.75, FOV × 0.82; the rig now owns the FOV s
 kept 0.4 m above `getGround()`, freefall / parachute framing (`forceAirMode` for a game's own drop), and aimFrom searching the
 crosshair ray from the hero's depth. Locked by `tests/theShooterCameraSeesPastTheHero.test.ts` (8 reversions each fail it).
 Open: no touch Aim button yet (phones have Zoom); the hero's arms are not raised while aiming (`hero.aim`) — left to avoid #4611.
+### 2026-11-27 — Kadam 1: the game photo judge (`gamePhotoJudge.ts`)
+- After a game turn's playtest, at most 3 yes/no questions from THIS request (item in hand, enemies, ground/road not hazed or
+  under water, houses) go with the proof pictures to the vision chain in one call (25 s hard limit). A clear NO →
+  `GAME_DEFECT_ASK_NOT_MET` with the question as evidence; unclear / no reply / timeout says nothing.
+- Billed like every build cost (admin decision): real reported tokens via `captureTurnUsage` in phase `game-photo-judge`; unreported
+  tokens recorded as unmeasured; a judge with no clear answer is barren. `runVisionChain` now returns the model and reported usage.
+- Weak/Normal: free vision chain (no Claude); Strong may reach Claude last. Kill switch `AGENTV3_GAME_PHOTO_JUDGE=off`.
+- Watch on the next real game builds: the admin-only `GAME_PHOTO_JUDGE` line (questions, answers, provider, tokens).
 ### 2026-11-27 (later) — autopsy #2565/#2566: cities on real land, no sea over the road (branch claude/cities-on-dry-land)
 - **Cities left out ("no dry ground … anywhere on the map").** Root cause: the plan's "10 km × 10 km map" became the project's
   athree `MAP_OPTIONS` loop of 10–11 km, i.e. the 100 km continent squeezed ×9 in plan and ×0.137 in height. On seed 90551631 at

@@ -278,7 +278,11 @@ function clampTo(v: unknown, lo: number, hi: number, fallback: number): number {
 /** The size the terrain functions are written for (a loop of 100 km, an island 8 km across). Any other size is this world, stretched. */
 export const REFERENCE_SIZE: Record<AthreeWorldMode, number> = { loop: 100000, bounded: 8000 };
 // EVERY MAP SIZE HAS ROADS (admin 2026-11-27). Below 20 km (an island below 6 km) the 12.5 km regions do not fit, so roads.ts lays ONE
-// planned network over the land instead (PLAN_BELOW there); the old MIN_ROAD_SIZE, under which a map had no roads at all, is gone.
+// planned network over the land instead (PLAN_BELOW there). MIN_ROAD_SIZE used to be the size under which a map had NO roads; it now
+// means where the planned network takes over. The name stays: a kit file never drops an export a game's own code may import (the
+// refresh that brings an older game up to date refuses a file that does, so dropping it would strand every older game without roads).
+/** Below these sizes a map's roads are the planned town network of roads.ts (no longer "no roads"); from them up, the regional network. */
+export const MIN_ROAD_SIZE: Record<AthreeWorldMode, number> = { loop: 20000, bounded: 6000 };
 
 export interface Spawn {
   x: number;

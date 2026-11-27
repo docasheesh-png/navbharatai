@@ -30,6 +30,6 @@ describe('the memory pulse', () => {
   });
   it('🔒 the build\'s tick calls it', () => {
     const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toMatch(/noteServerMemory\(memoryPulse, \{ record: \(issue\) => buildDiagRef\?\.record\(issue\) \}, Date\.now\(\) - memoryPulse\.since\);\s*\/\/ Q-3354[^\n]*\n\s*etaTick \+= 1;/);
+    expect(route).toMatch(/noteServerMemory\(memoryPulse, \{ record: \(issue\) => buildDiagRef\?\.record\(issue\) \}, Date\.now\(\) - memoryPulse\.since\);\s*\/\/ Q-3354[^\n]*\n(?:\s*noteBuildWatchers\([^\n]*\n)?\s*etaTick \+= 1;/);
   });
 });

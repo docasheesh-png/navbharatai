@@ -5405,3 +5405,11 @@ unrelated and unchanged. The vault name the owner's key is stored under is `ZAI_
 ### AGENTV3_GAME_PROOF_KEEP (code default: ON; not set in Cloud Run) — 2026-11-26
 
 Keeps the game playtest's proof pictures (`src/server/AgentV3/gameProofPictures.ts`, Q-3363, admin option A). Unset means ON. When on, up to three 480 px JPEGs per played game build are copied from the sandbox into the **existing private workspace-asset bucket**, the one `workspaceAssetBucketName` resolves (`WORKSPACE_ASSETS_BUCKET` → `NAV_STORE_BUCKET` → `FIREBASE_STORAGE_BUCKET`). They go under `game-proof-v1/<YYYY-MM-DD>/<buildId>/`, at most 40 KB each and 120 KB a build. They stay 30 days; a delete-after sweep removes each day folder after that. The server never sets bucket lifecycle rules. An optional console rule (delete, age 30, prefix `game-proof-v1/`) is a backup only. Only the admin can see them, through `GET /api/admin/game-proof-picture` (admin token). They are never public and never signed. `off` keeps the pictures in the sandbox, and GAME_PROOF says why. With no bucket configured, nothing is stored and GAME_PROOF says so.
+
+### AGENTV3_STALE_SUMMARY_NOTE (code default: ON; not set in Cloud Run) — 2026-11-27
+
+The stale-summary note (`src/server/AgentV3/staleSummary.ts`, `buildPhases/staleSummaryPhase.ts`). When the builder's reply was written BEFORE a later finding (a preview/runtime error not cleared by a later clean browser check) or before the wall-clock cap stopped the build, the reply gets "⚠️ Written before the last check — this is not the final word" with the evidence, and a `SUMMARY_SUPERSEDED` row is recorded (build #2566). Only `off` (any case) disables it; the reply is then delivered as written. No model call.
+
+### AGENTV3_SCRATCH_PROBE_REMOVE (code default: ON; not set in Cloud Run) — 2026-11-27
+
+The turn-end probe sweep (`src/server/AgentV3/scratchProbes.ts`, `buildPhases/turnEndScratch.ts`). A root-level probe/scratch/debug script that THIS build created, that nothing else references and the request does not name (build #2566 shipped `probe.test.ts`) is removed before the durable save, with an honest note. Anything uncertain is kept. Only `off` (any case) disables it; such files are then delivered.

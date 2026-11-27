@@ -250,7 +250,10 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // A fourth site would be a new verdict and must come here first. Since 2026-10-30 the fourth is the game
     // repair (gameRepair.ts, default on; AGENTV3_GAME_AUTO_REPAIR=off disables): ALWAYS barren — the platform absorbs it
     // until the admin decides who pays.
-    expect(route.match(/barrenPhases\.add\(/g) ?? []).toHaveLength(4);
+    // The fifth (2026-11-27, Kadam 1): the game photo judge (gamePhotoJudge.ts) when it gave no clear answer — no reply,
+    // a timeout, every answer UNCLEAR. The judge decides that itself and calls the route's one markBarren port.
+    expect(route.match(/barrenPhases\.add\(/g) ?? []).toHaveLength(5);
+    expect(route).toContain('markBarren: () => barrenPhases.add(PHASE_GAME_PHOTO_JUDGE)');
     expect(route).toContain('barrenPhases.add(PHASE_GAME_REPAIR)');
     expect(route).toContain('if (!outcome.kept) barrenPhases.add(PHASE_EXPLORER_REPAIR);');
     expect(route).toContain('else if (recheckBudget > 0) barrenPhases.add(PHASE_POST_FIX_REVIEW);');

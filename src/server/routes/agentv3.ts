@@ -78,6 +78,7 @@ import { platformCapabilityDigest } from '../AgentV3/plannerCapabilities';
 import { sportsWorldAtTurnStart } from '../AgentV3/sportsWorld';
 import { enforceGrowthAtTurnEnd } from '../AgentV3/growthTurn';
 import { noteServerMemory } from '../AgentV3/buildPhases/serverMemoryPulse';
+import { noteBuildWatchers } from '../AgentV3/buildPhases/buildWatchPulse';
 import { enemiesAtTurnStart } from '../AgentV3/buildPhases/enemiesTurn';
 import { housesAtTurnStart } from '../AgentV3/buildPhases/housesTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
@@ -14379,6 +14380,7 @@ async function noteBuildOutcome(
     let etaPlannedFiles = 0;
     let etaFirstFileAt = 0;
     const memoryPulse = { band: 0, since: Date.now() };   // serverMemoryPulse.ts — the highest memory band this build has recorded
+    const watchPulse = { unwatchedSince: null as number | null };   // buildWatchPulse.ts — since when no browser is connected
     /**
      * Files the PLATFORM laid down before the builder's first call (the game-kit seed, gameKitSeed.ts —
      * build 46e2d74b). They sit in `writtenFiles` so they are saved, but they are not progress on the
@@ -14583,6 +14585,7 @@ async function noteBuildOutcome(
       // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
       // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
       noteServerMemory(memoryPulse, { record: (issue) => buildDiagRef?.record(issue) }, Date.now() - memoryPulse.since); // Q-3354: the server's memory before a loss
+      noteBuildWatchers(watchPulse, { watching: () => rb.subscribers.size, record: (issue) => buildDiagRef?.record(issue) }, Date.now() - memoryPulse.since); // Q-3323: was anyone connected
       etaTick += 1;
       if (!abort.signal.aborted && etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {

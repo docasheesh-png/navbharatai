@@ -6955,3 +6955,6 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
   lake and canal counts stay "recorded" (the world makes its own rivers and lakes). roadStyle now reads APPLIED (main has #4626).
 - **Locked:** unsized racing → 25 km² with a circuit (4 seeds), flight → 100 km² with a runway, on foot → 5 km² with roads; each
   fix reverted → its test fails. Kit history regenerated.
+- **After #4624 merged (natural edges, ponds):** the plan's `boundary` and `water.ponds` now read APPLIED (names match: `options.boundary`,
+  `options.water … .ponds`); density stays recorded. The robot boundary check now reads the world's own `boundary.limitAt` (an island
+  ringed by mountains is land at the frame edge, so the sea-only ring would have called a closed edge open — reverted → test fails).

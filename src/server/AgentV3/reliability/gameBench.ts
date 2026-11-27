@@ -6,6 +6,8 @@
 // and this module adds what only a game build reports: the playtest outcome and Game Quality Score, the
 // structured defects (Phase 2), the scope match (Phase 1), the repair and the gate (Phase 3).
 //
+import type { BenchResultFile } from './benchHarness';
+
 // Every value is READ from the build's own diagnostics. A code that was never recorded leaves its field
 // null — "not measured", never "passed". Nothing here estimates a cost or a rate.
 
@@ -111,4 +113,35 @@ export function benchFixtureFile(value: string | undefined): string {
   if (v === '' || v === 'reliability') return 'fixtures/reliability-bench-prompts.json';
   if (v === 'game') return 'fixtures/game-bench-prompts.json';
   throw new Error('BENCH_FIXTURE must be "reliability" (default) or "game".');
+}
+
+/**
+ * The weekly workflow's job summary (Kadam 6, .github/workflows/game-bench-weekly.yml), from the result file
+ * the bench wrote. PURE. A run that did not finish says so first — its numbers cover only the runs it holds,
+ * and a value nothing reported is printed as "not reported", never as zero.
+ */
+export function gameBenchMarkdown(result: BenchResultFile): string {
+  const status = result.execution?.status ?? 'unknown';
+  const s = summarizeGameBench(result.runs.map((r) => ({ seconds: r.seconds, realCostUsd: r.metrics.evidence?.realCostUsd ?? null, cls: r.game?.cls ?? gameFailClass(r, null), game: r.game?.signals ?? null })));
+  const planned = result.execution?.plannedRuns;
+  const lines = [
+    `## Weekly game bench — ${result.label} (${result.set} set)`,
+    '',
+    status === 'complete'
+      ? `Status: **complete** — ${s.runs}${planned != null ? `/${planned}` : ''} runs.`
+      : `Status: **${status.toUpperCase()}** — ${s.runs}${planned != null ? ` of ${planned}` : ''} runs recorded. The numbers below cover only these runs.`,
+  ];
+  const failed = result.runs.find((r) => r.failure);
+  if (failed) lines.push(`Stopped at \`${failed.id}#${failed.attempt}\`: ${failed.failure}. Its remote outcome and cost may be unknown — reconcile before the next run.`);
+  lines.push('', `Requested tier: ${result.execution?.requestedTier ?? 'not recorded'} · started ${result.startedAt} · source ${result.execution?.sourceCommit?.slice(0, 9) ?? 'n/a'}`, '');
+  lines.push('| Class | Runs |', '|---|---|');
+  // `ok` and `ask-not-met` are always shown, so a zero is visible as a zero rather than as a missing row.
+  for (const cls of [...new Set(['ok', 'ask-not-met', ...Object.keys(s.byClass)])].sort()) lines.push(`| ${cls} | ${s.byClass[cls] ?? 0} |`);
+  lines.push('');
+  lines.push(`- Mean GQS: ${s.gqs.mean == null ? 'not reported' : `${s.gqs.mean.toFixed(1)} (over ${s.gqs.n} run${s.gqs.n === 1 ? '' : 's'})`}`);
+  lines.push(`- Seconds: ${s.seconds.n ? `${s.seconds.total.toFixed(0)} total, ${(s.seconds.total / s.seconds.n).toFixed(0)} mean (over ${s.seconds.n})` : 'not reported'}`);
+  lines.push(`- Real cost: ${s.realCostUsd.n ? `$${s.realCostUsd.total.toFixed(2)} (reported by ${s.realCostUsd.n} of ${s.runs} runs)` : 'not reported'}`);
+  const defects = Object.entries(s.defects).sort((a, b) => b[1] - a[1]);
+  if (defects.length) lines.push(`- Defects: ${defects.map(([d, n]) => `${d} ×${n}`).join(', ')}`);
+  return lines.join('\n') + '\n';
 }

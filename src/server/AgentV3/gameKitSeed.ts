@@ -1,3 +1,4 @@
+import { librarySubjectOf } from './characterSwap';
 // THE GAME KIT IS LAID DOWN BY THE PLATFORM, NOT LEFT TO THE MODEL'S CHOICE.
 //
 // 🔴 ADMIN REPORT 2026-10-11, build 46e2d74b ("Create an racing game for Nokia c 2-01", Weak tier). Admin,
@@ -340,7 +341,7 @@ export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKit
   if (recipe === 'generate_open_world') {
     const setting = worldSettingFrom(request);
     const regions = worldRegionsFor(setting);
-    const enemies = enemyRequestFrom(request);
+    const enemies = enemyRequestFrom(request, librarySubjectOf);
     const citizens = citizensWanted(request);
     return {
       mount: true, city: regions.some((r) => r.kind === 'city') || openWorldWantsCity(request),

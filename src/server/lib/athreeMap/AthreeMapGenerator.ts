@@ -22,6 +22,7 @@ import { mapOptionsFor, describeMap, type MapChoice } from './athreeMapKinds';
 import { ROADS, ROADMESH } from './athreeRoadSource';
 import { VEHICLES } from './athreeVehicleSource';
 import { BUDGET } from './athreeBudgetSource';
+import { BOUNDARY, MOVERS } from './athreeBoundarySource';
 
 export interface AthreeMapResult {
   files: Record<string, string>;
@@ -130,6 +131,10 @@ export interface MapOptions {
   roadStyle?: 'grid' | 'highway' | 'organic' | 'hill' | 'straight';
   /** false: plain ground colours and no bushes or stones (see AthreeWorldOptions.nature). Default on. */
   nature?: boolean;
+  /** The natural edge of a bounded world (see AthreeWorldOptions.boundary). Default 'sea'. */
+  boundary?: 'sea' | 'mountains' | 'canyon' | 'forest-river' | 'dunes' | 'wall';
+  /** Ponds and the sea shelf (see AthreeWorldOptions.water). */
+  water?: { ponds?: number; shelf?: boolean; seaMaxDepth?: number };
 }
 
 export interface QualityTier {
@@ -217,6 +222,7 @@ import { PROFILE_DEFAULTS, SEA_BREAK_RATIO, SEA_CREST_MAX, type AthreeProfile, t
 import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
+import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, type Boundary, type BoundaryKind, type Pond } from './boundary';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
@@ -252,6 +258,19 @@ export interface AthreeWorldOptions {
    * land, no bushes or stones, an open field with no tree). Nothing is ever put on a road, levelled ground (a city, a venue) or water.
    */
   nature?: boolean;
+  /**
+   * 🧱 THE MAP'S NATURAL EDGE (bounded worlds only; a loop world wraps and has none). 'sea' (default) is today's island in open sea;
+   * 'mountains' a ring too steep to climb; 'canyon' a sheer drop with a higher far wall; 'forest-river' a wide river with thick forest
+   * on both banks; 'dunes' a high dune wall; 'wall' a fort / city wall. world.boundary holds the ring, the sky ceiling and the soft
+   * cue; movers.ts createMoverGuard is the hard guarantee that nothing leaves (see the honest limits in boundary.ts).
+   */
+  boundary?: BoundaryKind;
+  /**
+   * 🌊 WATER. ponds: how many small ponds (talab) with ghat steps to carve on flat dry ground (default 0, at most 40). shelf: false keeps
+   * the old noise sea floor; on (default) the sea floor follows the distance from the shore — a beach to 2 m, then a shelf down to
+   * seaMaxDepth metres (5 .. 50, default 50).
+   */
+  water?: { ponds?: number; shelf?: boolean; seaMaxDepth?: number };
 }
 
 /** The knobs that make one map a desert, another a jungle, another an archipelago. All neutral at 0 (relief and rivers at 1). */
@@ -388,6 +407,10 @@ export interface AthreeWorld {
   biomeAt(x: number, z: number): Biome;
   windAt(x: number, z: number, t: number): Wind;
   spawnPoints(kind: SpawnKind, count?: number): Spawn[];
+  /** The map's edge: the ring nobody crosses, the sky ceiling and the soft cue (kind 'none' on a loop world). */
+  readonly boundary: Boundary;
+  /** Every pond (talab) carved into the ground. Each is also a lake in waterBodies() and answers waterAt(). */
+  ponds(): Pond[];
 }
 
 const ISLAND_BASE = 0.45;
@@ -439,6 +462,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const snowLine = mode === 'bounded' ? 400 : 650;
   /** The sea's level: every place below it is sea (world.seaLevel). */
   const seaLevel = 0;
+  const edgeKind: BoundaryKind = BOUNDARY_KINDS.includes(options.boundary as BoundaryKind) ? (options.boundary as BoundaryKind) : 'sea';
+  if (options.boundary !== undefined && options.boundary !== edgeKind) console.warn('[map] boundary "' + String(options.boundary) + '" is not one of ' + BOUNDARY_KINDS.join(', ') + '; the sea is used.');
+  const boundary: Boundary = createBoundary({ kind: edgeKind, seed, mode, gameRadius, vs });
+  const waterOpt = options.water ?? {};
+  const shelfOn = waterOpt.shelf !== false;
+  const seaMaxDepth = Math.max(5, Math.min(50, typeof waterOpt.seaMaxDepth === 'number' && Number.isFinite(waterOpt.seaMaxDepth) ? waterOpt.seaMaxDepth : 50));
 
   /** The reference world's ground, in the reference world's own metres. */
   function baseInner(x: number, z: number): number {
@@ -447,7 +476,8 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (mode === 'bounded') {
       // An island: land inside, a smooth shore, open sea outside the circle.
       const r = Math.hypot(x, z) / radius;
-      const m = smoothstep(1, 0.55, r);
+      // A natural edge other than the sea needs land under it: the shore is pushed out past the map's edge (the ring stands at 86%).
+      const m = edgeKind === 'sea' ? smoothstep(1, 0.55, r) : smoothstep(1.5, 1.05, r);
       // The island's core must ALWAYS be land: the noise swing (at most 1.2 either way) times ISLAND_SWING stays under ISLAND_BASE, so
       // no seed can drown its own centre (seeds 4, 8, 11 and 14 used to be open sea with the old 0.5 swing over a 0.35 base).
       e = (e * ISLAND_SWING + ISLAND_BASE) * m - (1 - m) * 0.9;
@@ -459,9 +489,25 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return e * 55 * (style.relief >= 1 ? 1 : 0.4 + 0.6 * style.relief) + mountain + detail;
   }
 
+  // 🌊 THE SEA SHELF: the sea floor follows the distance from the shore — a beach to 2 m, then a shelf down to seaMaxDepth. On a bounded
+  // world the distance is measured outward along the ray from the centre to the OUTERMOST shore (so the depth only grows going out to
+  // sea); a bay inside that shore keeps its own floor, never deeper than seaMaxDepth. On a loop world the continental field stands in.
+  let shores: Float64Array | null = null;
+  function seaFloor(x: number, z: number, hRef: number): number {
+    if (mode === 'bounded') {
+      if (!shores) shores = shoreRadii((rx, rz) => baseInner(rx, rz) >= 0, radius * (edgeKind === 'sea' ? 1 : 1.6));
+      const r = Math.hypot(x, z), sr = shoreAt(shores, Math.atan2(z, x)) / k;
+      if (r >= sr) return -shelfDepth(r - sr, { maxDepth: seaMaxDepth });
+      return Math.max(hRef * vs, -seaMaxDepth);
+    }
+    return -shelfDepth((-hRef / 110) * 2000 / k, { maxDepth: seaMaxDepth });
+  }
+
   /** The ground (without rivers, lakes and dunes) at a place in the game's metres. */
   function baseHeight(x: number, z: number): number {
-    return stretched ? baseInner(x * k, z * k) * vs : baseInner(x, z);
+    const hRef = stretched ? baseInner(x * k, z * k) : baseInner(x, z);
+    if (hRef >= 0 || !shelfOn) return stretched ? hRef * vs : hRef;
+    return seaFloor(x, z, hRef);
   }
 
   const withRivers = options.rivers !== false;
@@ -532,8 +578,9 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const b = lastBase;
     const d = lastDune;
     const c = withRivers ? rivers.carve(x, z, b) : b;
-    if (d <= 0) return c;
-    return c + (withRivers ? d * smoothstep(0, 20, rivers.edgeDistance(x, z)) : d);
+    const t = d <= 0 ? c : c + (withRivers ? d * smoothstep(0, 20, rivers.edgeDistance(x, z)) : d);
+    // The natural edge (bounded worlds) shapes the land last, so the roads, ponds and colliders all see it.
+    return edgeKind === 'sea' ? t : boundary.shape(x, z, t);
   }
 
   const withRoads = options.roads ?? true;
@@ -750,8 +797,36 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     return best;
   }
+  // 🪷 PONDS (talab): placed once, on first use, on flat dry ground away from rivers, lakes and roads, inside the play area; each is
+  // carved here (a flat bottom, a bank, ghat steps on one side), so the drawn ground, the collider and every mover agree.
+  const pondCount = Math.max(0, Math.floor(typeof waterOpt.ponds === 'number' && Number.isFinite(waterOpt.ponds) ? waterOpt.ponds : 0));
+  let pondList: Pond[] | null = null;
+  let placingPonds = false;
+  function pondsOf(): Pond[] {
+    if (pondList) return pondList;
+    if (!pondCount) { pondList = []; return pondList; }
+    placingPonds = true;
+    try {
+      const reach = mode === 'bounded' ? gameRadius * 0.7 : Math.min(3000, sizeMeters * 0.2);
+      pondList = placePonds(seed, pondCount, {
+        ground: naturalHeightAt,
+        busy: (x, z) => !!waterAt(x, z) || naturalHeightAt(x, z) < minLand || (withRoads && !!roadsOf().roadAt(x, z)),
+        allowed: (x, z) => boundary.inside(x, z, 60),
+        minLand, reach,
+      });
+    } finally { placingPonds = false; }
+    if (pondList.length < pondCount) console.info('[map] ' + pondList.length + ' of ' + pondCount + ' ponds found flat, dry ground away from water and roads.');
+    return pondList;
+  }
+  function pondAt(x: number, z: number): Pond | null {
+    if (placingPonds || !pondCount) return null;
+    for (const p of pondsOf()) if (Math.abs(x - p.x) < p.radius && Math.abs(z - p.z) < p.radius && Math.hypot(x - p.x, z - p.z) < p.radius) return p;
+    return null;
+  }
+
   function heightAt(x: number, z: number): number {
     let t = naturalHeightAt(x, z);
+    if (pondCount && !placingPonds) for (const p of pondsOf()) if (Math.abs(x - p.x) < p.radius * 1.35 && Math.abs(z - p.z) < p.radius * 1.35) t = pondHeight(p, x, z, t);
     if (lands.length) {
       const l = landAt(x, z);
       // Mountains rise from the land (higher towards the middle, ridged by noise), never out of the water.
@@ -843,11 +918,20 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   }
 
   function waterAt(x: number, z: number): WaterHit | null {
+    if (pondCount) {
+      const p = pondAt(x, z);
+      // A pond answers only where its water is over the ground (a pad laid over it later is dry land).
+      if (p && heightAt(x, z) < p.level) return { kind: 'lake', surface: p.level, fx: 0, fz: 0, width: p.radius * 2 };
+    }
     return withRivers ? rivers.waterAt(x, z) : null;
   }
 
+  let bodiesWithPonds: { rivers: River[]; lakes: Lake[] } | null = null;
   function waterBodies(): { rivers: River[]; lakes: Lake[] } {
-    return withRivers ? rivers.bodies() : { rivers: [], lakes: [] };
+    const b = withRivers ? rivers.bodies() : { rivers: [], lakes: [] };
+    if (!pondCount) return b;
+    if (!bodiesWithPonds) bodiesWithPonds = { rivers: b.rivers, lakes: b.lakes.concat(pondsOf().map((p) => ({ id: 100000 + p.id, x: p.x, z: p.z, radius: p.radius, level: p.level }))) };
+    return bodiesWithPonds;
   }
 
   function normalAt(x: number, z: number): { x: number; y: number; z: number } {
@@ -865,6 +949,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       const l = landAt(x, z);
       if (l && l.w > 0.15) return l.land === 'mountain' && h > snowLine ? 'snow' : l.land;
     }
+    if (edgeKind !== 'sea' && h >= 0) { const band = boundary.biomeAt(x, z); if (band) return band; }
     if (h < 3) return 'beach';
     const ix = stretched ? x * k : x; const iz = stretched ? z * k : z;
     const moisture = fieldNoise(ix, iz, seed + 4, 4, 9000 / biomeScale, period) - style.aridity;
@@ -944,6 +1029,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       const x = Math.cos(ang) * r;
       const z = Math.sin(ang) * r;
       if (out.some((p) => Math.hypot(p.x - x, p.z - z) < 150)) continue;
+      if (edgeKind !== 'sea' && !boundary.inside(x, z, 40)) continue; // never in the boundary's band
       const y = heightAt(x, z);
       const heading = rng() * Math.PI * 2;
       if (kind === 'boat') {
@@ -976,6 +1062,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       for (let gx = -R; gx <= R && out.length < count; gx += 100) {
         for (let gz = -R; gz <= R && out.length < count; gz += 100) {
           if (out.some((p) => Math.hypot(p.x - gx, p.z - gz) < 150)) continue;
+          if (edgeKind !== 'sea' && !boundary.inside(gx, gz, 40)) continue;
           const gy = heightAt(gx, gz);
           if (gy < minLand || gy > maxLand || !stripAt(gx, gz)) continue;
           out.push({ x: gx, y: gy, z: gz, heading: 0, strip: 600 });
@@ -985,7 +1072,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice() };
 }
 `;
 
@@ -1288,14 +1375,14 @@ export const ATHREE_OPTIONAL_MODULES: Record<string, { files: string[]; what: st
 };
 
 /** The modules every build gets. */
-export const ATHREE_CORE_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'rivers', 'dunes', 'roads', 'index'];
+export const ATHREE_CORE_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'rivers', 'dunes', 'roads', 'boundary', 'movers', 'index'];
 
 /** Every file this recipe can write. */
-export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'roads', 'roadmesh', 'vehicles', 'budget', 'index'];
+export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'roads', 'roadmesh', 'vehicles', 'budget', 'boundary', 'movers', 'index'];
 
 const SOURCES: Record<string, string> = {
   noise: NOISE, config: CONFIG, world: WORLD, collider: COLLIDER, chunks: CHUNKS, water: WATER, ocean: OCEAN, vegetation: VEGETATION, plants: PLANTS,
-  rivers: RIVERS, riverwater: RIVERWATER, dunes: DUNES, sky: SKY, roads: ROADS, roadmesh: ROADMESH, vehicles: VEHICLES, budget: BUDGET,
+  rivers: RIVERS, riverwater: RIVERWATER, dunes: DUNES, sky: SKY, roads: ROADS, roadmesh: ROADMESH, vehicles: VEHICLES, budget: BUDGET, boundary: BOUNDARY, movers: MOVERS,
 };
 
 /** The optional modules named in a request: unknown names are reported back, never ignored silently. Undefined means all of them. */
@@ -1320,6 +1407,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "import { createChunkManager, type ChunkManager } from './chunks';",
     "import { heightfieldFor, type HeightfieldData } from './collider';",
     "import { MAP_OPTIONS, type AthreeQuality } from './config';",
+    "import { createBoundaryWall, type BoundaryWall } from './boundary';",
   );
   if (has('sea')) add("import { createOcean, type Ocean } from './ocean';");
   if (has('plants')) add("import { createVegetation, type Vegetation } from './plants';");
@@ -1336,6 +1424,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "export * from './rivers';",
     "export * from './dunes';",
     "export * from './roads';",
+    "export * from './boundary';",
+    "export * from './movers';",
   );
   if (has('sea')) add("export * from './water';", "export { createOcean, oceanVertexShader, oceanFragmentShader, crestReach, shoreCalm, type Ocean } from './ocean';");
   if (has('plants')) add("export * from './vegetation';", "export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';");
@@ -1344,7 +1434,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('roads')) add("export { createRoadMesh, roadsInRect, ROAD_TIERS, ROAD_KIND, roadVertexShader, roadFragmentShader, type RoadMesh, type RoadArrays } from './roadmesh';");
   if (has('vehicles')) add("export * from './vehicles';");
   if (everything) add("export * from './budget';");
-  add('', 'export interface AthreeMap {', '  readonly world: AthreeWorld;', '  /** Terrain streaming; present when three.js was given. */', '  readonly chunks: ChunkManager | null;');
+  add('', 'export interface AthreeMap {', '  readonly world: AthreeWorld;', '  /** Terrain streaming; present when three.js was given. */', '  readonly chunks: ChunkManager | null;',
+    "  /** The fort wall of a 'wall' boundary, drawn round the camera; null for any other edge or without three.js. */", '  readonly boundaryWall: BoundaryWall | null;');
   if (has('sea')) add('  /** The sea: waves, shore foam, and what a boat floats on. Present when three.js was given. */', '  readonly ocean: Ocean | null;');
   if (has('plants')) add('  /** Grass and trees: wind-bent, streamed in tiles. Present when three.js was given (and vegetation was not switched off). */', '  readonly vegetation: Vegetation | null;');
   if (has('rivers')) add('  /** Rivers and lakes on screen, and what a boat on them floats on. Present when three.js was given. */', '  readonly riverWater: RiverWater | null;');
@@ -1387,6 +1478,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "  const quality = options.quality ?? 'mid';",
     // Ordinary sea-module omission retains the legacy flat plane; an explicit sea exclusion suppresses it.
     `  const chunks = options.three ? createChunkManager(options.three, world, quality, 3000, ${has('sea') || excludedModules.includes('sea') ? 'false' : 'true'}) : null;`,
+    "  const boundaryWall = options.three && world.boundary.kind === 'wall' ? createBoundaryWall(options.three, world.boundary, (x, z) => world.heightAt(x, z)) : null;",
+    '  if (chunks && boundaryWall) chunks.group.add(boundaryWall.group);',
   );
   if (has('sea')) add('  const ocean = options.three ? createOcean(options.three, world, quality) : null;', '  if (chunks && ocean) chunks.group.add(ocean.mesh);');
   if (has('plants')) add('  const vegetation = options.three && options.vegetation !== false ? createVegetation(options.three, world, quality) : null;', '  if (chunks && vegetation) chunks.group.add(vegetation.group);');
@@ -1396,7 +1489,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   const lit = ['sea', 'plants', 'rivers', 'roads'].some(has); // modules that take their light from the sky
   if (has('sky') && lit) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
   add('  const lateEdits = options.lateEdits === true;', '  let editsSeen = 0;');
-  add('  return {', '    world,', '    chunks,');
+  add('  return {', '    world,', '    chunks,', '    boundaryWall,');
   if (has('sea')) add('    ocean,');
   if (has('plants')) add('    vegetation,');
   if (has('rivers')) add('    riverWater,');
@@ -1419,6 +1512,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '        }',
     '      }',
     '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;',
+    '      if (boundaryWall && chunks) boundaryWall.update(cameraX, cameraZ, chunks.origin);',
   );
   if (has('sky')) {
     add('      if (sky && chunks) {', '        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);');
@@ -1434,7 +1528,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('plants')) add('      if (vegetation && chunks) vegetation.update(cameraX, cameraZ, time, chunks.origin);');
   if (has('rivers')) add('      if (riverWater && chunks) riverWater.update(cameraX, cameraZ, time, chunks.origin);');
   if (has('roads')) add('      if (roadMesh && chunks) roadMesh.update(cameraX, cameraZ, chunks.origin);');
-  const disposers = ['chunks?.dispose();'];
+  const disposers = ['chunks?.dispose();', 'boundaryWall?.dispose();'];
   if (has('sea')) disposers.push('ocean?.dispose();');
   if (has('plants')) disposers.push('vegetation?.dispose();');
   if (has('rivers')) disposers.push('riverWater?.dispose();');
@@ -1467,13 +1561,14 @@ export function athreeFiles(chosen: readonly string[], excludedModules: readonly
 }
 
 const RULE_CORE = 'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. The world is always there: terrain, biomes, wind, spawns, heightfield colliders, desert dunes (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), rivers and lakes as DATA (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real; rivers always end in the sea, a lake or another river; the water level only goes down along a river; nothing grows or spawns in the water; pass rivers: false for a world without them), roads as DATA (map.world.homeRoads() gives the villages, highways and, for the racing profile, the closed banked race circuit with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; on a map over 20 km roads are made region by region (12.5 km) as you travel; EVERY map under 20 km (an island under 6 km), and any map up to 25 km given roadStyle, has ONE connected planned town network instead: roadStyle grid (default: smart-city blocks, a highway ring and a highway through), highway, organic (old-town lanes), hill (winding) or straight; highways 4 to 6 lanes, main roads, colony streets and lanes, junction pads, roundabouts and zebra crossings; map.world.roadNetwork().blocks() gives the land enclosed by roads (polygons on the road centre lines, each side with its road half-width: build colonies inside, inset by it), .graph() the junctions and roads, and .route(from, to) a driving path in the LEFT lane (India) at road height; pass roads: false for a world without them) and map.world.surfaceAt (what a wheel runs on).';
+const RULE_EDGE = "EDGE, WATER AND GROUND (boundary.ts, movers.ts): a BOUNDED world takes boundary 'sea' (default) | 'mountains' | 'canyon' | 'forest-river' | 'dunes' | 'wall' (in MAP_OPTIONS or createAthreeMap) — natural terrain at the edge, map.world.boundary (inside, clampInside, cueAt and cueText for a hint near the edge, ceiling), and a drawn fort wall for 'wall'; a loop world has no edge. water: { ponds: n } carves ponds (talab) with ghat steps on flat ground (map.world.ponds(); each is a lake in waterBodies and answers waterAt); the sea floor is a beach to 2 m then a shelf to water.seaMaxDepth (default 50 m). THE HARD GUARANTEE is createMoverGuard(map.world).hold(obj, worldPos, kind) every frame for every mover you move (person, bot, animal, car, bike, boat, aircraft): it holds it inside the edge and under the ceiling, out of water too deep for it (waterDepthAt / moverRule: a person wades, swims, and needs a boat in deep water; a car fords to 0.4 m and no deeper; a boat needs 0.6 m) and puts anything found under the ground back at its last safe point. The open-world kit already does this for the player, its car and every bounded character. Honest limits: the guard moves a body back, it does not path-find; the fort wall and the trees have no physics collider; dunes are climbable sand, only the guard stops a walker there; a river reaching the edge is buried under it.";
 const RULE_BY_MODULE: Record<string, string> = {
   sea: 'SEA: a real wave ocean (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour) and map.ocean.floatAt for boats. Do not add your own water plane: the ocean is already in map.chunks.group.',
   plants: 'PLANTS: grass, trees, bushes and stones (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, bushes and stones scattered in clumps, placed by biome and slope, streamed in tiles, three levels of budget per quality tier; the ground colour is patchy — lush, dry, bare earth — never one flat green; an open grass field holds a few lone trees). Never on a road, levelled ground (a city, a venue), water or where the player starts. Trees, bushes and stones are visual only: they have no collider yet, so a car drives through them (treesInRect / propsInRect(world, x0, z0, x1, z1, cell) give their positions if you need to keep clear of them); pass nature: false for the plain look (one colour per land, no bushes or stones, no tree in an open field) and vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Do not scatter your own grass or trees over the map; a flower bed or bush you must add goes only where map.world.plantableAt(x, z) is true (never on a road, a city street or water).',
   rivers: 'RIVERS: map.riverWater draws the rivers and lakes with a flowing-water shader and gives boats floatAt; they are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Do not draw your own rivers or lakes.',
   sky: 'SKY: map.sky gives the sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. Do not draw your own sky.',
   roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, junction pads, roundabout islands, zebra crossings, bridge decks, rails and piers. Do not draw your own roads.',
-  vehicles: 'VEHICLES: createVehicle(THREE, map.world, {kind: car or bike, color, quality}) gives a lofted sports car or bike with four or two wheels that spin and steer, brake lights, headlights (setLights) and its own driving physics: engine that fades with speed, braking limited by the surface, steering that narrows with speed, a grip limit, a handbrake slide, pitch and roll from the ground, flight off a crest, water that stops it; you call vehicle.update(dt, {throttle -1..1, steer -1..1, brake 0..1, handbrake}, map.chunks.origin) every frame and read vehicle.state (speed, slip, position). Vehicles do not collide with trees or other vehicles yet.',
+  vehicles: 'VEHICLES: createVehicle(THREE, map.world, {kind: car or bike, color, quality}) gives a lofted sports car or bike with four or two wheels that spin and steer, brake lights, headlights (setLights) and its own driving physics: engine that fades with speed, braking limited by the surface, steering that narrows with speed, a grip limit, a handbrake slide, pitch and roll from the ground, flight off a crest, water measured by depth (it fords shallow water slowly, stalls deeper and SINKS past 1.2 m — vehicle.state.sunk — never driving on the sea bed; a bridge deck is dry); you call vehicle.update(dt, {throttle -1..1, steer -1..1, brake 0..1, handbrake}, map.chunks.origin) every frame and read vehicle.state (speed, slip, position). Vehicles do not collide with trees or other vehicles yet.',
 };
 const NOT_BUILT = 'NOT built yet — do not draw them by hand: buildings, animals, birds and people, sand ripple textures and heat haze. A plane to fly comes from the game kit (createAircraft / flyAircraft in three/flight.ts).';
 
@@ -1527,6 +1622,6 @@ export function generateAthreeMap(include?: string[], choiceOrExclusions?: MapCh
       (unknown.length ? `Unknown module names ignored: ${unknown.join(', ')}. The names are: ${Object.keys(ATHREE_OPTIONAL_MODULES).join(', ')}.\n` : '') +
       '```ts\n' + exampleSource(chosen) + '\n```\n' +
       (excludedModules.includes('sea') ? 'Sea visuals, including the fallback water plane, are disabled. Terrain still retains sea-level biome data; this is not a certified dry-land-only world. ' : '') +
-      (excludedModules.some(m => m === 'roads' || m === 'rivers') ? 'Explicit request exclusions: ' + excludedModules.filter(m => m === 'roads' || m === 'rivers').join(', ') + ' are disabled in world data as well as rendering; do not re-enable them. ' : '') + RULE_CORE + ' ' + chosen.map((m) => RULE_BY_MODULE[m]).join(' ') + (chosen.includes('sky') ? '' : ' No sky is in this build, so bring your own lights (a DirectionalLight for the sun and a HemisphereLight) and your own background colour.') + ' ' + NOT_BUILT,
+      (excludedModules.some(m => m === 'roads' || m === 'rivers') ? 'Explicit request exclusions: ' + excludedModules.filter(m => m === 'roads' || m === 'rivers').join(', ') + ' are disabled in world data as well as rendering; do not re-enable them. ' : '') + RULE_CORE + ' ' + RULE_EDGE + ' ' + chosen.map((m) => RULE_BY_MODULE[m]).join(' ') + (chosen.includes('sky') ? '' : ' No sky is in this build, so bring your own lights (a DirectionalLight for the sun and a HemisphereLight) and your own background colour.') + ' ' + NOT_BUILT,
   };
 }

@@ -6760,3 +6760,12 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+### 2026-11-27 (later) — autopsy of failedbr #2566 (7ac680e1) — Q-3757…Q-3760 (#4620)
+A "continue … finish/fix the build" turn, weak tier, STOPPED by the 25-min cap while a preview-render repair was still investigating.
+- Q-3757 (in this PR): the user got the 830 s reply ("The clean console confirms it.") although a later check still saw
+  `[world] no dry ground was found for "riverside-town"`. Root: `adoptHealResult` keeps the build's reply through repairs and an
+  unfinished repair changes nothing, so no step compared the reply's moment with later findings. Class fix: `staleSummary.ts`.
+- Q-3759 (in this PR): `probe.test.ts` shipped. Root: no net knew probe files, and the scratch-copy net ran before the repair that
+  wrote it. Class fix: `scratchProbes.ts` + a turn-end sweep (`turnEndScratch.ts`) after every writer, before the durable save.
+- Q-3758 BLOCKED (admin): `ok:true`/"succeeded" beside STOPPED — options in the queue row. Q-3760 OPEN: claim-audit sibling.

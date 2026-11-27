@@ -99,9 +99,10 @@ describe('🔴 the character holds an item in its hand', () => {
     await settle();
     const gun = new THREE.Mesh(new THREE.BoxGeometry(2, 0.5, 0.2));
     expect(c.hold(gun)).toBe(true);
-    expect(gun.parent?.name).toBe('mixamorig:RightHand');
+    expect(gun.parent?.name).toBe('grip');                                    // seated in its grip frame (humanoid.ts)
+    expect(gun.parent?.parent?.name).toBe('mixamorig:RightHand');
     const size = new THREE.Box3().setFromObject(gun).getSize(new THREE.Vector3());
-    expect(size.x).toBeGreaterThan(0.4); expect(size.x).toBeLessThan(0.7);   // about a third of 1.75 m
+    expect(Math.max(size.x, size.y, size.z)).toBeGreaterThan(0.4); expect(Math.max(size.x, size.y, size.z)).toBeLessThan(0.7);   // an unknown thing: about a third of 1.75 m
   });
   it('without a hand bone it is held at the side, and said', async () => {
     const c = PB.createPlayerCharacter(new THREE.Group(), { file: '/models/statue.glb' });

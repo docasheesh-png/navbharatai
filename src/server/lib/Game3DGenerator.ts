@@ -2255,10 +2255,12 @@ export interface Humanoid {
     leftHand: THREE.Group; rightHand: THREE.Group;
   };
   /**
-   * Put an object in the right hand: a weapon from createWeapon(), a torch, a phone. Its +Z points where
-   * the arm points (models face +Z). Pass null to empty the hand.
+   * Put an object in the right hand: a weapon from createWeapon(), a library pistol, a bat, a ball. subject (or the item's
+   * userData.nbSubject) says what it is, so it is held the way people hold it (gripFor / gripFrame / holdPose): a gun along
+   * the forearm with the other hand on a rifle's fore-grip, a handle through the fist, a ball in the palm. Pass null to
+   * empty the hand.
    */
-  hold: (item: THREE.Object3D | null) => void;
+  hold: (item: THREE.Object3D | null, subject?: string | null) => void;
   /** Raise the arms to aim what the right hand holds, straight ahead, while the legs keep walking. */
   aim: (on: boolean) => void;
   /** Drive the pose. dt in seconds; speed in world units/second; grounded false while airborne. */
@@ -2329,6 +2331,254 @@ function blob(rx: number, ry: number, rz: number, material: THREE.Material, w = 
   m.castShadow = true;
   m.receiveShadow = true;
   return m;
+}
+
+// ✋ HOLDING THINGS THE WAY PEOPLE DO (admin 2026-11-27: "character apne hath me gun theek se nahi pakadta … jab bhi koi
+// user apne hath me koi object hold kare, to woh style ek dam natural honi chahiye jaisa duniya me normal log pakadte hai").
+// A held thing used to be hung from the hand by its own origin, at a third of the person's height, in whatever direction
+// its model happened to face: a library pistol half a metre long, through the wrist, pointing sideways. Now every hold goes
+// through these four steps, one implementation for the kit person and for a model character:
+//   1. gripFor(subject)  — what it is: its real size and how people hold it (a pistol grip, a rifle with a support hand,
+//                          a handle such as a bat, a sword or a racket, a ball or a phone in the palm, a bow, a shield);
+//   2. gripFrame(item)   — where on THIS model the hand goes, read from its shape: the long axis, the grip that hangs
+//                          under a gun's barrel, the thinner end of a handle; the grip point becomes the origin, the
+//                          barrel or blade +Z, the top +Y; a second hold point for the support hand when it takes two;
+//   3. holdPose(frame)   — how it sits in a fist: a gun's barrel along the forearm, a handle through the fist past the
+//                          thumb, a ball in the palm;
+//   4. reachWith(arm)    — the other hand on a rifle's fore-grip, solved every frame (two-bone IK).
+export type GripStyle = 'pistol' | 'rifle' | 'handle' | 'twoHand' | 'palm' | 'shield' | 'bow';
+export interface GripSpec { style: GripStyle; length: number; handleAt?: number }
+const g = (style: GripStyle, length: number, handleAt?: number): GripSpec => (handleAt === undefined ? { style, length } : { style, length, handleAt });
+/** What people hold, at its real size (the longest side in metres, for a 1.75 m person) and how they hold it. */
+export const GRIPS: Readonly<Record<string, GripSpec>> = {
+  pistol: g('pistol', 0.2), handgun: g('pistol', 0.2), gun: g('pistol', 0.21), revolver: g('pistol', 0.26), glock: g('pistol', 0.19),
+  'desert eagle': g('pistol', 0.27), 'flare gun': g('pistol', 0.25), 'water gun': g('pistol', 0.3), taser: g('pistol', 0.18), blaster: g('pistol', 0.3),
+  rifle: g('rifle', 0.95), 'assault rifle': g('rifle', 0.9), ak: g('rifle', 0.88), 'ak 47': g('rifle', 0.88), akm: g('rifle', 0.88), m4: g('rifle', 0.84),
+  m416: g('rifle', 0.85), m16: g('rifle', 1.0), scar: g('rifle', 0.9), sniper: g('rifle', 1.2), awm: g('rifle', 1.2), kar98: g('rifle', 1.1), kar98k: g('rifle', 1.1),
+  shotgun: g('rifle', 1.05), smg: g('rifle', 0.6), uzi: g('rifle', 0.47), 'machine gun': g('rifle', 1.1), lmg: g('rifle', 1.1), 'rocket launcher': g('rifle', 1.2),
+  rpg: g('rifle', 1.0), crossbow: g('rifle', 0.8), carbine: g('rifle', 0.85), musket: g('rifle', 1.4),
+  bat: g('twoHand', 0.86, 0.08), 'cricket bat': g('twoHand', 0.86, 0.08), 'baseball bat': g('twoHand', 0.84, 0.08), 'hockey stick': g('twoHand', 1.5, 0.1),
+  'golf club': g('twoHand', 1.1, 0.08), katana: g('twoHand', 1.0, 0.1), spear: g('twoHand', 2.0, 0.4), staff: g('twoHand', 1.6, 0.4), lathi: g('twoHand', 1.5, 0.3),
+  broom: g('twoHand', 1.3, 0.45), shovel: g('twoHand', 1.1, 0.08), 'fishing rod': g('twoHand', 2.0, 0.08), axe: g('handle', 0.7, 0.12), sledgehammer: g('twoHand', 0.9, 0.08),
+  sword: g('handle', 0.95, 0.1), knife: g('handle', 0.25, 0.2), dagger: g('handle', 0.3, 0.18), machete: g('handle', 0.6, 0.12), hammer: g('handle', 0.33, 0.2),
+  wrench: g('handle', 0.3, 0.15), crowbar: g('handle', 0.6, 0.12), pan: g('handle', 0.45, 0.15), 'frying pan': g('handle', 0.45, 0.15), racket: g('handle', 0.68, 0.1),
+  'tennis racket': g('handle', 0.68, 0.1), 'badminton racket': g('handle', 0.67, 0.1), paddle: g('handle', 0.26, 0.2), 'table tennis bat': g('handle', 0.26, 0.2),
+  stick: g('handle', 1.0, 0.15), cane: g('handle', 0.9, 0.05), umbrella: g('handle', 0.9, 0.05), torch: g('handle', 0.25, 0.35), flashlight: g('handle', 0.25, 0.35),
+  wand: g('handle', 0.35, 0.15), microphone: g('handle', 0.2, 0.3), mic: g('handle', 0.2, 0.3), bottle: g('handle', 0.28, 0.4), candle: g('handle', 0.2, 0.3),
+  flag: g('handle', 1.2, 0.3), whip: g('handle', 1.2, 0.08), trophy: g('handle', 0.35, 0.3), mace: g('handle', 0.7, 0.1), club: g('handle', 0.7, 0.1),
+  ball: g('palm', 0.07), 'cricket ball': g('palm', 0.072), 'tennis ball': g('palm', 0.067), baseball: g('palm', 0.075), football: g('palm', 0.22), soccer: g('palm', 0.22),
+  basketball: g('palm', 0.24), volleyball: g('palm', 0.21), grenade: g('palm', 0.11), phone: g('palm', 0.15), mobile: g('palm', 0.15), smartphone: g('palm', 0.15),
+  cup: g('palm', 0.1), mug: g('palm', 0.11), glass: g('palm', 0.12), apple: g('palm', 0.08), book: g('palm', 0.24), can: g('palm', 0.12), coin: g('palm', 0.025),
+  key: g('palm', 0.06), card: g('palm', 0.09), egg: g('palm', 0.06), stone: g('palm', 0.1), rock: g('palm', 0.12), food: g('palm', 0.12), burger: g('palm', 0.11),
+  shield: g('shield', 0.7), bow: g('bow', 1.5),
+};
+/** The grip for a subject ("pistol", "AK-47", "cricket bat", "red ball"), by its longest known name. Null when unknown. PURE. */
+export function gripFor(subject: string | null | undefined): GripSpec | null {
+  const words = ' ' + String(subject || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+  let best: string | null = null;
+  for (const key of Object.keys(GRIPS)) if (words.indexOf(' ' + key + ' ') >= 0 && (!best || key.length > best.length)) best = key;
+  return best ? GRIPS[best] : null;
+}
+
+/**
+ * Points ON THE SURFACE of a model, in its own root's frame (about 6000), for reading its shape. Spread by area over every
+ * triangle — not only the corners: a low-poly gun is a few boxes whose corners say nothing about where its grip is.
+ * Deterministic (no randomness): the same model is always read the same way.
+ */
+function shapePoints(root: THREE.Object3D): THREE.Vector3[] {
+  root.updateWorldMatrix(true, true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const tris: Array<[THREE.Vector3, THREE.Vector3, THREE.Vector3, number]> = [];
+  let area = 0;
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const geo = mesh.isMesh ? mesh.geometry : null;
+    const p = geo ? geo.getAttribute('position') as THREE.BufferAttribute | undefined : undefined;
+    if (!geo || !p) return;
+    const m = new THREE.Matrix4().multiplyMatrices(inv, mesh.matrixWorld);
+    const index = geo.getIndex();
+    const count = index ? index.count : p.count;
+    const step = Math.max(1, Math.ceil(count / 3 / 20000)) * 3;
+    const vtx = (i: number) => new THREE.Vector3().fromBufferAttribute(p, index ? index.getX(i) : i).applyMatrix4(m);
+    for (let i = 0; i + 2 < count; i += step) {
+      const a = vtx(i), b = vtx(i + 1), c = vtx(i + 2);
+      if (!Number.isFinite(a.x + a.y + a.z + b.x + b.y + b.z + c.x + c.y + c.z)) continue;
+      const t = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).length() / 2;
+      tris.push([a, b, c, t]); area += t;
+    }
+  });
+  const out: THREE.Vector3[] = [];
+  let k = 0;
+  for (const [a, b, c, t] of tris) {
+    out.push(a, b, c);
+    const n = area > 0 ? Math.floor((t / area) * 6000) : 0;
+    for (let j = 0; j < n; j++, k++) {
+      let u = (k * 0.6180339887) % 1, v = (k * 0.7548776662) % 1;
+      if (u + v > 1) { u = 1 - u; v = 1 - v; }
+      out.push(new THREE.Vector3().copy(a).addScaledVector(new THREE.Vector3().subVectors(b, a), u).addScaledVector(new THREE.Vector3().subVectors(c, a), v));
+    }
+    if (out.length > 30000) break;
+  }
+  return out;
+}
+
+const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+const comp = (v: THREE.Vector3, i: number): number => (i === 0 ? v.x : i === 1 ? v.y : v.z);
+
+/**
+ * Wrap a held thing in a GRIP FRAME: a group whose origin is where the hand closes, whose +Z points along the barrel, blade
+ * or shaft, and whose +Y is the thing's top. lengthM sizes it (its longest side); null keeps its size. A model the kit made
+ * already in this frame (createWeapon: userData.nbGripFrame) is only wrapped. A support point for the other hand is left
+ * in userData.nbSupport when the thing takes two hands. Never throws: a model with nothing to read is held at its centre.
+ */
+export function gripFrame(item: THREE.Object3D, spec: GripSpec | null, lengthM: number | null = null): THREE.Group {
+  const frame = new THREE.Group();
+  frame.name = 'grip';
+  const style: GripStyle = spec ? spec.style : 'handle';
+  frame.userData.nbGrip = style;
+  frame.add(item);
+  const support = (z: number, y: number) => { const s = new THREE.Object3D(); s.name = 'support grip'; s.position.set(0, y, z); frame.add(s); frame.userData.nbSupport = s; };
+  try {
+    if (item.userData.nbGripFrame) {
+      // The kit's own weapon: grip at its origin, barrel +Z, real size. Its fore-grip is about 0.35 of its length ahead.
+      if (lengthM && lengthM > 0) {
+        const size = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3());
+        const longest = Math.max(size.x, size.y, size.z);
+        if (longest > 1e-6) item.scale.multiplyScalar(lengthM / longest);
+      }
+      if (style === 'rifle') { const len = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3()).z; support(len * 0.38, -0.02); }
+      return frame;
+    }
+    item.position.set(0, 0, 0); item.quaternion.identity();
+    const pts = shapePoints(item);
+    if (pts.length < 4) return frame;
+    const box = new THREE.Box3().setFromPoints(pts), size = box.getSize(new THREE.Vector3());
+    const ext = [size.x, size.y, size.z];
+    const a = ext.indexOf(Math.max(...ext));
+    const rest = [0, 1, 2].filter((i) => i !== a);
+    const h = ext[rest[0]] >= ext[rest[1]] ? rest[0] : rest[1];
+    const L = ext[a];
+    if (!(L > 1e-6)) return frame;
+    const lo = comp(box.min, a);
+    // Ten slices along the long axis: how tall (or how thick) the model is in each.
+    const N = 10, slices: THREE.Vector3[][] = Array.from({ length: N }, () => []);
+    for (const p of pts) slices[Math.min(N - 1, Math.max(0, Math.floor(((comp(p, a) - lo) / L) * N)))].push(p);
+    const spread = (s: THREE.Vector3[], i: number) => (s.length ? Math.max(...s.map((p) => comp(p, i))) - Math.min(...s.map((p) => comp(p, i))) : 0);
+    const thick = (s: THREE.Vector3[]) => Math.max(...rest.map((i) => spread(s, i)));
+    const ends = (fn: (s: THREE.Vector3[]) => number) => ({ low: (fn(slices[0]) + fn(slices[1])) / 2, high: (fn(slices[N - 1]) + fn(slices[N - 2])) / 2 });
+    let fwd = 1, up = 1, gripAlong = 0.5, gripH = (comp(box.min, h) + comp(box.max, h)) / 2;
+    const gripW = (comp(box.min, 3 - a - h) + comp(box.max, 3 - a - h)) / 2;
+    let supportAlong = -1, supportH = 0;
+    if (style === 'pistol' || style === 'rifle') {
+      // The muzzle is the slimmer end; the barrel line is the middle of the muzzle's slices; the grip hangs below it.
+      const e = ends((s) => spread(s, h));
+      fwd = e.high <= e.low ? 1 : -1;
+      const muzzle = fwd > 0 ? slices.slice(N - 3) : slices.slice(0, 3);
+      const mh = muzzle.flat().map((p) => comp(p, h)).sort((x, y) => x - y);
+      const barrel = mh.length ? mh[Math.floor(mh.length / 2)] : gripH;
+      const rear = fwd > 0 ? slices.slice(0, 6).flat() : slices.slice(N - 6).flat();
+      const above = Math.max(0, ...rear.map((p) => comp(p, h) - barrel)), below = Math.max(0, ...rear.map((p) => barrel - comp(p, h)));
+      up = below >= above ? 1 : -1;                                  // the grip hangs on the side away from the top
+      // Where the grip is: for a pistol, the middle of what hangs below the barrel at the rear; for a rifle (whose magazine
+      // hangs too) a third of the way from the stock. The fist closes a little over half-way down it.
+      const depth = (p: THREE.Vector3) => (barrel - comp(p, h)) * up;
+      const deepRear = Math.max(0, ...rear.map(depth));
+      const hanging = rear.filter((p) => depth(p) > deepRear * 0.5);
+      const fromRear = style === 'pistol' ? 0.22 : 0.34;
+      gripAlong = style === 'pistol' && hanging.length && deepRear > L * 0.05
+        ? (hanging.reduce((sum, p) => sum + comp(p, a), 0) / hanging.length - lo) / L
+        : fwd > 0 ? fromRear : 1 - fromRear;
+      const near = pts.filter((p) => Math.abs((comp(p, a) - lo) / L - gripAlong) < 0.08);
+      const deepest = near.length ? Math.max(0, ...near.map(depth)) : L * 0.1;
+      gripH = barrel - up * deepest * 0.55;
+      if (style === 'rifle') { supportAlong = fwd > 0 ? 0.62 : 0.38; supportH = barrel - up * L * 0.03; }
+    } else if (style === 'palm') {
+      gripAlong = 0.5;
+    } else {
+      // A handle: the thinner end is the one in the hand.
+      const e = ends(thick);
+      fwd = e.low <= e.high ? 1 : -1;
+      const at = spec && spec.handleAt !== undefined ? spec.handleAt : 0.12;
+      gripAlong = fwd > 0 ? at : 1 - at;
+      const slice = pts.filter((p) => Math.abs((comp(p, a) - lo) / L - gripAlong) < 0.05);
+      if (slice.length) gripH = slice.reduce((sum, p) => sum + comp(p, h), 0) / slice.length;
+      if (style === 'twoHand') { const s2 = at + (spec && spec.length > 1.4 ? 0.25 : 0.12); supportAlong = fwd > 0 ? s2 : 1 - s2; supportH = gripH; }
+    }
+    const grip = new THREE.Vector3();
+    grip.setComponent(a, lo + gripAlong * L); grip.setComponent(h, gripH); grip.setComponent(3 - a - h, gripW);
+    // The item turned so its long axis is the frame's +Z and its top +Y, sized, and moved so the grip is the origin.
+    const F = AXES[a].clone().multiplyScalar(fwd), U = AXES[h].clone().multiplyScalar(up), R = new THREE.Vector3().crossVectors(U, F);
+    const basis = new THREE.Matrix4().makeBasis(R, U, F);
+    const q = new THREE.Quaternion().setFromRotationMatrix(basis).invert();
+    const k = lengthM && lengthM > 0 ? lengthM / L : 1;
+    item.scale.multiplyScalar(k);
+    item.quaternion.copy(q);
+    item.position.copy(grip.clone().multiply(item.scale).applyQuaternion(q).negate());
+    if (supportAlong >= 0) {
+      const s = new THREE.Vector3(); s.setComponent(a, lo + supportAlong * L); s.setComponent(h, supportH); s.setComponent(3 - a - h, gripW);
+      const sp = s.multiply(item.scale).applyQuaternion(q).add(item.position);
+      support(sp.z, sp.y);
+    }
+  } catch { /* the thing is held at its own origin */ }
+  return frame;
+}
+
+/**
+ * Seat a grip frame in a hand. down: the direction from the wrist out through the fist (along the forearm), thumb: the
+ * direction the thumb points; both in the HAND's own frame. palm: where the fist closes, in the hand's frame.
+ * A gun lies along the forearm with its top toward the thumb; a handle runs through the fist past the thumb; a ball sits
+ * in the palm.
+ */
+export function holdPose(frame: THREE.Object3D, down: THREE.Vector3, thumb: THREE.Vector3, palm: THREE.Vector3 = new THREE.Vector3()): void {
+  const style = String(frame.userData.nbGrip || 'handle');
+  const d = down.clone().normalize();
+  const t = thumb.clone().sub(d.clone().multiplyScalar(thumb.dot(d)));
+  if (t.lengthSq() < 1e-8) t.copy(Math.abs(d.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1)).sub(d.clone().multiplyScalar(d.y));
+  t.normalize();
+  let F: THREE.Vector3, U: THREE.Vector3;
+  if (style === 'pistol' || style === 'rifle' || style === 'shield') { F = d.clone().add(t.clone().multiplyScalar(0.1)).normalize(); U = t.clone().sub(F.clone().multiplyScalar(t.dot(F))).normalize(); }
+  else { F = t.clone(); U = d.clone().negate(); }
+  const R = new THREE.Vector3().crossVectors(U, F);
+  frame.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(R, U, F));
+  frame.position.copy(palm);
+}
+
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _q = new THREE.Quaternion(), _pq = new THREE.Quaternion();
+/** Turn obj by a rotation given in WORLD space (axis, angle), keeping its parent. */
+function turnWorld(obj: THREE.Object3D, axis: THREE.Vector3, angle: number): void {
+  if (!(Math.abs(angle) > 1e-6) || axis.lengthSq() < 1e-12) return;
+  obj.updateWorldMatrix(true, false);
+  const world = obj.getWorldQuaternion(new THREE.Quaternion());
+  const parent = obj.parent ? obj.parent.getWorldQuaternion(_pq) : _pq.identity();
+  _q.setFromAxisAngle(axis.clone().normalize(), angle);
+  obj.quaternion.copy(parent.clone().invert().multiply(_q).multiply(world));
+  obj.updateWorldMatrix(false, true);
+}
+/**
+ * Two-bone reach: bend the elbow and swing the shoulder so the hand (end) arrives at target (world). Works on any chain —
+ * a model's upper arm, fore arm and hand, or the kit person's shoulder, elbow and grip. pole (world): which way the elbow
+ * bends when the arm starts straight. Never throws.
+ */
+export function reachWith(upper: THREE.Object3D, lower: THREE.Object3D, end: THREE.Object3D, target: THREE.Vector3, pole?: THREE.Vector3): void {
+  try {
+    upper.updateWorldMatrix(true, true);
+    upper.getWorldPosition(_a); lower.getWorldPosition(_b); end.getWorldPosition(_c);
+    const l1 = _a.distanceTo(_b), l2 = _b.distanceTo(_c);
+    if (!(l1 > 1e-6 && l2 > 1e-6) || !Number.isFinite(target.x + target.y + target.z)) return;
+    const d = Math.min(l1 + l2 - 1e-4, Math.max(Math.abs(l1 - l2) + 1e-4, _a.distanceTo(target)));
+    // 1. The elbow: the angle at it that makes shoulder-to-hand exactly d.
+    const ba = _a.clone().sub(_b), bc = _c.clone().sub(_b);
+    const now = ba.angleTo(bc);
+    const want = Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2))));
+    let n = new THREE.Vector3().crossVectors(ba, bc);
+    if (n.lengthSq() < 1e-10) n = new THREE.Vector3().crossVectors(ba, pole ? pole.clone().sub(_b) : new THREE.Vector3(0, 0, -1));
+    if (n.lengthSq() < 1e-10) n.set(1, 0, 0);
+    turnWorld(lower, n, want - now);
+    // 2. The shoulder: the whole arm swung so the hand lies on the line to the target.
+    upper.getWorldPosition(_a); end.getWorldPosition(_c);
+    const from = _c.clone().sub(_a), to = target.clone().sub(_a);
+    if (from.lengthSq() > 1e-10 && to.lengthSq() > 1e-10) turnWorld(upper, new THREE.Vector3().crossVectors(from, to), from.angleTo(to));
+  } catch { /* the arm stays as the animation left it */ }
 }
 
 /**
@@ -2507,6 +2757,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   let phase = 0;
   let aiming = false;
   let held: THREE.Object3D | null = null;
+  let heldStyle = '';   // gripFrame's style of what the right hand holds: it decides the carry pose and the support hand
   // 🎬 THE ACTION LAYER (admin 2026-11-19: "fire button press kiya goli chalne lagi par character goli chalate huye
   // dikha nahi, character same position me khada raha"). A one-shot pose laid OVER the walk, so the body visibly does
   // what the button did: a jab, a sword sweep, a gun kicking back, a kick, a throw, a crouch-launch, a landing squash,
@@ -2674,6 +2925,19 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
         left.shoulder.rotation.z = 0;
       }
       right.shoulder.rotation.z = 0;
+      // ✋ CARRIED THE WAY PEOPLE CARRY IT: a rifle at the low ready across the body with both hands on it (the support hand
+      // is placed on its fore-grip below), a pistol close with a bent elbow, never swung at arm's length like an empty hand.
+      if (heldStyle === 'rifle') {
+        // The gun hand close to the body (at the hip at the low ready, at the chest when aiming); the wrist, not the arm,
+        // points the rifle (below), so the support hand can reach its fore-grip.
+        if (aiming) { right.shoulder.rotation.set(-1.0, -0.35, 0.35); right.elbow.rotation.set(-1.55, 0, 0); }
+        else { right.shoulder.rotation.set(-0.3 + s * swing * 0.05, 0, 0.12); right.elbow.rotation.set(-1.2, 0, 0); }
+        left.shoulder.rotation.set(-0.6, 0, -0.2); left.elbow.rotation.set(-1.2, 0, 0);
+      } else if (!aiming && heldStyle === 'pistol') {
+        right.shoulder.rotation.x = s * swing * 0.3; right.elbow.rotation.x = -0.45;
+      } else if (!aiming && (heldStyle === 'twoHand' || heldStyle === 'handle')) {
+        right.shoulder.rotation.x = s * swing * 0.4; right.elbow.rotation.x = -0.3;
+      }
       chest.rotation.y = aiming ? 0 : -s * swing * 0.18;
       hips.rotation.y = s * swing * 0.1;
       hips.position.y = legH + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 * (1 + speed * 0.1) : Math.sin(phase) * 0.006);
@@ -2684,6 +2948,25 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     airTime = grounded ? 0 : airTime + dt;
     grounded0 = grounded;
     applyAction(dt);
+    // The other hand on a rifle's fore-grip (or a two-handed thing while aiming), wherever the gun hand and the pose put it.
+    if (held && held.parent !== right.grip) { held = null; heldStyle = ''; }   // taken out of the hand by the game
+    const sup = held && held.userData.nbSupport as THREE.Object3D | undefined;
+    if (held && heldStyle === 'rifle' && !action && !down) {
+      // The gun hand where people keep it (at the right hip at the low ready, at the chest under the cheek when aiming), and
+      // the wrist points the rifle: straight ahead when aiming, across the body and a little down at the low ready.
+      root.updateWorldMatrix(true, true);
+      const hand = aiming ? new THREE.Vector3(0.085 * H, 0.83 * H, 0.17 * H) : new THREE.Vector3(0.1 * H, 0.56 * H, 0.17 * H);
+      reachWith(right.shoulder, right.elbow, right.grip, root.localToWorld(hand), root.localToWorld(new THREE.Vector3(0.3, 0.6 * H, -0.3)));
+      const F = aiming ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(-0.55, -0.12, 0.83).normalize();
+      const U = new THREE.Vector3(0, 1, 0).sub(F.clone().multiplyScalar(F.y)).normalize();
+      const want = root.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(U, F), U, F)));
+      held.quaternion.copy(right.grip.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(want));
+      held.updateWorldMatrix(false, true);
+    }
+    if (sup && !action && !down && (heldStyle === 'rifle' || aiming)) {
+      root.updateWorldMatrix(true, true);
+      reachWith(left.shoulder, left.elbow, left.grip, sup.getWorldPosition(new THREE.Vector3()), root.localToWorld(new THREE.Vector3(-0.3, 0.6, -0.4)));
+    }
   };
 
   update(0, 0, true);
@@ -2698,14 +2981,17 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
       rightHip: rightLeg.hip, rightKnee: rightLeg.knee,
       leftHand: left.grip, rightHand: right.grip,
     },
-    hold: (item: THREE.Object3D | null) => {
+    hold: (item: THREE.Object3D | null, subject?: string | null) => {
       if (held) right.grip.remove(held);
-      held = item;
+      held = null; heldStyle = '';
       if (item) {
-        // The hand's −Y runs down the forearm, so an object's +Z must turn onto it.
-        item.rotation.set(Math.PI / 2, 0, 0);
-        item.position.set(0, 0, 0);
-        right.grip.add(item);
+        // Held the way people hold it: the grip found on the model, sized for this person (unless the kit made it at
+        // real size), seated in the fist — the hand's -Y runs out through the fist, its +Z is where the thumb points.
+        const spec = gripFor(subject ?? (item.userData.nbSubject as string | undefined) ?? (item.userData.nbGripFrame as string | undefined));
+        const frame = item.userData.nbGrip ? item : gripFrame(item, spec, spec && !item.userData.nbGripFrame ? spec.length * (H / 1.75) : null);
+        holdPose(frame, new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1));
+        right.grip.add(frame);
+        held = frame; heldStyle = String(frame.userData.nbGrip || '');
       }
     },
     aim: (on: boolean) => { aiming = on; update(0, 0, true); },
@@ -3815,6 +4101,8 @@ export function createWeapon(options: WeaponModelOptions = {}): WeaponModel {
   const real = d === 'real';
   const kind = options.kind ?? 'rifle';
   const root = new THREE.Group();
+  // Already in the grip frame (grip at the origin, barrel or blade +Z, real size): humanoid.hold only seats it (gripFrame).
+  root.userData.nbGripFrame = kind === 'pistol' || kind === 'rifle' || kind === 'bow' ? kind : kind === 'shotgun' || kind === 'smg' || kind === 'sniper' ? 'rifle' : 'sword';
   const gunmetal = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.45, metalness: 0.8 });
   const polymer = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.7, metalness: 0.1 });
   const wood = shared('wood', d, 0x7a4a26, 1);

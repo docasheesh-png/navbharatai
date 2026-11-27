@@ -6777,3 +6777,18 @@ stop) are resolved and removed from the open queue; their IDs are in BUILD_REPOR
 - **Q-3753 (blocked, recurrence of Q-3323/Q-3354):** five server losses in a row, two at once, no memory band; `BUILD_UNWATCHED`
   evidence added. **Q-3754** = Q-3334 (#4536). **Q-3755** (2–5 km cities) awaits the admin's choice. **Q-3756** (road-edge
   stair-steps) is open.
+
+## 2026-11-27 — characters hold things the way people do (admin: "character apne hath me gun theek se nahi pakadta … ek dam natural")
+- **Root cause:** every hold path (kit person `humanoid.hold`, a model character's `hold`, `holdInHand` for NPCs) hung the item
+  from the hand by its OWN origin, scaled to a third of the person's height, in whatever direction its model faced — a library
+  pistol 0.6 m long through the wrist, pointing sideways; nothing found a grip.
+- **Fix (one implementation, `humanoid.ts`):** `gripFor` (what it is: real size + how people hold it — pistol, rifle, handle,
+  two-hand handle, palm, bow, shield; ~120 names incl. cricket bat/ball), `gripFrame` (reads THIS model's shape from area-spread
+  surface samples: long axis, the part hanging under a gun's barrel, the thinner end of a handle → grip point at the origin,
+  barrel/blade +Z, top +Y, a support point), `holdPose` (gun along the forearm, handle through the fist past the thumb, ball in
+  the palm), `reachWith` (two-bone IK). The kit person carries a rifle at the low ready / aims it at the chest with the wrist
+  pointing it and the left hand on the fore-grip every frame; a model character gets the same via its arm bones.
+  `createWeapon` marks its models as already in the frame. The builder is told to name the thing in `holdInHand(…, subject)`.
+- **Locked:** `tests/aCharacterHoldsThingsTheWayPeopleDo.test.ts` (wrong-way library pistol, upside-down bat, ball, rifle both
+  hands over 40 walk frames, a mixamo-rigged arm; 7 of 8 fail with the fix reverted). Four older hold tests updated to the
+  grip frame (the item now sits inside a `grip` group in the hand) and to real sizes.

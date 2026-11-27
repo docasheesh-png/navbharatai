@@ -42,7 +42,7 @@ describe('any character holds an item', () => {
     const item = gun();
     expect(PB.holdInHand(enemy, item)).toBe(true);
     let hand: THREE.Object3D | null = null; enemy.traverse((o) => { if (o.name === 'mixamorig:RightHand') hand = o; });
-    expect(item.parent).toBe(hand);
+    expect(item.parent?.parent).toBe(hand);                                   // in its grip frame, in the hand bone
     const size = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3());
     expect(Math.max(size.x, size.y, size.z)).toBeCloseTo(0.54, 1); // about a third of 1.8 m
   });
@@ -51,7 +51,7 @@ describe('any character holds an item', () => {
     const a = gun(); const b = gun();
     expect(PB.holdInHand(npc, a)).toBe(true);
     expect(PB.holdInHand(npc, b, 'left')).toBe(true);
-    expect(b.parent).toBe(npc.joints.leftHand);
+    expect(b.parent?.parent).toBe(npc.joints.leftHand);
     let inRoot = false; for (let p: THREE.Object3D | null = a; p; p = p.parent) if (p === npc.root) inRoot = true;
     expect(inRoot).toBe(true);
   });
@@ -59,7 +59,7 @@ describe('any character holds an item', () => {
     const statue = npcModel(false);
     const item = gun();
     expect(PB.holdInHand(statue, item)).toBe(false);
-    expect(item.parent).toBe(statue);
+    expect(item.parent?.parent).toBe(statue);
   });
   it('the builder is told how', () => {
     expect(generateGameShell(['game']).instructions).toMatch(/holdInHand\(character, item\)/);

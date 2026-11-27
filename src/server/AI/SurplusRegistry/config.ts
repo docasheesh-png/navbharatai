@@ -26,7 +26,8 @@ export const SURPLUS_OBSERVATION_CANDIDATES: readonly string[] = Object.freeze([
 
 /**
  * Coding-quality preference (best first) used ONLY to order offers that already passed every
- * gate (reviewed+approved, healthy, trusted, fresh, ≥90% discount reported AND workload-weighted).
+ * gate (reviewed+approved, healthy, trusted, fresh, the model's discount floor — 85%, or 90% for a
+ * Claude-family model on Weak — reported AND workload-weighted; see `surplusBuildFloor`).
  * Grants nothing by itself. A reviewed `qualityScore` on the QualityReview overrides this order.
  * Admin decision 2026-10-29: when >1 coding-eligible model qualifies, pick the better one, not the cheapest.
  */
@@ -40,4 +41,86 @@ export function surplusCodingQuality(model: string, reviewedScore?: unknown): nu
   if (typeof reviewedScore === 'number' && Number.isFinite(reviewedScore) && reviewedScore >= 0 && reviewedScore <= 100) return 1000 + reviewedScore;
   const i = SURPLUS_CODING_QUALITY_ORDER.indexOf(model);
   return i < 0 ? -1 : SURPLUS_CODING_QUALITY_ORDER.length - i;
+}
+
+/**
+ * THE DISCOUNT FLOOR — one source of truth (admin decision 2026-11-27).
+ *
+ * - Every Surplus build request is routed on a request-time minimum-discount floor: the URL segment `min{N}`
+ *   (official docs: `min0`..`min100`, no leading zeros, no decimals; the router checks `estimated_discount_pct >= N`
+ *   per request and answers HTTP 404 `minimum_discount_not_met` — free, not attempted — when no seller meets it).
+ *   The realized discount may still differ from the router's estimate; receipts are checked again (receiptStore).
+ * - The floor is 85% (it was 90% until 2026-11-27). Among offers that clear it, the strongest model builds
+ *   (`surplusCodingQuality`, unchanged).
+ * - A Claude-family model (Claude / Sonnet / Opus) on the Weak tier runs ONLY on a guaranteed ≥ 90% floor. This is the
+ *   single exception to "Weak never runs Sonnet or Opus": it holds only through Surplus, only on `/min90`, and only
+ *   when the selected offer also clears 90%. Every direct provider, ladder rung and fallback stays Claude-free on Weak.
+ *
+ * There is no environment override for the BUILDER's endpoint: it is derived from these constants only.
+ * (`SURPLUS_BASE_URL` configures the separate text-only helper in `lib/surplusClient.ts`, never the builder.)
+ */
+export const SURPLUS_ORIGIN = 'https://api.surplusintelligence.ai';
+export const SURPLUS_MIN_DISCOUNT_PCT = 85;
+export const SURPLUS_CLAUDE_MIN_DISCOUNT_PCT = 90;
+/** The admin's bar for Claude on Weak, written as a literal on purpose: lowering the constant above cannot lower it. */
+const WEAK_CLAUDE_ADMIN_BAR_PCT = 90;
+
+/** Claude / Sonnet / Opus model ids (any spelling). PURE. */
+export function isSurplusClaudeFamily(model: string): boolean {
+  return typeof model === 'string' && /claude|sonnet|opus/i.test(model);
+}
+
+/** The minimum discount a Surplus request for this model on this tier is routed with. PURE. */
+export function surplusFloorFor(model: string, tier: string): number {
+  return tier === 'weak' && isSurplusClaudeFamily(model) ? SURPLUS_CLAUDE_MIN_DISCOUNT_PCT : SURPLUS_MIN_DISCOUNT_PCT;
+}
+
+/** The Surplus builder runs on Weak only (owner 2026-10-25), so its floor is the Weak floor. PURE. */
+export function surplusBuildFloor(model: string): number {
+  return surplusFloorFor(model, 'weak');
+}
+
+/** `https://api.surplusintelligence.ai/min{N}/v1`, or `/anthropic/min{N}/v1` for the Anthropic Messages protocol. PURE. */
+export function surplusBaseUrl(floor: number, protocol: 'openai' | 'anthropic' = 'openai'): string {
+  if (!Number.isInteger(floor) || floor < 0 || floor > 100) throw new Error('Invalid Surplus minimum-discount floor');
+  return protocol === 'anthropic' ? `${SURPLUS_ORIGIN}/anthropic/min${floor}/v1` : `${SURPLUS_ORIGIN}/min${floor}/v1`;
+}
+
+/** The exact base URL the builder sends this model's requests to. PURE. */
+export function surplusBuildEndpoint(model: string): string {
+  return surplusBaseUrl(surplusBuildFloor(model));
+}
+
+const FLOOR_URL = /^https:\/\/api\.surplusintelligence\.ai\/(?:anthropic\/)?min(0|[1-9]\d?|100)\/v1(?:\/chat\/completions|\/messages)?$/;
+const FLOOR_BASE_URL = /^https:\/\/api\.surplusintelligence\.ai\/min(0|[1-9]\d?|100)\/v1$/;
+
+/** The floor an official Surplus floor URL routes on (either protocol, base or full path); null when it has none. PURE. */
+export function surplusFloorOfEndpoint(url: unknown): number | null {
+  const m = typeof url === 'string' ? FLOOR_URL.exec(url) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/** The floor of an official OpenAI-protocol builder BASE url (`…/min{N}/v1`); null for anything else. PURE. */
+export function surplusFloorOfBuildBaseUrl(url: unknown): number | null {
+  const m = typeof url === 'string' ? FLOOR_BASE_URL.exec(url) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * A builder base URL is valid for this model when it is the official floor URL and its floor is AT LEAST the model's
+ * floor. A stricter floor is never a violation (it only narrows supply); a looser one always is. Production always
+ * sends exactly `surplusBuildEndpoint(model)`. PURE.
+ */
+export function surplusBuildEndpointValid(url: unknown, model: string): boolean {
+  const floor = surplusFloorOfBuildBaseUrl(url);
+  return floor !== null && floor >= surplusBuildFloor(model);
+}
+
+/**
+ * May a Surplus session on this tier choose this model at all? Non-Claude models: yes. Claude-family: only on Weak and
+ * only when its floor is the guaranteed ≥ 90% (admin 2026-11-27). PURE.
+ */
+export function surplusModelPermitted(model: string, tier: string): boolean {
+  if (!isSurplusClaudeFamily(model)) return true;
+  return tier === 'weak' && surplusFloorFor(model, tier) >= WEAK_CLAUDE_ADMIN_BAR_PCT;
 }

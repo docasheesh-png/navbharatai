@@ -21,10 +21,10 @@ describe('admitSurplusOrFallback', () => {
 
   it('fails open to Weak when Surplus admission throws', async () => {
     const onFallback = vi.fn();
-    const create = vi.fn(async () => { throw new SurplusBuildUnavailableError('no_eligible_90_percent_offer'); });
+    const create = vi.fn(async () => { throw new SurplusBuildUnavailableError('no_eligible_discount_offer'); });
     const outcome = await admitSurplusOrFallback({ buildId: 'b1', tier: 'weak', enabled: true, create, onFallback });
-    expect(outcome).toEqual({ status: 'fallback', session: undefined, reason: 'no_eligible_90_percent_offer' });
-    expect(onFallback).toHaveBeenCalledExactlyOnceWith('no_eligible_90_percent_offer');
+    expect(outcome).toEqual({ status: 'fallback', session: undefined, reason: 'no_eligible_discount_offer' });
+    expect(onFallback).toHaveBeenCalledExactlyOnceWith('no_eligible_discount_offer');
   });
 
   it('fails open with admission_timeout when Surplus hangs past the hard deadline', async () => {
@@ -78,7 +78,7 @@ describe('resolveProBuildSurplusAdmission', () => {
 describe('safeSurplusAdmissionReason', () => {
   it('passes through the allowlisted safe tokens', async () => {
     const { safeSurplusAdmissionReason } = await import('./admitOrFallback');
-    for (const reason of ['flag_off', 'missing_or_invalid_key', 'admission_timeout', 'stale_or_missing_snapshot', 'no_eligible_90_percent_offer', 'review_unavailable', 'other_safe'] as const) {
+    for (const reason of ['flag_off', 'missing_or_invalid_key', 'admission_timeout', 'stale_or_missing_snapshot', 'no_eligible_discount_offer', 'review_unavailable', 'other_safe'] as const) {
       expect(safeSurplusAdmissionReason(reason)).toBe(reason);
     }
   });

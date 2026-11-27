@@ -194,7 +194,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1ba3e1598af232984df7764ef44905e4230b2ed22bdf24b65be14d46783ca3dc",
     "ca2cb63543970f8ba8acc4a999c1785b3ae45f736d280fd552075382056ca6fb",
     "8d62db9a22584e9931c5310705a71335950df3a5a93d71c4bdfa32e04184e675",
-    "fad1cdf0a7bfb81563ff8b36ca945892651f6177909ff47dcdc132a22a68c507"
+    "6133b571edcc166ea87e828213ee16820fbf8bc6f4d40a356123d3a2a18cdffd",
+    "71e643fbd70f4ee915f58d0b03ded9d8d9d79255c2e4b007da86148087e975bb"
   ],
   "src/game/athree/dunes.ts": [
     "e874d9a83f2cc996bacaedf0969d91231a4dde4543304a401fa708eabd5f33be"
@@ -244,10 +245,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/athree/roadmesh.ts": [
     "69318d67cb0edb62ab875f8bc839d74a8ab2af56ddab96550071b47861d9df8b",
-    "fd91cf2d962b16b1d79700ad4c58ecc31ab1ad1a73dfa16348767d3b6a0d4b65"
+    "fd91cf2d962b16b1d79700ad4c58ecc31ab1ad1a73dfa16348767d3b6a0d4b65",
+    "7a9907d816236461787b68007a9c6177bdf9032b8d538a097966024962576156"
   ],
   "src/game/athree/roads.ts": [
-    "7483429b247808379d59a0c8b6697bd8a1d79546de1c19f6328140357962fcd2"
+    "7483429b247808379d59a0c8b6697bd8a1d79546de1c19f6328140357962fcd2",
+    "43777cbc4b47d46176395c9a28b82bcb27b0e06178f5dc6d344433caf87ebf48"
   ],
   "src/game/athree/sky.ts": [
     "32c209e29681a69852896fea713e956df10c8aa3253eccd7ec2f1d3354eb70c3",
@@ -299,7 +302,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0dc9ddb33bb14aed834e16dc87fcf3d14cfd1236382f6b3532cae8bf74fd3f77",
     "029563d9323bd1a3eeea5e283a766ac14808dc763332aa41cab3886f84a9731a",
     "ed78a7fa046e3e1f3a82a8fdfd7b7474bdd1564c58aeb75a5633fd4f8525f1be",
-    "22b168c740a791d92fe7a36d96b0372aabb9d5e37158b57378c97d8488ce0338"
+    "e1c5b2fd77b183d4704ff14803e4d02a6e239b511743867bb91a369caf206b2e",
+    "5ca0461079f29448de5255a9e365783fc18aa1c29a68431163b9545d9d347dbe",
+    "d122a549393e91754e1c964f22b25a6d91cd80db6ab13cd7649e5ea0020308ef"
   ],
   "src/game/board/business.ts": [
     "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",

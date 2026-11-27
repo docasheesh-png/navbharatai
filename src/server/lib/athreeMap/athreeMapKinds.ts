@@ -5,8 +5,9 @@
 // rivers); the size is how far the world is stretched (see createAthreeWorld). 12 archetypes x 10 sizes = 120 kinds, and every one is
 // seeded, so each kind is also an endless run of different maps. `mapChoiceFor` reads a user's words (English, Hinglish) and picks both.
 //
-// Honest limits: a 1 to 5 km map has no roads (a road region is 12.5 km, a runway 900 m) and a plane has nowhere to take off; a map of
-// 250 km and up is mostly empty land to cross, which is what it is.
+// Honest limits: every size has roads (admin 2026-11-27) — under 20 km (an island under 6 km) they are ONE planned town network (a grid by
+// default; see roads.ts) instead of the regional villages and highways, and under 5 km there is no 900 m runway unless it is a flight game,
+// so a plane may have nowhere to take off; a map of 250 km and up is mostly empty land to cross, which is what it is.
 
 /** The knobs of a map's character (the same five the emitted world takes: tests/census hold the two lists equal). */
 export interface MapStyle { relief: number; seaShift: number; aridity: number; warmth: number; rivers: number }
@@ -100,8 +101,9 @@ export function describeMap(choice: MapChoice): string {
   const a = ARCHETYPES[choice.archetype];
   const km = clampSizeKm(choice.sizeKm);
   const notes: string[] = [];
-  if (km < 20 && a.mode === 'loop') notes.push('too small for a road network, so there are no roads and no runway');
-  if (a.mode === 'bounded' && km < 6) notes.push('too small for roads');
+  const planned = (a.mode === 'loop' && km < 20) || (a.mode === 'bounded' && km < 6);
+  if (planned) notes.push('its roads are one planned town network (a smart-city grid with a highway ring, unless another road style is asked for)');
+  if (km < 5) notes.push('too small for a runway unless it is a flight game');
   if (km >= 250) notes.push('mostly open land to cross; roads are made region by region as you travel');
   return `${a.id} map, ${km} km${a.mode === 'bounded' ? ' across' : ' (a seamless loop)'}: ${a.what}` + (notes.length ? ` (${notes.join('; ')})` : '');
 }

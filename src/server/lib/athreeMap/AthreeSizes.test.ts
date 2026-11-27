@@ -146,9 +146,14 @@ describe('the water is where its data says, at every size', () => {
   });
 });
 
-describe('roads exist only where they fit', () => {
-  it('under 20 km a loop map has none, and a plane has no runway to find', () => {
-    for (const km of [1, 5, 10]) { const w = world('continental', km); expect(w.homeRoads().roads.length, `${km} km`).toBe(0); }
+describe('every size has roads (admin 2026-11-27: the old "under 20 km a loop map has none" is gone)', () => {
+  it('under 20 km a map has ONE planned town network, and under 5 km no runway (a 900 m strip needs room)', () => {
+    for (const km of [1, 5, 10]) {
+      const w = world('continental', km);
+      expect(w.roadNetwork().style(), `${km} km`).toBe('grid');
+      expect(w.homeRoads().roads.filter((r: any) => r.planned).length, `${km} km`).toBeGreaterThan(0);
+    }
+    expect(world('continental', 1).homeRoads().roads.some((r: any) => r.kind === 'runway')).toBe(false);
   });
   it('from 20 km up it has a road network again', () => {
     for (const km of [25, 100, 250]) expect(world('plains', km, 3).homeRoads().roads.length, `${km} km`).toBeGreaterThan(0);

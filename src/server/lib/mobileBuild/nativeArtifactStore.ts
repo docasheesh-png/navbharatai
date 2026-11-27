@@ -104,7 +104,7 @@ export interface NativeArtifactEraseReport {
 }
 
 export const RUNNING_NATIVE_BUILD_LIMITATION =
-  'A phone app build was still finishing when your account was deleted; it was asked to stop, and a file it saves afterwards expires with its download window.';
+  'A phone app build was still finishing when your account was deleted; it was asked to stop, and a file it finishes saving afterwards is deleted as soon as it finds its build record gone.';
 
 /**
  * DELETE /api/profile's step for native .apk/.aab files (Q-3614). `verifiedUid` is the deletion route's VERIFIED

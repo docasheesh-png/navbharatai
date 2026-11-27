@@ -197,6 +197,9 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   promo_codes:         { kind: 'platform', why: "one doc per admin-made promo code (adminPromoStore.ts); the doc id IS the code and it belongs to the campaign, not to any one redeemer — each person's redemption is its own payment_transactions record" },
   gift_code_daily:     { kind: 'user', why: "one doc per buyer per UTC day bounding chargeback exposure; it is that person's own purchase tally and nothing needs it once the account is gone" },
 
+  mobile_native_builds: { kind: 'user', why: 'one row per native .apk/.aab build, `userId` field (nativeBuildStore.ts); erased with the account after eraseUserNativeArtifacts deletes the files (Q-3702)' },
+  mobile_signing_keys: { kind: 'blocked', why: "the user's SEALED app signing keys, one per (user, app id) — whether account deletion deletes them is an admin decision (irreversible: no key, no app update on Play), owned by Q-3703" },
+  mobile_signing_key_events: { kind: 'blocked', why: 'the audit trail of a signing key (imported / generated / used / deleted, with userId); its fate follows the key decision in Q-3703' },
   mobile_build_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many .apk/.aab/.ipa builds finished and of what — counts only, no person in it, purged at 400 days' },
   mobile_build_counted:  { kind: 'retained', why: 'one marker per finished run so a POLLED status endpoint cannot count it twice; the id is a digest and the body names no owner' },
   referral_claim_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many referral claims were tried, paid or refused and why — counts only, no person in it, purged at 400 days' },
@@ -404,7 +407,9 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
 // `store` joined these on 2026-10-09 with `derivedIdErase.ts`, which names its collections as literals
 // on a root handle called `store`. Adding it WIDENS the scan — every such literal is now a collection
 // the obligations below are checked against — which is the direction this file is allowed to move in.
-const DB_HANDLES = new Set(['db', 'd', 'store']);
+// `usageDb` joined with form 5 (Q-3702): `usageDb?.collection('ai_usage_logs')` in FreeChain/entryAdmission.ts is a
+// Firestore root reached through optional chaining, which no earlier form read.
+const DB_HANDLES = new Set(['db', 'd', 'store', 'usageDb']);
 
 /**
  * Receivers that are NOT a Firestore root, each with the reason. All three are `.doc()` references,
@@ -414,7 +419,23 @@ const DB_HANDLES = new Set(['db', 'd', 'store']);
 const UNREADABLE_RECEIVERS: Record<string, string> = {
   root: 'always a `.doc()` reference (WorkspaceAssetStore / WorkspaceFileStore / DiagnosticsStore), so '
     + "`root.collection('assets' | 'files' | 'history')` is a subcollection, already registered as a `sub`",
+  // Form 5's call receivers (Q-3702): each returns a `.doc()` reference, so what follows is a SUBcollection.
+  'state()': "LiveRegistry/store.ts: `state()` returns `db.collection(ROOT).doc('openrouter')`; its chunks, controls, "
+    + 'health, history, routing and actions are children of live_ai_registry, whose retention is recorded there',
+  'mainDoc()': 'FirestoreConversationStore.ts: `mainDoc(id)` returns one conversation document; turns and timeline '
+    + 'are its subcollections, registered in USER_SCOPED_SUBCOLLECTIONS',
+  'controlRef()': "FreeChain/control.ts: `controlRef(db)` returns `db.collection('free_chat_chain').doc('state')`; "
+    + 'events, sticky and actions are its children, covered by free_chat_chain\'s retention',
 };
+
+/**
+ * Form 5 (Q-3702) — a receiver that is a CALL returning a Firestore root: `db().collection(BUILDS)`, `getDb()`,
+ * `(getDb() as any).collection('x')`. Before Q-3702 the scan read only `<identifier>.collection(…)`, so every
+ * `db().collection(…)` was skipped without a word — which is how `mobile_native_builds`, `mobile_signing_keys` and
+ * `mobile_signing_key_events` sat in no classification at all. A call receiver that is not here must be declared in
+ * UNREADABLE_RECEIVERS as `name()`; a new unknown one fails the receiver test.
+ */
+const ROOT_CALLS = new Set(['db', 'getDb', 'getServerDb', 'firestore']);
 
 /** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
 const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
@@ -475,6 +496,45 @@ const ADMIN_IDENT_FORM = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.collection\(\s*([A-Z][A-Z0
 /** Every `const NAME = 'value'` in a file, so form 4 can resolve an identifier to the real store name. */
 const STRING_CONST = /\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*'([a-zA-Z0-9_]+)'/g;
 
+/**
+ * What stands in front of `.collection(` at `dot` (the index of the `.` or of the `?` in `?.`), read backwards:
+ * an identifier, a call `name(…)` (`doc(…)` means a subcollection), or a parenthesised cast unwrapped to its inner
+ * expression. `other` is anything else — it is declared by its text, never dropped.
+ */
+type Receiver = { kind: 'ident' | 'call' | 'doc' | 'other'; name: string };
+function receiverBefore(src: string, dot: number): Receiver {
+  let i = dot - 1;
+  while (i >= 0 && /[\s!]/.test(src[i])) i--;
+  if (i >= 0 && /[A-Za-z0-9_$]/.test(src[i])) {
+    let j = i;
+    while (j >= 0 && /[A-Za-z0-9_$]/.test(src[j])) j--;
+    return { kind: 'ident', name: src.slice(j + 1, i + 1) };
+  }
+  if (src[i] !== ')') return { kind: 'other', name: src.slice(Math.max(0, i - 20), i + 1).trim() };
+  let depth = 0;
+  let open = i;
+  for (; open >= 0; open--) {
+    if (src[open] === ')') depth++;
+    else if (src[open] === '(' && --depth === 0) break;
+  }
+  if (open < 0) return { kind: 'other', name: src.slice(Math.max(0, i - 20), i + 1).trim() };
+  let k = open - 1;
+  while (k >= 0 && /\s/.test(src[k])) k--;
+  let m = k;
+  while (m >= 0 && /[A-Za-z0-9_$]/.test(src[m])) m--;
+  const callee = src.slice(m + 1, k + 1);
+  // `await (getDb() as any).collection(…)`: a keyword before `(` is not a callee — the parentheses are a group.
+  if (callee && !/^(await|return|typeof|void|yield|case|in|of|new)$/.test(callee)) return callee === 'doc' ? { kind: 'doc', name: 'doc' } : { kind: 'call', name: callee };
+  // A parenthesised expression — `(getDb() as any)`: drop the cast and read the inner expression the same way.
+  // A cast's TYPE can hold parentheses and braces (`(db as never as { collection: (n: string) => … })`), so the
+  // expression is what stands before the first ` as `, not what a type-shaped regex can peel off the end.
+  const inner = src.slice(open + 1, i).split(/\s+as\s+/)[0].replace(/!+\s*$/, '').trim();
+  return receiverBefore(`${inner}.`, inner.length);
+}
+
+/** Every `.collection(ARG)` / `?.collection(ARG)` whose receiver is NOT a plain `identifier.` (forms 3 and 4 own those). */
+const ANY_COLLECTION_CALL = /(\?)?\.collection\(\s*(?:'([a-zA-Z0-9_]+)'|([A-Z][A-Z0-9_]*))\s*\)/g;
+
 interface ScanResult {
   collections: { name: string; file: string }[];
   /** `receiver` → the files it appeared in. Must be covered by UNREADABLE_RECEIVERS. */
@@ -509,6 +569,23 @@ function scanServer(): ScanResult {
       for (const m of src.matchAll(ADMIN_IDENT_FORM)) {
         const value = named.get(m[2]);
         if (value && DB_HANDLES.has(m[1])) collections.push({ name: value, file: rel });
+      }
+      // Form 5 (Q-3702): every other receiver shape — a call, a cast, optional chaining — is read or declared.
+      ANY_COLLECTION_CALL.lastIndex = 0;
+      for (const m of src.matchAll(ANY_COLLECTION_CALL)) {
+        const at = m.index ?? 0;
+        const optional = !!m[1];
+        // A plain `identifier.collection(` is forms 3/4's; only `?.` turns an identifier receiver into ours.
+        if (!optional && /[A-Za-z0-9_$]/.test(src[at - 1] ?? '')) continue;
+        const r = receiverBefore(src, at);
+        if (r.kind === 'doc') continue; // `.doc(x).collection(SUB)` — a subcollection, Q-682's registry
+        const value = m[2] ?? named.get(m[3] ?? '');
+        const isRoot = (r.kind === 'ident' && DB_HANDLES.has(r.name)) || (r.kind === 'call' && ROOT_CALLS.has(r.name));
+        if (isRoot && value) { collections.push({ name: value, file: rel }); continue; }
+        const key = r.kind === 'call' ? `${r.name}()` : r.name;
+        if (isRoot && !value && r.kind === 'ident') continue; // `db.collection(name)` with a runtime name: forms 3/4's existing scope
+        if (!unreadable.has(key)) unreadable.set(key, new Set());
+        unreadable.get(key)!.add(rel);
       }
     }
   };
@@ -560,6 +637,13 @@ describe('every declared collection is classified', () => {
     expect(names, '`<db>.collection(CONST)` is not being read (form 4)').toContain('nav_store_purchases');
     expect(names, 'form 4 missed the money store it was added for').toContain('nav_store_pending_credits');
     expect(names, 'form 4 missed the workspace-keyed store it was added for').toContain('nav_store_remix_origins');
+    /**
+     * Form 5's witnesses (Q-3702). Reachable ONLY through a CALL receiver — `db().collection(BUILDS)` and
+     * `db().collection(KEYS)` in nativeBuildStore.ts — so every earlier form skipped them in silence.
+     */
+    expect(names, '`db().collection(CONST)` is not being read (form 5)').toContain('mobile_native_builds');
+    expect(names, 'form 5 missed the signing-key store').toContain('mobile_signing_keys');
+    expect(names, 'form 5 missed the signing-key audit store').toContain('mobile_signing_key_events');
 
     // And a floor, so a refactor cannot quietly shrink the world the obligations are checked against.
     // 144 at the time of writing; the floor is deliberately below that so adding a store is not a
@@ -671,7 +755,8 @@ describe('every declared collection is classified', () => {
     // The sixth absolute rule as a test: a store whose obligation is unmet may not be quietly
     // mislabelled to make this file pass, and it may not sit here with nobody accountable either.
     const unowned = Object.entries(CLASSIFICATION)
-      .filter(([, v]) => v.kind === 'blocked' && !/\bQ-\d{3}\b/.test(v.why))
+      // `\d{3,}`: queue ids passed Q-999 long ago; `\d{3}\b` refused every four-digit row (found by Q-3702).
+      .filter(([, v]) => v.kind === 'blocked' && !/\bQ-\d{3,}\b/.test(v.why))
       .map(([name]) => name);
     expect(unowned, `blocked with no Q-### row to own it: ${unowned.join(', ')}`).toEqual([]);
   });

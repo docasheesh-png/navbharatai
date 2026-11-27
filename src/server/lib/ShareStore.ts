@@ -317,6 +317,108 @@ export async function eraseUserShareHtml(
   return report;
 }
 
+// ─────────────────────────────── Expired shares (Q-3704) ───────────────────────────────
+//
+// A share stops working at `expiresAt`, but nothing ever deleted it: the record, its visitors' feedback and its
+// offloaded page stayed for ever. The owner can only read a share's feedback while they hold its token (the
+// ShareForReview panel keeps it in memory), so after a further SHARE_PURGE_GRACE_MS nobody can reach it at all.
+// The sweep deletes, in pointer order: the page (only the share's OWN path), then the feedback, then the record —
+// and a share whose page or feedback could not be confirmed deleted KEEPS its record, so the next run can retry.
+
+/** How long after a share's expiry it is purged. */
+export const SHARE_PURGE_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+/** At most this many shares per run: the sweep is daily, and a backlog drains over several nights. */
+export const SHARE_PURGE_BATCH = 200;
+
+/** What the sweep needs. firebase-admin in production; a fake in tests. Every method THROWS on failure. */
+export interface ExpiredShareDeps {
+  /** Shares whose `expiresAt` is before `beforeMs`, at most `limit`. */
+  listExpired(beforeMs: number, limit: number): Promise<Array<{ token: string; ownerId: string; htmlPath?: string }>>;
+  /** Delete one object; a missing object is success. */
+  deleteObject(path: string): Promise<void>;
+  /** Delete every feedback document under the share; returns how many. */
+  deleteFeedback(token: string): Promise<number>;
+  deleteRecord(token: string): Promise<void>;
+}
+
+export interface ExpiredSharePurgeReport {
+  scanned: number;
+  /** Shares whose page, feedback and record are all gone. */
+  purged: number;
+  pagesDeleted: number;
+  feedbackDeleted: number;
+  /** Shares kept because a page or feedback delete could not be confirmed (retried next run). */
+  kept: number;
+  /** Shares kept because their record points at a page outside their own path (needs review, never trusted). */
+  refused: number;
+  /** The batch was full: more expired shares are waiting for the next run. */
+  more: boolean;
+  /** Set when the expired shares could not even be listed. */
+  error?: string;
+}
+
+/** The production dependencies, or null when Firestore is not configured. */
+export function liveExpiredShareDeps(): ExpiredShareDeps | null {
+  const db = getDb();
+  if (!db) return null;
+  return {
+    async listExpired(beforeMs, limit) {
+      const snap = await db.collection(SHARES_COLLECTION).where('expiresAt', '<', beforeMs).limit(limit).get();
+      return snap.docs.map((d) => {
+        const data = (d.data() ?? {}) as Partial<ShareRecord>;
+        return { token: d.id, ownerId: String(data.ownerId ?? ''), ...(typeof data.htmlPath === 'string' ? { htmlPath: data.htmlPath } : {}) };
+      });
+    },
+    async deleteObject(path) {
+      const name = shareBucketName();
+      if (!name) throw new Error('no share bucket configured');
+      await admin.storage().bucket(name).file(path).delete({ ignoreNotFound: true });
+    },
+    async deleteFeedback(token) {
+      let n = 0;
+      for (let page = 0; page < 50; page++) {
+        const kids = await db.collection(SHARES_COLLECTION).doc(token).collection(FEEDBACK_SUBCOLLECTION).limit(300).get();
+        if (kids.empty) return n;
+        for (const k of kids.docs) { await k.ref.delete(); n++; }
+        if (kids.size < 300) return n;
+      }
+      throw new Error('feedback not fully deleted within the page cap');
+    },
+    async deleteRecord(token) { await db.collection(SHARES_COLLECTION).doc(token).delete(); },
+  };
+}
+
+/**
+ * Purge shares that expired more than SHARE_PURGE_GRACE_MS ago, at most `limit` per run (Q-3704). Page first (only
+ * the share's own path), then feedback, then the record; anything not confirmed keeps the record. Never throws.
+ */
+export async function purgeExpiredShares(
+  deps: ExpiredShareDeps,
+  nowMs = Date.now(),
+  limit = SHARE_PURGE_BATCH,
+): Promise<ExpiredSharePurgeReport> {
+  const report: ExpiredSharePurgeReport = { scanned: 0, purged: 0, pagesDeleted: 0, feedbackDeleted: 0, kept: 0, refused: 0, more: false };
+  let shares: Array<{ token: string; ownerId: string; htmlPath?: string }>;
+  try { shares = await deps.listExpired(nowMs - SHARE_PURGE_GRACE_MS, limit); } catch {
+    return { ...report, error: 'Expired share links could not be listed; nothing was purged.' };
+  }
+  report.scanned = shares.length;
+  report.more = shares.length >= limit;
+  for (const share of shares) {
+    const path = share.htmlPath ?? '';
+    if (path && !isOwnShareHtmlPath(path, share.token, share.ownerId)) { report.refused++; continue; }
+    try {
+      if (path) { await deps.deleteObject(path); report.pagesDeleted++; }
+      report.feedbackDeleted += await deps.deleteFeedback(share.token);
+      await deps.deleteRecord(share.token);
+      report.purged++;
+    } catch {
+      report.kept++;
+    }
+  }
+  return report;
+}
+
 /** Resolve a share by token. Returns null when missing/unreadable. */
 export async function getShare(token: string): Promise<ShareRecord | null> {
   if (!token) return null;

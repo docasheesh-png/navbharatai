@@ -75,7 +75,7 @@ describe('paid manager validates server data before rendering claims', () => {
     const fetch = vi.fn(async () => response(fixture())); await mount(fetch);
     expect(fetch).toHaveBeenCalledWith('/api/v1/admin/surplus-registry', expect.objectContaining({ headers: { 'x-admin-token': 'private-admin-token' } }));
     const html = renderToStaticMarkup(root());
-    for (const text of ['Separate from OpenRouter STRICT_FREE', 'Configured candidate', 'Not independently verified', 'Reported available', 'Not confirmed eligible', '90% minimum discount retained', 'Unknown', 'Raw source rate units are unverified']) expect(html).toContain(text);
+    for (const text of ['Separate from OpenRouter STRICT_FREE', 'Configured candidate', 'Not independently verified', 'Reported available', 'Not confirmed eligible', '85% minimum discount (90% for Claude-family models on Weak) retained', 'Unknown', 'Raw source rate units are unverified']) expect(html).toContain(text);
     expect(html).not.toContain('private-admin-token'); expect(html).not.toContain('type="password"');
   });
   it('expired metadata cannot keep availability or candidate eligibility green', async () => {

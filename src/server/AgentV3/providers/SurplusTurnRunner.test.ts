@@ -174,7 +174,17 @@ describe('Surplus native tool turns', () => {
     await expect(runner.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
     expect(authority.dispatch).not.toHaveBeenCalled();
   });
-  it.each([{ maxTokens: 501 }, { requestRouting: { model: 'override' } }, { providerId: '' }, { maxTokens: NaN }])('rejects malformed permit %j', async invalid => {
+  // Admin 2026-11-27: the floor route must be at least the model's floor — 85, or 90 for a Claude-family model.
+  it.each([
+    { model: 'reviewed-model', endpoint: 'https://api.surplusintelligence.ai/min84/v1' },
+    { model: 'claude-sonnet-5', endpoint: 'https://api.surplusintelligence.ai/min85/v1' },
+    { model: 'claude-opus-4-7', endpoint: 'https://api.surplusintelligence.ai/min89/v1' },
+  ])('blocks a route below the model floor %j before dispatch', async over => {
+    const { runner, authority } = setup({ authorize: vi.fn(async () => permit(over)) });
+    await expect(runner.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    expect(authority.dispatch).not.toHaveBeenCalled();
+  });
+  it.each([{ maxTokens: 501 },{ requestRouting: { model: 'override' } }, { providerId: '' }, { maxTokens: NaN }])('rejects malformed permit %j', async invalid => {
     const { runner, authority } = setup({ authorize: vi.fn(async () => permit(invalid)) });
     await expect(runner.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
     expect(authority.dispatch).not.toHaveBeenCalled();

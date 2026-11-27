@@ -36,9 +36,9 @@ describe('Surplus phase-one preview policy', () => {
     expect(result.selection?.offerId).toBe('offer-a');
   });
   it.each(['cacheRead', 'cacheWrite', 'reasoning'] as const)('does not treat unknown %s prices as free', dimension => {
-    expect(planSurplusBuild(snapshot, reviews, { ...workload, [dimension]: 10 }, now)).toMatchObject({ reason: 'no_eligible_90_percent_offer' });
+    expect(planSurplusBuild(snapshot, reviews, { ...workload, [dimension]: 10 }, now)).toMatchObject({ reason: 'no_eligible_discount_offer' });
   });
-  it.each([{ available: false }, { healthy: false }, { trusted: false }, { discountPct: 89.9 }, { rates: { input: '9000', output: '19000' } }, { observedAt: now + 1 }, { sourceDate: now - 700_000 }, { sourceAgeSeconds: 301 }, { discountPct: NaN }, { upstreamGeneratedAt: null }, { observedAt: NaN }, { sourceAgeSeconds: -1 }, { providerTrustConfirmed: false }])('rejects unsafe offer %j', override => {
+  it.each([{ available: false }, { healthy: false }, { trusted: false }, { discountPct: 84.9 }, { rates: { input: '9000', output: '19000' } }, { observedAt: now + 1 }, { sourceDate: now - 700_000 }, { sourceAgeSeconds: 301 }, { discountPct: NaN }, { upstreamGeneratedAt: null }, { observedAt: NaN }, { sourceAgeSeconds: -1 }, { providerTrustConfirmed: false }])('rejects unsafe offer %j', override => {
     expect(planSurplusBuild({ ...snapshot, offers: [{ ...offer, ...override }] }, reviews, workload, now).status).toBe('blocked');
   });
   it('fails closed on stale snapshot, expired reviews, or inconsistent quality cohorts', () => {

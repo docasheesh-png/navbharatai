@@ -1,6 +1,7 @@
 import { addFallbackMs } from '../../AgentV3/fallbackTime';
 import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { strongOffersOnly } from './strongOffers';
+import { surplusCodingQuality } from './config';
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
@@ -92,6 +93,19 @@ export function isSurplusReasoningModel(model: string): boolean {
   const m = model.toLowerCase();
   if (/flash|instruct|chat|non-?reason|turbo/.test(m)) return false;
   return /(^|\/)(gpt-5|o[1-9])|-(sol|terra)\b|think|reason|\br1\b/.test(m);
+}
+/**
+ * 🔝 THE NEXT MODEL WHEN THE STICKY ONE IS BENCHED — the strongest left, never the first in the list (admin 2026-11-27: "jo
+ * sabse strong ho woh build kare"). It used to take the first un-benched model in the snapshot's order, which follows the
+ * static registry list, so a build that lost its strong model dropped to whatever came first (often a flash model) while
+ * stronger ones were still eligible. Same rules as the opening choice: never Claude on Weak, a plain (non-reasoning) model
+ * before a reasoning one, and the reviewed coding-quality order (surplusCodingQuality) inside each group. PURE.
+ */
+export function nextStrongestSurplusModel(models: readonly string[], benched: ReadonlySet<string>, tier: string): string | undefined {
+  const left = [...new Set(models)].filter((m) => !benched.has(m) && !(tier === 'weak' && /claude|sonnet|opus/i.test(m)));
+  const byQuality = (a: string, b: string) => surplusCodingQuality(b) - surplusCodingQuality(a);
+  const plain = left.filter((m) => !isSurplusReasoningModel(m)).sort(byQuality);
+  return plain[0] ?? left.sort(byQuality)[0];
 }
 /** Switched off or keyless is a strict no-I/O path. A key with the switch not off uses live admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
@@ -291,7 +305,7 @@ export async function createSurplusBuildSession(options: {
           if (bench) {
             benchedModels.add(permit.model);
             if (model === permit.model) {
-              const alt = (initialState.snapshot?.offers ?? []).map(o => o.model).find(m => !benchedModels.has(m) && !(options.tier === 'weak' && /claude|sonnet|opus/i.test(m)));
+              const alt = nextStrongestSurplusModel((initialState.snapshot?.offers ?? []).map(o => o.model), benchedModels, options.tier);
               if (alt) model = alt;
             }
           }

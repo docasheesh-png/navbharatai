@@ -46,7 +46,8 @@ export type PlaceholderKind =
   | 'PLAYER_UNDERWATER'
   | 'EMPTY_MAP'
   | 'HIDDEN_CONTROLS'
-  | 'MISSING_ENEMIES';
+  | 'MISSING_ENEMIES'
+  | 'MISSING_HELD';
 export interface PlaceholderFinding { kind: PlaceholderKind; evidence: string; fix: string; /** The file it is about, when it is one. */ path?: string }
 
 export function gamePlaceholderProbeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -126,6 +127,11 @@ export interface PlaceholderPageRead {
   standing?: { feet?: number; land?: number; water?: number | null; seated?: boolean } | null;
   /** The kit's characters (systems/entities.ts) as the page saw them; null when the game does not use Entities. */
   characters?: CharactersRead | null;
+  /**
+   * What is really in the player's hands (play/playerBody.ts, window.__nbHeld): written by the kit only once an item is in a
+   * hand. null when the game does not have the kit's player body, so nothing can show it.
+   */
+  held?: Array<{ side?: string; subject?: string }> | null;
 }
 export interface CharactersRead {
   spawned?: number;
@@ -153,7 +159,7 @@ export const EMPTY_SCENE_MESHES = 2;
  * phone. Each read may be null (an older script, a 2D game, a stage that did not finish), and then that detector says
  * nothing. At most 6 findings. PURE.
  */
-export function pagePlaceholderFindings(start: PlaceholderPageRead | null | undefined, end: PlaceholderPageRead | null | undefined, controls?: ControlsRead | null, wanted: { enemies?: boolean } = {}): PlaceholderFinding[] {
+export function pagePlaceholderFindings(start: PlaceholderPageRead | null | undefined, end: PlaceholderPageRead | null | undefined, controls?: ControlsRead | null, wanted: { enemies?: boolean; held?: boolean } = {}): PlaceholderFinding[] {
   const out: PlaceholderFinding[] = [];
   const s = start && typeof start === 'object' ? start : null;
   const e = end && typeof end === 'object' ? end : null;
@@ -217,6 +223,8 @@ export function pagePlaceholderFindings(start: PlaceholderPageRead | null | unde
       fix: 'keep every on-screen control inside the screen (env(safe-area-inset-*) margins), fully opaque enough to see, and at least 40 px — or use the kit\'s touch controls',
     });
   }
+  const held = wanted.held ? missingHeldFinding(s, e) : null;
+  if (held) out.unshift(held);
   const enemies = wanted.enemies ? missingEnemiesFinding(s, e) : null;
   if (enemies) out.unshift(enemies); // the thing the user asked for comes first
   return out.slice(0, 6);
@@ -244,6 +252,24 @@ export function missingEnemiesFinding(start: PlaceholderPageRead | null, end: Pl
   if (inView === 0 && nearest !== null && nearest > ENEMY_NEAR_M) {
     return { kind: 'MISSING_ENEMIES', evidence: `${hostiles} enem${hostiles === 1 ? 'y is' : 'ies are'} alive, but the nearest stands ${Math.round(nearest)} m from the player and none was in view`, fix: 'spawn them where the hero is: crowd.spawnAround(n, { kind: \'enemy\' }) uses the player\'s position, never a fixed point of the map' };
   }
+  return null;
+}
+
+/**
+ * ✋ An asked-for item in the hero's hand that is not there (build report #2535, Kadam 2): the kit's live record of the
+ * hands (window.__nbHeld) is empty after a round, or the game has no kit player body so nothing can show it. Reads the
+ * round's end, else its start; null when the page was never read. PURE.
+ */
+export function missingHeldFinding(start: PlaceholderPageRead | null, end: PlaceholderPageRead | null): PlaceholderFinding | null {
+  const read = end ?? start;
+  if (!read) return null;
+  const use = 'first add_library_models with the item, then in src/game/player.ts set PLAYER.holds = { right: \'<the subject it was saved under>\' } — the kit puts it in the hand of the kit person or the chosen character';
+  const lists = [end?.held, start?.held].filter((h): h is NonNullable<typeof h> => Array.isArray(h));
+  if (!lists.length) {
+    return { kind: 'MISSING_HELD', evidence: 'an item in the hero\'s hand was asked for, but the game does not use the kit\'s player body, so nothing showed that anything is in the hand', fix: use };
+  }
+  const subjects = [...new Set(lists.flat().map((h) => clean(h?.subject, 40)).filter(Boolean))];
+  if (!subjects.length) return { kind: 'MISSING_HELD', evidence: 'an item in the hero\'s hand was asked for, but nothing was in either hand during the round', fix: use };
   return null;
 }
 
@@ -321,7 +347,9 @@ export const PLACEHOLDER_PAGE_HOOK = String.raw`() => {
     const sc = seen.scene, cam = seen.camera;
     let standing = null;
     try { standing = window.__nbWorld && window.__nbWorld.standing ? window.__nbWorld.standing() : null; } catch (e) { standing = null; }
-    if (!sc) return { failed: failed.slice(), standing };
+    let held = null;
+    try { held = typeof window.__nbHeld === 'function' ? window.__nbHeld().slice(0, 4) : null; } catch (e) { held = null; }
+    if (!sc) return { failed: failed.slice(), standing, held };
     let meshes = 0, nodes = 0;
     const skinned = [], broken = [];
     const keys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap'];
@@ -379,7 +407,7 @@ export const PLACEHOLDER_PAGE_HOOK = String.raw`() => {
         characters = { spawned: Number(ent.spawned) || 0, failed: Number(ent.failed) || 0, hostiles, nearestM: nearest === null ? null : Math.round(nearest * 10) / 10, inView };
       }
     } catch (e) { characters = null; }
-    return { meshes, skinned, brokenTextures: broken, failed: failed.slice(), standing, characters };
+    return { meshes, skinned, brokenTextures: broken, failed: failed.slice(), standing, characters, held };
   };
   window.__nbControlsOff = () => {
     const off = [];

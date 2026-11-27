@@ -109,6 +109,12 @@ describe('every check FAILS on a world broken on purpose, and names the place', 
     expect(C.checkBoundaryClosed(w, 16, (x: number) => x >= 0).ok).toBe(true); // the boundary layer's own wall closes it
     expect(C.checkBoundaryClosed(fakeWorld(), 16).ok).toBe(true);
   });
+  it('a natural edge (the world\'s boundary) closes the ring only when every direction has a limit inside the map', () => {
+    const edge = (limit: (a: number) => number) => ({ kind: 'mountains', limitAt: limit });
+    expect(C.checkBoundaryClosed(fakeWorld({ boundary: edge(() => 1800) }), 16)).toMatchObject({ ok: true, applicable: true });
+    const r = C.checkBoundaryClosed(fakeWorld({ boundary: edge((a: number) => (a < Math.PI ? 1800 : Infinity)) }), 16);
+    expect(r.ok).toBe(false); expect(r.detail).toMatch(/mountains edge is open there/);
+  });
   it('a check that crashes is a failure with its error, never a pass', () => {
     const report = C.runMapChecks(fakeWorld({ homeRoads: () => { throw new Error('region broke'); } }));
     expect(report.ok).toBe(false); expect(report.failed).toEqual(['roads-connected']);
@@ -172,6 +178,25 @@ describe('the planned default sizes really hold what the game needs (no floor in
       expect(plan.areaKm2).toBe(5);
       expect(roads.roads.length, `seed ${seed}`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('with the natural edges on main (#4624): the planned edge is applied and measured closed', () => {
+  it('"pahaadon se ghira island" — a bounded map ringed by mountains passes boundary-closed, and the note says APPLIED', () => {
+    const { plan, files } = filesFor('pahaadon se ghira chhota island explore game');
+    expect(plan.boundary).toBe('mountains');
+    const out = applyMapPlanToFiles(generateAthreeMap(undefined, plan.choice).files, plan, plan.choice);
+    expect(out.applied.boundary).toBe(true);
+    expect(out.note).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
+    const world = (loadEmittedAthree(files) as any).createAthreeMap({ seed: 3, profile: 'explore' }).world;
+    expect(world.boundary.kind).toBe('mountains');
+    const run = runRobotChecksOnFiles(files, 'explore', [3]);
+    expect(run.results.find((r) => r.id === 'boundary-closed')).toMatchObject({ applicable: true, ok: true });
+  });
+  it('ponds asked for are applied (water reads its ponds)', () => {
+    const { plan } = filesFor('ek talab wala chhota island explore game');
+    const out = applyMapPlanToFiles(generateAthreeMap(undefined, plan.choice).files, plan, plan.choice);
+    expect(plan.water.ponds).toBe(1); expect(out.applied.water).toBe(true);
   });
 });
 

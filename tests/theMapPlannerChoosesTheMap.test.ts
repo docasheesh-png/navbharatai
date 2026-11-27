@@ -40,10 +40,10 @@ describe('real prompts choose the map through the one planner', () => {
     expect(planIn()).toMatchObject({ areaKm2: 25, archetype: 'desert', boundary: 'mountains', water: { ponds: 2 }, timeOfDay: 'night', gameType: 'shooter' });
     const text = String(r.content);
     expect(text).toMatch(/MAP PLAN: a shooter game; desert land, 5 x 5 km \(25 km², the size you asked for\)/);
-    expect(text).toMatch(/boundary: a ring of mountains \(asked for\) — recorded, not built into this world yet/);
-    expect(text).toMatch(/water: 2 ponds — recorded, not built/);
+    expect(text).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
+    expect(text).toMatch(/water: 2 ponds — APPLIED/);
     expect(text).toMatch(/pass skyOptions \{ hours: 22 \}/);
-    expect(text).toMatch(/do not claim them/);
+    expect(text).toMatch(/density .*do not claim it/);
   });
   it('"athree map par battle royale": the 8 km island, sea all round, and the robot checks ran and passed on it', async () => {
     const r = await run('athree map par ek battle royale game banao');

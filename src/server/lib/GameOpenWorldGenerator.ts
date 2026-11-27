@@ -29,6 +29,7 @@ import type { GameContext } from '../Game';
 import { markWorldCollider } from '../three/collision';
 import { createAthreeMap, type AthreeMap, type AthreeMapOptions } from '../athree';
 import * as athreeConfig from '../athree/config';
+import * as athreeKit from '../athree';
 import type { LandBiome } from '../athree/world';
 import { createCity, planCity, type City, type CityOptions, type CityPlan } from '../three/city';
 import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
@@ -44,7 +45,15 @@ import { damagePlayer } from '../core/state';
 import { events } from '../core/events';
 import { setWorldMapSource, placeName, type WorldMapPlace } from '../ui/worldMap';
 
-export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three'> {
+export interface OpenWorldOptions extends Omit<AthreeMapOptions, 'three' | 'boundary' | 'water'> {
+  /**
+   * 🧱 THE MAP'S NATURAL EDGE on a bounded map (athree's own 'boundary' option; named apart here because boundary below is this
+   * file's play-area wall): 'sea' | 'mountains' | 'canyon' | 'forest-river' | 'dunes' | 'wall'. Unset: the map's own choice
+   * (MAP_OPTIONS), else the sea. A loop map has no edge.
+   */
+  naturalEdge?: 'sea' | 'mountains' | 'canyon' | 'forest-river' | 'dunes' | 'wall';
+  /** 🌊 The map's ponds and sea shelf (athree's own 'water' option; water below is drown-or-swim). */
+  mapWater?: { ponds?: number; shelf?: boolean; seaMaxDepth?: number };
   /** Side of the walkable ground patch kept under the player, in metres. Default 96. */
   patchSize?: number;
   /**
@@ -487,7 +496,7 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
 }
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, ...mapOptions } = options;
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, naturalEdge, mapWater, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -518,7 +527,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // the first draw, but a game feature that levels ground later used to leave the drawn terrain at the old height while the
   // player walked on the new one — one place on two layers. Nothing is redrawn while nothing changes, so it costs nothing then.
   const lateEdits = options.lateEdits !== false;
-  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...sized, lateEdits, three: THREE } as AthreeMapOptions);
+  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...(naturalEdge ? { boundary: naturalEdge } : {}), ...(mapWater ? { water: mapWater } : {}), ...sized, lateEdits, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   // Dry ground for a place (PLACE_DRY_M), one test for every planner below: above the sea in this map's own metres, and not in a
@@ -1725,6 +1734,51 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
     for (const o of car ? [car, ctx.player.object] : [ctx.player.object]) { o.position.x -= ux * back; o.position.z -= uz * back; }
     if (time - edgeToldAt > 4) { edgeToldAt = time; try { events.emit('HINT', { id: 'world-edge', text: 'This is the edge of the map — turn back.', seconds: 3 }); } catch { /* no Hud */ } }
   };
+  // 🧱🌊 THE MAP'S EDGE, ITS WATER AND ITS GROUND HOLD EVERY MOVER (admin 2026-11-27: "natural boundary nobody can cross … ground
+  // sheet nobody can fall through"). athree/movers.ts createMoverGuard, every frame: the player (or the car it drives), and every
+  // bounded character and dispatched car, are held inside the map's natural edge (a bounded world's ring), under its sky ceiling,
+  // out of water too deep for them (a car never drives on the sea bed: it is held where it can still ford; a person needs a boat in
+  // deep water) and never under the ground (put back at the last safe point). Read through the module object, so this file still
+  // compiles beside an older athree/ without movers.ts — there the guard is absent and nothing extra is held.
+  type MoverGuardLike = { hold(key: object, p: { x: number; y: number; z: number }, kind?: string): { moved: boolean; reason: string | null; say: string | null } };
+  const makeGuard = (athreeKit as unknown as { createMoverGuard?: (world: unknown) => MoverGuardLike }).createMoverGuard;
+  const moverGuard: MoverGuardLike | null = typeof makeGuard === 'function' ? makeGuard(map.world) : null;
+  const mapEdge = (map.world as unknown as { boundary?: { kind: string; cueText: string; cueAt(x: number, z: number): number } }).boundary;
+  const moverKind = (o: THREE.Object3D, vehicle: boolean): string => {
+    const name = o.name || '';
+    if (/boat|ship|yacht|kayak|canoe|raft|ferry/i.test(name)) return 'boat';
+    if (vehicle && (/aircraft|plane|\bjet\b|heli|drone/i.test(name) || o.userData.ground === false)) return 'aircraft';
+    if (/bike|cycle|scooter/i.test(name)) return 'bike';
+    return vehicle || /\bcar\b|truck|\bvan\b|\bbus\b|jeep/i.test(name) ? 'car' : 'bot';
+  };
+  let guardToldAt = -Infinity;
+  const tell = (text: string | null) => {
+    if (!text || time - guardToldAt <= 4) return;
+    guardToldAt = time;
+    try { events.emit('HINT', { id: 'world-edge', text, seconds: 3 }); } catch { /* no Hud */ }
+  };
+  const holdMovers = () => {
+    if (!moverGuard) return;
+    const car = ctx.vehicles.seated;
+    const body = car ?? ctx.player.object;
+    const p = { x: body.position.x + chunks.origin.x, y: body.position.y, z: body.position.z + chunks.origin.z };
+    const held = moverGuard.hold(body, p, car ? moverKind(car, true) : 'person');
+    if (held.moved) {
+      const nx = p.x - chunks.origin.x, nz = p.z - chunks.origin.z;
+      if (car) {
+        const dx = nx - car.position.x, dy = p.y - car.position.y, dz = nz - car.position.z;
+        car.position.set(nx, p.y, nz);
+        ctx.player.object.position.x += dx; ctx.player.object.position.y += dy; ctx.player.object.position.z += dz;
+      } else if (held.reason === 'edge' || held.reason === 'ceiling') ctx.player.object.position.set(nx, p.y, nz);
+      else ctx.player.reset(nx, p.y, nz);
+      tell(held.say);
+    } else if (mapEdge && mapEdge.kind !== 'none' && mapEdge.cueAt(p.x, p.z) > 0.7) tell(mapEdge.cueText);
+    for (const o of ctx.scene.children) {
+      if (!o.userData.bounded || o === car || o === ctx.player.object) continue;
+      const q = { x: o.position.x + chunks.origin.x, y: o.position.y, z: o.position.z + chunks.origin.z };
+      if (moverGuard.hold(o, q, moverKind(o, false)).moved) o.position.set(q.x - chunks.origin.x, q.y, q.z - chunks.origin.z);
+    }
+  };
   const probeHook = { geometry: geometryReport, standing: standingReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
   if (probeWindow) probeWindow.__nbWorld = probeHook;
@@ -1782,6 +1836,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           if (!edgeSaid) { edgeSaid = true; console.info('[world] The map ends here — the edge is margin metres past the farthest place (WORLD.boundary).'); }
         }
       }
+      holdMovers();
       // 🌊 Water hurts unless the user asked for swimming: the player loses health every second it is in water.
       if (waterMode !== 'swim' && !ctx.vehicles.seated && (ctx.player.swimming || ctx.player.underwater)) damagePlayer(DROWN_PER_SECOND * delta);
       if (lateEdits && map.world.editCount) {

@@ -175,14 +175,16 @@ describe('boundary, water, roads, density, region, time of day', () => {
 
 describe('honesty: what the world applies is read from its source, never assumed', () => {
   const p = plan('5 km ka registan shooter, pahaadon se ghira, do talab');
-  it('today\'s world builds the road style (#4626) and is reported as applying it; what it does not read is not claimed', () => {
+  it('today\'s world builds the road style (#4626), the edge and the ponds (#4624) and is reported as applying them; density, which it does not read, is not claimed', () => {
     const world = generateAthreeMap().files['src/game/athree/world.ts'];
     const a = appliedMapLayers(world, p);
-    expect(a).toMatchObject({ frame: true, land: true, roadStyle: true, density: false });
+    // Since #4626 (road styles) and #4624 (natural edges, ponds) the world reads roadStyle, boundary and water.ponds; density is unread.
+    expect(a).toMatchObject({ frame: true, land: true, roadStyle: true, boundary: true, water: true, density: false });
     expect(describeMapPlan(p, a)).toMatch(/roadStyle: .* — APPLIED/);
     const note = describeMapPlan(p, a);
-    expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — recorded, not built into this world yet/);
-    expect(note).toMatch(/do not claim them/);
+    expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
+    expect(note).toMatch(/density: normal — recorded, not built into this world yet/);
+    expect(note).toMatch(/density is planned but not yet built into the world; do not claim it/);
   });
   it('the water layer is APPLIED only when the world reads its ponds (the #4624 shape: options.water ?? {} … .ponds); counts it does not use are said', () => {
     const p2 = plan('do nadiyan aur ek talab wala explore game');

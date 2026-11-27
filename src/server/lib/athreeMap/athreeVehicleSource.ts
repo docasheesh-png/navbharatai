@@ -19,6 +19,7 @@ export const VEHICLES = `// Athree map — a sports car and a sports bike: lofte
 
 import { type AthreeQuality } from './config';
 import type { AthreeWorld } from './world';
+import { waterDepthAt, DRY_DEPTH, FORD_DEPTH, SINK_DEPTH } from './movers';
 
 // three.js is passed in by the caller (import * as THREE from 'three'); it is typed loosely here on purpose.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -318,12 +319,22 @@ export interface VehicleState {
   surface: Surface;
   /** Metres driven. */
   odometer: number;
+  /** Metres of water over what the wheels stand on (0 on dry land or on a bridge deck). */
+  waterDepth: number;
+  /** True once the car went into water deeper than SINK_DEPTH: it settled on the bed, its engine dead, until reset(). */
+  sunk: boolean;
 }
 
 export interface VehicleEnvironment {
   /** The height a wheel meets at a place: the ground, or the deck of a bridge. */
   groundAt(x: number, z: number): number;
   surfaceAt(x: number, z: number): Surface;
+  /**
+   * 🌊 Metres of water over what the wheels stand on (0 on dry land and on a bridge deck). With it a car fords shallow water slowly,
+   * stalls in water deeper than FORD_DEPTH and SINKS past SINK_DEPTH — it never drives on the sea bed. Without it (an older game's own
+   * environment) any 'water' surface cuts the engine, as before.
+   */
+  waterDepthAt?(x: number, z: number): number;
 }
 
 export interface VehiclePhysics {
@@ -334,7 +345,7 @@ export interface VehiclePhysics {
 }
 
 export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment, x = 0, z = 0, yaw = 0): VehiclePhysics {
-  const state: VehicleState = { x, y: env.groundAt(x, z) + spec.rideHeight, z, yaw, pitch: 0, roll: 0, vx: 0, vy: 0, vz: 0, speed: 0, slip: 0, steerAngle: 0, wheelSpin: 0, onGround: true, inWater: false, surface: env.surfaceAt(x, z), odometer: 0 };
+  const state: VehicleState = { x, y: env.groundAt(x, z) + spec.rideHeight, z, yaw, pitch: 0, roll: 0, vx: 0, vy: 0, vz: 0, speed: 0, slip: 0, steerAngle: 0, wheelSpin: 0, onGround: true, inWater: false, surface: env.surfaceAt(x, z), odometer: 0, waterDepth: 0, sunk: false };
 
   let prevTarget: number | null = null;
 
@@ -355,9 +366,16 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     // Body frame speeds.
     let vf = state.vx * c + state.vz * s;
     let vl = -state.vx * s + state.vz * c;
-    const wet = state.surface === 'water';
+    const measured = typeof env.waterDepthAt === 'function';
+    const depth = measured ? Math.max(0, Number(env.waterDepthAt!(state.x, state.z)) || 0) : 0;
+    state.waterDepth = depth;
+    if (measured && depth > SINK_DEPTH) state.sunk = true;
+    const wet = measured ? depth >= DRY_DEPTH || state.sunk : state.surface === 'water';
+    const fording = measured && wet && !state.sunk && depth <= FORD_DEPTH;
     state.inWater = wet;
-    const throttle = Math.max(-1, Math.min(1, input.throttle)) * (wet ? 0 : 1);
+    // Dry: full power. Fording: slow. Deeper (bogged): only a slow reverse back out. Sunk: nothing, until reset().
+    const bogged = measured && wet && !fording && !state.sunk;
+    const throttle = Math.max(-1, Math.min(1, input.throttle)) * (!wet ? 1 : fording ? 0.45 : bogged && input.throttle < 0 ? 0.3 : 0);
     const traction = state.onGround ? 1 : 0;
     // Engine: strong from rest, fading to nothing at the top speed; reverse is slow.
     let a = 0;
@@ -366,7 +384,7 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     a *= traction;
     // Brakes bite as hard as the surface lets them.
     const brakeA = Math.max(0, Math.min(1, input.brake)) * spec.brake * mu * traction + (input.handbrake ? spec.brake * 0.5 * mu * traction : 0);
-    const drag = 0.0004 * vf * Math.abs(vf) + 0.02 * vf + (wet ? 3.5 * vf : 0);
+    const drag = 0.0004 * vf * Math.abs(vf) + 0.02 * vf + (!wet ? 0 : fording ? 1.2 * vf : state.sunk ? 6 * vf : 3.5 * vf);
     let dv = (a - drag) * h;
     if (brakeA > 0) { const b = brakeA * h; dv += vf > 0 ? -Math.min(b, vf) : Math.min(b, -vf); }
     // Gravity along the slope the car stands on.
@@ -438,14 +456,19 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     spec, state, step,
     reset(nx: number, nz: number, nyaw: number): void {
       state.x = nx; state.z = nz; state.yaw = nyaw; state.y = env.groundAt(nx, nz) + spec.rideHeight;
-      state.vx = 0; state.vy = 0; state.vz = 0; state.speed = 0; state.slip = 0; state.pitch = 0; state.roll = 0; state.steerAngle = 0; state.onGround = true; state.odometer = 0; prevTarget = null;
+      state.vx = 0; state.vy = 0; state.vz = 0; state.speed = 0; state.slip = 0; state.pitch = 0; state.roll = 0; state.steerAngle = 0; state.onGround = true; state.odometer = 0; state.waterDepth = 0; state.sunk = false; prevTarget = null;
     },
   };
 }
 
 /** The environment of a map: the height a wheel meets and the surface it runs on. */
 export function mapEnvironment(world: AthreeWorld): VehicleEnvironment {
-  return { groundAt: (x, z) => world.drivableHeightAt(x, z), surfaceAt: (x, z) => world.surfaceAt(x, z) };
+  return {
+    groundAt: (x, z) => world.drivableHeightAt(x, z),
+    surfaceAt: (x, z) => world.surfaceAt(x, z),
+    // Water over the wheels: measured against the bridge deck where there is one, so a car on a bridge is dry.
+    waterDepthAt: (x, z) => { const w = waterDepthAt(world, x, z); return w.surface === null ? 0 : Math.max(0, w.surface - world.drivableHeightAt(x, z)); },
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------

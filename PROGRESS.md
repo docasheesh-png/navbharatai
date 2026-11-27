@@ -6789,6 +6789,42 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   W and R build them; the notes flip to APPLIED by themselves). Time of day is only an instruction to the builder (skyOptions.hours).
   The playtest does not yet read `window.__nbMapChecks` into its findings. Lots-clear has no lots to check until the colonies layer
   exists. The racing/flight defaults are 400 km² today because roads need 20 km — they shrink when small-map roads land.
+## 2026-11-27 — Athree map wave-1 PART W: natural boundaries, sea shelf, ponds, water/ground rules for every mover (branch `claude/feat/map-boundaries-water`)
+
+Admin plan (frame → natural boundary nobody can cross → water → ground sheet nobody can fall through → roads → colonies); this is
+part W. Parallel parts P (the planner reading the wish into options) and R (roads in small maps + styles) are NOT in this change.
+
+- **New emitted modules** (`src/server/lib/athreeMap/athreeBoundarySource.ts` → `src/game/athree/boundary.ts` + `movers.ts`, both core):
+  - `boundary` option on a BOUNDED world: `'sea'` (default, today's island, land heights bit-identical) | `'mountains'` | `'canyon'` |
+    `'forest-river'` | `'dunes'` | `'wall'`. A closed ring (wobble read on the circle) with a height profile in game metres, added to
+    the ONE height function (drawn = collider = movers). `world.boundary`: `inside`, `clampInside`, `limitAt`, `featureAt`, `cueAt` +
+    `cueText` (soft cue), `ceiling` (sky), `ring()`. `createBoundaryWall` draws the fort wall near the camera (index wires it).
+  - **Sea shelf** (default on; `water.shelf: false` = old floor): beach 0 → −2 m over 40 m, then a shelf to `water.seaMaxDepth`
+    (5–50, default 50). Bounded: measured outward along the ray from the outermost shore (depth only grows); loop: continental-field
+    stand-in (honest limit). Ocean depth colour already reads −heightAt, so it follows.
+  - **Ponds** (`water.ponds`, ≤ 40): flat ground (±1.5 m), dry, ≥ 60 m from rivers/lakes/roads, inside the play area; flat bottom
+    1.8 m, bank, 6 ghat steps on one side; `world.ponds()`, `waterAt`, drawn as lakes via `waterBodies()`; nothing spawns in them.
+  - **Mover rules + guard** (`movers.ts`): `waterDepthAt`, `moverRule` (person wade < 0.9 m slower, swim < 4 m, deep needs a boat;
+    car/bike ford ≤ 0.4 m; boat ≥ 0.6 m), `createMoverGuard(world).hold(obj, pos, kind)`: edge, ceiling, water, and the NO-FALL net
+    (below ground − 2 m → last safe point, on the surface).
+  - athree car (`vehicles.ts`): depth-measured water — fords slowly, bogs (slow reverse only), SINKS past 1.2 m (`state.sunk`, engine
+    dead until reset); a bridge deck is dry (before, surfaceAt said 'water' on a bridge and any water cut the engine).
+- **Kit wiring** (`GameOpenWorldGenerator.ts`): every frame `holdMovers()` holds the player (or its car) and every `userData.bounded`
+  character / dispatched car with the guard; the soft cue shows the edge's own message. New options `naturalEdge` and `mapWater`
+  (athree's `boundary`/`water` names collide with this file's play-area wall and drown/swim options — Omit'd from the extends).
+  The guard is read through the module object, so the bridge still compiles beside an older athree/ without movers.ts.
+- Tests: `src/server/lib/athreeMap/AthreeBoundaries.test.ts` (31) and `tests/theMapEdgeHoldsEveryMover.test.ts` (9, real open
+  world). Proven by reversion: shape off, edge hold off, shelf → noise floor, pond flatness off, sink off, net off, water hold off,
+  `holdMovers()` call removed — each turns tests red. Two existing assertions updated with the reason in place: the island's far sea
+  is −50 m (was a −99 m noise floor), and the exact stretch identity holds at sea only with `shelf: false` (the shelf is real metres).
+- **Honest limits / open items**: the guard holds, it does not path-find (a bot is held at the edge, not routed); the fort wall and
+  forest trees have no physics collider; dunes are climbable sand; a river traced across the ring is buried there; the kit car is
+  held at the water's edge but its speed is not zeroed by the map (the shell owns the seat state) and it does not visibly sink (the
+  athree car does); ghat steps are crisp only at near terrain LOD; no real-browser check exists for the open world in
+  `scripts/checks/` (the asset checks only), so none was extended — the kit-level tests run the real open world in node instead.
+- Coordination: open PRs #4612 and #4608 touch `GameOpenWorldGenerator.ts`, `AthreeMapGenerator.ts` and `gameKitHistory.ts`; this
+  change keeps away from their hunks, but `gameKitHistory.ts` will conflict on whichever merges second — resolve by re-running
+  `node scripts/gameKitHistory.mjs` on the merged tree.
 ### 2026-11-27 (later) — autopsy of failedbr #2566 (7ac680e1) — Q-3757…Q-3760 (#4620)
 A "continue … finish/fix the build" turn, weak tier, STOPPED by the 25-min cap while a preview-render repair was still investigating.
 - Q-3757 (in this PR): the user got the 830 s reply ("The clean console confirms it.") although a later check still saw

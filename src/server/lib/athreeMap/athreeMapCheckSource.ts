@@ -142,6 +142,19 @@ export function checkBoundaryClosed(world: AthreeWorld, samples = 96, blockedAt?
   const radius = world.sizeMeters / 2;
   const n = Math.max(8, Math.floor(samples));
   const open: string[] = [];
+  // A world with a natural edge (mountains, a canyon, a river, dunes, a wall) says where nobody may pass: every angle must have a
+  // finite limit inside the frame. Read optionally, so the check also measures a world built before edges existed.
+  const edge = (world as unknown as { boundary?: { kind: string; limitAt(angle: number): number } }).boundary;
+  if (edge && edge.kind !== 'none' && typeof edge.limitAt === 'function') {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const lim = edge.limitAt(a);
+      if (!(Number.isFinite(lim) && lim > 0 && lim <= radius * 1.001)) open.push(at(Math.cos(a) * radius, Math.sin(a) * radius));
+    }
+    return open.length
+      ? { id: 'boundary-closed', applicable: true, ok: false, detail: open.length + ' of ' + n + ' directions have no limit inside the map (the ' + edge.kind + ' edge is open there): ' + open.slice(0, 4).join('; ') + '.' }
+      : { id: 'boundary-closed', applicable: true, ok: true, detail: 'The ' + edge.kind + ' edge closes all ' + n + ' directions inside the map.' };
+  }
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     const x = Math.cos(a) * radius;

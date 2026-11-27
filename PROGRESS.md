@@ -6877,3 +6877,16 @@ stop) are resolved and removed from the open queue; their IDs are in BUILD_REPOR
 feature that does nothing is named; characters hold things the way people do). Q-3750..Q-3752 removed from the open queue and
 added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud Run logs), Q-3754 (Surplus recurrence), Q-3755
 (admin choice on 2–5 km cities) and Q-3756 (road-edge stair-steps) stay open.
+
+### 2026-11-27 (later) — map planner (#4625) follow-up: the true circuit/runway floor after #4626
+- **Integration defect:** after #4626 (roads on every map size) the planner still read `MIN_ROAD_SIZE` (now "where the regional network
+  takes over"), so an unsized race was inflated to 400 km² and flight past 100 km². Class: a planner reading a constant whose meaning
+  changed. Fix: a dedicated emitted `CIRCUIT_RUNWAY_MIN_SIZE = { loop: 5000, bounded: 2000 }` (measured: circuit + runway on every land
+  kind tried at the floor), read by the planner; only racing / flight are raised; driving needs no floor. `MIN_ROAD_SIZE` stays exported
+  (kit refresh for older games) and the planner no longer reads it (test-locked).
+- **Circuit placement on planned maps** (patch from the roads agent, reviewed): a planned map now tries smaller circuit radii and 16
+  candidate sites; before, a 5 km racing map got a circuit on ~1 seed in 24, which would have made the floor false.
+- **Water honesty:** the water layer counts as APPLIED only when the world reads its ponds (#4624's `options.water … .ponds`); river,
+  lake and canal counts stay "recorded" (the world makes its own rivers and lakes). roadStyle now reads APPLIED (main has #4626).
+- **Locked:** unsized racing → 25 km² with a circuit (4 seeds), flight → 100 km² with a runway, on foot → 5 km² with roads; each
+  fix reverted → its test fails. Kit history regenerated.

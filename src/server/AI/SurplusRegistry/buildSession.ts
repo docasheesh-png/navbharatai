@@ -6,18 +6,18 @@ import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
 import { surplusBuilderLive } from './liveAdmission';
-import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
+import { SURPLUS_CLAUDE_MIN_DISCOUNT_PCT, isSurplusClaudeFamily, surplusBuildEndpointValid, surplusFloorOfBuildBaseUrl, surplusModelPermitted } from './config';
 import { BuildStoppedError, raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
 import type { RunTurnParams, TurnResult, TurnUsage } from '../../AgentV3/ClaudeClient';
 import { makeSurplusTurnRunner, type SurplusTurnPermit, type SurplusTurnFailure } from '../../AgentV3/providers/SurplusTurnRunner';
 import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAdapter';
 import { planSurplusDispatchCandidate, type SurplusRequestFloorContract } from './selector';
-import { isSurplusReceiptDecision } from './receiptPolicy';
+import { SURPLUS_BUILD_POLICY_ID, isSurplusReceiptDecision } from './receiptPolicy';
 import { createProductionSurplusAdapter } from './productionAdapter';
 import type { Reviews, Snapshot, Workload } from './types';
 import { isSurplusMarketRefusal, recordSurplusPairRefusal, recordSurplusPairServed, surplusPairRefused } from './surplusPairRefusals';
 
-export const SURPLUS_BUILD_POLICY = 'surplus-build-10x-official-cap-v1';
+export const SURPLUS_BUILD_POLICY = SURPLUS_BUILD_POLICY_ID;
 /**
  * Default ON (owner 2026-11-17). True when the switch is not explicitly off AND a usable SURPLUS_API_KEY is set.
  * Without a key this is false, so a keyless server takes the same no-I/O path the old default-OFF took.
@@ -30,7 +30,7 @@ const SAFE_ADMISSION_REASONS = new Set([
   'previous_call_accounting_unavailable', 'price_objective_not_enforced', 'returned_route_identity_mismatch',
   'expired_or_replayed_dispatch', 'response_accounting_unavailable', 'invalid_workload',
   'stale_or_missing_snapshot', 'pricing_units_not_independently_verified', 'account_or_privacy_not_reviewed',
-  'no_reviewed_coding_models', 'incomparable_quality_cohorts', 'no_eligible_90_percent_offer',
+  'no_reviewed_coding_models', 'incomparable_quality_cohorts', 'no_eligible_discount_offer',
   'invalid_metadata_or_review', 'request_time_floor_contract_not_reviewed',
 ]);
 export class SurplusBuildUnavailableError extends PublicBuildEngineError {
@@ -52,7 +52,8 @@ export interface SurplusCapabilityReview {
   contextTokens: number; maxOutputTokens: number;
   tools: true; parallelTools: true; transcriptRoundTrip: true;
   providerPinVerified: true; returnedIdentityVerified: true; reportedChargeContractVerified: true;
-  endpoint: typeof SURPLUS_MIN90_BASE_URL;
+  /** The reviewed builder route: `…/min{N}/v1` with N at least the model's floor (`surplusBuildEndpointValid`). */
+  endpoint: string;
 }
 export interface SurplusReviewedState {
   snapshot: Snapshot | null; reviews: Reviews; capabilities: SurplusCapabilityReview[]; floorContract: SurplusRequestFloorContract;
@@ -81,7 +82,7 @@ function estimate(params: RunTurnParams): Workload {
 }
 function capability(state: SurplusReviewedState, selection: { model: string; providerId: string; offerId: string }, now: number, workload: Workload): SurplusCapabilityReview {
   const r = state.capabilities.find(c => c.model === selection.model && c.providerId === selection.providerId);
-  if (!r || !r.reviewId || !r.modelVersion || r.endpoint !== SURPLUS_MIN90_BASE_URL || r.tools !== true || r.parallelTools !== true
+  if (!r || !r.reviewId || !r.modelVersion || !surplusBuildEndpointValid(r.endpoint, r.model) || r.tools !== true || r.parallelTools !== true
       || r.transcriptRoundTrip !== true || r.providerPinVerified !== true || r.returnedIdentityVerified !== true || r.reportedChargeContractVerified !== true
       || !Number.isFinite(r.reviewedAt) || r.reviewedAt > now || !Number.isFinite(r.expiresAt) || r.expiresAt <= now
       || !Number.isSafeInteger(r.contextTokens) || !Number.isSafeInteger(r.maxOutputTokens)
@@ -102,7 +103,8 @@ export function isSurplusReasoningModel(model: string): boolean {
  * before a reasoning one, and the reviewed coding-quality order (surplusCodingQuality) inside each group. PURE.
  */
 export function nextStrongestSurplusModel(models: readonly string[], benched: ReadonlySet<string>, tier: string): string | undefined {
-  const left = [...new Set(models)].filter((m) => !benched.has(m) && !(tier === 'weak' && /claude|sonnet|opus/i.test(m)));
+  // Same permission as every other Surplus choice (surplusModelPermitted: Claude only on Weak at the ≥90% floor).
+  const left = [...new Set(models)].filter((m) => !benched.has(m) && surplusModelPermitted(m, tier));
   const byQuality = (a: string, b: string) => surplusCodingQuality(b) - surplusCodingQuality(a);
   const plain = left.filter((m) => !isSurplusReasoningModel(m)).sort(byQuality);
   return plain[0] ?? left.sort(byQuality)[0];
@@ -121,7 +123,8 @@ export async function createSurplusBuildSession(options: {
     if (!state.snapshot) return null;
     const offers = state.snapshot.offers.filter(offer => {
       if ((selectedModel && offer.model !== selectedModel) || excluded.has(offer.model)
-          || (options.tier === 'weak' && /claude|sonnet|opus/i.test(offer.model))) return false;
+          // Admin 2026-11-27: a Claude-family model is chosen only on Weak AND only on its guaranteed ≥90% floor.
+          || !surplusModelPermitted(offer.model, options.tier)) return false;
       // A pair the router could not fill a moment ago is skipped for every build (surplusPairRefusals.ts).
       if (surplusPairRefused(offer.model, offer.providerId, at)) return false;
       try { capability(state, offer, at, workload); return true; } catch { return false; }
@@ -205,11 +208,13 @@ export async function createSurplusBuildSession(options: {
           if (plan.status !== 'estimated_candidate' || !plan.selection) return fail(plan.reason);
           const selectedModel = plan.selection.model;
           const review = capability(state, plan.selection, at, workload);
+          // The request goes to the reviewed route; a Claude-family model is never sent on a floor below 90 (admin 2026-11-27).
+          if (isSurplusClaudeFamily(selectedModel) && (surplusFloorOfBuildBaseUrl(review.endpoint) ?? -1) < SURPLUS_CLAUDE_MIN_DISCOUNT_PCT) return fail('weak_model_not_authorized');
           const requestRouting = adapter.routing(review);
           if (!requestRouting || requestRouting.provider !== review.providerId || (requestRouting.si_route as { objective?: unknown })?.objective !== 'price') return fail('price_objective_not_enforced');
           const frozenState = structuredClone({ ...state, snapshot });
           const permit: SurplusTurnPermit = Object.freeze({ buildId: options.buildId, callId: randomUUID(), model: selectedModel,
-            providerId: plan.selection.providerId, offerId: plan.selection.offerId, endpoint: SURPLUS_MIN90_BASE_URL,
+            providerId: plan.selection.providerId, offerId: plan.selection.offerId, endpoint: review.endpoint,
             priceGeneration: plan.snapshotVersion!, estimatedMicroUsd: plan.selection.estimatedMicroUsd, policyVersion: SURPLUS_BUILD_POLICY, maxTokens: params.maxTokens ?? 8192,
             requestRouting: Object.freeze({ ...requestRouting }),
             assertCurrent() {

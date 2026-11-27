@@ -56,7 +56,7 @@ export interface QualityReview {
   benchmarkId: string;
   artifactSha256: string;
   cohort: string;
-  /** Optional reviewed coding-quality score 0–100 (higher = better). Ranks eligible ≥90%-discount offers. */
+  /** Optional reviewed coding-quality score 0–100 (higher = better). Ranks offers that cleared their discount floor (85%, or 90% for Claude on Weak). */
   qualityScore?: number;
   approved: boolean;
   reviewedAt: number;

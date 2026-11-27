@@ -2537,7 +2537,7 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     const seed = SRC.slice(seedAt, SRC.indexOf('// ── ONE-SHOT FAST LANE', seedAt));
     expect(seed).toContain("if (intent === 'new_build' && !projectModuleRef && !isImportTurn)");
     expect(seed).toContain('await srcHoldsOnlyOurStarter(');
-    expect(seed).toContain('if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted)');
+    expect(seed).toContain('const prepareAssets = gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted;'); // Q-3471: run beside the sounds
     expect(seed).toContain('for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content)');
     expect(seed).toContain('preseededGolden.set(kp, kc)');
     // 1× the turn-start KIT REFRESH (Q-2337, autopsy 61279465): gated on `intent === 'edit_existing' &&

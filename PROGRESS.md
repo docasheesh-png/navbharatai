@@ -6760,3 +6760,12 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+### 2026-11-27 — Kadam 1: the game photo judge (`gamePhotoJudge.ts`)
+- After a game turn's playtest, at most 3 yes/no questions from THIS request (item in hand, enemies, ground/road not hazed or
+  under water, houses) go with the proof pictures to the vision chain in one call (25 s hard limit). A clear NO →
+  `GAME_DEFECT_ASK_NOT_MET` with the question as evidence; unclear / no reply / timeout says nothing.
+- Billed like every build cost (admin decision): real reported tokens via `captureTurnUsage` in phase `game-photo-judge`; unreported
+  tokens recorded as unmeasured; a judge with no clear answer is barren. `runVisionChain` now returns the model and reported usage.
+- Weak/Normal: free vision chain (no Claude); Strong may reach Claude last. Kill switch `AGENTV3_GAME_PHOTO_JUDGE=off`.
+- Watch on the next real game builds: the admin-only `GAME_PHOTO_JUDGE` line (questions, answers, provider, tokens).

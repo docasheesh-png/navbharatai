@@ -138,6 +138,7 @@ import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
 import { registerProAttachmentRoutes } from './src/server/routes/proAttachments';
 import { registerSpreadsheetFileRoutes } from './src/server/routes/spreadsheetFiles';
+import { registerMapLibraryRoutes } from './src/server/routes/mapLibrary';
 import { registerApiContractRoutes } from './src/server/lib/apiContract';
 import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
@@ -879,6 +880,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // Upload rollout is gated inside the route; existing owners can still retrieve/delete originals.
   registerProAttachmentRoutes(app, chatLimiter);
   registerSpreadsheetFileRoutes(app); // NavBharatAI Pro's engine-made Excel/CSV files (spreadsheetRequest.ts)
+  registerMapLibraryRoutes(app); // the user's saved game maps: list, save, delete (mapLibraryStore.ts)
   registerApiContractRoutes(app); // P-DATA.5 — OpenAPI 3.0.3 contract at /api/openapi.json + /api/docs viewer
   registerKnowledgeDocsRoutes(app); // U-9 — docs site at /guide + machine-readable /api/knowledge-base
   registerApiKeyRoutes(app); // U-7 — public API keys (/api/keys) + key-gated /api/v1/me

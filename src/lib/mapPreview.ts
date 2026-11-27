@@ -202,7 +202,15 @@ export function mapSideLabel(sideMeters: number): string {
   return `${side} x ${side}`;
 }
 
-/** The message the map library's Use button puts in the composer; the server reads the name back (athreeMap/savedMapRequest.ts). */
-export function useSavedMapPrompt(name: string): string {
-  return `Use my saved map "${String(name).replace(/["\n\r]/g, ' ').trim()}" for this game.`;
+/** The kind of game a saved map was made for, in the words the build reads a game's world from (athreeMapIntent.mapProfileFor). */
+const PROFILE_WORDS: Record<string, string> = {
+  'open-world': 'open world', racing: 'open world racing', 'battle-royale': 'battle royale', flight: 'flight', explore: 'open world exploring',
+};
+
+/**
+ * The message the map library's Use button puts in the composer; the server reads the name back (athreeMap/savedMapRequest.ts). It
+ * names the kind of game the map was made for, so a new project gets its world; the user may change that before sending.
+ */
+export function useSavedMapPrompt(name: string, profile = 'open-world'): string {
+  return `Make a ${PROFILE_WORDS[profile] ?? 'open world'} game on my saved map "${String(name).replace(/["\n\r]/g, ' ').trim()}".`;
 }

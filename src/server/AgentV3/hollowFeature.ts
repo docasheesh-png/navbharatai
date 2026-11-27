@@ -14,13 +14,16 @@
 // reads the SHAPE of that stub:
 //   • a screen — a component whose whole body is `return null` (or `=> null`), that is routed
 //     (`element={<X />}`, `component={X}`, `element: <X />`) or is named like one (…Page / …Screen / …View);
-//   • a hook — `useX()` whose whole body returns `{}` or `[]`, that some other module calls.
+//   • a hook — `useX()` whose whole body returns `{}` or `[]`, that some other module calls;
+//   • a GAME feature (failedbr #2559–#2561) — a src/game/features/ file whose defineFeature setup and update hold no
+//     statement. Asked to fix "characters sinking" (a kit fault it could not see), the builder registered groundFix.ts,
+//     a feature that did nothing, and gunMechanics.ts of the same shape; the next turn spent minutes finding them out.
 // A component with ANY other statement (an effect, a redirect) is not matched: `return null` after work is a
 // real pattern. PURE — no I/O. Three readers: the builder hears it while the file is open (`hollowFeatureWriteNote`),
 // the build report records it, and the claim audit contradicts a summary that names it as delivered.
 
 export interface HollowFeature {
-  kind: 'screen' | 'hook';
+  kind: 'screen' | 'hook' | 'game-feature';
   name: string;
   file: string;
   /** The words a summary would use for it: `ProfilePage` → ['profile'], `useSocialFeed` → ['social', 'feed']. */
@@ -41,6 +44,47 @@ const EMPTY_HOOK_FUNCTION = new RegExp(String.raw`\bfunction\s+(use[A-Z][A-Za-z0
 /** `const useX = (...) => ({})` / `=> []` / `=> { return {}; }`. */
 const EMPTY_HOOK_ARROW = new RegExp(String.raw`\bconst\s+(use[A-Z][A-Za-z0-9_]*)\s*${TYPE_ANN}=\s*${PARAMS}\s*${TYPE_ANN}=>\s*(?:\(\s*\{\s*\}\s*\)|\[\s*\]|\{\s*return\s+(?:\{\s*\}|\[\s*\])\s*;?\s*\})`, 'g');
 const SCREEN_NAME = /(?:Page|Screen|View)$/;
+
+/**
+ * 🎮 A GAME FEATURE THAT DOES NOTHING (failedbr #2559–#2561). Read by code shape: setup and update (when present) hold only
+ * comments, a console line or a bare return. A shape this reader does not know is never matched.
+ */
+const GAME_FEATURES_DIR = 'src/game/features/';
+
+/** The body of `name(...) { … }` / `name: (...) => { … }` / `name: function (...) { … }` in source, or null. */
+function bodyOf(src: string, name: string): string | null {
+  const head = new RegExp(`\\b${name}\\s*(?::\\s*(?:async\\s+)?(?:function\\s*)?)?(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*(?::\\s*[^={]+)?(?:=>)?\\s*\\{`, 'g');
+  const m = head.exec(src);
+  if (!m) return null;
+  let depth = 1, i = m.index + m[0].length;
+  const start = i;
+  for (; i < src.length && depth > 0; i++) { const c = src[i]; if (c === '{') depth++; else if (c === '}') depth--; }
+  return depth === 0 ? src.slice(start, i - 1) : null;
+}
+
+/** True when a function body does nothing a player could see or feel. */
+function bodyDoesNothing(body: string): boolean {
+  const s = body
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\bconsole\.\w+\s*\((?:[^()]|\([^()]*\))*\)\s*;?/g, '')
+    .replace(/\bvoid\s+\w+\s*;?/g, '')
+    .replace(/\breturn\s*(?:undefined|null|\{\s*\})?\s*;?/g, '')
+    .trim();
+  return s.length === 0;
+}
+
+/** A feature file whose setup and update both do nothing. PURE. */
+export function gameFeatureDoesNothing(path: string, source: string | null | undefined): boolean {
+  try {
+    if (!path.startsWith(GAME_FEATURES_DIR) || !/\.tsx?$/.test(path) || /\/index\.tsx?$/.test(path) || /\.test\.tsx?$/.test(path)) return false;
+    const src = String(source ?? '');
+    if (!/\bdefineFeature\s*(?:<[^>]*>)?\s*\(/.test(src)) return false;
+    const setup = bodyOf(src, 'setup'), update = bodyOf(src, 'update');
+    if (setup === null && update === null) return false;                 // a shape this reader does not know: say nothing
+    return (setup === null || bodyDoesNothing(setup)) && (update === null || bodyDoesNothing(update));
+  } catch { return false; }
+}
 
 /** `ProfilePage` → ['profile']; `useSocialFeed` → ['social', 'feed']. Words under four letters say nothing. */
 export function featureWords(name: string): string[] {
@@ -81,6 +125,11 @@ export function findHollowFeatures(files: Readonly<Record<string, string>>): Hol
       if (called) out.push({ kind: 'hook', name, file, words: featureWords(name) });
     }
   }
+  for (const [file, content] of entries) {
+    if (!gameFeatureDoesNothing(file, content)) continue;
+    const name = file.slice(file.lastIndexOf('/') + 1).replace(/\.tsx?$/, '');
+    if (!out.some((h) => h.file === file)) out.push({ kind: 'game-feature', name, file, words: name.split(/(?<=[a-z0-9])(?=[A-Z])/).map((w) => w.toLowerCase()).filter((w) => w.length >= 4) });
+  }
   return out;
 }
 
@@ -88,7 +137,7 @@ export function findHollowFeatures(files: Readonly<Record<string, string>>): Hol
 export function hollowFeatureReport(found: readonly HollowFeature[]): string {
   if (!found.length) return '';
   const list = found.slice(0, 8).map((h) => `${h.name} (${h.file})`).join(', ');
-  return `${found.length} part(s) of the app are empty stubs — a screen that renders nothing or a hook that returns nothing: ${list}${found.length > 8 ? ` and ${found.length - 8} more` : ''}. They compile, but the feature they stand for is not built.`;
+  return `${found.length} part(s) of the app are empty stubs — a screen that renders nothing, a hook that returns nothing or a game feature that does nothing: ${list}${found.length > 8 ? ` and ${found.length - 8} more` : ''}. They compile, but the feature they stand for is not built.`;
 }
 
 /**
@@ -101,6 +150,10 @@ export function hollowFeatureWriteNote(file: string, content: string): string {
   const screens = [...matchesOf(NULL_FUNCTION, text), ...matchesOf(NULL_ARROW, text)].filter((n) => SCREEN_NAME.test(n));
   const hooks = [...matchesOf(EMPTY_HOOK_FUNCTION, text), ...matchesOf(EMPTY_HOOK_ARROW, text)];
   const names = [...new Set([...screens, ...hooks])];
+  if (gameFeatureDoesNothing(file, content)) {
+    return `\n\n⛔ EMPTY GAME FEATURE — ${file}: its setup and update hold no statement, so it does nothing. A feature that does nothing is a fake feature (real features only). `
+      + 'Make it do what the user asked, or remove the file AND its line in src/game/features/index.ts. If the problem is in the game kit itself and a feature cannot fix it, tell the user plainly instead of adding a stub.\n';
+  }
   if (!names.length) return '';
   return `\n\n⛔ EMPTY STUB — ${file}: ${names.join(', ')} ${names.length === 1 ? 'returns' : 'return'} nothing. A stub that only quiets the type-checker is not the feature. `
     + 'Build the real screen/hook now, or take it out of the router and do NOT name it as delivered in your final message.\n';

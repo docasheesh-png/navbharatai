@@ -6765,3 +6765,15 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 #4607 merged on a green CI. Q-3720 (unstyled screens no longer score design 100/A), Q-3721 (prompt-only CYBER_INTRUSION
 triage rule) and Q-3722 (one 120%-of-balance wallet limit, read by the admission gate, decideAffordability and the mid-build
 stop) are resolved and removed from the open queue; their IDs are in BUILD_REPORT_QUEUE_CLOSED.txt. Q-3723..Q-3728 stay 🟡.
+
+## 2026-11-27 — autopsy of failedbr #2558–#2561 (PUBG game): "characters sink, a layer over the road, cars in the air"
+- **Q-3750 (root cause, reproduced in a real browser on the seeded game):** the game shell's per-frame `groundScene` clamp lifted
+  the open world's own containers — the map's chunk group (terrain, sea, plants, roads) at render (0,0,0) rose to the land's height
+  there (1.3–135 m by project, ratcheting with origin shifts), so everything on the true ground looked sunk under it and the
+  highways floated. Fix: `userData.ground = false` on the chunk group at creation and on Highways, the map edge, place, venue and
+  user-map roots. Locked by `tests/theShellNeverLiftsTheWorldItself.test.ts` (runs the real shell clamp; fails reverted: 11.08 m).
+- **Q-3751:** the playtest probe called it a late ground edit; the kit's report now measures moved world containers and the probe
+  names a KIT fault. **Q-3752:** `hollowFeature.ts` now names a game feature that does nothing (the builder's `groundFix.ts`).
+- **Q-3753 (blocked, recurrence of Q-3323/Q-3354):** five server losses in a row, two at once, no memory band; `BUILD_UNWATCHED`
+  evidence added. **Q-3754** = Q-3334 (#4536). **Q-3755** (2–5 km cities) awaits the admin's choice. **Q-3756** (road-edge
+  stair-steps) is open.

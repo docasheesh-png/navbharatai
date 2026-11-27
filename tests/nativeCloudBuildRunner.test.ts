@@ -358,6 +358,23 @@ describe('advancing a build', () => {
     expect(w.charges).toEqual([]);
   });
 
+  // Q-3702: the row is a stored file's ONLY pointer (serve, expire, erase). A file saved for a row that is gone —
+  // the account was deleted mid-save — or already final (stopped meanwhile) is deleted at once, and never charged.
+  it.each([
+    ['the row was erased with the account', async (id: string) => { await (db as any).collection(store.BUILDS).doc(id).delete(); }],
+    ['the build was stopped meanwhile', async (id: string) => { await store.updateJob(id, { state: 'cancelled', errorCode: 'CANCELLED' }); }],
+  ])('a file saved after %s is deleted, not left in the bucket for ever', async (_why, during) => {
+    const job = await startOk();
+    w.script.exit = 0;
+    w.script.output = 'android/app/build/outputs/apk/debug/app-debug.apk';
+    w.script.signStdout = '::nbai-inspect::{"applicationId":"com.tea.timer","signingType":"debug"}';
+    const put = w.deps.artifacts.put.bind(w.deps.artifacts);
+    w.deps.artifacts.put = async (p: string, b: Buffer) => { const r = await put(p, b); await during(job.id); return r; };
+    await runner.advanceNativeBuild(job.id, w.deps as any);
+    expect(w.stored.size).toBe(0);
+    expect(w.charges).toEqual([]);
+  });
+
   it('an exempt account is never charged', async () => {
     const r = await runner.startNativeBuild(input(), w.deps as any);
     if (!r.ok) throw new Error('refused');

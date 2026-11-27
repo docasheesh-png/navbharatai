@@ -146,6 +146,18 @@ export function asksForEnemies(text: string | null | undefined): boolean {
 }
 
 /**
+ * ✋ Does this turn's request ask for something in the hero's hand — a gun, a sword, a bat — in English, Hinglish or Hindi?
+ * Build report #2535 ("hero kr hath me ek badi gun banao"): reported done with nothing in the hand. A hand word AND an item
+ * word, both in a sentence that is not declined ("no gun"). PURE.
+ */
+const HAND_WORD = /\b(?:h[a]?a?th|haath|hath|hand|hands|pakad\w*|hold\w*|grip\w*|wield\w*|carr(?:y|ies|ying))\b|(?:हाथ|पकड़)/i;
+const HELD_ITEM = /\b(?:gun|guns|bandook|bandooq|banduk|rifle|pistol|revolver|shotgun|smg|sniper|ak-?47|m416|weapon|hathiyar|sword|talwar|knife|chaku|axe|kulhadi|bow|dhanush|shield|dhaal|bat|balla|stick|lathi|danda|spear|bhala|torch|hammer|hathoda|trishul|gada)\b|(?:बंदूक|राइफल|पिस्तौल|तलवार|चाकू|ढाल|बल्ला|लाठी|हथियार)/i;
+export function asksForHeldItem(text: string | null | undefined): boolean {
+  const raw = withoutDeclinedSentences(String(text ?? ''));
+  return raw.split(/(?<=[.!?\n।])\s*/).some((s) => HAND_WORD.test(s) && HELD_ITEM.test(s));
+}
+
+/**
  * An action, shooter or open-world game (PUBG, Free Fire, BGMI, GTA, in any language) is a world of
  * enterable houses. A flat 2D game is not. PURE.
  */

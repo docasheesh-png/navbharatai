@@ -23,6 +23,10 @@ import { eraseUserWorkspaceAssetObjects, unconfirmedWorkspaceAssetEraseReport } 
 import { eraseUserProofPictures } from '../AgentV3/gameProofPictures';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { deIdentifyPublishedListings, getListingDb } from '../lib/publishedListingErase';
+import { navStoreApkObjects } from '../lib/navStoreStore';
+import { eraseUserShareHtml } from '../lib/ShareStore';
+import { eraseUserZipUploadChunks } from '../lib/zipUploadStore';
+import { eraseUserNativeArtifacts } from '../lib/mobileBuild/nativeArtifactStore';
 import { sendSafeError } from '../lib/httpError';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
@@ -329,6 +333,16 @@ export function registerProfileRoutes(app: Express): void {
       // reported as a limitation (they still expire by day 30). Best-effort like every eraser here: reported, never thrown.
       const gameProofPictures = await eraseUserProofPictures(identity.uid)
         .catch(() => ({ attempted: false, ownerPicturesRemoved: false, foldersDeleted: 0, failures: ['Game proof picture storage could not confirm removal.'], limitations: [] as string[] }));
+      // …AND THE BUCKET OBJECTS ONLY A RECORD COULD FIND (Q-3611, Q-3613), which is why these two run HERE, before
+      // `deleteUserData` erases the `shares` and `zip_uploads` records that point at them: the large share-link pages
+      // and the chunks of unfinished zip uploads. Then the phone app build files (Q-3614), owner-derived, with any
+      // running build stopped first. Each reports its own line; a failure is a failure, never a removal.
+      const shareLinkPages = await eraseUserShareHtml(identity.uid)
+        .catch(() => ({ attempted: false, htmlRemoved: false, legacyObjectsDeleted: 0, ownerFolderDeleted: false, failures: ['Share link storage could not confirm removal.'] }));
+      const zipUploadChunks = await eraseUserZipUploadChunks(identity.uid)
+        .catch(() => ({ attempted: false, chunksRemoved: false, uploadsCleared: 0, failures: ['Zip upload storage could not confirm removal.'] }));
+      const nativeBuildFiles = await eraseUserNativeArtifacts(identity.uid)
+        .catch(() => ({ attempted: false, artifactsRemoved: false, ownerFolderDeleted: false, runningBuildsStopped: 0, failures: ['Phone app build storage could not confirm removal.'], limitations: [] as string[] }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
       // deletion then failed, with the owner unable to sign in and retry. Retained unverified records
       // are disclosed even when sign-in removal succeeds.
@@ -366,9 +380,11 @@ export function registerProfileRoutes(app: Express): void {
        */
       const listingDb = getListingDb();
       const listings = listingDb
-        ? await deIdentifyPublishedListings(listingDb, identity.uid)
-          .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, totalDeIdentified: 0, error: e instanceof Error ? e.message : String(e) }))
-        : { uid: identity.uid, collections: [], totalDeleted: 0, totalDeIdentified: 0, error: 'data store unavailable' };
+        // The APK bucket goes in too (Q-3612): a never-public APK listing's bytes are deleted BEFORE its record, and
+        // a listing whose APK could not be confirmed deleted is kept de-identified and counted in `objectsNotConfirmed`.
+        ? await deIdentifyPublishedListings(listingDb, identity.uid, undefined, navStoreApkObjects())
+          .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, totalDeIdentified: 0, objectsNotConfirmed: 0, error: e instanceof Error ? e.message : String(e) }))
+        : { uid: identity.uid, collections: [], totalDeleted: 0, totalDeIdentified: 0, objectsNotConfirmed: 0, error: 'data store unavailable' };
       const account = await deleteAuthAccount(identity.uid);
       const accountDeleted = account === 'deleted' || account === 'not-found';
       return res.json({
@@ -403,6 +419,10 @@ export function registerProfileRoutes(app: Express): void {
         workspaceAssetObjects,
         // Its own line (Q-3410): the game proof pictures, with any legacy owner-less limitation said, never folded in.
         gameProofPictures,
+        // Their own lines (Q-3611, Q-3613, Q-3614): large share-link pages, unfinished zip upload parts, phone app files.
+        shareLinkPages,
+        zipUploadChunks,
+        nativeBuildFiles,
         proAttachments: { removed: true },
         /**
          * Its own line, and the one line here that is NOT a deletion count. `totalDeIdentified` is how

@@ -39,6 +39,7 @@ export const HARD_DEFECTS: ReadonlySet<GameDefectCode> = new Set([
 
 /** Every measured defect the repair can address. */
 const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
+  GAME_DEFECT_ASK_NOT_MET: 'What the user asked for in this request is not in the played game (its evidence is in "measured"): enemies that were not alive near the hero, or an item that was not in the hero\'s hand. Make it real with the kit (Entities.spawnAround for enemies; add_library_models then PLAYER.holds for a held item), and never claim it is there until it is.',
   GAME_DEFECT_NOT_SHOWN: 'The game said a model or item the code asks for could not be shown (its exact words are in "measured") — usually a library subject that was never added. Call add_library_models with that subject, then use the EXACT subject it was saved under (PLAYER.model / PLAYER.holds / the race car or track file). If the library has no such model, tell the user plainly and never claim it is shown.',
   GAME_DEFECT_START_STUCK: 'Pressing the start control shows no game surface — make the start control mount and start the game.',
   GAME_DEFECT_BLANK: 'The game surface is blank or one colour — draw the world and the player.',
@@ -158,5 +159,8 @@ export function gameIncompleteReason(defects: readonly GameDefect[], scopeMissin
   // offer reads it.
   const notShown = defects.filter((d) => d.code === 'GAME_DEFECT_NOT_SHOWN').map((d) => d.evidence).filter(Boolean);
   if (notShown.length) parts.push(`something the game was asked to show is not on screen — the game said: ${notShown.join(' · ').slice(0, 300)}`);
+  // Kadam 2: what THIS request asked for, proved by playing — enemies alive near the hero, an item really in the hand.
+  const unmet = defects.filter((d) => d.code === 'GAME_DEFECT_ASK_NOT_MET').map((d) => d.evidence).filter(Boolean);
+  if (unmet.length) parts.push(`what you asked for is not in the game yet — ${unmet.join(' · ').slice(0, 300)}`);
   return parts.length ? parts.join('; ') : null;
 }

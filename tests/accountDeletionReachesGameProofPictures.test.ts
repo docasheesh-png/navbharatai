@@ -136,10 +136,10 @@ const STORAGE_MODULES: Record<string, Disposition> = {
   'src/server/AgentV3/bucketPublish.ts': { erasedBy: 'eraseUserSnapshots' }, // published snapshots (Q-795)
   'src/server/lib/domainAutoPublish.ts': { notPerUser: 'copies an already-published app to its custom domain; the source is the published-apps bucket, erased with the snapshots' },
   'src/server/AgentV3/gameAssets/objectStore.ts': { notPerUser: 'content-addressed public-licence game assets shared by every build; nothing in them belongs to a user' },
-  'src/server/lib/ShareStore.ts': { open: 'Q-3611' },
-  'src/server/lib/navStoreStore.ts': { open: 'Q-3612' },
-  'src/server/lib/zipUploadStore.ts': { open: 'Q-3613' },
-  'src/server/lib/mobileBuild/nativeArtifactStore.ts': { open: 'Q-3614' }, // owner-hashed key, but no eraser calls it yet
+  'src/server/lib/ShareStore.ts': { erasedBy: 'eraseUserShareHtml' }, // Q-3611: owner-filed pages + legacy ones through their record
+  'src/server/lib/navStoreStore.ts': { erasedBy: 'navStoreApkObjects' }, // Q-3612: a never-public listing's APK, before the listing
+  'src/server/lib/zipUploadStore.ts': { erasedBy: 'eraseUserZipUploadChunks' }, // Q-3613: chunks before their record, + abandoned sweep
+  'src/server/lib/mobileBuild/nativeArtifactStore.ts': { erasedBy: 'eraseUserNativeArtifacts' }, // Q-3614: the owner-hashed folder
 };
 
 function serverFiles(dir: string): string[] {

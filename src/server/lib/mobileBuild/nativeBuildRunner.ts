@@ -450,6 +450,13 @@ async function finishBuild(id: string, built: Buffer, deps: RunnerDeps): Promise
       expiresAt: iso(new Date(now.getTime() + nativeLimits().retentionDays * 86_400_000)),
     },
   });
+  // ── A FILE NO ROW POINTS AT IS DELETED AT ONCE (Q-3702). The row can be gone (the account was deleted while the
+  // file was saving) or already terminal (stopped meanwhile): then nothing will ever serve, expire or erase this
+  // object, because the row IS its only pointer. Without this it stayed in the bucket for ever.
+  if (completed?.state !== 'completed' || completed.artifact?.objectPath !== objectPath) {
+    await deps.artifacts.remove(objectPath);
+    return completed;
+  }
 
   // ── CHARGE — only now, for a file that exists, once (idempotent on the build id). ──
   if (completed?.state === 'completed' && !completed.billingExempt) {

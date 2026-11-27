@@ -98,6 +98,7 @@ When ownership is independently verified and your deletion request is completed,
 - your **professional pass**, if you had one, and which admin notices you had already read;
 - the **files you uploaded** — .zip archives and spreadsheets you gave to a build;
 - your **share links** — a page you shared stops opening;
+- your **phone app builds** — each .apk / .aab build record and the file it made (a build still running is stopped first);
 - your **instantly-hosted apps** — an app you published with instant hosting stops being served;
 - your **referral record** — your own code and the claims against it. (A payout already recorded under
   somebody else's referral is their record, and is kept — see below.);

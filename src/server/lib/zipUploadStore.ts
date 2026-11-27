@@ -76,6 +76,8 @@ export async function beginSharedUpload(rec: SharedUploadRecord): Promise<void> 
   const d = db();
   if (!d) throw new Error('shared upload store unavailable');
   await d.collection(COLLECTION).doc(rec.uploadId).set(rec);
+  // Starting an upload is also when abandoned ones are reaped (Q-3613), at most once per interval per instance.
+  maybeSweepAbandonedZipUploads();
 }
 
 /** Look up an upload from ANY instance. Null when unknown — the caller turns that into its 403. */
@@ -222,3 +224,146 @@ export async function deleteSharedUpload(uploadId: string): Promise<void> {
     try { await d.collection(COLLECTION).doc(uploadId).delete(); } catch { /* best-effort */ }
   }
 }
+
+// ─────────────────────── Account deletion and the abandoned-upload sweep (Q-3613) ───────────────────────
+//
+// 🔴 THE CLASS (Q-3410's): chunks are keyed by the upload id, not by their owner, so the ONLY thing that can find a
+// user's chunks is their `zip_uploads` record — and account deletion erases that record (`deleteUserData`, by `uid`).
+// An upload abandoned mid-flight therefore outlived its owner's account for ever. Two layers close it:
+//   1. `eraseUserZipUploadChunks` runs BEFORE the records are erased and deletes each record's chunk folder first,
+//      then the record — the pointer goes only after the bytes it points at.
+//   2. `sweepAbandonedZipUploads` is the backstop for whatever layer 1 could not confirm (and for uploads abandoned
+//      by people who keep their account): a chunk folder whose record is gone, or whose record is older than
+//      ZIP_UPLOAD_ABANDONED_MS, is deleted. A chunk can never precede its record (/begin writes the record before it
+//      returns the upload id), so a folder without a record is never an upload in flight.
+
+/** A real upload id (`randomUUID()` in /begin). Anything else is never turned into a delete prefix. */
+const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function isZipUploadId(v: unknown): v is string { return typeof v === 'string' && UPLOAD_ID.test(v); }
+
+/** An upload older than this is abandoned: no import legitimately spans two days between /begin and /commit. */
+export const ZIP_UPLOAD_ABANDONED_MS = 48 * 60 * 60 * 1000;
+
+/** What the eraser and the sweep need. firebase-admin in production; a fake in tests. Every method THROWS on failure. */
+export interface ZipUploadCleanupDeps {
+  /** The `zip_uploads` records with `uid == uid`. */
+  listOwnedUploads(uid: string): Promise<SharedUploadRecord[]>;
+  /** The record for one upload id, or null when it does not exist. Throws when the store could not answer. */
+  getRecord(uploadId: string): Promise<SharedUploadRecord | null>;
+  /** The upload ids that have a chunk folder (`zip-uploads/<id>/`). */
+  listChunkFolders(): Promise<string[]>;
+  deleteChunks(uploadId: string): Promise<void>;
+  deleteRecord(uploadId: string): Promise<void>;
+}
+
+/** The production dependencies, or null when the bucket or Firestore is not configured. */
+export function liveZipUploadCleanupDeps(): ZipUploadCleanupDeps | null {
+  const name = bucketName();
+  const d = db();
+  if (!name || !d) return null;
+  const bucket = () => admin.storage().bucket(name);
+  return {
+    async listOwnedUploads(uid) {
+      const snap = await d.collection(COLLECTION).where('uid', '==', uid).get();
+      return snap.docs.map((doc) => ({ ...(doc.data() as SharedUploadRecord), uploadId: doc.id }));
+    },
+    async getRecord(uploadId) {
+      const snap = await d.collection(COLLECTION).doc(uploadId).get();
+      return snap.exists ? ({ ...(snap.data() as SharedUploadRecord), uploadId }) : null;
+    },
+    async listChunkFolders() {
+      const [, , api] = await bucket().getFiles({ prefix: 'zip-uploads/', delimiter: '/', autoPaginate: false, maxResults: 1000 });
+      const prefixes = (api as { prefixes?: unknown } | undefined)?.prefixes;
+      return Array.isArray(prefixes)
+        ? prefixes.filter((p): p is string => typeof p === 'string').map((p) => p.slice('zip-uploads/'.length).replace(/\/$/, ''))
+        : [];
+    },
+    async deleteChunks(uploadId) {
+      if (!isZipUploadId(uploadId)) throw new Error('Refusing to delete outside one upload folder');
+      await bucket().deleteFiles({ prefix: `zip-uploads/${uploadId}/`, force: true });
+    },
+    async deleteRecord(uploadId) { await d.collection(COLLECTION).doc(uploadId).delete(); },
+  };
+}
+
+export interface ZipUploadEraseReport {
+  attempted: boolean;
+  /** Every upload of this owner had its chunks confirmed deleted. */
+  chunksRemoved: boolean;
+  /** Uploads whose chunk folder was deleted (their record was then deleted too). */
+  uploadsCleared: number;
+  failures: string[];
+}
+
+/**
+ * DELETE /api/profile's step for zip-upload chunks (Q-3613). MUST run BEFORE `deleteUserData` erases the `zip_uploads`
+ * records: each record is the only pointer to its chunks. For every record owned by `verifiedUid` (the deletion
+ * route's VERIFIED identity, re-checked on the record): delete the chunk folder, then the record. A failure is
+ * reported as a failure, never as a removal; its folder is left for the abandoned-upload sweep. Never throws.
+ */
+export async function eraseUserZipUploadChunks(
+  verifiedUid: string,
+  deps: ZipUploadCleanupDeps | null = liveZipUploadCleanupDeps(),
+): Promise<ZipUploadEraseReport> {
+  const report: ZipUploadEraseReport = { attempted: false, chunksRemoved: false, uploadsCleared: 0, failures: [] };
+  if (!verifiedUid || typeof verifiedUid !== 'string') return { ...report, failures: ['No usable account id: zip uploads could not be selected for removal.'] };
+  if (!deps) return { ...report, failures: ['Zip upload storage is not configured; removal of unfinished uploads could not be confirmed.'] };
+  let uploads: SharedUploadRecord[];
+  try { uploads = await deps.listOwnedUploads(verifiedUid); } catch {
+    return { ...report, attempted: true, failures: ['Your unfinished zip uploads could not be listed; their removal could not be confirmed.'] };
+  }
+  report.attempted = true;
+  let failed = 0;
+  let refused = 0;
+  for (const rec of uploads) {
+    if (rec.uid !== verifiedUid) continue;
+    if (!isZipUploadId(rec.uploadId)) { refused++; continue; }
+    try {
+      await deps.deleteChunks(rec.uploadId);
+    } catch { failed++; continue; }
+    report.uploadsCleared++;
+    // The bytes are gone; the record that pointed at them may go now. If this fails, `deleteUserData` still erases it.
+    try { await deps.deleteRecord(rec.uploadId); } catch { /* the record holds no bytes any more */ }
+  }
+  if (failed) report.failures.push(`${failed} unfinished zip upload(s) could not be confirmed removed; a later cleanup deletes parts whose upload record is gone.`);
+  if (refused) report.failures.push(`${refused} zip upload record(s) had an id that is not a real upload id; their parts were not touched and need review.`);
+  report.chunksRemoved = report.failures.length === 0;
+  return report;
+}
+
+/**
+ * Delete every chunk folder that no live upload owns: its record is gone (committed, cleaned up, or erased with an
+ * account) or older than ZIP_UPLOAD_ABANDONED_MS. A record that cannot be read is NOT treated as gone. Returns the
+ * upload ids whose chunks were deleted. Never throws.
+ */
+export async function sweepAbandonedZipUploads(deps: ZipUploadCleanupDeps, nowMs = Date.now()): Promise<string[]> {
+  let folders: string[];
+  try { folders = await deps.listChunkFolders(); } catch { return []; }
+  const swept: string[] = [];
+  for (const id of folders) {
+    if (!isZipUploadId(id)) continue;
+    let rec: SharedUploadRecord | null;
+    try { rec = await deps.getRecord(id); } catch { continue; }
+    if (rec && !(Number.isFinite(rec.createdAt) && nowMs - rec.createdAt > ZIP_UPLOAD_ABANDONED_MS)) continue;
+    try {
+      await deps.deleteChunks(id);
+      if (rec) await deps.deleteRecord(id);
+      swept.push(id);
+    } catch { /* the next sweep tries again */ }
+  }
+  return swept;
+}
+
+const SWEEP_EVERY_MS = 60 * 60 * 1000;
+let lastZipSweepAt = 0;
+/** The sweep, at most once per hour on this instance, in the background. Never throws. */
+export function maybeSweepAbandonedZipUploads(
+  deps: ZipUploadCleanupDeps | null = liveZipUploadCleanupDeps(),
+  nowMs = Date.now(),
+): boolean {
+  if (!deps || nowMs - lastZipSweepAt < SWEEP_EVERY_MS) return false;
+  lastZipSweepAt = nowMs;
+  void sweepAbandonedZipUploads(deps, nowMs).catch(() => { lastZipSweepAt = 0; });
+  return true;
+}
+export function __resetZipUploadSweepForTests(): void { lastZipSweepAt = 0; }

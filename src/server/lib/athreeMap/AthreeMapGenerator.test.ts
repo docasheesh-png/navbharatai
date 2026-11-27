@@ -130,8 +130,9 @@ describe('the BOUNDED island', () => {
       if (Math.hypot(x, z) < 2000) { inside++; if (w.heightAt(x, z) > 0) landInside++; }
     }
     expect(landInside / inside).toBeGreaterThan(0.6);
-    expect(w.heightAt(4600, 0)).toBeLessThan(-50);
-    expect(w.heightAt(0, -5000)).toBeLessThan(-50);
+    // Open sea past the shore: the shelf (boundary.ts) bottoms out at the sea's chosen depth, 50 m by default (it was a 99 m noise floor).
+    expect(w.heightAt(4600, 0)).toBeLessThan(-45);
+    expect(w.heightAt(0, -5000)).toBeLessThan(-45);
   });
   it('has a mix of biomes (not one) and no snow', () => {
     const seen = new Set<string>();

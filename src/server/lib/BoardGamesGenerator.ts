@@ -1377,6 +1377,12 @@ export interface CricketLayout {
   pitchLength: number;
   /** The unit vector from the striker's end to the bowler's end, on the ground. */
   along: { x: number; z: number };
+  /**
+   * The TRUE right of someone at the striker's end looking at the bowler (three.js, Y up: right = along × up). At heading 0
+   * (looking +Z) it is −X — and that is also screen-right for a camera behind the striker looking down the pitch. Use THIS
+   * for "right" in controls and placement (build report #2543: a game mapped "right" to +X and its batter moved the wrong way).
+   */
+  right: { x: number; z: number };
   strikerStumps: FieldSpot;
   bowlerStumps: FieldSpot;
   /** The striker: at his popping crease, beside the line of the stumps, facing the bowler. */
@@ -1404,10 +1410,16 @@ export function cricketLayout(o: { centre?: { x: number; z: number }; heading?: 
   const c = o.centre && Number.isFinite(o.centre.x) && Number.isFinite(o.centre.z) ? o.centre : { x: 0, z: 0 };
   const h = Number.isFinite(o.heading as number) ? (o.heading as number) : 0;
   const along = { x: Math.sin(h), z: Math.cos(h) };
-  const side = { x: along.z, z: -along.x };                  // to the RIGHT of someone at the striker's end looking at the bowler (Y up)
+  // ⚠️ 'side' is the striker's LEFT (+X at heading 0), NOT his right — this line used to say "right", and builders believed it
+  // (#2543). Its value is kept as it is: games already written against it, and the placements below, depend on it. 'right'
+  // (returned) is the true right; football's own 'side' (below) already was.
+  const side = { x: along.z, z: -along.x };
   const at = (a: number, s: number) => ({ x: c.x + along.x * a + side.x * s, z: c.z + along.z * a + side.z * s });
   const half = PITCH_LENGTH / 2;
-  const legSide = o.leftHanded ? 0.45 : -0.45;              // a right-hander's leg side is to his left as he faces the bowler
+  // −0.45 × side puts the default batter on his RIGHT of the stumps line. With the kit person (whose 'right' hand is on +X,
+  // i.e. his anatomical left when he faces +Z) that reads as a consistent LEFT-hander — an OPEN item (PROGRESS.md 2026-11-27):
+  // a true right-hander needs the kit person's handedness corrected first, which changes every game's held items.
+  const legSide = o.leftHanded ? 0.45 : -0.45;
   const spot = (p: { x: number; z: number }, look: { x: number; z: number }): FieldSpot => ({ ...p, yaw: yawTo(p, look) });
   const strikerStumps = at(-half, 0), bowlerStumps = at(half, 0);
   const release = at(half - POPPING_CREASE + 0.2, 0.3);
@@ -1417,6 +1429,7 @@ export function cricketLayout(o: { centre?: { x: number; z: number }; heading?: 
   return {
     pitchLength: PITCH_LENGTH,
     along,
+    right: { x: -side.x, z: -side.z },
     strikerStumps: spot(strikerStumps, bowlerStumps),
     bowlerStumps: spot(bowlerStumps, strikerStumps),
     batter: spot(batterAt, release),
@@ -1448,7 +1461,7 @@ export function deliveryPath(f: CricketLayout, o: { speed?: number; lengthFromBa
   const toBat = Math.max(1, Math.min(toStumps - 0.3, (bat.x - from.x) * dx + (bat.z - from.z) * dz));
   const bounceAt = Math.max(1, toBat - length);
   const bounceTime = bounceAt / speed, batTime = toBat / speed, stumpsTime = toStumps / speed;
-  const sideX = -dz, sideZ = dx;                            // + line = towards the batter's right
+  const sideX = -dz, sideZ = dx;                            // + line = towards the batter's LEFT (the layout's 'side'), not his right
   const at = (t: number) => {
     const d = Math.max(0, t) * speed;
     const x = from.x + dx * d + sideX * line * Math.min(1, d / toStumps);

@@ -144,7 +144,8 @@ export function registerMobileBuildRoutes(app: Express, limiter?: RequestHandler
   app.post('/api/mobile-builds/signing-key/export', ...limited, async (req: Request, res: Response) => {
     const id = await identity(req, res);
     if (!id) return;
-    const appId = ((req.body || {}) as Record<string, unknown>).appId;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const appId = b.appId;
     if (!isValidAppId(appId)) return res.status(400).json({ error: 'A valid application id is required.' });
     let out: Awaited<ReturnType<typeof exportKey>>;
     try {

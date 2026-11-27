@@ -31,6 +31,7 @@ export const GAME_PLAYER_BODY = String.raw`// WHO THE PLAYER IS — and how it i
 import * as THREE from 'three';
 import type { GameContext } from '../Game';
 import type { HumanoidAction, HumanoidOptions } from '../three/humanoid';
+import { gripFor, gripFrame, holdPose, reachWith } from '../three/humanoid';
 import { events } from '../core/events';
 
 export type PlayerMove = 'idle' | 'walk' | 'run' | 'jump' | 'land' | 'swim' | 'dive' | 'punch' | 'kick' | 'block' | 'hit' | 'die' | 'fire' | 'swing' | 'throw' | 'use' | 'slide';
@@ -379,6 +380,7 @@ function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.O
     void (loaders.library ?? assetModule)().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(wanted, none) : null)).then((item) => {
       if (undone) { item?.dispose?.(); return; }
       if (!item || item.source !== 'model') { item?.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' to hold is not one of this game\'s saved models, so nothing is in the hand.'); return; }
+      item.root.userData.nbSubject = wanted;   // what it is decides how it is held (gripFor)
       if (!put(item.root, side)) { item.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' could not be put in the hand, so nothing is in the hand.'); return; }
       placed.push({ side, item: item.root, dispose: item.dispose });
       HELD.set(side, wanted);
@@ -387,20 +389,44 @@ function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.O
   }
   return () => {
     undone = true;
-    for (const p of placed) { p.item.removeFromParent(); p.dispose?.(); if (HELD.get(p.side)) HELD.delete(p.side); }
+    for (const p of placed) { const frame = p.item.parent && p.item.parent.userData.nbGrip ? p.item.parent : null; p.item.removeFromParent(); frame?.removeFromParent(); p.dispose?.(); if (HELD.get(p.side)) HELD.delete(p.side); }
     placed.length = 0;
     publishHeld();
   };
 }
 
 /** Put an item in the kit person's hand, sized like a model's (about a third of its height). */
-function holdOnPerson(hero: { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } }, item: THREE.Object3D, side: 'right' | 'left'): boolean {
-  const tall = (() => { const b = new THREE.Box3().setFromObject(hero.root); const h = b.max.y - b.min.y; return Number.isFinite(h) && h > 0.2 ? h : 1.75; })();
-  const longest = Math.max(...new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3()).toArray()) || 1;
-  item.scale.multiplyScalar((0.3 * tall) / longest / (Math.abs(hero.root.scale.x) || 1));
-  if (side === 'left') { if (!hero.joints?.leftHand) return false; hero.joints.leftHand.add(item); return true; }
-  hero.hold(item);
+function holdOnPerson(hero: { root: THREE.Object3D; hold: (item: THREE.Object3D | null, subject?: string | null) => void; joints?: { leftHand?: THREE.Object3D } }, item: THREE.Object3D, side: 'right' | 'left'): boolean {
+  // The kit person holds it the way people do (humanoid.ts gripFor / gripFrame / holdPose), at its real size for this person.
+  if (side === 'right') { hero.hold(item, item.userData.nbSubject as string | undefined); return true; }
+  if (!hero.joints?.leftHand) return false;
+  const tall = (() => { const b = new THREE.Box3().setFromObject(hero.root); const h = b.max.y - b.min.y; return Number.isFinite(h) && h > 0.2 ? h : 1.75; })() / (Math.abs(hero.root.scale.x) || 1);
+  const spec = gripFor(item.userData.nbSubject as string | undefined);
+  const frame = gripFrame(item, spec, spec ? spec.length * (tall / 1.75) : 0.3 * tall);
+  holdPose(frame, new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1));
+  hero.joints.leftHand.add(frame);
   return true;
+}
+
+/**
+ * Seat a grip frame in a model's hand bone: the forearm says which way is out through the fist, the body's forward which
+ * way the thumb points, and the fist closes a little past the wrist (the bone's origin). In the bone's own frame, so it
+ * follows every clip. PURE geometry; never throws.
+ */
+function seatInBone(frame: THREE.Object3D, bone: THREE.Object3D, fore: THREE.Object3D | null | undefined, body: THREE.Object3D, tall: number): void {
+  try {
+    body.updateWorldMatrix(true, true);
+    const inv = bone.getWorldQuaternion(new THREE.Quaternion()).invert();
+    const at = bone.getWorldPosition(new THREE.Vector3());
+    const kid = bone.children.find((o) => (o as THREE.Bone).isBone === true);
+    const out = fore ? at.clone().sub(fore.getWorldPosition(new THREE.Vector3())) : kid ? kid.getWorldPosition(new THREE.Vector3()).sub(at) : new THREE.Vector3(0, -1, 0);
+    if (out.lengthSq() < 1e-12) out.set(0, -1, 0);
+    const down = out.normalize().applyQuaternion(inv);
+    const thumb = new THREE.Vector3(0, 0, 1).transformDirection(body.matrixWorld).applyQuaternion(inv);
+    const scale = Math.abs(bone.getWorldScale(new THREE.Vector3()).x) || 1;
+    holdPose(frame, down, thumb, down.clone().multiplyScalar((0.045 * tall) / scale));
+    frame.scale.setScalar(1 / scale);
+  } catch { /* held at the bone's origin */ }
 }
 
 /** The player's character: the kit's body until a model takes its place. */
@@ -445,6 +471,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
   let busy = 0;
   let down = false;
   let bones: Partial<Record<BoneRole, THREE.Object3D>> = {};
+  let heldRight: THREE.Object3D | null = null;   // the grip frame in the right hand: its support point takes the left hand
   let made: { move: PlayerMove; t: number; seconds: number } | null = null;
   // A whole-body move for a model with no bones for it, and a walk/run made when the model has no clip (RIGID_MOVES, MADE_GAIT).
   let rigid: { move: PlayerMove; t: number; seconds: number } | null = null;
@@ -565,22 +592,19 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     revive() { down = false; busy = 0; looping = ''; made = null; rigid = null; gait = null; },
     hold(item, side = 'right') {
       if (!model || !wrapper) return false;
-      const box = new THREE.Box3().setFromObject(item);
-      const size = box.getSize(new THREE.Vector3());
-      const longest = Math.max(size.x, size.y, size.z) || 1;
-      const want = 0.3 * tallness;                          // a hand-held item is about a third of the character's height
+      // Held the way people hold it (humanoid.ts): what it is (gripFor), where the hand goes on THIS model (gripFrame), at its
+      // real size for this character; an unknown thing is a third of the character's height, held by its thinner end.
+      const spec = gripFor(item.userData.nbSubject as string | undefined);
+      const frame = gripFrame(item, spec, spec ? spec.length * (tallness / 1.75) : 0.3 * tallness);
       const bone = bones[side === 'left' ? 'leftHand' : 'rightHand'];
       if (bone) {
-        bone.updateWorldMatrix(true, false);
-        const scale = new THREE.Vector3();
-        bone.getWorldScale(scale);
-        item.scale.multiplyScalar(want / longest / (Math.abs(scale.x) || 1));
-        bone.add(item);
+        seatInBone(frame, bone, bones[side === 'left' ? 'leftForeArm' : 'rightForeArm'], wrapper, tallness);
+        bone.add(frame);
+        if (side === 'right') heldRight = frame;
         return true;
       }
-      item.scale.multiplyScalar(want / longest);
-      item.position.set((side === 'left' ? 1 : -1) * 0.22 * tallness, 0.5 * tallness, 0.2 * tallness);
-      wrapper.add(item);
+      frame.position.set((side === 'left' ? 1 : -1) * 0.22 * tallness, 0.5 * tallness, 0.2 * tallness);
+      wrapper.add(frame);
       if (!told.has('hold-' + side)) { told.add('hold-' + side); say('player-hold-' + side, 'Your character has no ' + side + ' hand bone, so the item is held at its side.'); }
       return true;
     },
@@ -630,6 +654,13 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
             body.pivot.rotation.z += s * 0.06;
           }
         }
+      }
+      // ✋ The other hand on a rifle's fore-grip, wherever the clip put the gun hand (two-bone reach, humanoid.ts).
+      const sup = heldRight && heldRight.userData.nbGrip === 'rifle' ? heldRight.userData.nbSupport as THREE.Object3D | undefined : undefined;
+      if (sup && wrapper && !made && !down && bones.leftUpperArm && bones.leftForeArm && bones.leftHand) {
+        for (const b of [bones.leftUpperArm, bones.leftForeArm]) if (!rests.has(b)) rests.set(b, b.quaternion.clone());
+        wrapper.updateMatrixWorld(true);
+        reachWith(bones.leftUpperArm, bones.leftForeArm, bones.leftHand, sup.getWorldPosition(new THREE.Vector3()), wrapper.localToWorld(new THREE.Vector3(0.3 * tallness, 0.55 * tallness, -0.3 * tallness)));
       }
       if (made && wrapper) {
         made.t += Number.isFinite(dt) && dt > 0 ? dt : 0;
@@ -742,39 +773,36 @@ export function holdItem(ctx: GameContext, item: THREE.Object3D, side: 'right' |
 /**
  * Put an item in the hand of ANY character — an NPC, an enemy, a pet — not only the player (admin 2026-11-24: "sabhi
  * character apne hath me object utha le"). Works on a library or uploaded model (its hand bone, found by name, the same
- * way as the player's), and on a kit person (createHumanoid: its own right/left hand). The item is sized to about a third
- * of the character's height. With no hand bone it is held at the character's side, and false says so.
+ * way as the player's), and on a kit person (createHumanoid: its own right/left hand). It is held the way people hold it
+ * (humanoid.ts: gripFor, gripFrame, holdPose): subject (or item.userData.nbSubject) says what it is, which sets its real size
+ * and grip; an unknown thing is a third of the character's height, held by its thinner end. With no hand bone it is held
+ * at the character's side, and false says so.
  */
 export function holdInHand(
-  character: THREE.Object3D | { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } },
+  character: THREE.Object3D | { root: THREE.Object3D; hold: (item: THREE.Object3D | null, subject?: string | null) => void; joints?: { leftHand?: THREE.Object3D } },
   item: THREE.Object3D,
   side: 'right' | 'left' = 'right',
+  subject?: string | null,
 ): boolean {
-  // A kit person (createHumanoid): its own grip — the right hand through hold(), the left hand by its joint.
-  if (!(character instanceof THREE.Object3D)) {
-    if (side === 'left' && character.joints?.leftHand) { character.joints.leftHand.add(item); return true; }
-    character.hold(item);
-    return true;
-  }
-  const bone = findBones(character)[side === 'left' ? 'leftHand' : 'rightHand'];
+  if (subject) item.userData.nbSubject = subject;
+  // A kit person (createHumanoid): held the way people hold it, in its own hands.
+  if (!(character instanceof THREE.Object3D)) return holdOnPerson(character, item, side);
+  const bones = findBones(character);
+  const bone = bones[side === 'left' ? 'leftHand' : 'rightHand'];
   const box = new THREE.Box3().setFromObject(character);
-  const tall = Math.max(0.2, box.max.y - box.min.y);
-  const size = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3());
-  const longest = Math.max(size.x, size.y, size.z) || 1;
-  const want = 0.3 * tall;
+  const tall = Math.max(0.2, box.max.y - box.min.y);       // world metres
+  const k = Math.abs(character.scale.x) || 1;
+  const spec = gripFor(item.userData.nbSubject as string | undefined);
+  const frame = gripFrame(item, spec, spec ? spec.length * (tall / 1.75) : 0.3 * tall);
   if (bone) {
-    bone.updateWorldMatrix(true, false);
-    const scale = new THREE.Vector3();
-    bone.getWorldScale(scale);
-    item.scale.multiplyScalar(want / longest / (Math.abs(scale.x) || 1));
-    item.position.set(0, 0, 0);
-    bone.add(item);
+    seatInBone(frame, bone, bones[side === 'left' ? 'leftForeArm' : 'rightForeArm'], character, tall);
+    bone.add(frame);
     return true;
   }
   // No hand bone: at the character's side, in its own frame, and false says so.
-  item.scale.multiplyScalar(want / longest / (Math.abs(character.scale.x) || 1));
-  item.position.set((side === 'left' ? 1 : -1) * 0.22 * tall, 0.5 * tall, 0.2 * tall).divideScalar(Math.abs(character.scale.x) || 1);
-  character.add(item);
+  frame.scale.setScalar(1 / k);
+  frame.position.set((side === 'left' ? 1 : -1) * 0.22 * tall, 0.5 * tall, 0.2 * tall).divideScalar(k);
+  character.add(frame);
   return false;
 }
 

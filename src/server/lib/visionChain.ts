@@ -1,4 +1,4 @@
-import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
+import { readProviderUsage, type AIProviderResponse, type ProviderUsage } from '../AI/Router/ProviderTypes';
 import { familyOfEngineName, legacyPathAllows } from '../AI/TrafficRegistry/legacyControl';
 import { maybeGatewayVision, isGatewayRouteSelected, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
@@ -92,6 +92,13 @@ async function freeHold(model: string, atts: VisionAttachment[], o: VisionOption
 
 const DEFAULT_TIMEOUT_MS = 28_000;
 
+/**
+ * One provider's answer: the text, the model that gave it, and the tokens the provider REPORTED for the call (absent when
+ * it reported none — never estimated). A caller that bills the call (the game photo judge) prices exactly these.
+ */
+export interface VisionHit { text: string; model?: string; usage?: ProviderUsage }
+const hit = (text: string, model: string | undefined, usage: ProviderUsage | undefined): VisionHit => ({ text, ...(model ? { model } : {}), ...(usage ? { usage } : {}) });
+
 /** Race a promise against a hard timeout so a stuck provider never hangs the chain. */
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -113,7 +120,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
  * free-tier image turn costs nothing; on any failure/rate-limit the chain continues exactly as before.
  * Z.AI is OpenAI-compatible, so this mirrors tryGrok's shape (data-URL image parts).
  */
-async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
+async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<VisionHit | null> {
   // A POOL, not one key (lib/keyPool.ts): the whole comma string used to go out as one bearer token.
   const images = atts.filter((f) => f.type.startsWith('image/'));
   if (images.length === 0) return null;
@@ -152,7 +159,7 @@ async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<strin
       if (!text) throw new Error('GLM vision returned an empty reply');
       o.signal?.throwIfAborted();
       noteProviderCall({ provider: healthProvider, model, surface: 'vision', ok: true, totalMs: Date.now() - started });
-      return text;
+      return hit(text, model, readProviderUsage(r?.usage));
     } catch (err: any) {
       if (!o.signal?.aborted) noteProviderCall({ provider: healthProvider, model, surface: 'vision', ok: false, totalMs: Date.now() - started, error: err });
       console.warn(`[VISION_CHAIN] GLM ${model} failed: ${err?.message || err}`);
@@ -167,7 +174,7 @@ async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<strin
  * Vertex vision (service-account auth) — the Free universe's primary. Through the one Vertex client
  * (`vertexGenAI.ts`, Q-769): the old `@google-cloud/vertexai` is past its own end-of-life date.
  */
-async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
+async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<VisionHit | null> {
   const vertex = vertexGenAI();
   if (!vertex) return null;
   const parts: any[] = [
@@ -188,9 +195,10 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Vertex vision (${modelId})`,
       );
-      await settleFreeTierPaid(budget.hold, geminiUsage((result as any)?.usageMetadata));
+      const usage = geminiUsage((result as any)?.usageMetadata);
+      await settleFreeTierPaid(budget.hold, usage);
       const text = result?.text?.trim();
-      if (text) return text;
+      if (text) return hit(text, modelId, readProviderUsage(usage));
     } catch (err: any) {
       console.warn(`[VISION_CHAIN] Vertex ${modelId} failed: ${err?.message || err}`);
     }
@@ -199,7 +207,7 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
 }
 
 /** API-key Gemini via @google/genai (only when a real GEMINI_API_KEY is present). */
-async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
+async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise<VisionHit | null> {
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!geminiKey) return null;
   const { GoogleGenAI } = await import('@google/genai');
@@ -218,9 +226,10 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Gemini vision (${modelId})`,
       );
-      await settleFreeTierPaid(budget.hold, geminiUsage(result?.usageMetadata));
+      const usage = geminiUsage(result?.usageMetadata);
+      await settleFreeTierPaid(budget.hold, usage);
       const text = (result?.text as string | undefined)?.trim();
-      if (text) return text;
+      if (text) return hit(text, modelId, readProviderUsage(usage));
     } catch (err: any) {
       console.warn(`[VISION_CHAIN] Gemini ${modelId} failed: ${err?.message || err}`);
     }
@@ -229,7 +238,7 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
 }
 
 /** Grok vision (images only — Grok cannot read PDFs). */
-async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
+async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<VisionHit | null> {
   const key = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   const images = atts.filter((f) => f.type.startsWith('image/'));
   if (visionTier(o) === 'free') return null; // 🔒 Grok is never a Free-tier rung
@@ -253,7 +262,7 @@ async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<stri
         `Grok vision (${model})`,
       );
       const text = r?.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
+      if (text) return hit(text, model, readProviderUsage(r?.usage));
     } catch {
       /* try the next Grok model */
     }
@@ -262,7 +271,7 @@ async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<stri
 }
 
 /** Claude vision (images + PDFs). ONLY reachable when allowClaude is true (never Free). */
-async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
+async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<VisionHit | null> {
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (!key || visionTier(o) === 'free') return null; // 🔒 never Claude on Free
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
@@ -274,9 +283,10 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
     { type: 'text', text: o.prompt },
   ];
   o.signal?.throwIfAborted();
+  const claudeModel = claudeVisionAnswerModel();
   const cr: any = await withTimeout(
     claude.messages.create({
-      model: claudeVisionAnswerModel(), max_tokens: 1500,
+      model: claudeModel, max_tokens: 1500,
       system: o.systemPrompt || undefined,
       messages: [{ role: 'user', content }],
     }, ...(o.signal ? [{ signal:o.signal }] : [])),
@@ -284,7 +294,7 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
     'Claude vision',
   );
   const text = (cr?.content?.find((c: any) => c.type === 'text') as any)?.text?.trim();
-  return text || null;
+  return text ? hit(text, typeof cr?.model === 'string' && cr.model ? cr.model : claudeModel, readProviderUsage(cr?.usage)) : null;
 }
 
 /**
@@ -304,7 +314,7 @@ export function visionProviderOrder(allowClaude: boolean, tier: VisionTier = all
 /** The added suppliers get a short budget (catalog + call), so a hang costs seconds, not the 28s default, before GLM. */
 export const VISION_SUPPLIER_TIMEOUT_MS = 10_000;
 /** Run one added supplier under its own short deadline (catalog + call together). The timer is always cleared. */
-async function withSupplierDeadline(o: VisionOptions, run: (opt: VisionOptions) => Promise<{ text: string } | null>): Promise<string | null> {
+async function withSupplierDeadline(o: VisionOptions, run: (opt: VisionOptions) => Promise<{ text: string; model?: string } | null>): Promise<VisionHit | null> {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(new Error(`vision supplier timed out after ${VISION_SUPPLIER_TIMEOUT_MS}ms`)), VISION_SUPPLIER_TIMEOUT_MS);
   try {
@@ -312,7 +322,8 @@ async function withSupplierDeadline(o: VisionOptions, run: (opt: VisionOptions) 
     const opt = { ...o, timeoutMs: Math.min(o.timeoutMs ?? VISION_SUPPLIER_TIMEOUT_MS, VISION_SUPPLIER_TIMEOUT_MS), signal };
     const aborted = new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
     aborted.catch(() => undefined);
-    return (await Promise.race([run(opt), aborted]))?.text ?? null;
+    const reply = await Promise.race([run(opt), aborted]);
+    return reply?.text ? hit(reply.text, reply.model, undefined) : null;
   } finally {
     clearTimeout(timer);
   }
@@ -342,7 +353,7 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
       ...(selected.gatewayPricingProof ? { gatewayPricingProof: selected.gatewayPricingProof } : {}) };
   }
   assertLegacyInferenceAllowed('vision');
-  const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<string | null>> = {
+  const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<VisionHit | null>> = {
     QUBAX: (a, opt) => withSupplierDeadline(opt, so => tryQubaxVision(a, so)),
     CHEAPERINFERENCE: (a, opt) => withSupplierDeadline(opt, so => tryCheaperInferenceVision(a, so)),
     GLM: tryGlm,
@@ -364,10 +375,11 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
     const started = Date.now();
     if (!managedHealth) providerInFlight(provider, 1);
     try {
-      const text = await runners[provider](atts, o);
-      if (text) {
+      const answer = await runners[provider](atts, o);
+      if (answer?.text) {
         if (!managedHealth) noteProviderCall({ provider, surface: 'vision', ok: true, totalMs: Date.now() - started });
-        return { text, provider };
+        // The model and the REPORTED tokens ride along (absent when unreported) so a caller that bills can price them.
+        return { text: answer.text, provider, ...(answer.model ? { model: answer.model } : {}), ...(answer.usage ? { usage: answer.usage } : {}) };
       }
     } catch (err: any) {
       if (!managedHealth && !o.signal?.aborted) noteProviderCall({ provider, surface: 'vision', ok: false, totalMs: Date.now() - started, error: err });

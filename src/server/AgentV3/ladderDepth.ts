@@ -24,7 +24,7 @@
 
 import type { LadderRung } from './tierLadder';
 import { UNATTRIBUTED_PROVIDER } from './ProviderUsageLedger';
-import { PHASE_PLANNER, PHASE_SCOPE } from './billingPhase';
+import { PHASE_GAME_PHOTO_JUDGE, PHASE_PLANNER, PHASE_SCOPE } from './billingPhase';
 
 /** The slice of a provider-ledger entry this module needs. Structural, so the ledger can grow. */
 export interface DeliveredSlice {
@@ -134,6 +134,7 @@ export function ladderDepthUsed(
     if (normalise(slice.provider) === UNATTRIBUTED_PROVIDER) { unattributedOutput++; continue; }
     // Q-2751: the scope classification ran before the build and delivered no part of it.
     if (slice.phase === PHASE_SCOPE || slice.phase === PHASE_PLANNER) continue; // …nor the roadmap planner (failedbr #1200)
+    if (slice.phase === PHASE_GAME_PHOTO_JUDGE) continue; // …nor the game photo judge: a vision model is no rung of the build
 
     const idx = rungIndexFor(slice, rungs);
     if (idx == null) {

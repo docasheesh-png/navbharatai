@@ -28,6 +28,7 @@ import { reportRuleProbes, reportFeaturesOff } from './gameRuleProbes';
 import { gameFeatureEvidence, gameProof, gameProofIssue } from '../gameProof';
 import type { KeepResult } from '../gameProofPictures';
 import type { ProofShot } from '../gamePlaytest';
+import { photoJudgeRecord, type PhotoJudgeInput, type PhotoJudgeOutcome, type PhotoQuestionKind } from '../gamePhotoJudge';
 
 /** What decides whether the game can be played now. All true ⇒ played; otherwise the reason is said. */
 export interface PlaytestFacts {
@@ -60,7 +61,7 @@ export interface GamePlaytestResult {
   placeholders?: PlaceholderFinding[];
 }
 
-export interface PlaytestIssue { phase: 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }
+export interface PlaytestIssue { phase: 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string; adminDetail?: string }
 
 export interface GamePlaytestPorts {
   facts: PlaytestFacts;
@@ -86,6 +87,11 @@ export interface GamePlaytestPorts {
    * Optional: absent, GAME_PROOF says the pictures stay in the sandbox, as before.
    */
   keepPictures?: (shots: ProofShot[]) => Promise<KeepResult | null>;
+  /**
+   * Kadam 1: looks at the proof pictures and answers this request's yes/no questions (gamePhotoJudge.ts). A clear NO
+   * becomes GAME_DEFECT_ASK_NOT_MET; anything else says nothing. Optional: absent, nothing looks at the pictures.
+   */
+  judgePhotos?: (input: PhotoJudgeInput) => Promise<PhotoJudgeOutcome>;
 }
 
 /** The workspace's file list, or [] when it fails or takes longer than `ms` (the timer is always cleared). */
@@ -142,6 +148,7 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
       // 🧸 The placeholder look (gamePlaceholderProbe.ts): a stand-in where the real thing should be — a model that is not
       // there, a texture that failed, a frozen character, a player under water, a blank map, controls nobody can see. One
       // info line for the admin; the next game turn hands it to the builder to repair, and that turn's playtest looks again.
+      const pageMissing = new Set<PhotoQuestionKind>(); // what the page probe already found missing (not asked again)
       if (gamePlaceholderProbeEnabled()) {
         // Bounded: a slow listing must never hold the build — after 5 s the file check says nothing.
         const present = p.listFiles ? await listWithin(p.listFiles, 5000) : [];
@@ -154,10 +161,18 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         // 🧾 KADAM 2: WHAT THIS REQUEST ASKED FOR IS PROVED, NOT CLAIMED (build report #2535). An asked-for thing the page
         // showed is not there becomes a defect the completion gate reads, so the build is never reported done without it.
         // A page that was not read says nothing (no finding), so "could not look" is never turned into "missing".
-        for (const f of fromPage) if (f.kind === 'MISSING_ENEMIES' || f.kind === 'MISSING_HELD') out.played.defects.push({ code: 'GAME_DEFECT_ASK_NOT_MET', evidence: f.evidence });
+        for (const f of fromPage) {
+          if (f.kind !== 'MISSING_ENEMIES' && f.kind !== 'MISSING_HELD') continue;
+          out.played.defects.push({ code: 'GAME_DEFECT_ASK_NOT_MET', evidence: f.evidence });
+          pageMissing.add(f.kind === 'MISSING_ENEMIES' ? 'enemies' : 'held');
+        }
         const placeholderMsg = placeholderFindingsMessage(placeholders);
         if (placeholderMsg) p.record({ phase: 'preview', severity: 'info', code: GAME_PLACEHOLDER_CODE, message: placeholderMsg, autoResolved: true });
       }
+      // 📸 KADAM 1: THE PHOTO JUDGE (gamePhotoJudge.ts). The proof pictures are looked at for what THIS request asked for; a
+      // clear NO is the same asked-for-not-met defect the page probe gives. What the page already found missing is not
+      // asked again. Bounded and billed inside the judge; a judge that could not look says nothing about the game.
+      await judgePhotos(p, playRun, out.played.defects, pageMissing);
       // Too heavy for a budget phone: a real defect of the user's game, with a one-tap fix (buildFindingSuggestions).
       const heavy = measured.find((d) => d.code === 'GAME_DEFECT_TOO_HEAVY');
       if (heavy) p.record({ phase: 'preview', severity: 'warning', code: 'GAME_TOO_HEAVY', message: `Too heavy for budget phones: ${heavy.evidence}.`, autoResolved: false });
@@ -228,10 +243,28 @@ function notPlayed(p: GamePlaytestPorts): GamePlaytestResult | null {
   return out;
 }
 
+/** Kadam 1: the photo judge on a played run's pictures — its NO answers join the defects, its line goes to the admin. Never throws. */
+async function judgePhotos(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest>, defects: ReturnType<typeof playtestDefects>, skip: ReadonlySet<PhotoQuestionKind>): Promise<void> {
+  if (!p.judgePhotos || !run?.ok) return;
+  try {
+    const shots = playedShots(run);
+    if (shots.length === 0) return;
+    const outcome = await p.judgePhotos({ shots, request: p.request ?? null, contract: p.contract, skip });
+    for (const d of outcome.defects) defects.push(d);
+    const line = photoJudgeRecord(outcome);
+    if (line) p.record(line);
+  } catch { /* observation only */ }
+}
+
+/** The pictures a played run took (an entry with an error is no picture). PURE. */
+function playedShots(run: ReturnType<typeof parsePlaytest>): ProofShot[] {
+  return (run?.proofShots ?? []).filter((s): s is ProofShot => !!s && !('error' in s) && typeof (s as ProofShot).id === 'string');
+}
+
 /** Q-3363: the pictures a played run took, kept privately for the admin. null when none or no keeper. Never throws. */
 async function keptPictures(p: GamePlaytestPorts, run: ReturnType<typeof parsePlaytest>): Promise<KeepResult | null> {
   if (!p.keepPictures || !run?.ok) return null;
-  const shots = (run.proofShots ?? []).filter((s): s is ProofShot => !!s && !('error' in s) && typeof (s as ProofShot).id === 'string');
+  const shots = playedShots(run);
   if (shots.length === 0) return null;
   try { return await p.keepPictures(shots); } catch { return null; }
 }

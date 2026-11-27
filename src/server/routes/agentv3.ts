@@ -539,7 +539,7 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel, type BilledUsage } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd, SurplusAccountingUnavailableError } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
-import { runInBillingPhase, currentBillingPhase, PHASE_PLANNER, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, PHASE_SCOPE, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { runInBillingPhase, currentBillingPhase, PHASE_PLANNER, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_GAME_PHOTO_JUDGE, PHASE_POST_FIX_REVIEW, PHASE_SCOPE, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
 import { bugHuntCostReading, bugHuntCostLine } from '../AgentV3/bugHuntCost';
 import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
@@ -598,6 +598,7 @@ import { type GameFixPorts } from '../AgentV3/buildPhases/gameFixVerdict';
 import { runGamePlaytestPhase, runGamePlaceholderRepairPhase, type GamePlaceholderRepairPorts, type GamePlaytestPorts, type GamePlaytestResult } from '../AgentV3/buildPhases/gamePlaytestPhase';
 import { PLACEHOLDER_REPAIR_TOOLS, PLACEHOLDER_REPAIR_MAX_STEPS, PLACEHOLDER_REPAIR_MAX_TOKENS_PER_TURN } from '../AgentV3/gamePlaceholderRepair';
 import { gameProofKeeper } from '../AgentV3/gameProofPictures';
+import { gamePhotoJudgePort } from '../AgentV3/gamePhotoJudge';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
@@ -24924,6 +24925,7 @@ async function noteBuildOutcome(
           turnStartedAt: buildStartedAt,
           fix: gameFixPorts,
           keepPictures: gameProofKeeper({ buildId, verifiedOwnerUid: verified?.uid, run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined }), // Q-3363, filed by the VERIFIED owner (Q-3410)
+          judgePhotos: gamePhotoJudgePort({ run: actuator.runCommand ? (c) => actuator.runCommand!(workspaceId, c) : undefined, recordUsage: captureTurnUsage, markBarren: () => barrenPhases.add(PHASE_GAME_PHOTO_JUDGE), power: powerLevelReqEffective, timeLeft: () => roomFor(40_000) }), // Kadam 1 (gamePhotoJudge.ts)
         }, gamePlayKeep);
         if (played) { gamePlayKeep.play = played; applyGamePlayed(played); }
       };

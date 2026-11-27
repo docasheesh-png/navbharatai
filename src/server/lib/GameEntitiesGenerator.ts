@@ -44,6 +44,40 @@ export interface EntityHost {
   scene: THREE.Scene;
   player: { object: THREE.Object3D };
   onStep?: (fn: (delta: number) => void) => () => void;
+  /** The game's camera and canvas (the shell's ctx has both): with them, hostiles get on-screen markers (ENEMY_MARKERS). */
+  camera?: THREE.Camera;
+  renderer?: { domElement: HTMLElement };
+}
+
+/**
+ * 🎯 WHO IS SHOOTING ME? (Kadam 4, 2026-11-26 — the reference game's answer to "goli kaun maar raha pata nahi"). A player
+ * must see at a glance: who, where, how far, and whether they are attacking right now. Every hostile in front of the camera
+ * within ENEMY_MARKERS.range gets a red ▼ with its distance above its head (yellow while it attacks), and every attack that
+ * lands shows an arrow at the edge of the screen pointing to where it came from. Drawn by Entities itself, so a game that
+ * spawns enemies with the kit has them without wiring anything. EntityOptions.markers = false turns it off.
+ */
+export const ENEMY_MARKERS = { range: 120, attackingSeconds: 0.6, arrowSeconds: 1.3, maxArrows: 6 } as const;
+
+/** Where a world point lands on a w×h screen, or null when it is behind the camera or off the screen. PURE. */
+export function screenPoint(camera: THREE.Camera, point: THREE.Vector3, w: number, h: number): { x: number; y: number } | null {
+  const v = point.clone().project(camera);
+  if (!(v.z > -1 && v.z < 1) || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) return null;
+  return { x: (v.x + 1) / 2 * w, y: (1 - v.y) / 2 * h };
+}
+
+/**
+ * The angle of an attacker around the screen centre, seen from the camera: 0 = straight ahead (top of the screen),
+ * +π/2 = to the right, ±π = behind (bottom). Measured on the ground plane. PURE.
+ */
+export function threatAngle(camera: THREE.Camera, player: THREE.Vector3, attacker: THREE.Vector3): number {
+  const f = new THREE.Vector3();
+  camera.getWorldDirection(f);
+  f.y = 0;
+  if (f.lengthSq() < 1e-9) f.set(0, 0, -1);
+  f.normalize();
+  const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();   // the camera's right on the ground
+  const dx = attacker.x - player.x, dz = attacker.z - player.z;
+  return Math.atan2(dx * r.x + dz * r.z, dx * f.x + dz * f.z);
 }
 
 export interface CharacterSpec {
@@ -106,6 +140,8 @@ export interface EntityOptions {
   maxAttackers?: number;
   /** Seconds after it spawns before a hostile may attack. Default ENTITY_BALANCE.attackGraceSeconds. */
   attackGraceSeconds?: number;
+  /** On-screen markers over hostiles and hit-direction arrows (ENEMY_MARKERS). Default true when the host has a camera. */
+  markers?: boolean;
 }
 
 /**
@@ -379,6 +415,7 @@ export class Entities {
     const me: Vec2 = { x: player.x, z: player.z };
     const far: Vec2 = { x: 1e9, z: 1e9 };
     this.clock += dt;
+    this.drawMarkers();
     for (const e of [...this.list]) {
       e.health.tick(dt);
       e.cooldown.tick(dt);
@@ -496,8 +533,83 @@ export class Entities {
     return hit;
   }
 
+  private overlay: HTMLDivElement | null = null;
+  private readonly marks = new Map<string, HTMLDivElement>();
+  private readonly arrows: Array<{ el: HTMLDivElement; born: number }> = [];
+
+  /** The layer the markers sit in: over the game's canvas, never catching a tap. null without a DOM or a camera. */
+  private layer(): HTMLDivElement | null {
+    if (this.overlay) return this.overlay;
+    if (this.options.markers === false || !this.host.camera || typeof document === 'undefined') return null;
+    const parent = this.host.renderer?.domElement?.parentElement ?? document.body;
+    const el = document.createElement('div');
+    el.setAttribute('data-nb-enemy-markers', '');
+    el.setAttribute('aria-hidden', 'true');
+    el.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:5;font:600 11px system-ui,sans-serif';
+    if (parent !== document.body && getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+    parent.appendChild(el);
+    this.overlay = el;
+    return el;
+  }
+
+  private drawMarkers(): void {
+    const layer = this.layer();
+    const camera = this.host.camera;
+    if (!layer || !camera) return;
+    const w = layer.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0), h = layer.clientHeight || (typeof innerHeight === 'number' ? innerHeight : 0);
+    const player = this.host.player.object.position;
+    const seen = new Set<string>();
+    for (const e of this.list) {
+      if (!e.alive || !e.hostile) continue;
+      const p = e.object.position;
+      const far = Math.hypot(p.x - player.x, p.z - player.z);
+      if (far > ENEMY_MARKERS.range) continue;
+      const at = screenPoint(camera, new THREE.Vector3(p.x, p.y + e.height + 0.35, p.z), w, h);
+      if (!at) continue;
+      seen.add(e.id);
+      let m = this.marks.get(e.id);
+      if (!m) {
+        m = document.createElement('div');
+        m.style.cssText = 'position:absolute;transform:translate(-50%,-100%);text-align:center;text-shadow:0 1px 2px #000;white-space:nowrap';
+        layer.appendChild(m);
+        this.marks.set(e.id, m);
+      }
+      const attacking = this.clock - e.lastAttackAt <= ENEMY_MARKERS.attackingSeconds;
+      m.style.color = attacking ? '#ffd23f' : '#ff3b3b';
+      m.textContent = '\u25BC ' + Math.round(far) + ' m';
+      m.style.left = at.x + 'px';
+      m.style.top = at.y + 'px';
+    }
+    for (const [id, m] of this.marks) if (!seen.has(id)) { m.remove(); this.marks.delete(id); }
+    for (let i = this.arrows.length - 1; i >= 0; i--) {
+      const a = this.arrows[i];
+      const age = this.clock - a.born;
+      if (age > ENEMY_MARKERS.arrowSeconds) { a.el.remove(); this.arrows.splice(i, 1); } else a.el.style.opacity = String(1 - age / ENEMY_MARKERS.arrowSeconds);
+    }
+  }
+
+  /** An arrow near the screen edge pointing to where the attack came from. */
+  private threatArrow(from: THREE.Vector3): void {
+    const layer = this.layer();
+    const camera = this.host.camera;
+    if (!layer || !camera) return;
+    const angle = threatAngle(camera, this.host.player.object.position, from);
+    const el = document.createElement('div');
+    el.setAttribute('data-nb-threat', String(Math.round(angle * 100) / 100));
+    // A long, narrow arrow: a near-equilateral triangle turned 60° looks the same as one turned 180°, so its point was unreadable.
+    el.style.cssText = 'position:absolute;left:50%;top:50%;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:30px solid #ff3b3b;'
+      + 'transform:translate(-50%,-50%) rotate(' + angle + 'rad) translateY(-32vmin)';
+    layer.appendChild(el);
+    this.arrows.push({ el, born: this.clock });
+    while (this.arrows.length > ENEMY_MARKERS.maxArrows) this.arrows.shift()!.el.remove();
+  }
+
   /** Remove every entity and stop ticking. */
   dispose(): void {
+    this.overlay?.remove();
+    this.overlay = null;
+    this.marks.clear();
+    this.arrows.length = 0;
     for (const e of [...this.list]) e.remove();
     this.off?.();
     this.offShot();
@@ -555,6 +667,7 @@ export class Entities {
 
   private attack(e: Inner): void {
     e.lastAttackAt = this.clock;
+    this.threatArrow(e.object.position);
     e.humanoid?.act(e.config.role === 'ranged' ? 'fire' : 'punch');
     const p = e.object.position;
     this.options.playerHealth?.damage(e.damage, { x: p.x, y: p.y, z: p.z });

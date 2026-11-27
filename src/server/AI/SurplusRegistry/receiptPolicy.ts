@@ -2,7 +2,9 @@
  * Pure, server-only accounting policy. This module does not authorize dispatch, verify
  * a signature, fetch tariffs, or debit a wallet. Its evidence MUST come from trusted
  * backend response validation and independently reviewed immutable tariff snapshots,
- * never from user input, a model answer, or marketplace direct_* reference prices.
+ * never from user input, a model answer, or marketplace direct_* reference prices. (Exception, admin 2026-11-27:
+ * the bound offer's direct/effective rate RATIO caps the user CHARGE at list price — see `listPrice`. It never
+ * becomes supplier expense or the official ceiling.)
  *
  * Counts are disjoint: input excludes both caches; output excludes reasoning. A
  * documented reasoning subset of completion_tokens must be partitioned, not added
@@ -15,7 +17,13 @@
  */
 import { createHash } from 'node:crypto';
 
-export const SURPLUS_BUILD_POLICY_ID = 'surplus-build-10x-official-cap-v1' as const;
+/**
+ * v2 (admin 2026-11-27): user charge = min(10 × verified actual cost, the model's list price for the same usage).
+ * v1 (admin 2026-10-30) was a flat 10 × actual with no list cap; its id is kept so older receipts stay distinguishable
+ * (a v1 prior settlement is still read as a valid record, never re-priced).
+ */
+export const SURPLUS_BUILD_POLICY_ID = 'surplus-build-10x-list-cap-v2' as const;
+export const SURPLUS_BUILD_POLICY_ID_V1 = 'surplus-build-10x-official-cap-v1' as const;
 export const SURPLUS_USAGE_DIMENSIONS = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const;
 export type SurplusUsageDimension = typeof SURPLUS_USAGE_DIMENSIONS[number];
 export type SurplusTokenCounts = Record<SurplusUsageDimension, string>;
@@ -80,7 +88,7 @@ export type SurplusOutputDisposition = 'accepted' | 'failed' | 'malformed' | 'di
 export interface SurplusPriorSettlement {
   accountingIdentity: string;
   evidenceFingerprint: string;
-  policyId: typeof SURPLUS_BUILD_POLICY_ID;
+  policyId: typeof SURPLUS_BUILD_POLICY_ID | typeof SURPLUS_BUILD_POLICY_ID_V1;
   actualCostUsd: string;
   userChargeUsd: string;
 }
@@ -93,6 +101,13 @@ export interface SurplusReceiptPolicyInput {
   tariff: SurplusOfficialTariff | null;
   now: number;
   priorSettlements?: readonly SurplusPriorSettlement[];
+  /**
+   * The bound offer's own published per-million rates from the market feed (`rates` = what the seller charges,
+   * `referenceRates` = the model's direct/list price), used ONLY for the list-price cap. Both come from the same feed in
+   * the same unit, so only their RATIO is used and no unit is assumed. Absent or incomplete → the list price is
+   * unknown and the charge stays 10 × actual (the v1 behaviour), labelled as such — a cost is never invented.
+   */
+  listPrice?: { rates: Partial<Record<SurplusUsageDimension, string>>; referenceRates: Partial<Record<SurplusUsageDimension, string>> } | null;
 }
 export interface SurplusReceiptDecision {
   policyId: typeof SURPLUS_BUILD_POLICY_ID;
@@ -172,7 +187,8 @@ function validUsage(value: unknown): value is SurplusNormalizedUsage {
 }
 function validEndpoint(value: unknown): value is string {
   // Bind to the exact official endpoint, never a seller-supplied URL.
-  return typeof value === 'string' && /^https:\/\/api\.surplusintelligence\.ai\/(?:min(?:30|90)\/)?v1(?:\/chat\/completions)?$/.test(value);
+  // Any documented `min{N}` floor (0–100, no leading zeros), or the bare route; the floor itself is policed at dispatch.
+  return typeof value === 'string' && /^https:\/\/api\.surplusintelligence\.ai\/(?:min(?:0|[1-9]\d?|100)\/)?v1(?:\/chat\/completions)?$/.test(value);
 }
 function officialSource(value: unknown): value is string {
   if (!isText(value)) return false;
@@ -269,6 +285,30 @@ export function normalizeSurplusUsage(input: {
     tokens: Object.fromEntries(SURPLUS_USAGE_DIMENSIONS.map(key => [key, tokens[key].toString()])) as SurplusTokenCounts };
 }
 
+const LIST_EXTRA_DIGITS = 12;
+const LIST_EXTRA_SCALE = 10n ** BigInt(LIST_EXTRA_DIGITS);
+/**
+ * list / actual for this call's usage, from the bound offer's own rates: Σ tokens × reference ÷ Σ tokens × effective.
+ * Cache tokens are weighted at the input rates and reasoning tokens at the output rates (the feed publishes input and
+ * output only), so the ratio is the offer's discount for this call's input/output mix. Null — "unknown" — when a needed
+ * rate is missing or malformed, or when the reference is not above the effective price (a nonsensical offer). PURE.
+ */
+function listToActualRatio(tokens: SurplusTokenCounts, listPrice: SurplusReceiptPolicyInput['listPrice']): { num: bigint; den: bigint } | null {
+  if (!isRecord(listPrice) || !isRecord(listPrice.rates) || !isRecord(listPrice.referenceRates)) return null;
+  const rate = (value: unknown): bigint | null => typeof value === 'string' && /^\d{1,15}(?:\.\d{1,6})?$/.test(value)
+    ? BigInt(value.split('.')[0]) * 1_000_000n + BigInt((value.split('.')[1] ?? '').padEnd(6, '0')) : null;
+  const t = (key: SurplusUsageDimension) => parseTokens(tokens[key]) ?? 0n;
+  const weights = { input: t('input') + t('cacheRead') + t('cacheWrite'), output: t('output') + t('reasoning') };
+  let num = 0n, den = 0n;
+  for (const key of ['input', 'output'] as const) {
+    if (weights[key] === 0n) continue;
+    const reference = rate(listPrice.referenceRates[key]), effective = rate(listPrice.rates[key]);
+    if (reference === null || effective === null) return null;
+    num += weights[key] * reference; den += weights[key] * effective;
+  }
+  return den > 0n && num >= den ? { num, den } : null;
+}
+
 function evaluateReceipt(input: SurplusReceiptPolicyInput): SurplusReceiptDecision {
   const result: SurplusReceiptDecision = {
     policyId: SURPLUS_BUILD_POLICY_ID, status: 'blocked', reason: 'invalid_input',
@@ -298,7 +338,7 @@ function evaluateReceipt(input: SurplusReceiptPolicyInput): SurplusReceiptDecisi
     if (!Array.isArray(input.priorSettlements) || input.priorSettlements.length > MAX_PRIOR_SETTLEMENTS) return { ...result, reason: 'invalid_prior_settlements', newSupplierExpenseUsd: null };
     let prior: SurplusPriorSettlement | undefined;
     for (const candidate of input.priorSettlements) {
-      if (!isRecord(candidate) || !isText(candidate.accountingIdentity) || !isHash(candidate.evidenceFingerprint) || candidate.policyId !== SURPLUS_BUILD_POLICY_ID || !parseDecimal(candidate.actualCostUsd) || !parseDecimal(candidate.userChargeUsd, 30)) return { ...result, reason: 'invalid_prior_settlements', newSupplierExpenseUsd: null };
+      if (!isRecord(candidate) || !isText(candidate.accountingIdentity) || !isHash(candidate.evidenceFingerprint) || (candidate.policyId !== SURPLUS_BUILD_POLICY_ID && candidate.policyId !== SURPLUS_BUILD_POLICY_ID_V1) || !parseDecimal(candidate.actualCostUsd) || !parseDecimal(candidate.userChargeUsd, 30)) return { ...result, reason: 'invalid_prior_settlements', newSupplierExpenseUsd: null };
       if (candidate.accountingIdentity !== result.accountingIdentity) continue;
       if (candidate.evidenceFingerprint !== result.evidenceFingerprint || compare(parseDecimal(candidate.actualCostUsd)!, actual) !== 0 || (prior && compare(parseDecimal(candidate.userChargeUsd, 30)!, parseDecimal(prior.userChargeUsd, 30)!) !== 0)) return { ...result, status: 'conflict', reason: 'conflicting_duplicate_receipt', newSupplierExpenseUsd: '0' };
       prior = candidate as unknown as SurplusPriorSettlement;
@@ -334,11 +374,22 @@ function evaluateReceipt(input: SurplusReceiptPolicyInput): SurplusReceiptDecisi
   if (!bounded(ceiling)) return unavailableCeiling('official_ceiling_exceeds_accounting_bound');
   if (absorptionReason) return { ...result, status: 'absorbed', reason: absorptionReason, officialCeilingUsd: format(ceiling) };
   const markedUp = { coefficient: actual.coefficient * 10n, scale: actual.scale };
-  // Admin 2026-10-30: Surplus charge = verified Surplus cost × 10, flat (no list-tariff cap).
+  // Admin 2026-11-27 ("List price par cap"): charge = min(10 × verified actual, the list price of the same usage).
+  // At a ≥ 90% discount 10 × actual ≤ list anyway; between 85% and 90% the list price is the cap.
   // Weak / Normal / Strong billing is untouched — this path prices Surplus receipts only.
-  const charge = markedUp;
-  return { ...result, status: 'chargeable', reason: 'ten_times_verified_actual_cost',
-    officialCeilingUsd: format(ceiling), userChargeUsd: format(charge), absorbedCostUsd: differenceFloorZero(actual, charge) };
+  const ratio = listToActualRatio(receipt.usage.tokens, input.listPrice);
+  if (!ratio) {
+    return { ...result, status: 'chargeable', reason: 'ten_times_verified_actual_cost_list_price_unknown',
+      officialCeilingUsd: format(ceiling), userChargeUsd: format(markedUp), absorbedCostUsd: differenceFloorZero(actual, markedUp) };
+  }
+  if (ratio.num >= ratio.den * 10n) {
+    return { ...result, status: 'chargeable', reason: 'ten_times_verified_actual_cost',
+      officialCeilingUsd: format(ceiling), userChargeUsd: format(markedUp), absorbedCostUsd: differenceFloorZero(actual, markedUp) };
+  }
+  // list = actual × num / den, rounded DOWN (a call is never rounded up above its cap). Never below actual: num ≥ den.
+  const listCharge: Decimal = { coefficient: (actual.coefficient * ratio.num * LIST_EXTRA_SCALE) / ratio.den, scale: actual.scale + LIST_EXTRA_DIGITS };
+  return { ...result, status: 'chargeable', reason: 'list_price_cap',
+    officialCeilingUsd: format(ceiling), userChargeUsd: format(listCharge), absorbedCostUsd: differenceFloorZero(actual, listCharge) };
 }
 
 // A caller cannot manufacture a trusted decision by deserializing user-controlled JSON.

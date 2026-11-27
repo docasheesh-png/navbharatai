@@ -1,9 +1,12 @@
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { SURPLUS_CLAUDE_MIN_DISCOUNT_PCT, SURPLUS_MIN_DISCOUNT_PCT, surplusBaseUrl } from '../AI/SurplusRegistry/config';
 
 export const SURPLUS_BASE_URL = 'https://api.surplusintelligence.ai/v1';
-export const SURPLUS_MIN30_BASE_URL = 'https://api.surplusintelligence.ai/min30/v1';
-export const SURPLUS_MIN90_BASE_URL = 'https://api.surplusintelligence.ai/min90/v1';
+export const SURPLUS_MIN30_BASE_URL = surplusBaseUrl(30);
+/** The builder floor (admin 2026-11-27) and its Claude-on-Weak floor — both from SurplusRegistry/config.ts. */
+export const SURPLUS_MIN85_BASE_URL = surplusBaseUrl(SURPLUS_MIN_DISCOUNT_PCT);
+export const SURPLUS_MIN90_BASE_URL = surplusBaseUrl(SURPLUS_CLAUDE_MIN_DISCOUNT_PCT);
 export const SURPLUS_DEFAULT_MODEL = 'deepseek-v4.1-flash';
 export const SURPLUS_TIMEOUT_MS = 60_000;
 
@@ -72,7 +75,7 @@ export function createSurplusChat(
   const baseURL = (env.SURPLUS_BASE_URL?.trim() || SURPLUS_BASE_URL).replace(/\/$/, '');
   // Exact allowlist rejects Markdown links, credentials, query strings and lookalike hosts.
   if (!apiKey || apiKey === 'replace_with_your_surplus_api_key' ||
-      ![SURPLUS_BASE_URL, SURPLUS_MIN30_BASE_URL, SURPLUS_MIN90_BASE_URL].includes(baseURL)) {
+      ![SURPLUS_BASE_URL, SURPLUS_MIN30_BASE_URL, SURPLUS_MIN85_BASE_URL, SURPLUS_MIN90_BASE_URL].includes(baseURL)) {
     throw new SurplusError('configuration');
   }
   const defaultModel = env.SURPLUS_MODEL?.trim() || SURPLUS_DEFAULT_MODEL;

@@ -15,6 +15,7 @@
 
 import ts from 'typescript';
 import { Worker } from 'node:worker_threads';
+import { BoundedCache } from '../boundedCache';
 import type { MapProfile as AthreeProfile } from './athreeMapLibrary';
 
 /**
@@ -74,12 +75,12 @@ const RUNNER = new Function(RUNNER_SOURCE + '\nreturn { loadEmitted: loadEmitted
  * TypeScript → JavaScript, cached by source text. The Athree modules are constants (only config.ts carries the map's choice), so a
  * server transpiles each one once in its life (a few hundred milliseconds, the first time) and the worker never loads TypeScript.
  */
-const transpiled = new Map<string, string>();
+// About 25 module sources exist; config.ts varies per map choice, so the least-recently-used entries give way past 200.
+const transpiled = new BoundedCache<string, string>({ maxEntries: 200 });
 function transpile(source: string): string {
   const hit = transpiled.get(source);
   if (hit !== undefined) return hit;
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-  if (transpiled.size > 400) transpiled.clear();
   transpiled.set(source, js);
   return js;
 }

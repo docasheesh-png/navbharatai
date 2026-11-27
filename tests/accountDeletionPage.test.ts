@@ -158,6 +158,10 @@ describe('the page and the deletion code do not drift apart', () => {
       shares: /share links/i,
       // Added 2026-11-26 (Q-3702): the native build rows, erased after their files.
       mobile_native_builds: /phone app builds.*\.apk \/ \.aab/i,
+      // Added 2026-11-27 (Q-3703, admin decision (a)): the keys go with the account, said with the consequence
+      // and the download step, because the loss is permanent for an app already on Google Play.
+      mobile_signing_keys: /saved app signing keys.*can never again publish an update.*\*\*download\*\* each one/is,
+      mobile_signing_key_events: /the record of when each key was used/i,
       pwa_apps: /instantly-hosted apps/i,
       user_referrals: /referral record/i,
       /** Said with its limit, because half of this one is not ours to do. */

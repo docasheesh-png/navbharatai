@@ -27,10 +27,11 @@ describe('Q-3702 — native build job rows are erased with the account, after th
     expect(del.indexOf('eraseUserNativeArtifacts(identity.uid)')).toBeLessThan(del.indexOf('deleteUserData(db, identity.uid)'));
   });
 
-  it('the signing keys are NOT erased here: that is the admin decision in Q-3703', () => {
+  it('the signing keys and their events are erased too, keys first (Q-3703, admin decision (a))', () => {
     const names = USER_SCOPED_COLLECTIONS.map((c) => c.collection);
-    expect(names).not.toContain('mobile_signing_keys');
-    expect(names).not.toContain('mobile_signing_key_events');
+    expect(USER_SCOPED_COLLECTIONS.find((c) => c.collection === 'mobile_signing_keys')?.key).toEqual({ field: 'userId' });
+    expect(USER_SCOPED_COLLECTIONS.find((c) => c.collection === 'mobile_signing_key_events')?.key).toEqual({ field: 'userId' });
+    expect(names.indexOf('mobile_signing_keys')).toBeLessThan(names.indexOf('mobile_signing_key_events'));
   });
 });
 

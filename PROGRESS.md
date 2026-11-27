@@ -6776,6 +6776,19 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   which now waits its turn instead of falling back.
 - Tests: `assetProviderBudget.test.ts` (+5), `tests/assetsAndSoundsArePreparedSideBySide.test.ts` (8; #2523 cold-cache
   shape). Every test was reverted and seen to fail.
+## 2026-11-27 — Q-3703: saved signing keys leave with the account, warned first, with a real download (PR #4616)
+- Admin decision (a), 2026-11-27. `mobile_signing_keys` and `mobile_signing_key_events` are now erased by DELETE /api/profile
+  (`USER_SCOPED_COLLECTIONS`, keys before events); the census reclassifies both from `blocked` to `user`.
+- `openKeyForSigning` is one transaction (read key → update `lastUsedAt` → write 'used' event), so a build signing during
+  the erase cannot leave an event behind or re-create a row; a key already gone fails the build as SIGNING_KEY_MISSING.
+- No key download existed (only the one-time backup at "Create a new key"). Built: `GET /api/mobile-builds/signing-keys`
+  (metadata, 502 when unreadable, never `[]`), `POST /api/mobile-builds/signing-key/export` (own key only, audited
+  'exported', no-store, rate-limited), client `src/lib/signingKeyDownload.ts`; used by the Danger zone and a new
+  "Download my key" button in the Native Cloud Build panel.
+- Danger zone: red warning only when the server reports keys (or the check failed), per-app "Download key", passwords
+  shown after download, and an "I understand" tick before "Permanently delete" can be pressed.
+- Still open (noted in the PR): an import/generate request already running in another tab when the account is deleted
+  could still save a key after the erase — the same race every user store has with the deletion route.
 ### 2026-11-27 — Kadam 1: the game photo judge (`gamePhotoJudge.ts`)
 - After a game turn's playtest, at most 3 yes/no questions from THIS request (item in hand, enemies, ground/road not hazed or
   under water, houses) go with the proof pictures to the vision chain in one call (25 s hard limit). A clear NO →

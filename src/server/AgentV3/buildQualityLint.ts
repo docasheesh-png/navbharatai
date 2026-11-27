@@ -23,12 +23,13 @@
 
 import ts from 'typescript';
 import {
-  lintDesign, designSummary, TOKEN_MODULE_PATH, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
+  lintDesign, withUnstyledClasses, designSummary, TOKEN_MODULE_PATH, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
 } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
 import { blankOurMarkup } from './ourInjectedMarkup';
 import { isKnownKitVersion } from '../lib/gameRecipeLayers';
+import { findUndefinedClasses } from './CssConsistency';
 
 /**
  * Source files worth linting. Everything else is noise the linters would only mis-read.
@@ -242,7 +243,8 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   return {
     markupObserved,
     designObserved: markupObserved || styleObserved,
-    design: lintDesign(joined, { tokenModuleCode, colorCode: colorParts.join('\n') }),
+    // The screens' classes with no style rule count against the design too (failedbr #2555: 100/A beside 47 unstyled classes).
+    design: withUnstyledClasses(lintDesign(joined, { tokenModuleCode, colorCode: colorParts.join('\n') }), findUndefinedClasses(files)),
     a11y: lintA11y(joined),
     fileCount,
     truncated,

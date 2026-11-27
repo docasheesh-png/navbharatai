@@ -6743,3 +6743,15 @@ NavBharatAI's game maker and asked for a 6-step plan, then "bina ruke sabhi kaam
 ### 2026-11-27 — Queue: Q-3561, Q-3702, Q-3704 closed
 - #4601 (prompt triage precision, Q-3561) and #4602 (native build rows erased with the account, census reads call receivers, expired shares purged — Q-3702, Q-3704) merged and deployed (Cloud Build succeeded for 07d70213 and 4ce04b96). Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.
 - Watch on the next real runs: `[share-purge]` log line daily at 03:25 UTC (needs `DATA_RETENTION_PURGE_ENABLED=on`); admin safety flags labelled "False alarm" for prompts the current rules allow.
+
+## 2026-11-27 — Autopsy of failedbr #2555 (8b4e7f6b) — Q-3720…Q-3728
+New build, mini tier, STOPPED at 7.9 min by the wallet guard (provisional ₹126.14 > balance ₹93.63; final bill ₹0, real $0.37).
+Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGINE_DT benched), 1 shipped-broken stop, 1 skip
+(the styles turn cut), struggles (two silences of 164 s and 186 s; 64% of the clock on calls that returned nothing).
+- Q-3720 RESOLVED in this branch: design 100/A beside 47 unstyled classes → `withUnstyledClasses`.
+- Q-3721 (offensive-hacking prompt untriaged), Q-3722 (wallet guard prices the markup before any preview; estimate ignores the
+  fallback rung) — admin decisions, options and recommendations in the queue rows.
+- Recurrences, still blocked: Q-3724 = Q-1121 (150 s reasoning-only), Q-3725 = Q-1210 (KIMI balance), Q-3723 ≈ Q-2306 (a route
+  outside the declared ladder); Q-3726 ENGINE_DT silence (external).
+- Q-3727, Q-3728: not defects, with evidence — waiting for the admin's agreement.
+

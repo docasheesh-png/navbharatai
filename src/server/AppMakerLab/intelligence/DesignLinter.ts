@@ -8,7 +8,7 @@
 // This is a *consistency* linter (works from the code alone). A future pass can additionally compare
 // against a specific brand token set (WhitelabelBranding); the pure extractors here are the base.
 
-export type ViolationType = 'color-count' | 'font-count' | 'off-grid-spacing' | 'hardcoded-colors';
+export type ViolationType = 'color-count' | 'font-count' | 'off-grid-spacing' | 'hardcoded-colors' | 'unstyled-classes';
 
 export interface DesignViolation {
   type: ViolationType;
@@ -26,7 +26,32 @@ const DESIGN_FIX: Record<ViolationType, string> = {
   'font-count': 'Reduce this app to at most two font families — one for headings and one for body text — and apply them consistently.',
   'off-grid-spacing': 'Align all padding, margin, and gap values in this app to a consistent 4px spacing grid (use multiples of 4px/8px).',
   'hardcoded-colors': 'Extract the hardcoded colours in this app into CSS variables (design tokens like --brand-primary) and use them throughout.',
+  'unstyled-classes': 'Every class name the screens use must have a rule in the app\'s stylesheet: give each listed class its style (layout, spacing, colours) so no screen renders as plain unstyled HTML.',
 };
+
+/**
+ * 🎨 A SCREEN WITH NO STYLES IS NOT A 100/A DESIGN (failedbr #2555, 2026-11-27). The same pass recorded "Design consistency
+ * 100/100 (A)" and CSS_CLASSES_UNDEFINED — "47 class name(s) used by the screens have no style rule … those screens render
+ * unstyled". The palette, font and spacing rules read only the stylesheet that EXISTS, so an app whose screens' classes have no
+ * rules at all looked perfect. The classes the screens use with no rule (CssConsistency.findUndefinedClasses) are now a
+ * design violation: 10 points plus one a class, up to 40 (47 classes → 60/100, C). PURE.
+ */
+export function withUnstyledClasses(result: DesignLintResult, unstyled: readonly string[]): DesignLintResult {
+  const list = [...new Set(unstyled)];
+  if (list.length === 0) return result;
+  const penalty = Math.min(40, 10 + list.length);
+  const score = Math.max(0, Math.min(100, Math.round(result.score - penalty)));
+  return {
+    ...result,
+    score,
+    grade: scoreToGrade(score),
+    violations: [...result.violations, {
+      type: 'unstyled-classes', severity: 'warn', count: list.length, examples: list.slice(0, 6).map((c) => '.' + c),
+      message: `${list.length} class name(s) the screens use have no style rule, so those parts render unstyled`,
+      fix: DESIGN_FIX['unstyled-classes'],
+    }],
+  };
+}
 
 export interface DesignLintResult {
   score: number; // 0–100

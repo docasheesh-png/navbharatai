@@ -153,8 +153,37 @@ export function asksForEnemies(text: string | null | undefined): boolean {
 const HAND_WORD = /\b(?:h[a]?a?th|haath|hath|hand|hands|pakad\w*|hold\w*|grip\w*|wield\w*|carr(?:y|ies|ying))\b|(?:हाथ|पकड़)/i;
 const HELD_ITEM = /\b(?:gun|guns|bandook|bandooq|banduk|rifle|pistol|revolver|shotgun|smg|sniper|ak-?47|m416|weapon|hathiyar|sword|talwar|knife|chaku|axe|kulhadi|bow|dhanush|shield|dhaal|bat|balla|stick|lathi|danda|spear|bhala|torch|hammer|hathoda|trishul|gada)\b|(?:बंदूक|राइफल|पिस्तौल|तलवार|चाकू|ढाल|बल्ला|लाठी|हथियार)/i;
 export function asksForHeldItem(text: string | null | undefined): boolean {
+  return heldItemAsked(text) !== null;
+}
+
+/** The item's words (English, Hinglish, Hindi) → one plain English noun, for a question about a picture. */
+const HELD_ITEM_NOUN: ReadonlyArray<[RegExp, string]> = [
+  [/\b(?:gun|guns|bandook|bandooq|banduk|rifle|shotgun|smg|sniper|ak-?47|m416)\b|बंदूक|राइफल/i, 'gun'],
+  [/\b(?:pistol|revolver)\b|पिस्तौल/i, 'pistol'],
+  [/\b(?:sword|talwar)\b|तलवार/i, 'sword'],
+  [/\b(?:knife|chaku)\b|चाकू/i, 'knife'],
+  [/\b(?:axe|kulhadi)\b/i, 'axe'],
+  [/\b(?:bow|dhanush)\b/i, 'bow'],
+  [/\b(?:shield|dhaal)\b|ढाल/i, 'shield'],
+  [/\b(?:bat|balla)\b|बल्ला/i, 'bat'],
+  [/\b(?:stick|lathi|danda)\b|लाठी/i, 'stick'],
+  [/\b(?:spear|bhala)\b/i, 'spear'],
+  [/\btorch\b/i, 'torch'],
+  [/\b(?:hammer|hathoda)\b/i, 'hammer'],
+  [/\btrishul\b/i, 'trident'],
+  [/\bgada\b/i, 'mace'],
+];
+
+/**
+ * The item this turn's request asks the hero to hold, as one plain English noun ("hero kr hath me ek badi gun banao" →
+ * "gun"), or null when nothing is asked for in the hand. Same rule as `asksForHeldItem` (a hand word AND an item word in
+ * one sentence that is not declined); an item word with no plainer name is "weapon". PURE.
+ */
+export function heldItemAsked(text: string | null | undefined): string | null {
   const raw = withoutDeclinedSentences(String(text ?? ''));
-  return raw.split(/(?<=[.!?\n।])\s*/).some((s) => HAND_WORD.test(s) && HELD_ITEM.test(s));
+  const sentence = raw.split(/(?<=[.!?\n।])\s*/).find((s) => HAND_WORD.test(s) && HELD_ITEM.test(s));
+  if (!sentence) return null;
+  return HELD_ITEM_NOUN.find(([re]) => re.test(sentence))?.[1] ?? 'weapon';
 }
 
 /**

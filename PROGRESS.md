@@ -6958,3 +6958,46 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
 - **After #4624 merged (natural edges, ponds):** the plan's `boundary` and `water.ponds` now read APPLIED (names match: `options.boundary`,
   `options.water … .ponds`); density stays recorded. The robot boundary check now reads the world's own `boundary.limitAt` (an island
   ringed by mountains is land at the frame edge, so the sea-only ring would have called a closed edge open — reverted → test fails).
+
+## 2026-11-27 — Athree map wave 2 part 1: COLONIES between the roads (branch `claude/feat/map-colonies`)
+
+The admin's map order is frame → natural boundary → water → ground → roads → **colonies of houses between the roads**. Wave 1
+(#4624 edges/ponds, #4626 roads + `blocks()`, #4625 planner + robot checks) is on main; this fills the blocks.
+
+- **New core kit file `src/game/athree/colonies.ts`** (`athreeColonySource.ts`): `planColonies` (PURE, deterministic per seed) cuts
+  every block side into straight runs and every run into plots behind a 3 m footpath, each plot's front parallel to and facing its
+  road. A plot is kept only when it is dry (river lines, lakes, ponds + banks, sea), off every road / junction pad / dead-end lane
+  (geometry + `roadAt`), inside the boundary, has real road access, and its ground (5 x 5 grid) can be levelled within 3.5 m of cut or
+  fill and a 0.2 slope; refusals are counted in `skipped`. Zoning: main roads / highways → shops (market, offices, towers near the
+  centre; every main-road plot inside ring 0.5 is commercial, ~40% beyond), colony streets / lanes → homes (flats with roof tanks
+  near the centre, houses / havelis at the edge). Blocks joined by a colony street are one colony (main roads separate; a lane web
+  is split into ~400 m neighbourhoods; tiny colonies merge); every colony gets park, school, temple, clinic, playground from
+  neighbouring plots; one hospital in the most central big colony; a market where there are 6+ shops. Density
+  (`sparse|normal|dense`) sets plot size, fill and tallest flats; floors fall with distance from the centre. Trees on the footpaths
+  and in parks. Drawing: `createColonyMesh` — one merged vertex-coloured mesh per 160 m tile (one draw call), nearest first, inside
+  `COLONY_TIERS` (phone 10k / mid 10k / desktop 26k triangles); `budget.ts` gains `colonyBudget`, and `vehicleBudget` now subtracts
+  the colony cap (phone 23 → 11, mid 15 → 9, desktop 18 → 10 vehicles; the ≥ 8 floor test holds).
+- **World:** `options.density` / `options.colonies` (on exactly when a density is given — the planner always gives one; old games
+  unchanged). Each plot is a pad inside `heightAt` (before the game's own pads; round margin so a turned neighbour never reaches in),
+  so drawn terrain, heightfield and movers agree. `world.colonies()` (live: plots a later `levelGround` / `addRoad` reaches are
+  taken away and their ground noted as edited), `world.colonyAt(x, z)`, `clearAt` true on plots (no plants through houses),
+  spawns never inside a plot. `createAthreeMap` returns `colonyMesh`.
+- **Planner:** new layer `colonies`, APPLIED only when the world reads `density` AND calls `planColonies`; density is APPLIED now.
+- **Robot check:** `lots-clear` defaults to the world's own colony plots (`colonyLots`, centre + inscribed circle + corners), so it
+  really measures; a broken world (plot moved onto a road / into the sea) fails it (test).
+- **Two pre-existing bugs found and fixed (class: a layer reading a layer that is placed against it):**
+  1. A map with ponds on a planned road network (every map < 20 km) **overflowed the stack on its first heightAt** — roads read
+     `waterBodies()` (incl. ponds), ponds read road-carved ground. In builds it showed only as robot checks "could not run". Fix:
+     roads read rivers + lakes only; ponds come after and avoid roads. `tests/pondsAndPlannedRoadsBuild.test.ts`.
+  2. Ponds landed ON streets: the road clearance was 8 samples on a 60 m ring. Now read every 4 m on a ring 20 m off the rim (+ the
+     bank ring); `POND_CLEAR = 20` (a 60 m ring read properly leaves no room for a talab anywhere in a town).
+- **Tests:** `AthreeColonies.test.ts` (21) on six real worlds; each claim reverted → its test fails (road access via set-back plots,
+  pad in heightAt, round margin, zoning, civic, density, fall-off, 25-point cut/fill, water layers, robot default lots, phone cap,
+  overlap, game pad yield, spawns, roads-read-ponds, pond rings).
+- **Honest limits / OPEN:** houses have no physics collider (use `colonyAt`); no people/traffic in colonies (the kit's city
+  people/traffic are bound to the three/city grid, not this graph); plots line the roads so the middle of a superblock stays open;
+  on the phone terrain grid (8 m) a slope beside a park can cover the slab edge. **Planning cost (open root cause):** ~0.8–1.4 s
+  once on a 2.2 km map and ~5 s on a dense 5 km map (server CPU), 60%+ inside roads.ts `eachCandidate` (125 m grid cells hold
+  dozens of 10 m planned segments); next lever: a finer road index (identical answers) or time-sliced planning. Wiring the
+  open-world kit's own cities onto colonies is not done (its cities avoid roads; on maps ≥ the planned-network size there are no
+  blocks, so they do not collide today).

@@ -6739,3 +6739,7 @@ NavBharatAI's game maker and asked for a 6-step plan, then "bina ruke sabhi kaam
 - Kadam 4: enemy-visibility kit (markers, hit-direction arrows, tracers, stereo pan) and the camera kit.
 - Kadam 5: a stronger planner/judge model for hard game edits — the admin's money decision.
 - Kadam 6: running the game bench on a schedule spends real money — the admin's decision.
+
+### 2026-11-27 — Queue: Q-3561, Q-3702, Q-3704 closed
+- #4601 (prompt triage precision, Q-3561) and #4602 (native build rows erased with the account, census reads call receivers, expired shares purged — Q-3702, Q-3704) merged and deployed (Cloud Build succeeded for 07d70213 and 4ce04b96). Rows deleted from `BUILD_REPORT_QUEUE.md`; IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.
+- Watch on the next real runs: `[share-purge]` log line daily at 03:25 UTC (needs `DATA_RETENTION_PURGE_ENABLED=on`); admin safety flags labelled "False alarm" for prompts the current rules allow.

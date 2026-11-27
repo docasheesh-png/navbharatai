@@ -34,14 +34,15 @@ export interface MapChecksReport {
   results: MapCheckResult[];
 }
 
-/** A plot for a house (the colonies layer, or the game's own). */
-export interface MapLot { x: number; z: number; radius?: number; name?: string }
+/** A plot for a house (the colonies layer, or the game's own). corners: a rectangular plot's four corners, tested too. */
+export interface MapLot { x: number; z: number; radius?: number; name?: string; corners?: ReadonlyArray<{ x: number; z: number }> }
 /** Something the game stood on the ground (a house, a prop, a character). */
 export interface MapPlaced { x: number; y: number; z: number; name?: string }
 
 export interface MapCheckOptions {
   /** How many player and vehicle spawns to test (default 8 each). */
   spawns?: number;
+  /** The lots to test. Left out: the world's own colony plots (world.colonies()), so the check measures the colonies by itself. */
   lots?: ReadonlyArray<MapLot>;
   placed?: ReadonlyArray<MapPlaced>;
   /** Points on the boundary ring (default 96). */
@@ -79,13 +80,27 @@ export function checkSpawnDry(world: AthreeWorld, count = 8): MapCheckResult {
     : { id: 'spawn-dry', applicable: true, ok: true, detail: 'All ' + tested + ' player and vehicle spawns are on dry land.' };
 }
 
-/** 2. No lot (a house's plot) is in water, under the sea or on a road — its centre and four points on its edge are tested. */
+/**
+ * The world's own colony plots as lots: the centre, a circle inside the plot and its four corners (pulled 0.2 m in). Empty when the world
+ * has no colonies (or is older than them).
+ */
+export function colonyLots(world: AthreeWorld): MapLot[] {
+  const read = (world as unknown as { colonies?: () => { plots: ReadonlyArray<{ x: number; z: number; width: number; depth: number; kind: string; id: number; corners: ReadonlyArray<{ x: number; z: number }> }> } }).colonies;
+  if (typeof read !== 'function') return [];
+  return read.call(world).plots.map((p) => ({
+    x: p.x, z: p.z, radius: Math.min(p.width, p.depth) / 2, name: p.kind + ' ' + p.id,
+    corners: p.corners.map((c) => ({ x: c.x + (p.x - c.x) * (0.2 / Math.max(0.2, Math.hypot(p.x - c.x, p.z - c.z))), z: c.z + (p.z - c.z) * (0.2 / Math.max(0.2, Math.hypot(p.x - c.x, p.z - c.z))) })),
+  }));
+}
+
+/** 2. No lot (a house's plot) is in water, under the sea or on a road — its centre, four points on its edge and its corners are tested. */
 export function checkLotsClear(world: AthreeWorld, lots: ReadonlyArray<MapLot> = []): MapCheckResult {
   if (lots.length === 0) return { id: 'lots-clear', applicable: false, ok: true, detail: 'No house lots were placed on this map yet.' };
   const bad: string[] = [];
   for (const lot of lots) {
     const r = Math.max(0, Number(lot.radius) || 0);
     const pts: Array<[number, number]> = [[lot.x, lot.z], [lot.x + r, lot.z], [lot.x - r, lot.z], [lot.x, lot.z + r], [lot.x, lot.z - r]];
+    for (const c of lot.corners ?? []) pts.push([c.x, c.z]);
     const name = lot.name || 'lot';
     if (pts.some(([x, z]) => wet(world, x, z))) bad.push(name + ' at ' + at(lot.x, lot.z) + ' is in water');
     else if (pts.some(([x, z]) => onRoad(world, x, z))) bad.push(name + ' at ' + at(lot.x, lot.z) + ' is on a road');
@@ -175,7 +190,7 @@ export function runMapChecks(world: AthreeWorld, options: MapCheckOptions = {}):
     ['spawn-dry', () => checkSpawnDry(world, count)],
     ['above-ground', () => checkAboveGround(world, options.placed, count, options.tolerance)],
     ['roads-connected', () => checkRoadsConnected(world)],
-    ['lots-clear', () => checkLotsClear(world, options.lots)],
+    ['lots-clear', () => checkLotsClear(world, options.lots ?? colonyLots(world))],
   ];
   const results = runs.map(([id, run]) => {
     try { return run(); } catch (error) { return { id, applicable: true, ok: false, detail: 'The check could not run: ' + (error instanceof Error ? error.message : String(error)) }; }

@@ -1,5 +1,5 @@
 import type { Dimension, Observation, Plan, Reviews, Snapshot, Workload } from './types';
-import { SURPLUS_MAX_MODELS, SURPLUS_MAX_OFFERS, surplusCodingQuality } from './config';
+import { SURPLUS_MAX_MODELS, SURPLUS_MAX_OFFERS, SURPLUS_MIN_DISCOUNT_PCT, surplusBuildFloor, surplusCodingQuality, surplusFloorOfBuildBaseUrl } from './config';
 const DIMENSIONS: Dimension[] = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'];
 const SCALE = 1_000_000n;
 const blocked = (reason: string): Plan => ({ canDispatch: false, status: 'blocked', reason });
@@ -45,6 +45,8 @@ function plan(snapshot: Snapshot | null, reviews: Reviews, workload: Workload, n
   if (!quality.length) return blocked('no_reviewed_coding_models');
   if (new Set(quality.map(q => q.cohort)).size !== 1) return blocked('incomparable_quality_cohorts');
   const candidates = snapshot.offers.flatMap(offer => {
+    // Admin 2026-11-27: 85% for every model, 90% for a Claude-family model (Surplus is Weak-only).
+    const floor = surplusBuildFloor(offer.model);
     const approved = quality.find(q => q.model === offer.model && q.providerId === offer.providerId && (requestFloor ? q.binding === 'model-provider' : q.offerId === offer.offerId));
     const originFresh = offer.upstreamGeneratedAt !== null && Number.isFinite(offer.upstreamGeneratedAt)
       && offer.upstreamGeneratedAt <= now && offer.upstreamGeneratedAt >= now - 600_000;
@@ -56,19 +58,20 @@ function plan(snapshot: Snapshot | null, reviews: Reviews, workload: Workload, n
       && (offer.sourceAgeSeconds === null || offer.sourceAgeSeconds + (now - offer.observedAt) / 1000 <= 300);
     if (!approved || offer.available !== true || offer.healthy !== true || offer.trusted !== true || offer.providerTrustConfirmed !== true
         || offer.trustObservedAt === null || !Number.isFinite(offer.trustObservedAt) || offer.trustObservedAt > now || offer.trustObservedAt < now - 600_000
-        || !snapshot.models.includes(offer.model) || [offer.model, offer.providerId, offer.offerId].some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/.test(id)) || !Number.isFinite(offer.discountPct) || offer.discountPct! < 90 || offer.discountPct! > 100
+        || !snapshot.models.includes(offer.model) || [offer.model, offer.providerId, offer.offerId].some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/.test(id)) || !Number.isFinite(offer.discountPct) || offer.discountPct! < floor || offer.discountPct! > 100
         || !Number.isFinite(offer.observedAt) || (!originFresh && !boundedObservation)
         || offer.observedAt > now || offer.observedAt < now - 600_000 || offer.observedAt < snapshot.startedAt
         || (offer.sourceDate !== null && (!Number.isFinite(offer.sourceDate) || offer.sourceDate > now + 5000 || offer.sourceDate < now - 600_000))
         || (offer.sourceAgeSeconds !== null && (!Number.isFinite(offer.sourceAgeSeconds) || offer.sourceAgeSeconds < 0 || offer.sourceAgeSeconds > 300))) return [];
     const cost = weighted(offer.rates, workload), reference = weighted(offer.referenceRates, workload);
-    // Both reported discount AND the actual workload-weighted estimate must meet 90%.
-    if (cost === null || reference === null || reference <= 0n || cost * 10n > reference) return [];
+    // Both reported discount AND the actual workload-weighted estimate must meet the floor:
+    // cost ≤ reference × (100 − floor) / 100, in exact integers.
+    if (cost === null || reference === null || reference <= 0n || cost * 100n > reference * BigInt(100 - floor)) return [];
     return [{ offer, approved, cost, quality: surplusCodingQuality(offer.model, approved.qualityScore) }];
-  // Objective (admin 2026-10-29): among ≥90%-discount eligible offers pick the BEST coding quality;
+  // Objective (admin 2026-10-29, floor 2026-11-27): among offers that clear their floor pick the BEST coding quality;
   // price only breaks ties within the same model/quality, then offerId for determinism.
   }).sort((a, b) => b.quality - a.quality || (a.cost < b.cost ? -1 : a.cost > b.cost ? 1 : 0) || a.offer.offerId.localeCompare(b.offer.offerId));
-  if (!candidates.length) return blocked('no_eligible_90_percent_offer');
+  if (!candidates.length) return blocked('no_eligible_discount_offer');
   const { offer, approved, cost } = candidates[0];
   return { canDispatch: false, status: 'estimated_candidate', reason: 'cost_preview_only_agent_capability_receipts_and_builder_adapter_unverified', snapshotVersion: snapshot.version, configuredUniverse: snapshot.models, observationBasis: requestFloor ? 'request-time-floor-required' : 'origin-timestamp',
     selection: { model: offer.model, providerId: offer.providerId, offerId: offer.offerId, estimatedMicroUsd: microUsd(cost), qualityArtifact: approved.artifactSha256 } };
@@ -83,7 +86,8 @@ export function planSurplusBuild(snapshot: Snapshot | null, reviews: Reviews, wo
 /** Reviewed permission to consider bounded cached observations, NOT proof of a live quote. */
 export interface SurplusRequestFloorContract {
   kind: 'observation-only-provider-request-time-floor';
-  endpoint: 'https://api.surplusintelligence.ai/min90/v1';
+  /** The base floor URL (`…/min{N}/v1`, N ≥ SURPLUS_MIN_DISCOUNT_PCT). Each request still carries its model's own floor. */
+  endpoint: string;
   reviewId: string;
   reviewedAt: number;
   expiresAt: number;
@@ -94,7 +98,7 @@ export interface SurplusRequestFloorContract {
 }
 
 /**
- * The adapter must enforce /min90, exact model/provider, marketplace-only service and no
+ * The adapter must enforce the request's /min{N} floor (85, or 90 for Claude on Weak), exact model/provider, marketplace-only service and no
  * fallback at REQUEST TIME. This candidate remains an estimate and never authorizes a bill.
  * Origin generation time remains null; no synthetic timestamp is inserted into the snapshot.
  */
@@ -103,7 +107,7 @@ export function planSurplusDispatchCandidate(
 ): Plan {
   try {
     if (!contract || contract.kind !== 'observation-only-provider-request-time-floor'
-        || contract.endpoint !== 'https://api.surplusintelligence.ai/min90/v1'
+        || (surplusFloorOfBuildBaseUrl(contract.endpoint) ?? -1) < SURPLUS_MIN_DISCOUNT_PCT
         || contract.providerPin !== 'top-level-provider' || contract.objective !== 'price'
         || contract.marketplaceOnly !== true || contract.allowFallbacks !== false
         || typeof contract.reviewId !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(contract.reviewId)

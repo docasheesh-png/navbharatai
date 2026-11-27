@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { SurplusReceiptDecision, SurplusNormalizedUsage } from './receiptPolicy';
 import { readSurplusModelControls, SURPLUS_DOCUMENT } from './store';
+import { SURPLUS_CLAUDE_MIN_DISCOUNT_PCT, surplusFloorOfEndpoint } from './config';
 export interface SurplusPilotAuthority {
   id: string; expiresAt: number; maxCalls: number; maxEstimatedMicroUsd: string;
   providerSpendLimitReviewedUntil: number; noAutoTopup: true;
@@ -71,7 +72,7 @@ function roundedMicro(value: string): bigint {
   const [whole, fraction = ''] = value.split('.'); return BigInt(whole) + (/[^0]/.test(fraction) ? 1n : 0n);
 }
 /** Operational circuit breaker only: never changes the already-issued billing decision. */
-function receiptQuarantineReason(decision: SurplusReceiptDecision, actualMicro: bigint, reservedMicro: unknown): string | null {
+function receiptQuarantineReason(decision: SurplusReceiptDecision, actualMicro: bigint, reservedMicro: unknown, endpoint: unknown): string | null {
   if (decision.actualCostUsd === null) return 'supplier_cost_unknown';
   if (!['chargeable', 'absorbed'].includes(decision.status)) return 'receipt_accounting_unavailable';
   if (typeof reservedMicro !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(reservedMicro)) return 'reservation_comparison_unavailable';
@@ -80,9 +81,17 @@ function receiptQuarantineReason(decision: SurplusReceiptDecision, actualMicro: 
   if (typeof official !== 'string' || !/^(0|[1-9]\d{0,30})(?:\.\d{1,24})?$/.test(official)) return 'official_tariff_comparison_unavailable';
   const [whole, fraction = ''] = official.split('.');
   const officialScaled = BigInt(whole) * 10n ** 24n + BigInt(fraction.padEnd(24, '0'));
-  // Integer microUSD × 10 versus exact reviewed same-usage official USD. Equality is exactly90%.
-  if (actualMicro * 10n * 10n ** 18n > officialScaled) return 'realized_discount_below_90_percent';
+  // The request's own floor (admin 2026-11-27): 85, or 90 for a Claude-family model — read from the route it was sent
+  // on. An endpoint without a readable floor is held to the strictest builder floor (90), never a looser one.
+  const floor = BigInt(surplusFloorOfEndpoint(endpoint) ?? surplusFloorOfBareSegment(endpoint) ?? SURPLUS_CLAUDE_MIN_DISCOUNT_PCT);
+  // Integer microUSD × 100 versus exact reviewed same-usage official USD × (100 − floor). Equality passes.
+  if (actualMicro * 100n * 10n ** 18n > officialScaled * (100n - floor)) return 'realized_discount_below_floor';
   return null;
+}
+/** A stored endpoint written as a bare `min{N}` segment (older audit rows / fixtures). PURE. */
+function surplusFloorOfBareSegment(endpoint: unknown): number | null {
+  const m = typeof endpoint === 'string' ? /^min(0|[1-9]\d?|100)$/.exec(endpoint) : null;
+  return m ? Number(m[1]) : null;
 }
 /** A durable bounded PILOT reservation, not a claim the provider guarantees this estimated amount. */
 export async function reserveSurplusAttempt(db: Pick<Firestore, 'doc' | 'runTransaction'>, input: {
@@ -153,7 +162,7 @@ export async function persistSurplusReceipt(db: Pick<Firestore, 'doc' | 'runTran
       if (existing.decision.evidenceFingerprint !== value.decision.evidenceFingerprint || value.decision.userChargeUsd !== '0'
           || value.decision.status !== 'absorbed' || existing.decision.actualCostUsd !== value.decision.actualCostUsd) throw new Error('Surplus receipt audit conflict');
       const micro = actualMicro(value.decision.actualCostUsd);
-      const reason = receiptQuarantineReason(value.decision, micro, existing.estimatedMicroUsd);
+      const reason = receiptQuarantineReason(value.decision, micro, existing.estimatedMicroUsd, existing.endpoint);
       const receipt = { ...existing, ...value, quarantineReason: existing.quarantineReason ?? reason };
       if (isLivePilot(pilot.authorityId)) { tx.set(ref, receipt); return continuation(pilot, receipt); }
       const nextPilot = { ...pilot, blocked: pilot.blocked === true || receipt.quarantineReason != null,
@@ -167,7 +176,7 @@ export async function persistSurplusReceipt(db: Pick<Firestore, 'doc' | 'runTran
     if (!live && pilot.pendingCallId !== audit.callId) throw new Error('Surplus pilot reservation mismatch');
     const known = value.decision.actualCostUsd !== null;
     const micro = actualMicro(value.decision.actualCostUsd);
-    const quarantineReason = receiptQuarantineReason(value.decision, micro, existing.estimatedMicroUsd);
+    const quarantineReason = receiptQuarantineReason(value.decision, micro, existing.estimatedMicroUsd, existing.endpoint);
     const receipt = { ...existing, ...value, state: known ? 'reported' : 'unknown', quarantineReason: existing.quarantineReason ?? quarantineReason };
     if (live) {
       // Per-call audit keeps its quarantine reason; the shared counter only accumulates known spend.
@@ -199,14 +208,14 @@ function settleLiveReceipt(
     if (JSON.stringify(prior) === JSON.stringify(value.decision)) return continuation(pilot, existing);
     if (prior.evidenceFingerprint !== value.decision.evidenceFingerprint || value.decision.userChargeUsd !== '0'
         || value.decision.status !== 'absorbed' || prior.actualCostUsd !== value.decision.actualCostUsd) throw new Error('Surplus receipt audit conflict');
-    const reason = receiptQuarantineReason(value.decision, actualMicro(value.decision.actualCostUsd), existing.estimatedMicroUsd);
+    const reason = receiptQuarantineReason(value.decision, actualMicro(value.decision.actualCostUsd), existing.estimatedMicroUsd, existing.endpoint);
     const receipt = { ...existing, ...value, quarantineReason: existing.quarantineReason ?? reason };
     tx.set(ref as never, receipt);
     return continuation(pilot, receipt);
   }
   if (existing.state !== 'pending') throw new Error('Surplus receipt audit conflict');
   const known = value.decision.actualCostUsd !== null;
-  const reason = receiptQuarantineReason(value.decision, actualMicro(value.decision.actualCostUsd), existing.estimatedMicroUsd);
+  const reason = receiptQuarantineReason(value.decision, actualMicro(value.decision.actualCostUsd), existing.estimatedMicroUsd, existing.endpoint);
   const receipt = { ...existing, ...value, state: known ? 'reported' : 'unknown', quarantineReason: existing.quarantineReason ?? reason };
   tx.set(ref as never, receipt);
   return continuation(pilot, receipt);

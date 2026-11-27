@@ -208,7 +208,9 @@ describe('the terminal signal wins over live status and capability marketing',()
     const emitted:unknown[]=[];
     const env={rb:{ended:false},abort:ac,buildDiagRef:{heartbeat:vi.fn(),record:vi.fn()},userWait:{since:null},events:{emit:(e:unknown)=>emitted.push(e)},waitingForUserLine:()=>'',futilityFired:false,futilityArmed:true,futilityState:{},futilityMinutes:()=>10,tickFutility:()=>({state:{},quietMinutes:10,stop:true}),writtenFiles:new Set(),commandsRun:0,pathsReadNow:()=>0,etaStepsDone:0,futilityStopApplies:()=>true,renderSeenThisBuild:()=>false,workspaceId:'w',futilityDetail:()=>'',console:{log:()=>{}},abortBuild,etaTick:1,etaTotalMs:300000,etaStartMs:1,etaPlatformSeededFiles:0,etaFinalChecksAt:0,finalChecksAfterSteer:()=>false,steeringHandoff:{lastTakenAt:()=>0},etaAppRenderedAt:0,etaAppExists:()=>false,etaLoopFailed:true,etaPlannedFiles:28,etaFirstFileAt:0,etaPlannedSteps:0,etaStepPaths:new Set(),etaFirstStepAt:0,etaEvidenced:false,effectiveBuildSeconds:1500,etaRoughBand:false,etaRoughHighMs:0,etaBaseMs:300000,etaRevisions:0,etaPromisedHighMs:432286,etaTickLine:()=>({text:'I will keep going for up to 15 min more',totalMs:300000,revisions:0,evidenced:false}),
       // Q-3354: the tick also records the server's memory band (serverMemoryPulse.ts) — evidence only, never an emit.
-      noteServerMemory:()=>0,memoryPulse:{band:0,since:0}};
+      noteServerMemory:()=>0,memoryPulse:{band:0,since:0},
+      // Q-3323: and whether a browser is still connected (buildWatchPulse.ts) — evidence only, never an emit.
+      noteBuildWatchers:()=>'',watchPulse:{unwatchedSince:null}};
     vi.useFakeTimers();
     const tick=execute(`return ${callback.getText(ast)}`,env) as ()=>void;
     const id=setInterval(tick,60000); vi.advanceTimersByTime(60000); clearInterval(id);

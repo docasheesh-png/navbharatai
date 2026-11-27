@@ -6778,8 +6778,9 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   built yet", decided by reading the emitted world source (`appliedMapLayers`), never assumed.
 - **Robot checks:** `athreeMapCheckSource.ts` emitted as `src/game/athree/mapChecks.ts` (spawn on dry land, no lot in water or on a
   road, road graph connected, nothing below ground, bounded boundary ring closed; `publishMapChecks` leaves `window.__nbMapChecks`).
-  `mapRobotRun.ts` runs the SAME emitted code at build time on the generated files (seeds 1 and 7, < 1 s) and puts the verdict in the
-  build note; a crash reads "could not run", never a pass. `tests/helpers/loadAthree.ts` now delegates to the same loader.
+  `mapRobotRun.ts` runs the SAME emitted code at build time on the generated files (seed 1) in a WORKER THREAD with an 8 s budget
+  (a 500 km world costs ~2 s of CPU; never on the main thread) and puts the verdict in the build note; a crash or timeout reads
+  "could not run", never a pass. `tests/helpers/loadAthree.ts` now delegates to the same loader.
 - **Superseded test expectation:** `theAthreeMapKindsAreWired` — an unsized racing request is no longer the 100 km default world; it is
   the racing default raised to the 20 km road floor (admin-approved defaults).
 - **Honest limits / open:** boundary, water wishes, road style and density are passed but NOT consumed by the world yet (wave 1 agents

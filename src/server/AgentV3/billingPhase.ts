@@ -85,6 +85,14 @@ export const PHASE_GAME_REPAIR = 'game-repair';
  */
 export const PHASE_POST_FIX_REVIEW = 'post-fix-review';
 
+/**
+ * The game photo judge (gamePhotoJudge.ts, Kadam 1, admin decision 2026-11-27): one vision call that looks at the
+ * playtest's proof pictures. Billed like every other build-phase cost (the user's bill, the markup, a failed build is
+ * free). Barren only when it gave no clear answer (no reply, a timeout, every answer UNCLEAR) — then it delivered nothing.
+ * Its own label also keeps it out of LADDER_DEPTH: a vision model is not a rung of the build ladder.
+ */
+export const PHASE_GAME_PHOTO_JUDGE = 'game-photo-judge';
+
 const storage = new AsyncLocalStorage<{ name: string }>();
 
 /**

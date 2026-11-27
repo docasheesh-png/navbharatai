@@ -250,7 +250,7 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
             ? 'Not granted by this manager. Existing quality evidence does not alone establish complete production readiness.'
             : 'Not granted by this manager. Missing evidence remains unverified.'}</dd></div>
         <div><dt className="font-bold">Quality evidence source</dt><dd>{view.qualitySource === 'live_synthesis' ? 'Legacy synthesized record — unverified' : view.qualitySource === 'firestore' ? 'Existing stored quality evidence' : 'None — genuine evidence is required'}</dd></div>
-        <div><dt className="font-bold">Discount and spending safeguards</dt><dd>90% minimum discount retained. No budget increase or production activation control.</dd></div>
+        <div><dt className="font-bold">Discount and spending safeguards</dt><dd>85% minimum discount (90% for Claude-family models on Weak) retained. No budget increase or production activation control.</dd></div>
         <div><dt className="font-bold">Metadata sync target / freshness limit</dt><dd>{view.intervalMs / 1000} / {view.freshnessMs / 1000} seconds; not an instantaneous quote</dd></div>
         <div><dt className="font-bold">Last successful sync</dt><dd>{timestamp(view.lastSuccessAt)}</dd></div>
         <div><dt className="font-bold">Last sync attempt / next allowed attempt</dt><dd>{timestamp(view.lastAttemptAt)} / {timestamp(view.nextAllowedAt)}</dd></div>

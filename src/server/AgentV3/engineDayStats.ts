@@ -58,7 +58,7 @@ export function engineCodeInMessage(message: string): string | null {
 /** A plain sentence per reason, for an admin who is not an engineer. Unknown codes are shown as written. */
 export const ENGINE_REASON_TEXT: Readonly<Record<string, string>> = Object.freeze({
   no_sellers_for_model: 'Surplus had no seller for this model at that moment, so this model was skipped and another tried.',
-  minimum_discount_not_met: 'No Surplus seller met the 90% discount for a request this size, so this model was skipped.',
+  minimum_discount_not_met: 'No Surplus seller met the minimum discount (85%, or 90% for a Claude-family model) for a request this size, so this model was skipped.',
   'rate-limit': 'Too many requests: the provider rate-limited this key (HTTP 429).',
   timeout: 'Timed out before the answer finished.',
   silent: 'Sent nothing back within the wait time.',

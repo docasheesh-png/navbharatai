@@ -3,8 +3,10 @@ import { PublicBuildEngineError } from '../../lib/buildEngineError';
 import { surplusBuilderSwitchOn } from '../../lib/alwaysOnSuppliers';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
 import { Agent } from 'undici';
+import { SURPLUS_CLAUDE_MIN_DISCOUNT_PCT, SURPLUS_MIN_DISCOUNT_PCT, surplusBaseUrl, surplusFloorOfBuildBaseUrl } from './config';
 
-const URL = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
+/** Default route when a caller names none: the STRICTEST builder floor, so an omission can never loosen a request. */
+const DEFAULT_BASE_URL = surplusBaseUrl(SURPLUS_CLAUDE_MIN_DISCOUNT_PCT);
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 /** Hard ceiling (all attempts combined) so hung Surplus HTTP cannot pin the Pro builder forever. */
@@ -227,7 +229,7 @@ async function sleepBackoff(ms: number, signal: AbortSignal, deadline: AbortSign
 }
 
 /**
- * Fixed min90 endpoint with bounded retries on transient HTTP / network / empty-stream failures.
+ * The permit's minimum-discount floor endpoint (`…/min{N}/v1`, N ≥ 85 — admin 2026-11-27) with bounded retries on transient HTTP / network / empty-stream failures.
  * Not itself dispatch authority: the build session must still validate reviewed capability,
  * price generation, provider and response identity each turn.
  * Keys are read only after explicit enablement; importing this file performs no I/O.
@@ -237,8 +239,11 @@ async function sleepBackoff(ms: number, signal: AbortSignal, deadline: AbortSign
  * - Never retry: 401/402/403, request/configuration errors, caller Stop, exhausted overall deadline
  * - After retries exhaust: return last HTTP body for accounting (never invent success); throw on pure network
  */
-export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = globalThis.fetch) {
+export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = globalThis.fetch, baseUrl: string = DEFAULT_BASE_URL) {
   if (typeof window !== 'undefined' || !surplusBuilderSwitchOn(env)) throw new SurplusBuildTransportError('configuration');
+  // Only an official floor route at or above the builder floor; never a bare /v1, a lower floor or another host.
+  if ((surplusFloorOfBuildBaseUrl(baseUrl) ?? -1) < SURPLUS_MIN_DISCOUNT_PCT) throw new SurplusBuildTransportError('configuration');
+  const endpointUrl = `${baseUrl}/chat/completions`;
   const key = env.SURPLUS_API_KEY?.trim();
   if (!key || key.startsWith('inf_admin_') || key === 'replace_with_your_surplus_api_key' || /[\r\n]/.test(key)) throw new SurplusBuildTransportError('configuration');
   return async (request: Record<string, unknown>, signal: AbortSignal): Promise<SurplusBuildTransportResponse> => {
@@ -262,7 +267,7 @@ export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env
       const combined = combineSignals(signal, deadline);
       try {
         const dispatcher = fetcher === globalThis.fetch ? surplusKeepAliveDispatcher() : undefined;
-        const response = await fetcher(URL, {
+        const response = await fetcher(endpointUrl, {
           method: 'POST', redirect: 'error', signal: combined,
           ...(dispatcher ? { dispatcher } as Record<string, unknown> : {}),
           headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },

@@ -186,7 +186,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     name: 'My maps (your saved game maps)',
     path: 'NavBharatAI Pro → the mode button under the message box (Build / Plan) → My maps',
     description: 'The game maps you saved from a map card: each with its picture, name, size, land, edge, roads and water. Use this map puts a ready message in the message box ("Make an open world game on my saved map "Ganga Nagar".") — in a new project the build makes the game on exactly that map (same plan, same seed); in a game that already has a map, that map is put on the game. Delete removes it from your library. Up to 50 maps, only visible to your account, and erased if you delete your account.',
-    howToUse: 'Save a map from the "Your map, from above" card first. Then tap the mode button under the message box, choose My maps, and tap Use this map (edit the message if you want a different kind of game) and send — or tap Delete to remove a map. You can also just type "mera Ganga Nagar map use karo" in a game request.',
+    howToUse: 'Save a map from the "Your map, from above" card first. Then tap the mode button under the message box, choose My maps, and tap Use this map (edit the message if you want a different kind of game) and send — or tap Delete to remove a map. Naming a saved map in a game request, in your own words together with the word map, works the same way.',
     relatedFeatures: ['map_preview_card', 'map_layer_edit', 'athree_map'],
     keywords: ['my maps', 'saved maps', 'map library', 'mera map', 'mere maps', 'save map', 'reuse map', 'same map new game', 'map use karo', 'delete map', 'map hatao', 'Ganga Nagar map'],
     aiSurface: 'pro_chat',

@@ -6958,3 +6958,34 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
 - **After #4624 merged (natural edges, ponds):** the plan's `boundary` and `water.ponds` now read APPLIED (names match: `options.boundary`,
   `options.water … .ponds`); density stays recorded. The robot boundary check now reads the world's own `boundary.limitAt` (an island
   ringed by mountains is land at the frame edge, so the sea-only ring would have called a closed edge open — reverted → test fails).
+
+### 2026-11-27 — Maps wave 2 part 2: top-down map preview, one layer by chat, My maps (branch claude/feat/map-preview-library)
+- **Map preview (`mapPreviewRun.ts`, `mapPreviewCard.ts`, `lib/mapPreview.ts`, `MapPreviewCard.tsx`):** when `generate_athree_map` writes a map, the
+  EMITTED world modules run in a worker (the robot checks' loader and worker runner, now shared as `runAthreeScriptInWorker`) with the seed the
+  game uses, and are sampled to a 128 x 128 grid: sea by depth, rivers/lakes, ponds (the world's own list, where `waterAt` agrees), land by
+  biome, roads (the network's own centre lines, where `roadAt` agrees), the edge (`boundary.limitAt`), building plots when `world.colonies()`
+  exists, the first player spawn. A `map_preview` event carries the card to the chat; the timeline keeps it (`{t:'map'}`), so a reopened chat
+  shows it. A failed or timed-out run is "Map preview unavailable: <reason>" — never a picture. The towns a game adds at runtime are not in it
+  (said on the card).
+- **The map's seed is now real and recorded:** a new map's seed is `varietySeed(workspaceId, 'world')` (the open-world kit's WORLD.seed),
+  written to `MAP_PLAN.seed` and `Object.assign(MAP_OPTIONS, { seed })`; the robot checks run on that seed (they ran on seed 1 before).
+- **❌→✅ defect found by the preview:** "3 talaab" on a 5 km LOOP world crashed the world ("Maximum call stack size exceeded"): the road
+  network read the water bodies WITH ponds, so building a road region during pond placement re-entered pond placement. Class: a lower layer
+  reading a higher one. Fix: roads read rivers/lakes without ponds (ponds are placed after and away from roads; also true to the road cache
+  key, which never named the pond count). Kit history regenerated. Locked in `mapPreview.test.ts` (reverted → RangeError).
+- **One layer by chat (`mapLayerEdit.ts`, `buildPhases/mapLayerTurn.ts`, wired at turn start in `routes/agentv3.ts`):** on a game with a
+  MAP_PLAN, "nadi ki jagah jheel karo" / "colony badi karo" / "sadkein tedhi-medhi karo" / "map 2 guna bada karo" / "kinara pahaadon wala
+  karo" change only that layer (same seed), read by meaning with the planner's parsers; config.ts is rewritten by the platform
+  (`mapPlanData.rewriteMapPlanInConfig`, everything else byte for byte), checks + preview re-run, the card names the change. Honest per layer
+  (`changeVerdict`): river/lake counts recorded (world makes its own; ponds carved), density recorded until colonies land, road styles only up
+  to 25 km, an edge on a loop map refused, an open-world game's size left to `worldTurn` ("map 40 km x 40 km").
+- **My maps (`mapLibraryStore.ts`, `routes/mapLibrary.ts`, `MapLibraryPicker.tsx`, Mode menu → My maps):** save from the card (plan + seed +
+  name + picture), list, delete, "Use this map" (composer message the build reads by name for the VERIFIED owner: a new project gets the saved
+  plan and seed; a game with a map gets it put on). `user_saved_maps` (field `uid`) is erased with the account (USER_SCOPED_COLLECTIONS,
+  classification census, deletion page). 50 maps per account, 60-character names, 160 x 160 previews, rate-limited, 404 for someone else's id.
+- **Locked (each proven by reversion):** `mapPreview.test.ts` (pixels = the world's functions; worker = in-thread; budget; broken world),
+  `mapLayerEdit.test.ts` (each phrase changes only its layer and keeps the seed; non-requests change nothing; the turn), 
+  `tests/theMapLibraryIsMineOnly.test.ts` (routes on a real server, IDOR, bounds, reuse through the real dispatcher), 
+  `MapPreviewCard.test.tsx` (card states incl. unavailable, buttons wired, reducer + timeline replay).
+- **Open / limits:** location words ("yahan") are read as the whole map's plan; colonies are drawn only once `world.colonies()` lands
+  (the parallel colonies branch); a platform-only layer edit still runs the builder (it is told the change is done) — not a platform-done turn.

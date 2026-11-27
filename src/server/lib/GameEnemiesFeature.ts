@@ -16,8 +16,7 @@
 // and every enemy is dressed in it with the kit's own Entities.dress: the kit body stays until the model has loaded, and a
 // model the game has not saved leaves the kit body, said in the console, never an invisible enemy.
 
-import { librarySubjectOf } from '../AgentV3/characterSwap';
-import { libraryPicksIn } from '../AgentV3/gameAssets/libraryPicks';
+import { libraryPicksIn } from './libraryPicks';
 
 export const ENEMIES_FEATURE_PATH = 'src/game/features/enemies.ts';
 export const FEATURES_INDEX_PATH = 'src/game/features/index.ts';
@@ -43,7 +42,10 @@ const NOT_WANTED = /\b(?:no|without|bina|nahi|nahin|mat|remove|hatao|hata\s*do|d
 const NUMBER_WORDS: Record<string, number> = { ek: 1, one: 1, do: 2, two: 2, teen: 3, three: 3, char: 4, chaar: 4, four: 4, paanch: 5, panch: 5, five: 5, chhe: 6, six: 6, saat: 7, seven: 7, aath: 8, eight: 8, nau: 9, nine: 9, das: 10, ten: 10, bees: 20, twenty: 20 };
 
 /** The enemies a request asks for, or null when it asks for none (or refuses them). PURE. */
-export function enemyRequestFrom(prompt: string | null | undefined, subjectOf: (id: string) => string | null = librarySubjectOf): EnemyRequest | null {
+// subjectOf turns a library id into the subject it is saved under. It is PASSED IN (the AgentV3 callers pass
+// librarySubjectOf): a kit generator must not import the library catalogue, which drags the server's dependency tree into
+// the kit-history bundle (#4618 CI). Without it, a pick is not resolved and the request falls back to its words.
+export function enemyRequestFrom(prompt: string | null | undefined, subjectOf: (id: string) => string | null = () => null): EnemyRequest | null {
   const text = String(prompt ?? '');
   if (!ENEMY_WORDS.test(text) || NOT_WANTED.test(text)) return null;
   // "a zombie movie on the TV" is not a request: the words must come with a wish or a game verb.

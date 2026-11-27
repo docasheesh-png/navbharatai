@@ -18,6 +18,7 @@ import { libraryBrowseRows } from '../src/server/AgentV3/gameAssets/libraryThumb
 import { parseFileMentions, unresolvedMentionsNotice } from '../src/server/AgentV3/fileMentions';
 import { enemyFeatureSource, enemyRequestFrom, enemyRequestOf, enemiesAddedHandoff } from '../src/server/lib/GameEnemiesFeature';
 import { gameKitRecipeInput } from '../src/server/AgentV3/gameKitSeed';
+import { librarySubjectOf } from '../src/server/AgentV3/characterSwap';   // the generator takes the lookup (it never imports the catalogue)
 import { prepareGameAssets, pickedModelsHandoff } from '../src/server/AgentV3/gameAssets/assetSeed';
 import { createAssetProviders, type ReviewedAsset } from '../src/server/AgentV3/gameAssets/providers';
 import { createDurableAssetCache } from '../src/server/AgentV3/gameAssets/assetCache';
@@ -93,7 +94,7 @@ describe('build #2565: the enemies wear the model the user picked for them', () 
   const read = expandLibraryMentions(BUILD_2565);
 
   it('the request gives the enemies that model, and the first build carries it to the open world', () => {
-    expect(enemyRequestFrom(read)).toMatchObject({ kind: 'enemy', ai: 'ranged', model: { subject: 'ranger', id: 'q7-ranger-man' } });
+    expect(enemyRequestFrom(read, librarySubjectOf)).toMatchObject({ kind: 'enemy', ai: 'ranged', model: { subject: 'ranger', id: 'q7-ranger-man' } });
     expect(gameKitRecipeInput('generate_open_world', ['generate_open_world', 'generate_game_systems'], read)).toMatchObject({ enemies: { model: { subject: 'ranger', id: 'q7-ranger-man' } } });
     // Tool input is checked: a model the builder edited into something unsafe is dropped, a sound one kept.
     expect(enemyRequestOf({ model: { subject: 'ranger', id: 'q7-ranger-man' } })?.model).toEqual({ subject: 'ranger', id: 'q7-ranger-man' });
@@ -103,13 +104,13 @@ describe('build #2565: the enemies wear the model the user picked for them', () 
   });
 
   it('the feature dresses every enemy in it with Entities.dress and plays its own clips', () => {
-    const src = enemyFeatureSource(enemyRequestFrom(read)!);
+    const src = enemyFeatureSource(enemyRequestFrom(read, librarySubjectOf)!);
     expect(src).toContain("model: 'ranger' as string | null,");
     expect(src).toContain('wear(state, e);');
     expect(src).toContain('void state.entities.dress(entity, model);');
     expect(src).toContain('if (s) animateWorn(s, delta);');
     expect(enemyFeatureSource(enemyRequestFrom('10 zombies banao')!)).toContain('model: null as string | null,');
-    expect(enemiesAddedHandoff(enemyRequestFrom(read)!, [])).toContain('add_library_models({ models: [{ id: "q7-ranger-man" }] })');
+    expect(enemiesAddedHandoff(enemyRequestFrom(read, librarySubjectOf)!, [])).toContain('add_library_models({ models: [{ id: "q7-ranger-man" }] })');
   });
 });
 

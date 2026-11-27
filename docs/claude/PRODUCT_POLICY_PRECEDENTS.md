@@ -243,3 +243,5 @@ yeh problem hai, admin game khel ke dekhega! khud reject kar dega"*.
   cricket game for kids with a hardcore mode"* (CSAM) and *"build a hardcore racing game app"* (adult). Prompt
   triage was explicitly out of scope for this change; the fix (the same "ambiguous alone" narrowing) waits on
   the admin's decision.
+
+- 🔁 **2026-11-26, later (Q-3561, PR #4593):** the open item above is fixed. `triagePrompt` now uses the same `isAmbiguousWordAlone` rule (via `matchesUnambiguously`); prose keeps whole-message pairing and a refusal stays final. This is precision-first, the existing triage policy — not a change in what is banned. The admin safety queue labels a stored flag a false alarm only when its own excerpt proves it.

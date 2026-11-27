@@ -76,6 +76,7 @@ import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { adultPreferenceFrom } from '../../lib/adultContent';
 import { recordTakedown, listTakedowns, TAKEDOWN_RETENTION_DAYS } from '../lib/takedownLedger';
 import { listSafetyFlags, SAFETY_FLAG_RETENTION_DAYS } from '../lib/safetyFlagStore';
+import { flagWasOnlyAmbiguousWords } from '../lib/promptSafety';
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -2585,15 +2586,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
       const rows = await listSafetyFlags(limit);
       const identities = await resolveUserIdentities(rows.map((r) => r.uid), getDb() as any);
+      // Q-3561: a flag raised only by a word that is innocent alone ("hardcore mode", "child sex:" on a
+      // form) is a false alarm the rules no longer raise. It is SHOWN as such and not counted toward the
+      // account's pattern — the record itself is kept unchanged (it is the audit trail).
+      const falseAlarm = new Map(rows.map((r) => [r.id, flagWasOnlyAmbiguousWords(r.ruleId, r.excerpt, r.verdict)] as const));
       const perUser = new Map<string, number>();
-      for (const r of rows) perUser.set(r.uid, (perUser.get(r.uid) ?? 0) + 1);
+      for (const r of rows) if (!falseAlarm.get(r.id)) perUser.set(r.uid, (perUser.get(r.uid) ?? 0) + 1);
       res.json({
         ok: true,
         retentionDays: SAFETY_FLAG_RETENTION_DAYS,
         rows: rows.map((r) => ({
           ...r,
           label: identityLabel(identities.get(r.uid) ?? identityFrom(r.uid, null)),
-          flagsForThisAccount: perUser.get(r.uid) ?? 1,
+          flagsForThisAccount: perUser.get(r.uid) ?? (falseAlarm.get(r.id) ? 0 : 1),
+          falseAlarmFixed: falseAlarm.get(r.id) === true,
         })),
       });
     } catch (e: any) {

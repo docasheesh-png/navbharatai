@@ -30,7 +30,7 @@
 //
 // PURE + deterministic + bounded. No model call, so the 99.9% path costs nothing at all.
 
-import { ILLEGAL_RULES, normalizeScanText, protectiveStandDown, type PublishContentClass } from '../AgentV3/illegalContentRules';
+import { ILLEGAL_RULES, matchesUnambiguously, normalizeScanText, protectiveStandDown, type PublishContentClass } from '../AgentV3/illegalContentRules';
 import { redactSecrets, redactPII } from '../AgentV3/SecretRedactor';
 
 export type SafetyVerdict = 'allow' | 'flag' | 'block';
@@ -67,7 +67,9 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
   let flagged: PromptTriage | null = null;
 
   for (const rule of ILLEGAL_RULES) {
-    if (!rule.subject.test(body)) continue;
+    // Q-3561: a word that is ambiguous ALONE ("hardcore mode", "explicit", "child sex:" on a form) is not
+    // half of a pair — "a cricket game for kids with a hardcore mode" was refused as CSAM, finally.
+    if (!matchesUnambiguously(rule.subject, body)) continue;
     // A rule may name a context that makes its subject innocent. See `exempt` in illegalContentRules:
     // a sexual-health clinic app and a harassment-reporting tool both contain the pair, and both are
     // apps NavBharatAI should want.
@@ -77,7 +79,7 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
     if (protectiveStandDown(rule, body)) continue;
 
     // The prompt carries the offending thing itself — the same pairing the publish scanner blocks on.
-    if (rule.context.test(body)) {
+    if (matchesUnambiguously(rule.context, body)) {
       if (rule.contentClass === 'illegal') {
         return { verdict: 'block', ruleId: rule.id, contentClass: 'illegal', description: rule.description };
       }
@@ -115,6 +117,27 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
   }
 
   return flagged ?? ALLOWED;
+}
+
+/**
+ * Was a STORED flag raised only by a word that is ambiguous alone — a false alarm the Q-3561 fix now
+ * allows? PURE. For the admin's safety queue, so a record the platform got wrong says so.
+ *
+ * 🔒 TRUE ONLY WITH PROOF IN THE EXCERPT. The excerpt is bounded (300 chars), so the words that fired
+ * may lie beyond it; "the excerpt no longer triggers anything" would then be a guess. So this answers
+ * true only when the excerpt ITSELF still holds the old raw match for the flagged rule (the evidence is
+ * there) AND the ambiguity rule removes it. Anything else — unknown rule, empty excerpt, evidence cut
+ * off — is false: the record stands exactly as it was written.
+ */
+export function flagWasOnlyAmbiguousWords(ruleId: string, excerpt: string, verdict: string): boolean {
+  const rule = ILLEGAL_RULES.find((r) => r.id === ruleId);
+  const body = normalizeScanText(String(excerpt ?? ''));
+  if (!rule || !body.trim()) return false;
+  if (!rule.subject.test(body)) return false;
+  const subjectGone = !matchesUnambiguously(rule.subject, body);
+  if (verdict !== 'block') return subjectGone;
+  if (!rule.context.test(body)) return false;
+  return subjectGone || !matchesUnambiguously(rule.context, body);
 }
 
 /** Where the message came from, so a reviewer knows what they are looking at. */

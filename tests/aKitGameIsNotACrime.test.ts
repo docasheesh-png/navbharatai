@@ -130,11 +130,11 @@ describe('what an offending page cannot avoid is still caught', () => {
     expect(t('Games for kids', 'kids')).toBe(false);
   });
 
-  it('prompt triage is UNCHANGED — a prompt is prose and keeps its whole-message test', () => {
+  it('prompt triage keeps its WHOLE-MESSAGE pairing — a prompt is prose (Q-3561 added only the word rule)', () => {
     // The sentence is a request; its halves are 60+ characters apart and it still blocks, as before.
     expect(triagePrompt('Build an app for underage users, with a big gallery and many features, that shows porn').verdict).toBe('block');
     const src = readFileSync(join(ROOT, 'src/server/lib/promptSafety.ts'), 'utf8');
-    expect(src).toContain('if (rule.context.test(body)) {');
+    expect(src).toContain('if (matchesUnambiguously(rule.context, body)) {');
     expect(src).not.toContain('pairedPhrases(');
   });
 

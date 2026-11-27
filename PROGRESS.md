@@ -6657,6 +6657,14 @@ GAME_FEATURES_INDEX_WITH_DANGER stayed a hand-written copy of what the dispatche
 Fix: one DOWN_SECONDS (6, every blow); GAME_FEATURES_INDEX_WITH_DANGER is derived from featuresIndexWith(GAME_FEATURES_INDEX,
 'streetDanger'), so the dispatcher and the fixture cannot drift; the street-danger test asserts the dispatcher's real line.
 
+## 2026-11-26 — Q-3561: innocent prompts were refused for a word that is innocent alone; Q-3560 closed (PR #4593)
+
+- **Problem (measured on main):** prompt triage (build, chat, image) refused, finally, "a cricket game for kids with a hardcore mode" (CSAM_SIGNAL), "build a hardcore racing game app" and "Hardcore mode: watch the timer" (ADULT_CONTENT), and "school admission form: child name, child sex, date of birth" (CSAM_SIGNAL).
+- **Root cause / class:** the shared rule lists hold words that are sexual only next to a sexual noun ("hardcore", "explicit") or not sexual at all as a form field ("sex:"). Q-3560 fixed this on the publish path only; prompt triage was its unhunted sibling.
+- **Fix:** `triagePrompt` reads subject and context through `matchesUnambiguously` (the one `isAmbiguousWordAlone` rule both readers share). Prose keeps whole-message pairing; real pairs ("kids hardcore videos", "underage sex videos", every existing promptSafety / Hindi / every-Indian-script positive) still block, and a refusal stays final.
+- **Honesty:** false blocks had been written to `safety_flags` (admin queue, 180 days; no strike system reads it). The admin safety queue now labels a row "False alarm: the current rules allow this message" when its own excerpt proves it (`flagWasOnlyAmbiguousWords`), and leaves it out of the per-account count. Records are not altered or deleted.
+- **Lock:** `tests/anInnocentPromptIsNotRefused.test.ts`; reversion (restore `rule.subject.test(body)` / `rule.context.test(body)`) failed 7 tests.
+- **Q-3560 closed:** #4586 merged (42f76c87); row deleted, ID added to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`.
 ## 2026-11-26 — Q-3611…Q-3614: account deletion now erases the bucket objects only a record could find (PR #4594)
 
 The Q-3410 storage census (#4571) left four open exceptions — per-user Cloud Storage objects that outlived account

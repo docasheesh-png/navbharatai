@@ -475,19 +475,40 @@ const SEXUAL_NOUN_AFTER = /^\s+(?:porn\w*|sex\w*|nud\w*|naked|photos?|pictures?|
 const SEX_AS_FIELD_AFTER = /^\s*(?:[:=/|(,]|\s+(?:ratio|m\/f|male|female|of\s+the\s+(?:child|baby|student)))/i;
 
 /**
- * Is this match one of the words that are ambiguous ALONE in an app's text? PURE. Publish path only.
+ * Is this match one of the words that are ambiguous ALONE? PURE. Read by BOTH readers: the publish
+ * scanner (via `humanSpans`) and prompt triage (via `matchesUnambiguously`).
  *
  * A game has a "hardcore mode", a codebase says "explicit dispose of child meshes", a school form asks
  * "Child sex: M/F". Each word is sexual only next to a sexual noun, so on its own it is not one half of
  * a pair. Measured, not guessed: "a cricket game for kids with a hardcore mode" paired CSAM_SIGNAL and
- * "Hardcore mode: watch the timer" paired ADULT_CONTENT before this (Q-3560). ⚠️ `triagePrompt` shares
- * the same rule lists and still has these false blocks — recorded as an open, admin-decision item,
- * because prompt triage is a separate policy that this change was told not to touch.
+ * "Hardcore mode: watch the timer" paired ADULT_CONTENT before this (Q-3560 on the publish path, Q-3561
+ * on the prompt path — where a refusal is final, so a false one costs a user their build outright).
  */
 export function isAmbiguousWordAlone(word: string, after: string): boolean {
   const w = word.toLowerCase();
   if (w === 'explicit' || w === 'hardcore') return !SEXUAL_NOUN_AFTER.test(after);
   if (w === 'sex') return SEX_AS_FIELD_AFTER.test(after);
+  return false;
+}
+
+/**
+ * Does `re` match `body` at least once with a word that is NOT ambiguous alone? PURE + bounded.
+ *
+ * The prompt reader's version of `humanSpans`. A prompt is prose, so it keeps its whole-message pairing
+ * (a request names the subject and the offence in one message, often one long sentence) and does not
+ * use the publish path's code-identifier or 80-character rules — only this one word-level precision
+ * rule, which is true of prose and code alike. Precision-first is the existing triage policy
+ * (docs/claude/PRODUCT_POLICY_PRECEDENTS.md); a refusal stays final.
+ */
+export function matchesUnambiguously(re: RegExp, body: string): boolean {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+  let seen = 0;
+  for (const m of body.matchAll(g)) {
+    if (!m[0]) continue;
+    const e = (m.index ?? 0) + m[0].length;
+    if (!isAmbiguousWordAlone(m[0], body.slice(e, e + 40))) return true;
+    if (++seen >= MAX_MATCHES_PER_LIST) return false;
+  }
   return false;
 }
 

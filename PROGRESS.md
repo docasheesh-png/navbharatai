@@ -6709,3 +6709,33 @@ player. tests/aLibraryCarArrivesInAnOpenWorld.test.ts.
 - **Q-3704:** `purgeExpiredShares` — 30 days past expiry, page → feedback → record, bounded at 200 per run, a failure
   keeps the record; daily `expired-share-purge` under `DATA_RETENTION_PURGE_ENABLED`.
 - **Lock:** `tests/nativeRowsAndExpiredShares.test.ts`, census witnesses, two runner cases — 9 reversions, each fails.
+
+## 2026-11-27 — Game maker vs the reference game: Kadam 1–6, first slice (#4595–#4600, all merged)
+
+The admin compared a reference game (single-file WebGL open world, two prompts, screenshot-checked after every step) with
+NavBharatAI's game maker and asked for a 6-step plan, then "bina ruke sabhi kaam karo, PR bana kar merge karo". Merged:
+- **#4595 (Kadam 1)** — a slow game is still played. Measured on a 6 fps WebGL page: 7 picture compares took 40.9 s of the
+  63 s keyboard stage because each decoded two PNGs INSIDE the game's page (BR2539/2540/2542/2545 "never played"). All
+  picture work now runs on a separate bench page; the phone context draws at DPR 1. Keyboard 63→29 s, start 17.4→5.8 s, the
+  phone stage is reached. Census `aSlowGameIsStillPlayed` (browser proof opt-in `NBAI_BROWSER_PERF=1`). Also: the
+  street-danger compile test got its own 120 s timeout + census `aKitCompileTestHasItsOwnTimeout` (it timed out in CI).
+- **#4596 (Kadam 2)** — `PLAYER.holds` was silently dropped for the kit person (the default body) and after a model failed
+  to load (BR2535). One loader `holdChosen()` for every body; `window.__nbHeld()` records what is really in a hand.
+- **#4597 (Kadam 2)** — what the request asked for is proved by playing: `asksForHeldItem`, `MISSING_HELD`, and
+  `MISSING_ENEMIES`/`MISSING_HELD` → `GAME_DEFECT_ASK_NOT_MET`, which the completion gate reads ("what you asked for is not
+  in the game yet").
+- **#4598 (Kadam 6)** — the game bench counts `ask-not-met` and carries the realistic cricket prompt (45 prompts, 15 smoke).
+- **#4599 (Kadam 3)** — the project map names the game's own files (those importing the kit) and what they export.
+- **#4600 (Kadam 4)** — `ENTITY_BALANCE`: at most 3 attackers at once, 2 s grace after spawning (six enemies used to kill
+  the hero in 2 s).
+
+**OPEN (not done, recorded so nothing is lost):**
+- Kadam 1: an in-game scene control for the playtest, per-genre photo lists, and a vision judge (each judged photo is a
+  paid call → needs the admin's billing decision).
+- Kadam 3: the kit's left/right is mirrored (humanoid `right = arm(1)` is +X; a +Z-facing figure's right is −X;
+  `cricketLayout.side`, `deliveryPath` line and `leftHanded` follow it; the cricket test comment encodes it). Builders
+  patched games locally (#2543), so flipping the kit through KIT_REFRESHED would re-break those games — needs a migration
+  path first. Also the batter's side-on stance (needs a new bat swing) and model orientation/height normalisation review.
+- Kadam 4: enemy-visibility kit (markers, hit-direction arrows, tracers, stereo pan) and the camera kit.
+- Kadam 5: a stronger planner/judge model for hard game edits — the admin's money decision.
+- Kadam 6: running the game bench on a schedule spends real money — the admin's decision.

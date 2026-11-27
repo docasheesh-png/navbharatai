@@ -339,7 +339,7 @@ export function disposeMaterials(): void {
 const CAMERA = `import * as THREE from 'three';
 import { damp } from '../core/feel';
 import { vehicleAt, isVehicle } from './objects';
-import { groundHeightAt } from './surfaces';
+import { groundHeightAt, getGround } from './surfaces';
 import { worldColliders } from './collision';
 
 /**
@@ -368,6 +368,47 @@ export const CHASE_FRAME_MAX = 40;
 /** How far ahead of a vehicle's nose the ground first shows over its roof in the chase view, in metres. */
 export const CHASE_SIGHT_M = 30;
 
+/**
+ * 🎯 ONE FRAMING of the on-foot third-person view: how far behind the pivot (metres), how far to the side of it (+ is the
+ * player's right), how high the pivot stands above the target's feet, and the field of view as a multiple of the
+ * camera's own. The rig damps between framings (walk ↔ aim ↔ freefall), so no change ever jumps.
+ */
+export interface CameraFraming { distance: number; side: number; height: number; fov: number }
+
+/**
+ * OVER-THE-SHOULDER framing — a third-person shooter's camera (Kadam 4 camera kit, 2026-11-27). The hero stands left of
+ * centre so the crosshair in the middle of the screen sees past them; holding Aim (right mouse / left trigger) moves in
+ * closer, further to the side, and narrows the view. Every value is optional (metres; aimFov multiplies the FOV).
+ */
+export interface ShoulderOptions {
+  distance?: number;
+  /** To the hero's right; negative for the left shoulder. */
+  side?: number;
+  height?: number;
+  aimDistance?: number;
+  aimSide?: number;
+  aimFov?: number;
+}
+export const SHOULDER_DEFAULTS: Required<ShoulderOptions> = { distance: 3.7, side: 0.6, height: 1.6, aimDistance: 2.3, aimSide: 0.75, aimFov: 0.82 };
+
+/** How the view sits while the target is in the air: walking framing, a long fall, or a slow drop under a canopy. */
+export type AirMode = 'ground' | 'freefall' | 'parachute';
+/** What freefall and parachute ADD to the walking framing (metres further back, metres higher). false = no change. */
+export interface AirFramingOptions {
+  freefall?: { distance?: number; height?: number } | false;
+  parachute?: { distance?: number; height?: number } | false;
+}
+export const AIR_FRAMING_DEFAULTS = { freefall: { distance: 4, height: 1.5 }, parachute: { distance: 2.5, height: 1 } };
+/** Falling faster than this (m/s) for FREEFALL_HOLD_S is freefall; a jump never gets there. */
+export const FREEFALL_SPEED = 8;
+export const FREEFALL_HOLD_S = 0.35;
+/** In the air this long (s) and still coming down, slower than FREEFALL_SPEED, is a parachute drop. */
+export const PARACHUTE_AIR_S = 1.6;
+/** The camera stays this far IN FRONT of the wall its ray met (metres) — the near plane never cuts into it. */
+export const CAMERA_WALL_GAP = 0.3;
+/** …and at least this far above the ground under it (metres), so a view looking up never goes under the terrain. */
+export const CAMERA_GROUND_GAP = 0.4;
+
 /** What a rig frames: a point, or the object itself — which also tells it which way the object faces. */
 export type CameraTarget = THREE.Vector3 | THREE.Object3D;
 
@@ -382,6 +423,10 @@ export interface CameraRigOptions {
   fov?: number;
   /** Meshes the camera must not pass through (third-person only). */
   collidables?: THREE.Object3D[];
+  /** Over-the-shoulder framing on foot (see ShoulderOptions). Off by default; the shell turns it on for a hero holding a gun. */
+  shoulder?: boolean | ShoulderOptions;
+  /** Farther and higher while the target falls or drops under a parachute (see AirFramingOptions). On by default; false = off. */
+  air?: AirFramingOptions | false;
 }
 
 export class CameraRig {
@@ -408,6 +453,27 @@ export class CameraRig {
   /** Each framed object's extent in its own heading frame (+Z forward, metres), refreshed as it changes. */
   private readonly extents = new WeakMap<THREE.Object3D, { box: THREE.Box3 | null; parts: number; age: number }>();
   private cinematicAngle = 0.6;
+  /** Over-the-shoulder framing, or null (the centred view). */
+  private shoulder: Required<ShoulderOptions> | null = null;
+  private aimingNow = false;
+  private air: { freefall: { distance: number; height: number } | null; parachute: { distance: number; height: number } | null };
+  private airForced: AirMode | null = null;
+  private airMode: AirMode = 'ground';
+  /** What the game says about the target's feet (setGrounded); null = it never said, so only speed is read. */
+  private groundedHint: boolean | null = null;
+  private airLastY = NaN;
+  private airDy = 0;
+  private fallSpeed = 0;
+  private fastFall = 0;
+  private slowFall = 0;
+  private airTime = 0;
+  /** The framing the view is at NOW, damped toward framingFor(); null until the first frame. */
+  private now: CameraFraming | null = null;
+  /** The scope's magnification (setZoom), applied with the framing's FOV in one place. */
+  private zoomBy = 1;
+  private lensScale = 1;
+  private lensBase = 60;
+  private framedNow = false;
 
   constructor(options: CameraRigOptions = {}) {
     this.kind = options.kind ?? 'third-person';
@@ -416,7 +482,55 @@ export class CameraRig {
     this.stiffness = options.stiffness ?? 7;
     this.collidables = options.collidables ?? [];
     this.camera = new THREE.PerspectiveCamera(options.fov ?? 60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.air = { freefall: null, parachute: null };
+    this.setAirFraming(options.air ?? {});
+    if (options.shoulder) this.setShoulder(options.shoulder);
   }
+
+  /**
+   * 🎯 OVER-THE-SHOULDER framing on foot (a shooter): behind and above the hero, to its right, so the centre of the screen
+   * looks past it. true = SHOULDER_DEFAULTS; an object tunes them; false = the centred view. The change is damped.
+   */
+  setShoulder(on: boolean | ShoulderOptions): void {
+    if (!on) { this.shoulder = null; this.aimingNow = false; return; }
+    const o = on === true ? {} : on;
+    const pick = (v: number | undefined, d: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d);
+    const d = SHOULDER_DEFAULTS;
+    this.shoulder = {
+      distance: pick(o.distance, d.distance, 0.5, 50), side: pick(o.side, d.side, -5, 5), height: pick(o.height, d.height, 0, 20),
+      aimDistance: pick(o.aimDistance, d.aimDistance, 0.5, 50), aimSide: pick(o.aimSide, d.aimSide, -5, 5), aimFov: pick(o.aimFov, d.aimFov, 0.2, 1.5),
+    };
+  }
+
+  /** Aim mode (Aim held): closer, further to the side, a narrower view. Only with the shoulder framing, only on the ground. */
+  setAiming(on: boolean): void { this.aimingNow = !!on && this.shoulder !== null; }
+
+  private get aimingOnGround(): boolean { return this.aimingNow && this.airNow === 'ground'; }
+
+  private setAirFraming(options: AirFramingOptions | false): void {
+    const o = options === false ? { freefall: false as const, parachute: false as const } : options;
+    const one = (v: { distance?: number; height?: number } | false | undefined, d: { distance: number; height: number }) => {
+      if (v === false) return null;
+      const n = (x: number | undefined, dx: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(-20, Math.min(100, x)) : dx);
+      return { distance: n(v?.distance, d.distance), height: n(v?.height, d.height) };
+    };
+    this.air = { freefall: one(o.freefall, AIR_FRAMING_DEFAULTS.freefall), parachute: one(o.parachute, AIR_FRAMING_DEFAULTS.parachute) };
+  }
+  /** Say whether the target's feet are on the ground (the shell does, every frame). Without it only a fast fall is read. */
+  setGrounded(grounded: boolean): void { this.groundedHint = !!grounded; }
+  /** Force a framing ('freefall', 'parachute', 'ground'); null goes back to reading it from the fall. */
+  forceAirMode(mode: AirMode | null): void { this.airForced = mode === 'ground' || mode === 'freefall' || mode === 'parachute' ? mode : null; }
+  private get airNow(): AirMode { return this.airForced ?? this.airMode; }
+  /** The framing the view is at this frame (damped), its air mode, and whether it is aiming. */
+  get framing(): CameraFraming & { air: AirMode; aiming: boolean } {
+    return { ...(this.now ?? this.framingFor()), air: this.airNow, aiming: this.aimingOnGround };
+  }
+
+  /**
+   * The scope's magnification (1, 2, 4, 8). The rig owns the field of view: zoom and aim are applied together here, so
+   * neither overwrites the other. A game that sets camera.fov itself keeps it while neither is in use.
+   */
+  setZoom(zoom: number): void { this.zoomBy = typeof zoom === 'number' && Number.isFinite(zoom) && zoom >= 1 ? zoom : 1; }
 
   /**
    * The character controller needs this so movement is CAMERA-RELATIVE: pressing forward must go where
@@ -472,16 +586,22 @@ export class CameraRig {
    * A character on foot is unchanged — its yaw is the player's to turn.
    */
   update(target: CameraTarget, delta: number): void {
+    this.framedNow = false;
+    this.place(target, delta);
+    this.settleLens(delta);
+  }
+
+  private place(target: CameraTarget, delta: number): void {
     const object = isObject3D(target) ? target : vehicleAt(target);
     if (this.kind === 'cinematic' && object) { this.cinematic(object, delta); return; }
     if (this.kind === 'chase' || this.kind === 'cinematic') {
-      if (object) this.follow(object, delta);
+      if (object) this.followObject(object, delta);
       else this.chasePoint(target as THREE.Vector3, delta);
       return;
     }
     const vehicle = object && isVehicle(object) ? object : null;
     if (vehicle && this.kind === 'first-person') { this.cockpit(vehicle); return; }
-    if (vehicle && this.kind !== 'top-down' && this.kind !== 'side-scroller') { this.follow(vehicle, delta); return; }
+    if (vehicle && this.kind !== 'top-down' && this.kind !== 'side-scroller') { this.followObject(vehicle, delta); return; }
     // A point is used as given (the old contract); an object is framed at its WORLD position.
     if (isObject3D(target)) target = target.getWorldPosition(this.targetPos);
 
@@ -503,15 +623,21 @@ export class CameraRig {
       return;
     }
 
-    // third-person / orbit
+    // third-person / orbit — at the framing of this moment (walk, shoulder, aim, freefall, parachute), damped.
+    this.readAir(target, delta);
+    const f = this.stepFraming(delta);
     const offset = new THREE.Vector3(
       Math.sin(this.yawAngle) * Math.cos(this.pitch),
       -Math.sin(this.pitch),
       Math.cos(this.yawAngle) * Math.cos(this.pitch),
-    ).multiplyScalar(this.distance);
+    ).multiplyScalar(f.distance);
 
-    const focus = target.clone().add(new THREE.Vector3(0, this.height, 0));
-    let wanted = focus.clone().add(offset);
+    // The focus is the hero's own head — never inside a wall — so every collision ray starts there. The shoulder moves
+    // the camera to the hero's RIGHT (the view's right is (cos yaw, 0, −sin yaw)) and the ray still runs from the head,
+    // so a wall at the hero's shoulder pulls the camera in instead of letting it stand inside the wall.
+    const focus = target.clone().add(new THREE.Vector3(0, f.height, 0));
+    const pivot = focus.clone().add(new THREE.Vector3(Math.cos(this.yawAngle), 0, -Math.sin(this.yawAngle)).multiplyScalar(f.side));
+    let wanted = pivot.clone().add(offset);
 
     const collidables = this.collisionScene ? worldColliders(this.collisionScene, this.collidables, object ?? undefined) : this.collidables;
     if (collidables.length > 0) {
@@ -521,9 +647,12 @@ export class CameraRig {
       this.ray.far = dist;
       const hit = this.ray.intersectObjects(collidables, !this.collisionScene)[0];
       // Pull in slightly PAST the hit so the near plane does not clip into the wall.
-      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0, hit.distance - 0.3)));
+      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0, hit.distance - CAMERA_WALL_GAP)));
     }
 
+    // A fall carries the camera down WITH the hero: damping alone trails a 40 m/s drop by v ÷ stiffness (≈6 m), and the
+    // hero slides out of the bottom of the frame.
+    if (this.airNow !== 'ground' && Number.isFinite(this.airDy)) this.camera.position.y += this.airDy;
     this.dampTo(wanted, delta);
     // Damping from an old exterior pose must not leave the camera behind a wall.
     const actualDirection = this.camera.position.clone().sub(focus);
@@ -531,9 +660,87 @@ export class CameraRig {
     if (collidables.length && actualDistance > 0) {
       this.ray.set(focus, actualDirection.normalize()); this.ray.far = actualDistance;
       const hit = this.ray.intersectObjects(collidables, !this.collisionScene)[0];
-      if (hit) this.camera.position.copy(focus).addScaledVector(actualDirection, Math.max(0, hit.distance - 0.3));
+      if (hit) this.camera.position.copy(focus).addScaledVector(actualDirection, Math.max(0, hit.distance - CAMERA_WALL_GAP));
     }
-    this.camera.lookAt(focus);
+    // 🌍 NEVER UNDER THE GROUND. Looking up swings the camera low behind the hero; on a hill the terrain behind rises
+    // above it. The ground the movers follow (getGround — null in a world with none) is the floor the camera keeps to.
+    const ground = getGround();
+    if (ground) {
+      const g = ground(this.camera.position.x, this.camera.position.z);
+      if (Number.isFinite(g) && this.camera.position.y < g + CAMERA_GROUND_GAP) this.camera.position.y = g + CAMERA_GROUND_GAP;
+    }
+    // Centred: look at the head (the view it always had). Off the shoulder: look the way the view points, past the
+    // pivot, so the hero stays left of centre and the crosshair sees what is ahead of them.
+    if (Math.abs(f.side) < 1e-4) this.camera.lookAt(focus);
+    else this.camera.lookAt(pivot.addScaledVector(offset, -10 / Math.max(1e-6, f.distance)));
+  }
+
+  /** The framing the view should be at now: walk, shoulder or aim on the ground; farther and higher in the air. */
+  private framingFor(): CameraFraming {
+    const s = this.shoulder;
+    const f: CameraFraming = s
+      ? (this.aimingOnGround ? { distance: s.aimDistance, side: s.aimSide, height: s.height, fov: s.aimFov } : { distance: s.distance, side: s.side, height: s.height, fov: 1 })
+      : { distance: this.distance, side: 0, height: this.height, fov: 1 };
+    const mode = this.airNow;
+    const add = mode === 'freefall' ? this.air.freefall : mode === 'parachute' ? this.air.parachute : null;
+    // In the air the view centres and widens again: there is nothing to aim past, and the ground below is what matters.
+    if (add) return { distance: Math.max(0.5, f.distance + add.distance), side: 0, height: Math.max(0, f.height + add.height), fov: 1 };
+    return f;
+  }
+
+  /** Damp the framing toward framingFor() — the first frame starts there, so a game never opens on a swoop. */
+  private stepFraming(delta: number): CameraFraming {
+    this.framedNow = true;
+    const want = this.framingFor();
+    if (!this.now) { this.now = { ...want }; return this.now; }
+    const n = this.now;
+    for (const key of ['distance', 'side', 'height', 'fov'] as const) {
+      const v = Number.isFinite(delta) && delta > 0 ? damp(n[key], want[key], 10, delta) : n[key];
+      n[key] = Math.abs(v - want[key]) < 1e-3 ? want[key] : v;
+    }
+    return n;
+  }
+
+  /**
+   * 🪂 Read the fall from the target's own height, frame to frame: falling faster than FREEFALL_SPEED for FREEFALL_HOLD_S
+   * is freefall; airborne longer than PARACHUTE_AIR_S and still coming down slower than that is a parachute (only when
+   * the game said the feet are off the ground — setGrounded; walking down a slope is not a drop). A jump is neither. A
+   * height change of more than 25 m in one frame is a respawn, not a fall.
+   */
+  private readAir(target: THREE.Vector3, delta: number): void {
+    const dt = Number.isFinite(delta) && delta > 0 ? delta : 0;
+    const dy = target.y - this.airLastY;
+    this.airLastY = target.y;
+    this.airDy = Number.isFinite(dy) && Math.abs(dy) <= 25 ? dy : 0;
+    if (!dt || !Number.isFinite(dy) || Math.abs(dy) > 25) { this.fallSpeed = 0; this.fastFall = this.slowFall = this.airTime = 0; this.airMode = 'ground'; return; }
+    this.fallSpeed = damp(this.fallSpeed, -dy / dt, 12, dt);
+    const grounded = this.groundedHint === true || (this.groundedHint === null && this.fallSpeed < 1);
+    if (grounded) { this.fastFall = this.slowFall = this.airTime = 0; this.airMode = 'ground'; return; }
+    this.airTime += dt;
+    this.fastFall = this.fallSpeed > FREEFALL_SPEED ? this.fastFall + dt : 0;
+    this.slowFall = this.fallSpeed > 0.5 && this.fallSpeed <= FREEFALL_SPEED * 0.75 ? this.slowFall + dt : 0;
+    if (this.fastFall >= FREEFALL_HOLD_S) this.airMode = 'freefall';
+    else if (this.airMode === 'freefall' && this.fallSpeed > FREEFALL_SPEED * 0.75) this.airMode = 'freefall';
+    else if (this.groundedHint === false && this.airTime >= PARACHUTE_AIR_S && this.slowFall >= 0.3) this.airMode = 'parachute';
+    else if (this.airMode === 'parachute' && this.fallSpeed > 0.2) this.airMode = 'parachute';
+    else this.airMode = 'ground';
+  }
+
+  /**
+   * 🔭 THE ONE PLACE THE FIELD OF VIEW IS WRITTEN for aim and zoom: the framing's FOV ÷ the scope's zoom, times the FOV the
+   * camera had when neither was in use. Untouched while both are at 1, so a game's own camera.fov stands.
+   */
+  private settleLens(delta: number): void {
+    // Any view but the on-foot third-person one (a seat, first person, top-down) still settles the framing — an aim
+    // held while getting into a car must not leave the narrow FOV behind.
+    if (!this.framedNow) { this.airMode = 'ground'; this.airLastY = NaN; this.stepFraming(delta); }
+    const raw = (this.now?.fov ?? 1) / this.zoomBy;
+    const scale = Math.abs(raw - 1) < 1e-3 ? 1 : raw;
+    if (scale === 1 && this.lensScale === 1) return;
+    if (this.lensScale === 1) this.lensBase = this.camera.fov;
+    const fov = this.lensBase * scale;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    this.lensScale = scale;
   }
 
   /**
@@ -550,6 +757,12 @@ export class CameraRig {
    * that never calls follow() still gets this view.
    */
   follow(object: THREE.Object3D, delta: number, lookAhead = 4): void {
+    this.framedNow = false;
+    this.followObject(object, delta, lookAhead);
+    this.settleLens(delta);
+  }
+
+  private followObject(object: THREE.Object3D, delta: number, lookAhead = 4): void {
     object.getWorldPosition(this.followPos);
     this.chaseFrom(this.followPos, this.headingOf(object), delta, lookAhead, object);
   }

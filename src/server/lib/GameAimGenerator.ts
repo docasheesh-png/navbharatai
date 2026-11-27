@@ -14,8 +14,9 @@ export const GAME_AIM = String.raw`// WHERE THE PLAYER AIMS — the one way ever
 //   gun.update(dt, fireHeld, a.muzzle, a.shot, bullets);   // the shot goes from the gun to what the crosshair is on
 //   a.point / a.hit                         // where it will land, and what it is on (null for open sky)
 //
-// The ray starts at the camera and goes through the screen centre (the crosshair). The first visible solid thing it meets
-// is the aim point — never the player's own body, its vehicle, particles or anything marked userData.noAim. The muzzle is
+// The ray is the camera's centre ray (the crosshair), searched from the hero's own depth along it: a third-person camera
+// stands behind the hero (over the shoulder, too), and a wall or post between the camera and the hero is behind the gun,
+// never what it shoots. The first visible solid thing it meets past there is the aim point — never the player's own body, its vehicle, particles or anything marked userData.noAim. The muzzle is
 // the tip of what the hand holds (its far end along the aim), else the hand, else chest height in front of the player.
 // The shot is the unit vector from the muzzle to the aim point, so a bullet goes where the crosshair is even though the gun
 // is not at the camera. A point behind the muzzle (something between the camera and the player) falls back to the camera's
@@ -102,6 +103,20 @@ export function shotFrom(muzzle: THREE.Vector3, point: THREE.Vector3, dir: THREE
   return shot.normalize();
 }
 
+/**
+ * Where along the camera's centre ray the search starts: the hero's chest depth on that ray, less HERO_DEPTH_MARGIN, so
+ * nothing between the camera and the hero is aimed at (the shot leaves from in front of the hero). 0.05 in first person
+ * (the camera is at the hero) and in a top-down game (the ray already starts at the muzzle).
+ */
+export const HERO_DEPTH_MARGIN = 0.4;
+export function aimNear(origin: THREE.Vector3, dir: THREE.Vector3, body: THREE.Object3D | null | undefined, topDownFacing?: number | null): number {
+  if (!body || (typeof topDownFacing === 'number' && Number.isFinite(topDownFacing))) return 0.05;
+  body.updateWorldMatrix(true, false);
+  const chest = body.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.4, 0));
+  const along = chest.sub(origin).dot(dir);
+  return Number.isFinite(along) ? Math.max(0.05, along - HERO_DEPTH_MARGIN) : 0.05;
+}
+
 /** Aim from a camera through the screen centre into the scene. */
 export function aimFrom(camera: THREE.Camera, scene: THREE.Object3D, options: AimOptions = {}): AimResult {
   const range = Math.max(1, options.range ?? 300);
@@ -116,7 +131,7 @@ export function aimFrom(camera: THREE.Camera, scene: THREE.Object3D, options: Ai
     dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(_q)).normalize();
   }
   ray.set(origin, dir);
-  ray.near = 0.05;
+  ray.near = aimNear(origin, dir, options.body, options.topDownFacing);
   ray.far = range;
   scene.updateMatrixWorld(true);
   let point: THREE.Vector3 | null = null, hit: THREE.Object3D | null = null;

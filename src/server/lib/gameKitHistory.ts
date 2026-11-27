@@ -119,7 +119,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3effb0aa84a5eca20cb6222207e6b0d5ed4ebdb5a17bf9e6fec14bae78c6bc15",
     "3c1991e63354af7a5be770e10f5401ee68027b6a458dc113e0ec1f2e8706225c",
     "15208f79de67db964f9f934c3e0ce3c5a20f7c119b18972ca7e3e8ba736ef17c",
-    "f3445e4f9e652bfd06dedf2ffb6dff0f9c0b34a4e5b2ad440d64c5873b2dbeea"
+    "f3445e4f9e652bfd06dedf2ffb6dff0f9c0b34a4e5b2ad440d64c5873b2dbeea",
+    "c7b3c76803880480eadda4724a7ff990e1d761a8678a9e1e8f7f105516d4c2eb"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -543,7 +544,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/play/aim.ts": [
     "f9803ff82045872507a1e60657b343fc203c4fa00528561f00636f8875913ebf",
-    "32c2f1d6864ee59de9126fbbd4fa8fd826df8d27e20dd636c361f65c9dbb4fc3"
+    "32c2f1d6864ee59de9126fbbd4fa8fd826df8d27e20dd636c361f65c9dbb4fc3",
+    "4c76d376dec7d98b4ece0b6a6f7ce879aee2f10590a12455c5498bb233cd6104"
   ],
   "src/game/play/boundary.ts": [
     "a95200280ddd4e78fbd494cd3cda6253e19fb55d7f957c405ee8015c8e61c392"
@@ -739,7 +741,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "291ef95c5bb7576b68db794e146814c160c0056abd8ff05fc8b987f8196fd4a0",
     "36a2a5adb5d0c824d5fae72d76fe169ff66f5f85c20f6b98d59ad74574e22a92",
     "b4db037a5541007f7bb0c29ae53d554b12805a3bcc3ad3c891b9adac55566d44",
-    "9b8251af50e99307a1ea4141720a2442732170d9386187fdf123adb814dcd4da"
+    "9b8251af50e99307a1ea4141720a2442732170d9386187fdf123adb814dcd4da",
+    "bd3a8ceeba1b7228c5dc2f17f2b52f85cd6cc8bbc254959241ee73a64fd4c082"
   ],
   "src/game/three/city.ts": [
     "f81e49558a350f1975c90e33da0f956e83d8bc57bb1291ae85d44b214f32f8df",

@@ -1,6 +1,7 @@
 // 🏏 THE BATTER STANDS IN FRONT OF HIS STUMPS AND PLAYS THE SHOT (admin 2026-11-23: the batter stood behind his
 // stumps, the wickets were between bowler and batter, and the batter never played a shot). These run the REAL generated src/game/board/cricket.ts (the field) and three/humanoid.ts (the bat swing).
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as THREE from 'three';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { generateBoardGames } from '../src/server/lib/BoardGamesGenerator';
@@ -39,7 +40,9 @@ describe('🏏 cricketLayout — the field a fan recognises', () => {
   }
   it('a right-hander stands on his leg side (his left as he faces the bowler), a left-hander on the other', () => {
     const r = K.cricketLayout({}), l = K.cricketLayout({ leftHanded: true });
-    // heading 0: the bowler is towards +Z; facing +Z with Y up, the left is -X.
+    // heading 0: the bowler is towards +Z. In three.js (Y up) someone facing +Z has his RIGHT on −X (right = forward × up).
+    // These two lines pin today's placement (x < 0 for the default batter = his right of the stumps), which with the kit
+    // person's mirrored hands reads as a left-hander — an OPEN item, see the cricketLayout comment.
     expect(r.batter.x).toBeLessThan(0);
     expect(l.batter.x).toBeGreaterThan(0);
   });
@@ -92,3 +95,23 @@ describe('🏏 the batter plays the shot', () => {
     expect(h.acting()).toBeNull();
   });
 });
+
+describe('🧭 right is right (#2543: a game took the layout\'s side for "right" and its batter moved the wrong way)', () => {
+  for (const heading of [0, Math.PI / 2, -2.1]) {
+    it(`heading ${heading.toFixed(2)}: f.right = along × up, the camera-behind-the-striker's screen right`, () => {
+      const f = K.cricketLayout({ heading });
+      expect(f.right.x).toBeCloseTo(-f.along.z, 9);    // along × (0,1,0) = (−along.z, 0, along.x)
+      expect(f.right.z).toBeCloseTo(f.along.x, 9);
+    });
+  }
+  it('heading 0: right is −X, exactly what a three.js camera looking down +Z calls screen-right', () => {
+    const f = K.cricketLayout({});
+    expect(f.right.x).toBeCloseTo(-1, 9);
+    // The real three.js camera, not a belief about it: looking +Z, its local +X (screen right) points along world −X.
+    const cam = new THREE.PerspectiveCamera(); cam.lookAt(0, 0, 1); cam.updateMatrixWorld(true);
+    const screenRight = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+    expect(screenRight.x).toBeCloseTo(f.right.x, 6);
+    expect(screenRight.z).toBeCloseTo(f.right.z, 6);
+  });
+});
+

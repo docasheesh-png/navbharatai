@@ -245,7 +245,7 @@ import {
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { zTestFreeBilling } from '../lib/zTestAccount';
-import { shouldRefuseBuildForBalance } from '../AgentV3/balanceRechargeNotice';
+import { shouldRefuseBuildForBalance, walletSpendLimitInr } from '../AgentV3/balanceRechargeNotice';
 import { buildWalletBudgetDiagnostic, buildWalletStopDetail } from '../AgentV3/buildWalletDiagnostic';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser, freshAccessToken, databaseReadyNarration, connectedDatabaseAsleepNote } from '../lib/supabaseProvisionFlow';
@@ -15241,7 +15241,8 @@ async function noteBuildOutcome(
               discountPct: liveCostDiscountPct ?? 0, usdInr: usdInrRate(),
             });
             if (inr !== null && spendableBalanceInr > 0) walletUseRatio = inr / spendableBalanceInr;
-            if (inr !== null && inr > spendableBalanceInr) {
+            // The bill may run up to 20% past the balance before the build stops (walletSpendLimitInr, admin 2026-11-27).
+            if (inr !== null && inr > walletSpendLimitInr(spendableBalanceInr)) {
               walletStopFired = true;
               const notice = balanceRechargeNotice(prompt);
               emit({ type: 'error', message: notice, code: 'INSUFFICIENT_CREDITS', ts: Date.now() });

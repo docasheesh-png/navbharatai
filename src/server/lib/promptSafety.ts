@@ -32,6 +32,7 @@
 
 import { ILLEGAL_RULES, matchesUnambiguously, normalizeScanText, protectiveStandDown, type PublishContentClass } from '../AgentV3/illegalContentRules';
 import { redactSecrets, redactPII } from '../AgentV3/SecretRedactor';
+import { PROMPT_ONLY_RULES, cyberIntrusionMessage } from './cyberIntrusionRule';
 
 export type SafetyVerdict = 'allow' | 'flag' | 'block';
 
@@ -66,7 +67,8 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
 
   let flagged: PromptTriage | null = null;
 
-  for (const rule of ILLEGAL_RULES) {
+  // The publish scanner's rules, and the rules only a REQUEST is read against (cyberIntrusionRule.ts — admin 2026-11-27).
+  for (const rule of [...ILLEGAL_RULES, ...PROMPT_ONLY_RULES]) {
     // Q-3561: a word that is ambiguous ALONE ("hardcore mode", "explicit", "child sex:" on a form) is not
     // half of a pair — "a cricket game for kids with a hardcore mode" was refused as CSAM, finally.
     if (!matchesUnambiguously(rule.subject, body)) continue;
@@ -210,6 +212,8 @@ export function blockMessage(contentClass: PublishContentClass = 'illegal', prom
         + 'bets, withdrawals or cash prizes. I can build the same game with pretend chips or coins instead (no real money), '
         + 'and it can still have a chip wallet, a leaderboard and rewards. Shall I build it that way?';
   }
+  // BREAKING INTO OTHER PEOPLE'S SYSTEMS (admin 2026-11-27, Q-3721): say why, and offer the security app they CAN have.
+  if (ruleId === 'CYBER_INTRUSION') return cyberIntrusionMessage(prefersHindi(prompt));
   if (contentClass === 'adult') {
     return prefersHindi(prompt)
       ? 'पोर्नोग्राफी बैन है।\n\n'

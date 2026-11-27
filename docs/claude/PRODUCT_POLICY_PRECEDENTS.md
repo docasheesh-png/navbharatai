@@ -245,3 +245,12 @@ yeh problem hai, admin game khel ke dekhega! khud reject kar dega"*.
   the admin's decision.
 
 - 🔁 **2026-11-26, later (Q-3561, PR #4593):** the open item above is fixed. `triagePrompt` now uses the same `isAmbiguousWordAlone` rule (via `matchesUnambiguously`); prose keeps whole-message pairing and a refusal stays final. This is precision-first, the existing triage policy — not a change in what is banned. The admin safety queue labels a stored flag a false alarm only when its own excerpt proves it.
+
+## 2026-11-27 — Breaking into other people's systems is refused at the prompt (Q-3721, failedbr #2555)
+Admin: *"apki salah ke anusar banao"* — block build prompts that ask to break into systems the user does not own (unauthorised
+access, malware, credential theft, DDoS); keep defensive, educational and own-system security tools. Built as a PROMPT-ONLY rule
+(`src/server/lib/cyberIntrusionRule.ts`, read by `triagePrompt` for build and chat), NOT in `ILLEGAL_RULES`, so the App Mart
+publish scanner never holds an honest security app for naming "ransomware". Precision first: an offensive capability AND a
+target / harmful purpose; a protective purpose stands it down unless the request also says "without permission", "someone's",
+"secretly", "steal", "victims", "sell". The refusal is final and offers a cybersecurity-learning app instead.
+

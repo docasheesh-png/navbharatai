@@ -83,6 +83,9 @@ export const WHOLE_APP_VIOLATIONS: ReadonlySet<string> = new Set([
   'color-count',
   'font-count',
   'hardcoded-colors',
+  // A class is "unstyled" only if NO stylesheet of the project defines it (failedbr #2555); the file's own write-time half is
+  // CssConsistency.undefinedClassWriteNote, said while it is open.
+  'unstyled-classes',
 ]);
 
 /**

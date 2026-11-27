@@ -25,6 +25,8 @@
 // Pure + fully unit-tested. `balance`, `estimate` are in the SAME currency unit (the caller picks — e.g.
 // INR from the wallet, or USD; this module never mixes units).
 
+import { walletSpendLimitInr } from './balanceRechargeNotice';
+
 export type AffordabilityAction = 'proceed' | 'economy' | 'block';
 
 export interface AffordabilityInput {
@@ -73,7 +75,8 @@ export function decideAffordability(input: AffordabilityInput): AffordabilityDec
   }
 
   // 3. Enough for the estimate → proceed exactly as today (no routing change).
-  if (Number.isFinite(estimate) && estimate > 0 && balance >= estimate) return { action: 'proceed', reason: 'covers-estimate' };
+  //    "Enough" is up to 20% over the balance (walletSpendLimitInr — admin 2026-11-27: a bill a little above the balance is fine).
+  if (Number.isFinite(estimate) && estimate > 0 && walletSpendLimitInr(balance) >= estimate) return { action: 'proceed', reason: 'covers-estimate' };
 
   // 4. Positive but below the estimate. Owner t403u: do not start a cheap or weak build to
   //    cover the gap. The app is not built. A balance that covers the estimate already returned above.

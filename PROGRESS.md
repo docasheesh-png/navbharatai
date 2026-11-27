@@ -6999,5 +6999,6 @@ The admin's map order is frame → natural boundary → water → ground → roa
   on the phone terrain grid (8 m) a slope beside a park can cover the slab edge. **Planning cost (open root cause):** ~0.8–1.4 s
   once on a 2.2 km map and ~5 s on a dense 5 km map (server CPU), 60%+ inside roads.ts `eachCandidate` (125 m grid cells hold
   dozens of 10 m planned segments); next lever: a finer road index (identical answers) or time-sliced planning. Wiring the
-  open-world kit's own cities onto colonies is not done (its cities avoid roads; on maps ≥ the planned-network size there are no
-  blocks, so they do not collide today).
+  open-world kit's own cities onto colonies is not done: where both exist (e.g. a battle-royale island with a planned network) the
+  kit's city is levelled with levelGround and the plots under it give way (tested), so they never overlap, but the two styles sit
+  side by side.

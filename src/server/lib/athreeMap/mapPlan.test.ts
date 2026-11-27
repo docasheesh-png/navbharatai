@@ -76,7 +76,11 @@ describe('the default area by game type (admin-approved) — and the user\'s siz
     expect(p.sideKm).toBe(2); expect(p.areaSource).toBe('user'); expect(p.notes.join(' ')).not.toMatch(/raised/);
     expect(plan('500 sq km shooter').areaKm2).toBe(500);
   });
-  it('the builder\'s size and kind win field by field; the words fill the rest', () => {
+  it('the user\'s stated size beats the builder\'s size_km, and the note says so', () => {
+    const p = plan('5 km ka registan racing game', { sizeKm: 100 });
+    expect(p.sideKm).toBe(5); expect(p.notes.join(' ')).toMatch(/the user's own size wins/);
+  });
+  it('the builder\'s size and kind win field by field over defaults; the words fill the rest', () => {
     expect(plan('registan racing game', { sizeKm: 12 }).choice).toEqual({ archetype: 'desert', sizeKm: 12 });
     expect(plan('registan racing game', { archetype: 'tundra' }).choice?.archetype).toBe('tundra');
   });

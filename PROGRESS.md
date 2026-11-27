@@ -6760,3 +6760,29 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+### 2026-11-27 — the map planner ("naksha banane wala dimaag") and the robot checks (admin's map order, wave 1 part 1)
+- **What:** `src/server/lib/athreeMap/mapPlan.ts` — ONE pure reader turns the request (English / Hinglish / Devanagari input) into a
+  nine-field MapPlan: area km² ("5 km" = side → 25 km²; "5 km²/sq km/varg km" = area), archetype, boundary
+  (`sea|mountains|canyon|forest-river|dunes|wall`, from "se ghira / surrounded by", else per archetype), water
+  (`{sea, rivers, lakes, ponds, canals}` with counts, or refused), roadStyle (`grid|highway|organic|hill|straight`, default grid),
+  density (`sparse|normal|dense`), region flavour (Rajasthan, Kerala, Mumbai, Goa, Himalaya, Ladakh, Sundarbans, Punjab, Deccan,
+  North-East), game type, time of day.
+- **Defaults (admin-approved):** on foot / shooter / RPG 5 km², driving / racing 25 km², flight 100 km²; battle royale keeps its 8 km
+  island; a game that needs roads (circuit, runway) is raised to the world's own `MIN_ROAD_SIZE` (read from the emitted world source,
+  so it follows when small-map roads land); the user's stated size ALWAYS wins, over the builder's `size_km` too.
+- **Wired:** `generate_athree_map` (ToolDispatcher) uses the planner instead of `mapChoiceFor` / `sizeKmIn` / builder picking.
+  `mapPlanWiring.ts` (additive; AthreeMapGenerator.ts untouched because #4608/#4612 are on it) appends `MAP_PLAN` to config.ts and
+  `Object.assign(MAP_OPTIONS, {areaKm2, boundary, water, roadStyle, density})` — the shared option names reach createAthreeWorld
+  through the existing spread and are ignored until the world reads them. The build note says per layer APPLIED vs "recorded, not
+  built yet", decided by reading the emitted world source (`appliedMapLayers`), never assumed.
+- **Robot checks:** `athreeMapCheckSource.ts` emitted as `src/game/athree/mapChecks.ts` (spawn on dry land, no lot in water or on a
+  road, road graph connected, nothing below ground, bounded boundary ring closed; `publishMapChecks` leaves `window.__nbMapChecks`).
+  `mapRobotRun.ts` runs the SAME emitted code at build time on the generated files (seeds 1 and 7, < 1 s) and puts the verdict in the
+  build note; a crash reads "could not run", never a pass. `tests/helpers/loadAthree.ts` now delegates to the same loader.
+- **Superseded test expectation:** `theAthreeMapKindsAreWired` — an unsized racing request is no longer the 100 km default world; it is
+  the racing default raised to the 20 km road floor (admin-approved defaults).
+- **Honest limits / open:** boundary, water wishes, road style and density are passed but NOT consumed by the world yet (wave 1 agents
+  W and R build them; the notes flip to APPLIED by themselves). Time of day is only an instruction to the builder (skyOptions.hours).
+  The playtest does not yet read `window.__nbMapChecks` into its findings. Lots-clear has no lots to check until the colonies layer
+  exists. The racing/flight defaults are 400 km² today because roads need 20 km — they shrink when small-map roads land.

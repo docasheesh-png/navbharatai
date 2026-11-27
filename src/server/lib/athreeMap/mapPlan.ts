@@ -335,12 +335,14 @@ export function planMap(input: MapPlanInput): MapPlan {
   const builderSide = typeof input?.builder?.sizeKm === 'number' && Number.isFinite(input.builder.sizeKm) ? input.builder.sizeKm : null;
   const said = areaKm2In(prompt);
   let side: number | null; let areaSource: PlanSource;
-  if (builderSide !== null) { side = builderSide; areaSource = 'builder'; }
-  else if (said) {
+  // The size the USER states always wins — over the builder's size_km too (the builder picks a size only when the user named none).
+  if (said) {
     side = Math.sqrt(said.areaKm2); areaSource = 'user';
+    if (builderSide !== null && Math.abs(clampSizeKm(builderSide) - clampSizeKm(side)) > 0.005) notes.push(`The builder asked for ${round2(builderSide)} km, but the user's own size wins.`);
     if (said.said === 'side') notes.push(`"${round2(side)} km" was read as the side of the map: a ${round2(side)} x ${round2(side)} km frame (${round2(said.areaKm2)} km²). Say "${round2(side)} sq km" for an area.`);
     if (said.said === 'area') notes.push(`${round2(said.areaKm2)} km² was read as the AREA: a square frame about ${round2(side)} km on each side.`);
     if (said.said === 'rectangle') notes.push(`The ${round2(said.areaKm2)} km² rectangle is made a square frame of the same area (about ${round2(side)} km on each side); the world's frame is square.`);
+  } else if (builderSide !== null) { side = builderSide; areaSource = 'builder';
   } else if (gameType !== 'unknown') {
     const area = DEFAULT_AREA_KM2[gameType];
     side = Math.sqrt(area); areaSource = 'game-default';

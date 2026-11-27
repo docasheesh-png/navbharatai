@@ -209,8 +209,8 @@ export function boundaryIn(text: string): BoundaryKind | null {
 // ---------------------------------------------------------------------------------------------------------------------------------
 // 4. WATER
 
-const COUNT_WORDS: Record<string, number> = { one: 1, ek: 1, two: 2, do: 2, three: 3, teen: 3, four: 4, char: 4, chaar: 4, five: 5, paanch: 5, panch: 5, many: 4, kai: 4, bahut: 4, lots: 4, several: 3 };
-const WATER_KINDS: Array<[keyof Omit<WaterPlan, 'sea'>, RegExp]> = [
+export const COUNT_WORDS: Record<string, number> = { one: 1, ek: 1, two: 2, do: 2, three: 3, teen: 3, four: 4, char: 4, chaar: 4, five: 5, paanch: 5, panch: 5, many: 4, kai: 4, bahut: 4, lots: 4, several: 3 };
+export const WATER_KINDS: Array<[keyof Omit<WaterPlan, 'sea'>, RegExp]> = [
   ['ponds', /\b(?:ponds?|talaa?bs?|taalaa?bs?|talav|pokhar\w*|kund|pokhri)\b|तालाब|पोखर|कुंड/u],
   ['lakes', /\b(?:lakes?|jheel\w*|jhil|sarovar|lagoons?)\b|झील|सरोवर/u],
   ['canals', /\b(?:canals?|nahar\w*|nehar\w*|backwaters?)\b|नहर/u],

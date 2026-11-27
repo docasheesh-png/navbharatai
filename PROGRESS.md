@@ -6760,3 +6760,19 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
 - Q-3722: `walletSpendLimitInr` — a build may start and run while its estimate / running bill is within 120% of a positive balance;
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
+
+### 2026-11-27 — Q-3471 (failedbr #2523), admin option A: 3D assets and sounds prepared side by side (#4617)
+- `assetProviderBudget.ts`: the permit now QUEUES a request FIFO for up to 8 s instead of refusing it. Still one request a
+  second per origin, and a Retry-After is never shortened. A turn past 8 s is refused at once, as before. A waiter that a
+  later cooldown pushes past its deadline is refused at that moment. A cancelled waiter leaves the queue and the next one
+  takes its slot.
+- `gameAssets/seedMedia.ts`: the asset preparer and the sound preparer run together, after the recipes as before. The seed
+  detail now gives each part's own time and "side by side, N s together", never a sum.
+- Sibling found and fixed: `saveWorkspaceAssets` updated the asset index by reading, merging and writing it back with no
+  serialization, so two saves at once dropped paths (the reversion test kept 1 of 24). It now runs one save at a time per
+  workspace (`mergeAssetIndex` → `withIndexQueue('assets:<id>')`).
+- Other permit callers checked: assetSeed chain, soundSeed retry, downloadReviewedAsset 15 s deadline, Poly Haven
+  metadata/discovery, liveCheck, addLibraryModels. None depended on an immediate refusal except Poly Haven discovery,
+  which now waits its turn instead of falling back.
+- Tests: `assetProviderBudget.test.ts` (+5), `tests/assetsAndSoundsArePreparedSideBySide.test.ts` (8; #2523 cold-cache
+  shape). Every test was reverted and seen to fail.

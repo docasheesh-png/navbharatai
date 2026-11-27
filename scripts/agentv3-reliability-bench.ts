@@ -21,6 +21,9 @@
  *      BENCH_USER_ID / BENCH_EMAIL (a v3-enabled test account on the tier under test),
  *      BENCH_RUNS (attempts per prompt, default 1), BENCH_ONLY (comma ids), BENCH_FLAGS (comma, recorded only),
  *      BENCH_TIMEOUT_S (per build, default 1800), BENCH_AUTH_TOKEN (current ID token),
+ *      BENCH_FIREBASE_REFRESH_TOKEN (instead of BENCH_AUTH_TOKEN: a fresh ID token is minted before each
+ *      build, for runs longer than an ID token lives — the weekly workflow uses this) + BENCH_FIREBASE_API_KEY
+ *      (optional; defaults to the public web key in src/firebase-applet-config.json),
  *      BENCH_POWER_LEVEL (required exact tier; this pilot uses weak),
  *      BENCH_OUTPUT_DIR (optional artifact directory), BENCH_CONFIRM=yes (actually run),
  *      BENCH_FIXTURE (reliability|game, default reliability — game = Game Engine Ultra Phase 4 corpus,
@@ -34,7 +37,7 @@ import { fileURLToPath } from 'url';
 import { parseNdjson, metricsFromEvents, type BuildMetrics } from '../src/server/AgentV3/BakeoffMetrics';
 import { breakdown, buildSucceeded, formatEvidenceSummary, selectBenchPrompts, successRate, summarizeEvidence, validateBenchFixture, verifiedOutcome, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
 import { benchFixtureFile, gameSignalsFromEvents, gameFailClass, summarizeGameBench } from '../src/server/AgentV3/reliability/gameBench';
-import { benchmarkEndpoint, benchmarkRequest, benchmarkToken, benchmarkTier } from './lib/reliabilityRequest';
+import { benchmarkEndpoint, benchmarkRequest, benchmarkTokenSource, benchmarkTier } from './lib/reliabilityRequest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -49,6 +52,11 @@ const CONFIRMED = env.BENCH_CONFIRM === 'yes';
 const REQUESTED_TIER = benchmarkTier(env.BENCH_POWER_LEVEL);
 const FIXTURE_FILE = benchFixtureFile(env.BENCH_FIXTURE);
 const IS_GAME = FIXTURE_FILE.includes('game-bench');
+
+/** The Firebase web API key is public client config; reading it here keeps one copy of it. */
+function publicWebApiKey(): string | undefined {
+  try { return (JSON.parse(readFileSync(join(HERE, '..', 'src', 'firebase-applet-config.json'), 'utf8')) as { apiKey?: string }).apiKey; } catch { return undefined; }
+}
 
 const FAILED: BuildMetrics = { filesCreated: 0, ok: false, readinessScore: null, billedUsd: null, toolCalls: 0, toolErrors: 0, providerFallbacks: 0, geminiTrap: false, errored: true };
 
@@ -79,10 +87,10 @@ async function main(): Promise<void> {
   if (!CONFIRMED) {
     console.log('\nDRY RUN (no build started). These would be sent:');
     for (const p of prompts) console.log(`  - [${p.lang}/${p.complexity}] ${p.id}: ${p.prompt}`);
-    console.log('\nSet BENCH_AUTH_TOKEN and BENCH_CONFIRM=yes to run them for real (costs provider money).');
+    console.log('\nSet BENCH_AUTH_TOKEN (or BENCH_FIREBASE_REFRESH_TOKEN) and BENCH_CONFIRM=yes to run them for real (costs provider money).');
     return;
   }
-  const token = benchmarkToken(env.BENCH_AUTH_TOKEN);
+  const tokenFor = benchmarkTokenSource({ authToken: env.BENCH_AUTH_TOKEN, refreshToken: env.BENCH_FIREBASE_REFRESH_TOKEN, apiKey: env.BENCH_FIREBASE_API_KEY || publicWebApiKey() });
   const startedAt = new Date().toISOString();
   const runs: BenchRun[] = [];
   const dir = env.BENCH_OUTPUT_DIR || join(HERE, 'bench-results');
@@ -104,6 +112,13 @@ async function main(): Promise<void> {
   for (const p of prompts) {
     for (let attempt = 1; attempt <= RUNS; attempt++) {
       const t0 = Date.now();
+      // Minted BEFORE the request exists, so a refused refresh stops the run with no paid build sent.
+      let token: string;
+      try { token = await tokenFor(); } catch (err) {
+        out.execution!.status = 'blocked';
+        save();
+        throw new Error(`Benchmark blocked before ${p.id}#${attempt}: ${err instanceof Error ? err.message : 'token-refresh-failed'} (no build was sent). Partial evidence: ${file}`);
+      }
       const request = benchmarkRequest(p.prompt, token, env.BENCH_USER_ID, env.BENCH_EMAIL, REQUESTED_TIER);
       const row = runs.length;
       runs.push({ id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: null,

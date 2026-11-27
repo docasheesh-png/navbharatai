@@ -175,16 +175,26 @@ describe('boundary, water, roads, density, region, time of day', () => {
 
 describe('honesty: what the world applies is read from its source, never assumed', () => {
   const p = plan('5 km ka registan shooter, pahaadon se ghira, do talab');
-  it('today\'s world builds the road style (#4626), the edge and the ponds (#4624) and is reported as applying them; density, which it does not read, is not claimed', () => {
+  it('today\'s world builds the road style (#4626), the edge and the ponds (#4624), and the density and colonies (wave 2), and is reported as applying them', () => {
     const world = generateAthreeMap().files['src/game/athree/world.ts'];
     const a = appliedMapLayers(world, p);
-    // Since #4626 (road styles) and #4624 (natural edges, ponds) the world reads roadStyle, boundary and water.ponds; density is unread.
-    expect(a).toMatchObject({ frame: true, land: true, roadStyle: true, boundary: true, water: true, density: false });
-    expect(describeMapPlan(p, a)).toMatch(/roadStyle: .* — APPLIED/);
+    // Since #4626 (road styles), #4624 (natural edges, ponds) and the colonies the world reads roadStyle, boundary, water.ponds and density,
+    // and lays the colony plots from the density (planColonies).
+    expect(a).toMatchObject({ frame: true, land: true, roadStyle: true, boundary: true, water: true, density: true, colonies: true });
     const note = describeMapPlan(p, a);
+    expect(note).toMatch(/roadStyle: .* — APPLIED/);
     expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
-    expect(note).toMatch(/density: normal — recorded, not built into this world yet/);
-    expect(note).toMatch(/density is planned but not yet built into the world; do not claim it/);
+    expect(note).toMatch(/density: normal — APPLIED/);
+    expect(note).toMatch(/colonies: .* — APPLIED/);
+    expect(note).not.toMatch(/do not claim/);
+  });
+  it('the colonies layer is APPLIED only when the world reads the density AND lays plots from it (reading the option alone is not enough)', () => {
+    expect(appliedMapLayers('const { density } = options;', p)).toMatchObject({ density: true, colonies: false });
+    expect(appliedMapLayers('const c = planColonies({ seed });', p)).toMatchObject({ density: false, colonies: false });
+    expect(appliedMapLayers('const d = options.density; const c = planColonies({ seed, density: d });', p)).toMatchObject({ density: true, colonies: true });
+    const note = describeMapPlan(p, appliedMapLayers('const { density } = options;', p));
+    expect(note).toMatch(/colonies: .* — recorded, not built into this world yet/);
+    expect(note).toMatch(/colonies are planned but not yet built into the world; do not claim them/);
   });
   it('the water layer is APPLIED only when the world reads its ponds (the #4624 shape: options.water ?? {} … .ponds); counts it does not use are said', () => {
     const p2 = plan('do nadiyan aur ek talab wala explore game');

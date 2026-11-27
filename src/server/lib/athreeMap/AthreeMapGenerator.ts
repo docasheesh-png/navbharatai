@@ -635,8 +635,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + (options.roadStyle ?? '') + '|' + landLine, {
         seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile, roadStyle: options.roadStyle, landLine,
         terrain: terrainNoRoads,
-        water: (x, z) => { const w = waterAt(x, z); return w ? { surface: w.surface, kind: w.kind } : null; },
-        bodies: waterBodies,
+        // 🔁 ROADS FIRST, PONDS AFTER (found 2026-11-27 building the colonies: a planned-network map with ponds overflowed the stack on its
+        // first heightAt). The ponds are placed AWAY from the roads (pondsOf reads roadAt and the road-carved ground), so the roads may
+        // not read the ponds back: they see the rivers and lakes only. Reading waterAt / waterBodies here (both include the ponds) made
+        // roads → ponds → road-carved ground → roads, a loop with no end. tests/pondsAndPlannedRoadsBuild.test.ts holds the order.
+        water: (x, z) => { const w = withRivers ? rivers.waterAt(x, z) : null; return w ? { surface: w.surface, kind: w.kind } : null; },
+        bodies: () => (withRivers ? rivers.bodies() : { rivers: [], lakes: [] }),
       });
     }
     return roadNet;

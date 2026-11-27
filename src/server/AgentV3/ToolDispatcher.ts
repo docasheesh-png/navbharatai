@@ -422,7 +422,8 @@ import { gameKitWants3D, gameTurnRequest } from './gameKitSeed';
 import { forgeNotUsedFor, forgeNotUsedWarning, type MissingObject } from './forgeForMissing';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
-import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
+import { ARCHETYPES, ARCHETYPE_IDS, type Archetype } from '../lib/athreeMap/athreeMapKinds';
+import { applyMapPlanToFiles, planAthreeMap } from '../lib/athreeMap/mapPlanWiring';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
@@ -10569,16 +10570,20 @@ export class ToolDispatcher {
         const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
         const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
         if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
-        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.worldRequest());
-        if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
+        // 🗺️ THE MAP PLANNER (mapPlan.ts) is the one reader of size, land, boundary, water, roads, density, region, game type and
+        // time of day. The builder's archetype / size_km win field by field; the user's stated size always beats a default.
+        const athPlan = planAthreeMap(this.worldRequest(), { archetype: (athArchetype || null) as Archetype | null, sizeKm: athSize });
+        let athChoice = athPlan.choice;
         if (composition !== undefined) {
-          const promptSize = sizeKmIn(this.worldRequest());
+          const promptSize = athPlan.areaSource === 'user' ? athPlan.sideKm : null;
           const requestedSizes = [athSize, promptSize].filter((size): size is number => size !== null);
           const width = (composition as {widthKm?:unknown})?.widthKm;
-          if (requestedSizes.some(size => width !== size)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
+          if (requestedSizes.some(size => typeof width !== 'number' || Math.abs(width - size) > 0.005)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
           if (athChoice && typeof width === 'number') athChoice = {...athChoice,sizeKm:width};
         }
-        const ath = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
+        const athGenerated = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
+        const athPlanned = applyMapPlanToFiles(athGenerated.files, athPlan, athChoice);
+        const ath = { ...athGenerated, files: athPlanned.files };
         // Additive only: a read failure is not a missing file, and custom project source must not be replaced.
         if (composition !== undefined) {
           if (!this.actuator.createFileExclusive) refuse('World composition requires atomic exclusive source creation; this backend is unavailable. No source was installed.');
@@ -10610,7 +10615,7 @@ export class ToolDispatcher {
           }
         }
         this.scheduleCheckpoint('athree map');
-        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${athPlanned.note}\n\n${ath.instructions}${athLayers}`;
       }
 
       case 'generate_game_2d': {

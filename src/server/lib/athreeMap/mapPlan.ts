@@ -408,8 +408,8 @@ export function appliedMapLayers(worldSource: string, plan: MapPlan): Record<Map
 }
 
 /** The smallest map the emitted world builds roads on (its own MIN_ROAD_SIZE), or null when it cannot be read. */
-export function roadFloorFromConfig(configSource: string): { loop: number; bounded: number } | null {
-  const m = /MIN_ROAD_SIZE[^=]*=\s*\{\s*loop:\s*(\d+)\s*,\s*bounded:\s*(\d+)\s*\}/.exec(String(configSource ?? ''));
+export function roadFloorFromWorldSource(worldSource: string): { loop: number; bounded: number } | null {
+  const m = /MIN_ROAD_SIZE[^=]*=\s*\{\s*loop:\s*(\d+)\s*,\s*bounded:\s*(\d+)\s*\}/.exec(String(worldSource ?? ''));
   return m ? { loop: Number(m[1]), bounded: Number(m[2]) } : null;
 }
 

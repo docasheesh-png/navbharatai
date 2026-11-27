@@ -12,16 +12,16 @@
 
 import { athreeFiles } from './AthreeMapGenerator';
 import { MAP_CHECKS } from './athreeMapCheckSource';
-import { appliedMapLayers, describeMapPlan, mapPlanWorldOptions, planMap, roadFloorFromConfig, type MapLayer, type MapPlan, type MapPlanInput } from './mapPlan';
+import { appliedMapLayers, describeMapPlan, mapPlanWorldOptions, planMap, roadFloorFromWorldSource, type MapLayer, type MapPlan, type MapPlanInput } from './mapPlan';
 import type { MapChoice } from './athreeMapKinds';
 
 const DIR = 'src/game/athree';
 export const MAP_CHECKS_PATH = `${DIR}/mapChecks.ts`;
 
 let floorCache: { loop: number; bounded: number } | null | undefined;
-/** The emitted world's own MIN_ROAD_SIZE (read once from the config it emits). */
+/** The emitted world's own MIN_ROAD_SIZE (read once from the world source it emits). */
 export function athreeRoadFloor(): { loop: number; bounded: number } | null {
-  if (floorCache === undefined) floorCache = roadFloorFromConfig(athreeFiles([])[`${DIR}/config.ts`] ?? '');
+  if (floorCache === undefined) floorCache = roadFloorFromWorldSource(athreeFiles([])[`${DIR}/world.ts`] ?? '');
   return floorCache;
 }
 
@@ -59,7 +59,9 @@ export function applyMapPlanToFiles(files: Readonly<Record<string, string>>, pla
       + 'Object.assign(MAP_OPTIONS, ' + JSON.stringify(mapPlanWorldOptions(effective)) + ');\n';
   }
   if (!(MAP_CHECKS_PATH in out)) out[MAP_CHECKS_PATH] = MAP_CHECKS;
-  const applied = appliedMapLayers(out[`${DIR}/world.ts`] ?? '', effective);
+  // Every emitted world module except the plan's own data and the checks: a layer may be read by any of them.
+  const worldSource = Object.entries(out).filter(([p]) => p.startsWith(DIR + '/') && p !== `${DIR}/config.ts` && p !== MAP_CHECKS_PATH).map(([, src]) => src).join('\n');
+  const applied = appliedMapLayers(worldSource, effective);
   const note = describeMapPlan(effective, applied)
     + '\nROBOT CHECKS: import { publishMapChecks } from \'./game/athree/mapChecks\' and call publishMapChecks(map.world, { lots, placed }) once, after createAthreeMap and after the game has placed its houses and props. It measures: spawns on dry land, no lot in water or on a road, the road graph in one piece, nothing under the ground, the boundary closed. Every failure is printed to the console and left on window.__nbMapChecks for the playtest; show failures honestly, never hide them.';
   return { files: out, applied, note };

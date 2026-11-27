@@ -202,7 +202,7 @@ export async function addEnemiesAtTurnStart(io: {
   record: (issue: Issue) => void;
 }): Promise<string> {
   try {
-    const req = enemyRequestFrom(io.prompt);
+    const req = enemyRequestFrom(io.prompt, librarySubjectOf);
     const files = io.filesAtTurnStart;
     if (!req || !files || typeof files[FEATURES_INDEX_PATH] !== 'string') return '';
     if (typeof files[ENEMIES_FEATURE_PATH] === 'string') {

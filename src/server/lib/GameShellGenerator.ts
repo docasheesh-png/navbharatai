@@ -1364,7 +1364,7 @@ export class Game {
   private capturePointer(): void {
     if (this.options.pointerLock === false || touchDevice() || automatedBrowser()) return;
     const c = this.canvas as HTMLCanvasElement & { requestPointerLock?: () => unknown };
-    try { const r = c.requestPointerLock?.(); if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined); } catch { /* refused: the mouse still looks, just not captured */ }
+    try { const r = c.requestPointerLock?.(); if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined); } catch { /* refused: the mouse looks only while dragged (lookActive in core/input.ts) */ }
   }
   private releasePointer(): void {
     const d = document as Document & { exitPointerLock?: () => void; pointerLockElement?: Element | null };

@@ -181,6 +181,15 @@ export const PLAYER2_ACTIONS: ActionMap = {
 
 const GROUP_OF: Record<string, readonly string[]> = Object.fromEntries(ACTION_GROUPS.flatMap((g) => g.map((name) => [name, g])));
 
+/**
+ * Does this mouse move turn the camera? Only while the page holds the pointer (pointer lock, after a click in play), or
+ * while a mouse button is held (a drag — the way to look around where the browser refuses the lock). A free cursor: no.
+ */
+export function lookActive(e: { buttons?: number }): boolean {
+  const locked = typeof document !== 'undefined' && !!(document as Document & { pointerLockElement?: Element | null }).pointerLockElement;
+  return locked || ((e.buttons ?? 0) & 3) !== 0;
+}
+
 export class Input {
   private down = new Set<string>();
   private pressed = new Set<string>();
@@ -216,7 +225,12 @@ export class Input {
     const onKeyUp = (e: KeyboardEvent) => this.set(e.code, false);
     const onMouseDown = (e: MouseEvent) => this.set('Mouse' + e.button, true);
     const onMouseUp = (e: MouseEvent) => this.set('Mouse' + e.button, false);
-    const onMouseMove = (e: MouseEvent) => { this.lookX += e.movementX || 0; this.lookY += e.movementY || 0; };
+    // 🖱️ THE MOUSE TURNS THE CAMERA ONLY WHEN THE GAME HAS IT (admin 2026-11-27, choice "A" — the PC shooter way): after a
+    // click the game captures the pointer and the mouse turns camera and aim together; Esc frees it. A FREE cursor never
+    // turns the camera — it used to, on every plain move, so moving toward a button swung the whole frame (and the preview,
+    // which refused the lock, never stopped doing it). Where the browser refuses the lock, dragging with a button held still
+    // looks around. lookActive() is the one rule.
+    const onMouseMove = (e: MouseEvent) => { if (!lookActive(e)) return; this.lookX += e.movementX || 0; this.lookY += e.movementY || 0; };
     // A tab-switch must release everything, or the player keeps running after they come back.
     const onBlur = () => { this.down.clear(); this.moveX = 0; this.moveY = 0; };
 

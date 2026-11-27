@@ -8,7 +8,7 @@ import { providerDebugTag } from '../../routes/agentv3';
 
 describe('public build failure boundary', () => {
   it.each([
-    new SurplusBuildUnavailableError('no_eligible_90_percent_offer'),
+    new SurplusBuildUnavailableError('no_eligible_discount_offer'),
     new SurplusAccountingUnavailableError(),
     new PublicBuildEngineError(),
   ])('serializes only generic public failure and keeps SSE supplier-free', error => {

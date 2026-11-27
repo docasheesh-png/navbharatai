@@ -83,8 +83,9 @@ describe('durable Surplus pilot reservations', () => {
 
   it.each([
     ['over estimate', '0.000031', '0.001', 'actual_cost_exceeded_reserved_estimate'],
-    ['below90%', '0.000021', '0.0002', 'realized_discount_below_90_percent'],
-    ['above official tariff', '0.00002', '0.00001', 'realized_discount_below_90_percent'],
+    // Deliberate update (admin 2026-11-27): the reason names the request's floor; this fixture's endpoint is 'min90'.
+    ['below90%', '0.000021', '0.0002', 'realized_discount_below_floor'],
+    ['above official tariff', '0.00002', '0.00001', 'realized_discount_below_floor'],
     ['missing official comparison', '0.00002', null, 'official_tariff_comparison_unavailable'],
   ])('quarantines %s without rewriting actual expense or approved user charge', async (_label, actual, official, reason) => {
     const { db,input,audit,docs } = setup(); await reserveSurplusAttempt(db,input);

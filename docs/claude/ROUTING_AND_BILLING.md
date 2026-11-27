@@ -958,3 +958,21 @@ shared `decideAffordability`, and the mid-build wallet stop in the route. No pos
 20% negative, settled at the real bill; the account is then blocked for the next build until top-up. Not decided (and not built):
 pricing only the real cost, without the markup, before a preview exists.
 
+
+## 2026-11-27 — Surplus discount floor 85%, list-price cap, and Claude on Weak at ≥ 90% (admin decision)
+Supersedes, for Surplus only, the 90% floor and the "no list-tariff cap" note of 2026-10-30 above; nothing earlier is deleted.
+- **Floor 85%** (was 90%). Every Surplus build request is routed on the official request-time floor `…/min85/v1`; the router
+  checks `estimated_discount_pct >= N` per request and answers 404 `minimum_discount_not_met` (free, not attempted) when no
+  seller meets it. Among offers that clear the floor, the **strongest** model builds (`surplusCodingQuality`, unchanged).
+- **Charge = min(10 × verified actual cost, the model's list price for the same usage)** — policy id
+  `surplus-build-10x-list-cap-v2` (v1 `surplus-build-10x-official-cap-v1` kept for older receipts). At ≥ 90% discount 10 × actual
+  is already ≤ list; between 85% and 90% the list price is the cap. The list price comes from the bound offer's own
+  `direct_*`/`effective_*` rates (same feed, so only their ratio is used and no unit is assumed). When that ratio is unknown
+  the charge stays 10 × actual and the decision says `ten_times_verified_actual_cost_list_price_unknown`.
+- **Weak may run Claude (Sonnet/Opus) ONLY through Surplus with a guaranteed ≥ 90% discount**: the request goes to `…/min90/v1`
+  and the selected offer must clear 90% too. Every other Weak path is unchanged and still Claude-free: the ladder and its
+  override (`FORBIDDEN_ON_WEAK`), `enforceNoClaude`, `noClaudeZone` (direct Anthropic calls) and the shared model rule
+  (`chooseModels` with `noClaude`). The build report's detector reads provider names, so a Surplus turn is reported as `SURPLUS`.
+- One source of truth: `src/server/AI/SurplusRegistry/config.ts` (`SURPLUS_MIN_DISCOUNT_PCT`, `SURPLUS_CLAUDE_MIN_DISCOUNT_PCT`,
+  `surplusFloorFor`, `surplusBaseUrl`, `surplusBuildEndpoint`, `surplusModelPermitted`). The builder endpoint has no env override.
+  Receipts are quarantined at the request's own floor (`realized_discount_below_floor`). Locked by `tests/surplusDiscountFloor85.test.ts`.

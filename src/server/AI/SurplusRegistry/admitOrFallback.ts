@@ -15,7 +15,7 @@ export const SAFE_SURPLUS_ADMISSION_REASONS = [
   'missing_or_invalid_key',
   'admission_timeout',
   'stale_or_missing_snapshot',
-  'no_eligible_90_percent_offer',
+  'no_eligible_discount_offer',
   'review_unavailable',
   'admit_circuit_open',
   'other_safe',
@@ -33,7 +33,8 @@ export function safeSurplusAdmissionReason(reason: string | undefined | null): S
   if (/api key missing|invalid for live|credential/i.test(raw)) return 'missing_or_invalid_key';
   if (/timed out|admission_timeout/i.test(raw)) return 'admission_timeout';
   if (/stale_or_missing_snapshot|no observed models|metadata snapshot/i.test(raw)) return 'stale_or_missing_snapshot';
-  if (/no_eligible_90_percent_offer/i.test(raw)) return 'no_eligible_90_percent_offer';
+  // The machine code was `no_eligible_90_percent_offer` until the floor became 85% (admin 2026-11-27); both map here.
+  if (/no_eligible_(?:90_percent|discount)_offer/i.test(raw)) return 'no_eligible_discount_offer';
   if (/flag_off|builder is disabled/i.test(raw)) return 'flag_off';
   if (/admit_circuit_open|circuit.?open|overload.?cool/i.test(raw)) return 'admit_circuit_open';
   // Known SurplusBuildUnavailableError allowlist reasons pass through when listed above; else fold.
@@ -42,11 +43,10 @@ export function safeSurplusAdmissionReason(reason: string | undefined | null): S
     'previous_call_accounting_unavailable', 'price_objective_not_enforced', 'returned_route_identity_mismatch',
     'expired_or_replayed_dispatch', 'response_accounting_unavailable', 'invalid_workload',
     'stale_or_missing_snapshot', 'pricing_units_not_independently_verified', 'account_or_privacy_not_reviewed',
-    'no_reviewed_coding_models', 'incomparable_quality_cohorts', 'no_eligible_90_percent_offer',
+    'no_reviewed_coding_models', 'incomparable_quality_cohorts', 'no_eligible_discount_offer',
     'invalid_metadata_or_review', 'request_time_floor_contract_not_reviewed', 'review_unavailable',
   ]);
   if (raw === 'stale_or_missing_snapshot') return 'stale_or_missing_snapshot';
-  if (raw === 'no_eligible_90_percent_offer') return 'no_eligible_90_percent_offer';
   if (raw === 'review_unavailable' || known.has(raw)) return 'review_unavailable';
   return 'other_safe';
 }

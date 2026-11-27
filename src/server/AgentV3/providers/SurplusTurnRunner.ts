@@ -1,4 +1,5 @@
 import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeIdentity';
+import { surplusBuildEndpointValid } from '../../AI/SurplusRegistry/config';
 import { elideTurnParams } from '../elideTurnMedia';
 import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from '../scopeFailureDiagnostic';
 import { tagRawErrorDetail } from '../rawErrorDetail';
@@ -62,7 +63,7 @@ export interface SurplusFailureResolution {
 }
 export interface SurplusRunnerAuthority {
   authorize(params: RunTurnParams): Promise<SurplusTurnPermit>;
-  /** Dedicated min90 transport only. Must disable SDK retries and verify the permit is still current. */
+  /** Dedicated minimum-discount (min{N}) transport only. Must disable SDK retries and verify the permit is still current. */
   dispatch(request: SurplusTurnRequest, signal: AbortSignal, permit: SurplusTurnPermit): Promise<unknown>;
   /** Trusted accounting mapper, never a conversion of buyer_cost_micro into a settled receipt. */
   onResponse?(raw: unknown, permit: SurplusTurnPermit, result: TurnResult): Promise<TurnUsage['surplusReceipt'] | undefined>;
@@ -102,7 +103,6 @@ export function engineCodeOf(raw: unknown): string | undefined {
     return [e.code, e.type].find((v): v is string => typeof v === 'string' && /^[A-Za-z0-9_.-]{1,48}$/.test(v));
   } catch { return undefined; }
 }
-const ENDPOINT = 'https://api.surplusintelligence.ai/min90/v1';
 const MAX_TURN_ATTEMPTS = 3;
 const validationReasons = new WeakMap<object, SurplusTurnFailure['reason']>();
 function validationError(reason: 'empty_completion' | 'content_filter'): Error {
@@ -124,7 +124,9 @@ function failureReason(error: unknown): SurplusTurnFailure['reason'] {
 }
 const RESERVED = new Set(['model', 'messages', 'tools', 'tool_choice', 'max_tokens', 'stream', 'stream_options', '__proto__', 'constructor', 'prototype']);
 function checkPermit(permit: SurplusTurnPermit, requested?: number): void {
-  if (!permit || permit.endpoint !== ENDPOINT ||
+  // The request's floor route (admin 2026-11-27): `…/min{N}/v1` with N at least the model's floor — 85, or 90 for a
+  // Claude-family model (the builder is Weak-only). Anything looser, or any other host, never dispatches.
+  if (!permit || !surplusBuildEndpointValid(permit.endpoint, permit.model) ||
       ![permit.buildId, permit.callId, permit.model, permit.providerId, permit.offerId, permit.priceGeneration, permit.policyVersion]
         .every(v => typeof v === 'string' && v.trim().length > 0) ||
       !Number.isSafeInteger(permit.maxTokens) || permit.maxTokens <= 0 ||

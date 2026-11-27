@@ -81,7 +81,8 @@ describe('fixed, bounded, durable one-shot dispatch', () => {
     expect(result).toMatchObject({ status: 'passed', expectedResponse: 'matched', actualCostUsd: '0.000029', latencyMs: 0 });
     expect(t.fetcher).toHaveBeenCalledTimes(1);
     const [url, init] = t.fetcher.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://api.surplusintelligence.ai/min90/v1/chat/completions');
+    // Admin 2026-11-27: a non-Claude model is routed on the 85% floor.
+    expect(url).toBe('https://api.surplusintelligence.ai/min85/v1/chat/completions');
     expect(JSON.parse(init.body as string)).toEqual({ model: 'deepseek-v4.1-flash', messages: [{ role: 'user', content: 'Reply with exactly OK and nothing else.' }], max_tokens: 32, stream: false, si_route: { objective: 'price' } });
     expect(t.stored()).toMatchObject({ attempts: 1, state: 'reported', authorizationId: SURPLUS_CONNECTION_TEST_AUTHORITY, remainingBudgetUsd: '1' });
     expect(JSON.stringify([...t.docs.values()])).not.toContain(KEY);

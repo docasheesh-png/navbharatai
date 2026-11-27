@@ -42,7 +42,7 @@ describe('any character holds an item', () => {
     const item = gun();
     expect(PB.holdInHand(enemy, item)).toBe(true);
     let hand: THREE.Object3D | null = null; enemy.traverse((o) => { if (o.name === 'mixamorig:RightHand') hand = o; });
-    expect(item.parent).toBe(hand);
+    expect(item.parent?.userData?.nbHoldPivot ? item.parent.parent : item.parent).toBe(hand);   // through fitInHand's holder (grip, turn)
     const size = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3());
     expect(Math.max(size.x, size.y, size.z)).toBeCloseTo(0.54, 1); // about a third of 1.8 m
   });

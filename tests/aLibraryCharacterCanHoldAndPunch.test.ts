@@ -99,7 +99,7 @@ describe('🔴 the character holds an item in its hand', () => {
     await settle();
     const gun = new THREE.Mesh(new THREE.BoxGeometry(2, 0.5, 0.2));
     expect(c.hold(gun)).toBe(true);
-    expect(gun.parent?.name).toBe('mixamorig:RightHand');
+    expect((gun.parent?.userData?.nbHoldPivot ? gun.parent.parent : gun.parent)?.name).toBe('mixamorig:RightHand');   // through fitInHand's holder (grip, turn)
     const size = new THREE.Box3().setFromObject(gun).getSize(new THREE.Vector3());
     expect(size.x).toBeGreaterThan(0.4); expect(size.x).toBeLessThan(0.7);   // about a third of 1.75 m
   });

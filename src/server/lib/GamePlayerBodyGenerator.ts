@@ -354,6 +354,50 @@ function say(id: string, text: string): void {
   try { events.emit('HINT', { id, text, seconds: 6 }); } catch { /* a game without the Hud still plays */ }
 }
 
+// 🔫 HOW A HAND HOLDS A THING (admin 2026-11-27, screenshot: the young-man hero's gun hung sideways at his hip, far too big).
+// Three causes, one for each line of a real grip: the item was added to the hand bone with NO turn (a rigged hand's own axes
+// run along the fingers, so the barrel pointed anywhere), with its CENTRE in the palm instead of its grip, and at ONE size for
+// everything (a third of the body — a 52 cm pistol, a 52 cm rifle). fitInHand() does all three, for the player and for any
+// character (holdInHand), so no path can hold a thing differently.
+/** Real lengths, metres, of hand-held things by the words of their subject; anything else is a third of the body. */
+const HELD_LENGTHS: Array<[RegExp, number]> = [
+  [/sniper/i, 1.15], [/shotgun/i, 1.0], [/rifle|ak-?47|m416|carbine|assault/i, 0.95], [/smg|uzi|mp5|sub-?machine/i, 0.55],
+  [/pistol|revolver|handgun|glock/i, 0.22], [/knife|dagger|chaku/i, 0.28], [/sword|katana|talwar/i, 0.95], [/axe|kulhadi/i, 0.7],
+  [/\bbat\b|balla/i, 0.86], [/shield|dhaal/i, 0.6], [/\bbow\b|dhanush/i, 1.1], [/torch|phone|mobile/i, 0.22],
+];
+export function heldLength(subject: string | undefined, bodyHeight: number): number {
+  const s = String(subject ?? '');
+  for (const [re, m] of HELD_LENGTHS) if (re.test(s)) return m * (bodyHeight / 1.75);
+  return 0.3 * bodyHeight;
+}
+
+/**
+ * Put an item in a hand bone: sized to its real length, its barrel (+Z — every model faces +Z) pointing where the body faces,
+ * and its GRIP in the palm (the rear third, low — where a hand closes on a gun or a hilt). Returns the holder group that was
+ * added to the hand (it carries the item), so it can be taken out again. PURE apart from the scene graph edit.
+ */
+export function fitInHand(item: THREE.Object3D, hand: THREE.Object3D, body: THREE.Object3D, length: number): THREE.Object3D {
+  const holder = new THREE.Group();
+  holder.userData.nbHoldPivot = true;
+  holder.add(item);
+  holder.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(holder);
+  const size = box.getSize(new THREE.Vector3());
+  const longest = Math.max(size.x, size.y, size.z) || 1;
+  const grip = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y + size.y * 0.35, box.min.z + size.z * 0.3);
+  item.position.sub(grip);
+  hand.updateWorldMatrix(true, false);
+  body.updateWorldMatrix(true, false);
+  const handQ = hand.getWorldQuaternion(new THREE.Quaternion());
+  const bodyQ = body.getWorldQuaternion(new THREE.Quaternion());
+  holder.quaternion.copy(handQ.invert().multiply(bodyQ));   // world turn = the body's: the barrel points where the body faces
+  const handScale = hand.getWorldScale(new THREE.Vector3());
+  holder.scale.setScalar(length / longest / (Math.abs(handScale.x) || 1));
+  hand.add(holder);
+  holder.updateWorldMatrix(true, true);   // measured at once by whoever asks (a stale identity matrix read the item unscaled)
+  return holder;
+}
+
 // ✋ WHAT IS IN THE PLAYER'S HANDS, LIVE (Kadam 1/2, build report #2535: "hero ke haath me gun" was reported done while
 // nothing was in the hand). Every path that puts a PLAYER.holds item in a hand — a model character, the kit person, and
 // the kit person shown because a model could not load — goes through holdChosen(), and records the subject here only once
@@ -369,7 +413,7 @@ function publishHeld(): void {
  * Load each PLAYER.holds subject from the game's saved models and give it to put(item, side). One implementation for every
  * body, so the kit person can never silently drop what a model would have held. Returns an undo that empties the hands.
  */
-function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.Object3D, side: 'right' | 'left') => boolean, loaders: PlayerLoaders): () => void {
+function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.Object3D, side: 'right' | 'left', subject: string) => boolean, loaders: PlayerLoaders): () => void {
   const placed: Array<{ side: 'right' | 'left'; item: THREE.Object3D; dispose?: () => void }> = [];
   let undone = false;
   for (const side of ['right', 'left'] as const) {
@@ -379,7 +423,7 @@ function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.O
     void (loaders.library ?? assetModule)().then((mod) => (mod?.loadRequestedAsset ? mod.loadRequestedAsset(wanted, none) : null)).then((item) => {
       if (undone) { item?.dispose?.(); return; }
       if (!item || item.source !== 'model') { item?.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' to hold is not one of this game\'s saved models, so nothing is in the hand.'); return; }
-      if (!put(item.root, side)) { item.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' could not be put in the hand, so nothing is in the hand.'); return; }
+      if (!put(item.root, side, wanted)) { item.dispose?.(); say('player-hold-missing-' + side, 'The ' + wanted + ' could not be put in the hand, so nothing is in the hand.'); return; }
       placed.push({ side, item: item.root, dispose: item.dispose });
       HELD.set(side, wanted);
       publishHeld();
@@ -387,17 +431,17 @@ function holdChosen(choice: PlayerChoice | null | undefined, put: (item: THREE.O
   }
   return () => {
     undone = true;
-    for (const p of placed) { p.item.removeFromParent(); p.dispose?.(); if (HELD.get(p.side)) HELD.delete(p.side); }
+    for (const p of placed) { (p.item.parent?.userData?.nbHoldPivot ? p.item.parent : p.item).removeFromParent(); p.dispose?.(); if (HELD.get(p.side)) HELD.delete(p.side); }
     placed.length = 0;
     publishHeld();
   };
 }
 
 /** Put an item in the kit person's hand, sized like a model's (about a third of its height). */
-function holdOnPerson(hero: { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } }, item: THREE.Object3D, side: 'right' | 'left'): boolean {
+function holdOnPerson(hero: { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } }, item: THREE.Object3D, side: 'right' | 'left', subject?: string): boolean {
   const tall = (() => { const b = new THREE.Box3().setFromObject(hero.root); const h = b.max.y - b.min.y; return Number.isFinite(h) && h > 0.2 ? h : 1.75; })();
   const longest = Math.max(...new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3()).toArray()) || 1;
-  item.scale.multiplyScalar((0.3 * tall) / longest / (Math.abs(hero.root.scale.x) || 1));
+  item.scale.multiplyScalar(heldLength(subject, tall) / longest / (Math.abs(hero.root.scale.x) || 1));
   if (side === 'left') { if (!hero.joints?.leftHand) return false; hero.joints.leftHand.add(item); return true; }
   hero.hold(item);
   return true;
@@ -415,7 +459,7 @@ export interface PlayerCharacter {
   /** Back on its feet after die (a respawn, Play again). */
   revive(): void;
   /** Put an item in a hand (it follows the hand bone). False while the kit body is shown. */
-  hold(item: THREE.Object3D, side?: 'right' | 'left'): boolean;
+  hold(item: THREE.Object3D, side?: 'right' | 'left', subject?: string): boolean;
   update(dt: number): void;
   dispose(): void;
 }
@@ -494,7 +538,7 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
     // Names first; the skeleton's shape fills every role the names did not (findBonesByShape).
     bones = { ...findBonesByShape(m.root, outer), ...findBones(m.root) };
     // What the character holds (PLAYER.holds): library subjects, each put in its hand once it has loaded.
-    emptyHands = holdChosen(choice, (item, side) => api.hold(item, side), loaders);
+    emptyHands = holdChosen(choice, (item, side, subject) => api.hold(item, side, subject), loaders);
     if (m.clips && m.clips.length === 0) { told.add('*'); say('player-moves-none', 'Your character has no animations of its own, so NavBharatAI animates its moves for it.'); }
     shown();
   };
@@ -563,21 +607,14 @@ export function createPlayerCharacter(holder: THREE.Object3D, choice: PlayerChoi
       return true;
     },
     revive() { down = false; busy = 0; looping = ''; made = null; rigid = null; gait = null; },
-    hold(item, side = 'right') {
+    hold(item, side = 'right', subject?: string) {
       if (!model || !wrapper) return false;
       const box = new THREE.Box3().setFromObject(item);
       const size = box.getSize(new THREE.Vector3());
       const longest = Math.max(size.x, size.y, size.z) || 1;
-      const want = 0.3 * tallness;                          // a hand-held item is about a third of the character's height
+      const want = heldLength(subject, tallness);
       const bone = bones[side === 'left' ? 'leftHand' : 'rightHand'];
-      if (bone) {
-        bone.updateWorldMatrix(true, false);
-        const scale = new THREE.Vector3();
-        bone.getWorldScale(scale);
-        item.scale.multiplyScalar(want / longest / (Math.abs(scale.x) || 1));
-        bone.add(item);
-        return true;
-      }
+      if (bone) { fitInHand(item, bone, wrapper, want); return true; }
       item.scale.multiplyScalar(want / longest);
       item.position.set((side === 'left' ? 1 : -1) * 0.22 * tallness, 0.5 * tallness, 0.2 * tallness);
       wrapper.add(item);
@@ -685,7 +722,7 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
   if (!asksForModel(choice)) {
     if (!wantsHold) return person;
     if (!hero) { say('player-no-body', 'This game shows no player body (it is first-person, or it brought its own), so nothing is shown in its hands.'); return person; }
-    const empty = holdChosen(choice, (item, side) => holdOnPerson(hero, item, side), loaders);
+    const empty = holdChosen(choice, (item, side, subject) => holdOnPerson(hero, item, side, subject), loaders);
     const held: PlayerBody = { get showing() { return 'person' as const; }, update() { /* the shell drives the kit person */ }, dispose() { applied.delete(ctx); empty(); } };
     applied.set(ctx, { body: held, character: { showing: 'person', root: null, move: () => false, act: () => false, revive() { /* the kit person */ }, hold: () => false, update() { /* the kit person's own grips: ctx.hero.hold */ }, dispose: empty } as PlayerCharacter });
     return held;
@@ -696,7 +733,7 @@ export function applyPlayerChoice(ctx: GameContext, choice?: PlayerChoice | null
   }
   let personHands: () => void = () => {};
   const character = createPlayerCharacter(ctx.player.object, choice, () => { hero.root.scale.setScalar(0.0001); }, loaders,   // the kit person steps aside (the shell still drives it)
-    () => { if (wantsHold) personHands = holdChosen(choice, (item, side) => holdOnPerson(hero, item, side), loaders); });
+    () => { if (wantsHold) personHands = holdChosen(choice, (item, side, subject) => holdOnPerson(hero, item, side, subject), loaders); });
   const act = hero.act, die = hero.die, revive = hero.revive;
   hero.act = (pose, strength) => { act(pose, strength); character.act(MOVE_FOR_POSE[pose]); };
   hero.die = (fromFront) => { die(fromFront); character.act('die'); };
@@ -749,6 +786,7 @@ export function holdInHand(
   character: THREE.Object3D | { root: THREE.Object3D; hold: (item: THREE.Object3D | null) => void; joints?: { leftHand?: THREE.Object3D } },
   item: THREE.Object3D,
   side: 'right' | 'left' = 'right',
+  subject?: string,
 ): boolean {
   // A kit person (createHumanoid): its own grip — the right hand through hold(), the left hand by its joint.
   if (!(character instanceof THREE.Object3D)) {
@@ -761,16 +799,8 @@ export function holdInHand(
   const tall = Math.max(0.2, box.max.y - box.min.y);
   const size = new THREE.Box3().setFromObject(item).getSize(new THREE.Vector3());
   const longest = Math.max(size.x, size.y, size.z) || 1;
-  const want = 0.3 * tall;
-  if (bone) {
-    bone.updateWorldMatrix(true, false);
-    const scale = new THREE.Vector3();
-    bone.getWorldScale(scale);
-    item.scale.multiplyScalar(want / longest / (Math.abs(scale.x) || 1));
-    item.position.set(0, 0, 0);
-    bone.add(item);
-    return true;
-  }
+  const want = heldLength(subject, tall);
+  if (bone) { item.position.set(0, 0, 0); fitInHand(item, bone, character, want); return true; }
   // No hand bone: at the character's side, in its own frame, and false says so.
   item.scale.multiplyScalar(want / longest / (Math.abs(character.scale.x) || 1));
   item.position.set((side === 'left' ? 1 : -1) * 0.22 * tall, 0.5 * tall, 0.2 * tall).divideScalar(Math.abs(character.scale.x) || 1);

@@ -61,6 +61,6 @@ describe('🔴 a library model with no clip for it picks up the gun with its own
     let moved = false;
     for (let t = 0; t < 1.1; t += 1 / 60) { body.update(1 / 60); ACT.updateActions(ctx, 1 / 60); if (arm.quaternion.angleTo(rest) > 0.2) moved = true; }
     expect(moved).toBe(true);
-    expect(gun.parent).toBe(named(model, 'mixamorig:RightHand'));
+    expect(gun.parent?.userData?.nbHoldPivot ? gun.parent.parent : gun.parent).toBe(named(model, 'mixamorig:RightHand'));   // through fitInHand's holder
   });
 });

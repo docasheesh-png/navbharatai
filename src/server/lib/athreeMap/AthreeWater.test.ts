@@ -111,8 +111,9 @@ describe('the GLSL is generated from the SAME table (one sea, not two)', () => {
   it('defines the displacement and normal functions the shaders call', () => {
     expect(src).toContain('vec3 gerstnerDisplace(vec2 p, float t, float s, float minWl)');
     expect(src).toContain('vec3 gerstnerNormal(vec2 p, float t, float s)');
-    expect(A.oceanVertexShader(f, 42)).toContain('gerstnerDisplace(p0, uTime, uAmp, 42.0)');
-    expect(A.oceanFragmentShader(f)).toContain('gerstnerNormal(vP0, uTime, uAmp)');
+    // The amplitude is the wind's, bounded by the water's depth (failedbr #2565/#2566: no wave over land — tests/citiesStandOnRealLand).
+    expect(A.oceanVertexShader(f, 42)).toContain('gerstnerDisplace(p0, uTime, amp, 42.0)');
+    expect(A.oceanFragmentShader(f)).toContain('gerstnerNormal(vP0, uTime, vAmp)');
   });
   it('is a different table for a different seed', () => {
     expect(A.createWaveField(4, 0.7).glsl()).not.toBe(src);
@@ -173,10 +174,13 @@ describe('the ocean mesh (real three.js)', () => {
     expect(o.mesh.material.uniforms.uAmp.value).toBeCloseTo(o.waves.ampScale(world.windAt(0, 0, 12.5).speed), 12);
     o.dispose();
   });
-  it('floatAt is the wave field\'s surface at the sea level', () => {
+  it('floatAt is the wave field\'s surface at the sea level (in open water; the shore bounds it — tests/citiesStandOnRealLand)', () => {
     const o = A.createOcean(THREE, world, 'mid');
-    const f = o.floatAt(120, -40, 7);
-    const s = o.waves.surfaceAt(120, -40, 7, world.windAt(120, -40, 7).speed);
+    let x = 120, z = -40;
+    for (let i = 0; i < 4000 && !(world.heightAt(x, z) < -40); i++) { x = ((i * 977) % 60000) - 30000; z = ((i * 619) % 60000) - 30000; }
+    expect(world.heightAt(x, z)).toBeLessThan(-40);
+    const f = o.floatAt(x, z, 7);
+    const s = o.waves.surfaceAt(x, z, 7, world.windAt(x, z, 7).speed);
     expect(f).toEqual({ y: world.seaLevel + s.y, nx: s.nx, ny: s.ny, nz: s.nz });
     o.dispose();
   });

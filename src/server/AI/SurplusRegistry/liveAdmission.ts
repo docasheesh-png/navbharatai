@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { surplusBuilderSwitchOn } from '../../lib/alwaysOnSuppliers';
-import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
+import { SURPLUS_MIN_DISCOUNT_PCT, surplusBaseUrl, surplusBuildEndpoint, surplusBuildEndpointValid, surplusFloorOfBuildBaseUrl } from './config';
 import type { SurplusCapabilityReview } from './buildSession';
 import type { SurplusOfficialTariff } from './receiptPolicy';
 import type { SurplusPilotAuthority } from './receiptStore';
@@ -79,7 +79,7 @@ function readVerifiedLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | nu
   const source = (value: unknown) => typeof value === 'string' && /^https:\/\//.test(value) && !/example\.|\.example(?:\/|$)/i.test(value);
   if (!data || !Number.isSafeInteger(data.revision) || data.revision < 1
     || !Array.isArray(data.capabilities) || !data.capabilities.length
-    || !data.capabilities.every(c => fresh(c) && c.endpoint === SURPLUS_MIN90_BASE_URL)
+    || !data.capabilities.every(c => fresh(c) && surplusBuildEndpointValid(c.endpoint, c.model))
     || !Array.isArray(data.tariffs) || !data.tariffs.length
     || !data.tariffs.every(t => artifact(t.artifactSha256) && source(t.sourceUrl) && t.reviewedAt <= now && t.reviewExpiresAt > now)
     || !Array.isArray(data.usageMappings) || !data.usageMappings.length || !data.usageMappings.every(fresh)
@@ -87,7 +87,7 @@ function readVerifiedLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | nu
     || !data.reviews.quality.every(q => fresh(q) && q.approved === true && artifact(q.artifactSha256))
     || !fresh(data.reviews.pricingContract ?? undefined) || !source(data.reviews.pricingContract?.sourceUrl)
     || !(data.reviews.accountAndPrivacyReviewedUntil > now)
-    || !fresh(data.floorContract) || data.floorContract.endpoint !== SURPLUS_MIN90_BASE_URL
+    || !fresh(data.floorContract) || (surplusFloorOfBuildBaseUrl(data.floorContract.endpoint) ?? -1) < SURPLUS_MIN_DISCOUNT_PCT
     || !data.account || data.account.marketplaceOnly !== true || data.account.noFallbackKeys !== true || data.account.credentialSha256 !== credentialSha256(key) || !(data.account.reviewedUntil > now)
     || !(data.account.liveCredentialCheckAt <= now) || !(data.account.liveCredentialCheckExpiresAt > now)
     || !data.pilot || !(data.pilot.expiresAt > now) || !(data.pilot.providerSpendLimitReviewedUntil > now)
@@ -142,7 +142,8 @@ function synthesizeOwnerLiveReviews(
     providerPinVerified: true,
     returnedIdentityVerified: true,
     reportedChargeContractVerified: true,
-    endpoint: SURPLUS_MIN90_BASE_URL,
+    // Admin 2026-11-27: min85 for every model, min90 for a Claude-family model (the builder is Weak-only).
+    endpoint: surplusBuildEndpoint(model),
   }));
 
   // Usage and tariff contracts bind a model, not a seller. Keep seller evidence above
@@ -221,7 +222,7 @@ function synthesizeOwnerLiveReviews(
     capabilities,
     floorContract: {
       kind: 'observation-only-provider-request-time-floor',
-      endpoint: SURPLUS_MIN90_BASE_URL,
+      endpoint: surplusBaseUrl(SURPLUS_MIN_DISCOUNT_PCT),
       reviewId: 'owner-live-floor-v1',
       reviewedAt,
       expiresAt,

@@ -150,7 +150,7 @@ export const OCEAN = `// Athree map — the ocean surface: a camera-following wa
 // wave table; every wave shades the normal; colour runs shallow to deep from a coarse depth texture baked from the terrain's own height
 // function (rows are filled a few per frame, then swapped in whole), foam gathers where the water is shallow. Own implementation.
 
-import { OCEAN_TIERS, type AthreeQuality } from './config';
+import { OCEAN_TIERS, SEA_BREAK_RATIO, type AthreeQuality } from './config';
 import { createWaveField, type WaveField } from './water';
 import type { AthreeWorld } from './world';
 
@@ -174,17 +174,35 @@ export interface Ocean {
   dispose(): void;
 }
 
+/** The highest a sum of these waves can stand above the sea at amplitude scale 1 (waves shorter than minWavelength left out). */
+export function crestReach(waves: WaveField, minWavelength = 0): number {
+  return waves.components.reduce((sum, c) => sum + (c.wavelength < minWavelength ? 0 : c.a), 0);
+}
+
+/**
+ * The wave scale the water there allows (0..1): no crest higher than SEA_BREAK_RATIO × the depth (config.ts), so over land and on
+ * the shore the sea lies flat at its level and never rises over a road or a pad; in open water nothing changes.
+ */
+export function shoreCalm(depth: number, amp: number, reach: number): number {
+  const top = Math.max(1e-6, amp * reach);
+  return Math.max(0, Math.min(1, (SEA_BREAK_RATIO * Math.max(0, depth)) / top));
+}
+
 export function oceanVertexShader(waves: WaveField, minWavelength: number): string {
   return [
     waves.glsl(),
     'uniform float uTime; uniform float uAmp; uniform vec2 uCenter; uniform float uSea;',
+    'uniform sampler2D uDepth; uniform vec2 uDepthCenter; uniform float uDepthSize;',
     'varying vec2 vP0; varying vec3 vView; varying float vAmp;',
     'void main() {',
     '  vec2 p0 = position.xz + uCenter;',
-    '  vec3 d = gerstnerDisplace(p0, uTime, uAmp, ' + minWavelength.toFixed(1) + ');',
+    // The water's depth here (the same baked texture the colour uses) bounds the waves: none over land, low on the shore.
+    '  float depth = texture2D(uDepth, (p0 - uDepthCenter) / uDepthSize + 0.5).r * ' + DEPTH_FULL.toFixed(1) + ';',
+    '  float amp = uAmp * clamp(' + SEA_BREAK_RATIO.toFixed(2) + ' * depth / max(1e-6, uAmp * ' + crestReach(waves, minWavelength).toFixed(4) + '), 0.0, 1.0);',
+    '  vec3 d = gerstnerDisplace(p0, uTime, amp, ' + minWavelength.toFixed(1) + ');',
     '  vec3 local = vec3(position.x + d.x, uSea + d.y, position.z + d.z);',
     '  vec4 mv = modelViewMatrix * vec4(local, 1.0);',
-    '  vView = -mv.xyz; vP0 = p0; vAmp = uAmp;',
+    '  vView = -mv.xyz; vP0 = p0; vAmp = amp;',
     '  gl_Position = projectionMatrix * mv;',
     '}',
   ].join('\\n');
@@ -199,7 +217,7 @@ export function oceanFragmentShader(waves: WaveField): string {
     'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
     'float vnoise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }',
     'void main() {',
-    '  vec3 n = gerstnerNormal(vP0, uTime, uAmp);',
+    '  vec3 n = gerstnerNormal(vP0, uTime, vAmp);',
     '  vec3 v = normalize(vView);',
     '  vec2 uv = (vP0 - uDepthCenter) / uDepthSize + 0.5;',
     '  float depth = texture2D(uDepth, uv).r * ' + DEPTH_FULL.toFixed(1) + ';',
@@ -223,6 +241,7 @@ export function createOcean(THREE: ThreeLike, world: AthreeWorld, quality: Athre
   const wind0 = world.windAt(0, 0, 0);
   const waves = createWaveField(world.seed, Math.atan2(wind0.z, wind0.x));
   const step = tier.extent / tier.grid;
+  const crestAll = crestReach(waves);
 
   const depthRes = tier.depthRes;
   const depthData = new Uint8Array(depthRes * depthRes * 4);
@@ -294,8 +313,13 @@ export function createOcean(THREE: ThreeLike, world: AthreeWorld, quality: Athre
   }
 
   function floatAt(x: number, z: number, time: number): { y: number; nx: number; ny: number; nz: number } {
-    const s = waves.surfaceAt(x, z, time, world.windAt(x, z, time).speed);
-    return { y: world.seaLevel + s.y, nx: s.nx, ny: s.ny, nz: s.nz };
+    const wind = world.windAt(x, z, time).speed;
+    const s = waves.surfaceAt(x, z, time, wind);
+    // The same bound the mesh is drawn with: a boat in shallow water rides the lower waves it sees, and none over land.
+    const calm = shoreCalm(world.seaLevel - world.heightAt(x, z), waves.ampScale(wind), crestAll);
+    if (calm >= 1) return { y: world.seaLevel + s.y, nx: s.nx, ny: s.ny, nz: s.nz };
+    const nx = s.nx * calm, nz = s.nz * calm, len = Math.hypot(nx, 1, nz);
+    return { y: world.seaLevel + s.y * calm, nx: nx / len, ny: 1 / len, nz: nz / len };
   }
 
   function dispose(): void {

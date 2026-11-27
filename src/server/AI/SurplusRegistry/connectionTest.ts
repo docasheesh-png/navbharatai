@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { getServerDb } from '../../lib/serverDb';
 import { surplusBuyerCostToUsd } from './receiptPolicy';
+import { surplusBuildEndpoint } from './config';
 import type { SurplusConnectionTestStatus } from './types';
 
 /** These identities are lifetime fences, not resettable request IDs or approval records. */
@@ -9,10 +10,11 @@ export const SURPLUS_CONNECTION_TEST_ID = 'approved-one-shot-v1';
 export const SURPLUS_CONNECTION_TEST_AUTHORITY = 'owner-approved-surplus-test-20261024-usd1-v1';
 export const SURPLUS_CONNECTION_TEST_DOCUMENT = `surplus_connection_tests/${SURPLUS_CONNECTION_TEST_ID}`;
 export const SURPLUS_CONNECTION_TEST_REVIEW_DOCUMENT = 'live_ai_registry/surplus-connection-test-review';
-const ENDPOINT = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
 const AUTH_ENDPOINT = 'https://api.surplusintelligence.ai/v1/buyer/me';
 // Deliberately fixed, matching surplusClient.ts's verified default; no model/URL overrides.
 const MODEL = 'deepseek-v4.1-flash';
+// The same floor route the builder uses for this model (admin 2026-11-27: min85, or min90 for Claude on Weak).
+const ENDPOINT = `${surplusBuildEndpoint(MODEL)}/chat/completions`;
 const TIMEOUT_MS = 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const AUTOMATIC_FUNDING_EVIDENCE_FRESH_MS = 300_000;

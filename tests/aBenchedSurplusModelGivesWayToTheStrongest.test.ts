@@ -8,7 +8,7 @@ import { nextStrongestSurplusModel } from '../src/server/AI/SurplusRegistry/buil
 import { SURPLUS_CODING_QUALITY_ORDER } from '../src/server/AI/SurplusRegistry/config';
 
 // The registry's own static order has the flash model early (the order the old code took).
-const listOrder = ['deepseek-v4.1-flash', 'minimax-m2.5', 'glm-5.3', 'qwen3-coder', 'deepseek-v4.1-flash-1017', 'gpt-5.6-sol', 'claude-sonnet-5'];
+const listOrder = ['deepseek-v4.1-flash', 'minimax-m2.5', 'glm-5.3', 'qwen3-coder', 'deepseek-v4.1-flash-1017', 'gpt-5.6-sol'];
 
 describe('🔝 nextStrongestSurplusModel', () => {
   it('the real #2566 sequence: qwen3-coder benched → glm-5.3 (the strongest plain one left), not the list\'s first (deepseek-flash)', () => {
@@ -17,8 +17,11 @@ describe('🔝 nextStrongestSurplusModel', () => {
   it('then glm-5.3 benched → deepseek-v4.1-flash-1017 before plain deepseek-v4.1-flash (the quality order)', () => {
     expect(nextStrongestSurplusModel(listOrder, new Set(['qwen3-coder', 'glm-5.3']), 'weak')).toBe('deepseek-v4.1-flash-1017');
   });
-  it('never Claude on Weak, even though it ranks first', () => {
-    expect(nextStrongestSurplusModel(['claude-sonnet-5', 'glm-5.3'], new Set(), 'weak')).toBe('glm-5.3');
+  // Admin 2026-11-27 (#4613): Weak may run Claude through Surplus on the guaranteed ≥90% floor (surplusModelPermitted), and
+  // it ranks first — so it is the strongest one left. Outside Weak, Surplus never offers it.
+  it('Claude on Weak is allowed (≥90% floor) and, ranking first, is the strongest left; never on another tier', () => {
+    expect(nextStrongestSurplusModel(['claude-sonnet-5', 'glm-5.3'], new Set(), 'weak')).toBe('claude-sonnet-5');
+    expect(nextStrongestSurplusModel(['claude-sonnet-5', 'glm-5.3'], new Set(), 'normal')).toBe('glm-5.3');
   });
   it('a reasoning model only when no plain one is left (the opening rule)', () => {
     expect(nextStrongestSurplusModel(['gpt-5.6-sol', 'minimax-m2.5'], new Set(), 'weak')).toBe('minimax-m2.5');
@@ -34,5 +37,6 @@ describe('🔝 nextStrongestSurplusModel', () => {
     const src = readFileSync('src/server/AI/SurplusRegistry/buildSession.ts', 'utf8');
     expect(src).toMatch(/const alt = nextStrongestSurplusModel\(/);
     expect(src).not.toMatch(/\.map\(o => o\.model\)\.find\(m => !benchedModels\.has\(m\)/);
+    expect(src).toMatch(/!benched\.has\(m\) && surplusModelPermitted\(m, tier\)/);   // one permission rule (#4613)
   });
 });

@@ -36,11 +36,20 @@ describe('the reference size is untouched', () => {
 
 describe('a stretched world is the reference world stretched', () => {
   it('the ground at (x, z) is the reference ground at (x*k, z*k), taller by heightStretch(k)', () => {
-    const ref = A.createAthreeWorld({ seed: 5 });
+    // The LAND stretches exactly. The sea floor is the shelf (boundary.ts), written in real metres on purpose — a beach is 40 m wide and
+    // the sea at most 50 m deep on a map of any size — so the exact stretch holds at sea only with the old noise floor (shelf: false).
+    const ref = A.createAthreeWorld({ seed: 5, water: { shelf: false } });
+    const refShelf = A.createAthreeWorld({ seed: 5 });
     for (const km of [1, 10, 400]) {
-      const w = A.createAthreeWorld({ seed: 5, sizeMeters: km * 1000 });
+      const w = A.createAthreeWorld({ seed: 5, sizeMeters: km * 1000, water: { shelf: false } });
+      const wShelf = A.createAthreeWorld({ seed: 5, sizeMeters: km * 1000 });
       const k = 100 / km; const vs = A.heightStretch(k);
-      for (const [x, z] of spread(km * 1000, 9)) expect(w.baseHeightAt(x, z), `${km} km`).toBeCloseTo(ref.baseHeightAt(x * k, z * k) * vs, 6);
+      for (const [x, z] of spread(km * 1000, 9)) {
+        expect(w.baseHeightAt(x, z), `${km} km`).toBeCloseTo(ref.baseHeightAt(x * k, z * k) * vs, 6);
+        const land = refShelf.baseHeightAt(x * k, z * k);
+        if (land >= 0) expect(wShelf.baseHeightAt(x, z), `${km} km, shelf on, land`).toBeCloseTo(land * vs, 6);
+        else expect(wShelf.baseHeightAt(x, z), `${km} km, shelf on, sea`).toBeLessThan(0);
+      }
     }
   });
   it('a mountain 1000 km wide is taller than one 100 km wide, and a 1 km one is lower (heights stretch, but less than lengths)', () => {

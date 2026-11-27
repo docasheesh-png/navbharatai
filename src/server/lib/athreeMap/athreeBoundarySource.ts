@@ -121,14 +121,15 @@ export function createBoundary(o: BoundaryOptions): Boundary {
   const featureAt = (a: number): number => (kind === 'sea' ? base : base * (1 + 0.025 * wobble(a)));
   // Where each kind holds a mover: on the steep face, before the canyon's drop, at the near bank, on the dune face, at the wall.
   const channel = Math.max(10, Math.min(40, w * 0.25));
-  const inset = kind === 'sea' ? 0 : kind === 'mountains' ? 0.2 * w : kind === 'canyon' ? 0.75 * w : kind === 'forest-river' ? channel : kind === 'dunes' ? 0.3 * w : WALL_THICKNESS + 1;
+  const inset = kind === 'sea' ? 0 : kind === 'mountains' ? 0.2 * w : kind === 'canyon' ? 1.0 * w : kind === 'forest-river' ? channel : kind === 'dunes' ? 0.3 * w : WALL_THICKNESS + 1;
   const limitAt = (a: number): number => featureAt(a) - inset;
   const H = 1.6 * w;               // the mountain wall's rise: an average slope of 1.6 (58 degrees) across the band
   const D = Math.max(25, 0.5 * w); // the canyon's depth below its rim
   const Hd = 0.7 * w;              // the dune wall's rise
   const ceiling = 1000 * Math.max(1, o.vs) + (kind === 'mountains' ? H : kind === 'dunes' ? Hd : 0);
   const cueBand = Math.max(60, Math.min(250, R * 0.08));
-  const ridges = (x: number, z: number): number => { const r = 1 - Math.abs(2 * fieldNoise(x, z, seed + 73, 3, Math.max(60, w * 1.5), 0) - 1); return 0.75 + 0.45 * r * r; };
+  // Peaks beyond the crest: 1 .. 1.45 times the wall (they only ever add to it).
+  const ridges = (x: number, z: number): number => { const r = 1 - Math.abs(2 * fieldNoise(x, z, seed + 73, 3, Math.max(60, w * 1.5), 0) - 1); return 1 + 0.45 * r * r; };
 
   function shape(x: number, z: number, h: number): number {
     if (kind === 'sea') return h;
@@ -138,7 +139,7 @@ export function createBoundary(o: BoundaryOptions): Boundary {
       case 'mountains': {
         if (u < -w) return h;
         // A foot that is walkable, then a face steeper than 45 degrees over three quarters of the band, then peaks to the map's end.
-        const rise = H * smooth(-w, 0, u) * (u > 0 ? ridges(x, z) : 1 + (ridges(x, z) - 1) * smooth(-w * 0.3, 0, u));
+        const rise = H * smooth(-w, 0, u) * (u > 0 ? 1 + (ridges(x, z) - 1) * smooth(0, w * 0.5, u) : 1);
         return Math.max(h, 0) + rise;
       }
       case 'canyon': {
@@ -149,7 +150,7 @@ export function createBoundary(o: BoundaryOptions): Boundary {
           return CANYON_FLOOR + (rimmed - CANYON_FLOOR) * (1 - smooth(-0.9 * w, -0.6 * w, u));
         }
         // The far wall: higher than the near rim, so a body in the canyon has no way out on either side.
-        const far = Math.max(h, CANYON_FLOOR + 1.6 * D) * (0.9 + 0.1 * ridges(x, z));
+        const far = Math.max(h + 0.6 * D, CANYON_FLOOR + 1.6 * D) * (1 + 0.1 * (ridges(x, z) - 1));
         return CANYON_FLOOR + (far - CANYON_FLOOR) * smooth(0.6 * w, 0.9 * w, u);
       }
       case 'forest-river': {

@@ -6835,3 +6835,9 @@ stop) are resolved and removed from the open queue; their IDs are in BUILD_REPOR
 - **Locked:** `tests/aCharacterHoldsThingsTheWayPeopleDo.test.ts` (wrong-way library pistol, upside-down bat, ball, rifle both
   hands over 40 walk frames, a mixamo-rigged arm; 7 of 8 fail with the fix reverted). Four older hold tests updated to the
   grip frame (the item now sits inside a `grip` group in the hand) and to real sizes.
+
+## 2026-11-27 — Q-3750, Q-3751, Q-3752 closed (#4608 merged)
+#4608 merged on a green CI (the world is never lifted over the ground; the playtest names a moved world as a kit fault; a game
+feature that does nothing is named; characters hold things the way people do). Q-3750..Q-3752 removed from the open queue and
+added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud Run logs), Q-3754 (Surplus recurrence), Q-3755
+(admin choice on 2–5 km cities) and Q-3756 (road-edge stair-steps) stay open.

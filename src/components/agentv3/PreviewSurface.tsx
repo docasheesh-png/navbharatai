@@ -24,7 +24,7 @@ import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueActionForPreviewError } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
-import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
+import { UNTRUSTED_PREVIEW_SANDBOX, LIVE_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 import { frameUrlSharesPageOrigin, isFromOurPreviewFrame, previewPostMessageTarget } from '../../lib/previewMessages';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, resolveZoomScale, nextZoom, zoomLabel } from './previewViewport';
@@ -1812,7 +1812,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           src={versionUrl}
           className="w-full flex-1 bg-white border-0"
           allow={PREVIEW_IFRAME_ALLOW}
-          sandbox={frameUrlSharesPageOrigin(versionUrl, window.location.origin) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'}
+          sandbox={frameUrlSharesPageOrigin(versionUrl, window.location.origin) ? UNTRUSTED_PREVIEW_SANDBOX : LIVE_PREVIEW_SANDBOX}
         />
       </div>
     );
@@ -2074,7 +2074,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                 (chooseLiveFrameSrc) — the copy winning this src is what made a working wake look dead. */}
             {(() => {
               const frame = chooseLiveFrameSrc({ snapshotUrl: shownSnapshotUrl, doorHref: doorUrl ? resolveApiHref(doorUrl, window as never) : '', effectiveUrl, liveWanted });
-              return <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={frame.src} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; postToPreview({ ...TUNE_LIST_ASK }); }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(frame.isSnapshot && frameUrlSharesPageOrigin(frame.src, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'} />;
+              return <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={frame.src} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; postToPreview({ ...TUNE_LIST_ASK }); }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(frame.isSnapshot && frameUrlSharesPageOrigin(frame.src, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : LIVE_PREVIEW_SANDBOX} />;
             })()}
           </ResponsiveFrame>
         )}
@@ -2309,7 +2309,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             src={idleSnapshotUrl}
             onLoad={() => { everRendered.current = true; }}
             className="w-full h-full bg-white border-0"
-            allow={PREVIEW_IFRAME_ALLOW} sandbox={frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'}
+            allow={PREVIEW_IFRAME_ALLOW} sandbox={frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin) ? UNTRUSTED_PREVIEW_SANDBOX : LIVE_PREVIEW_SANDBOX}
           />
         </ResponsiveFrame>
       ) : refusal.refuse ? (
@@ -2427,7 +2427,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               try { inBrowserIframeRef.current?.contentWindow?.postMessage({ [PREVIEW_HTML_MESSAGE]: html }, new URL(previewSandboxUrl).origin); } catch { /* best-effort */ }
             }}
             className="w-full h-full bg-white border-0"
-            allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            allow={PREVIEW_IFRAME_ALLOW} sandbox={LIVE_PREVIEW_SANDBOX}
           />
         </ResponsiveFrame>
       ) : html && !import.meta.env.DEV ? (
@@ -2460,7 +2460,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             srcDoc={html}
             className="w-full h-full bg-white border-0"
             allow={PREVIEW_IFRAME_ALLOW}
-            sandbox={import.meta.env.DEV ? 'allow-scripts allow-same-origin allow-forms allow-popups' : UNTRUSTED_PREVIEW_SANDBOX}
+            sandbox={import.meta.env.DEV ? LIVE_PREVIEW_SANDBOX : UNTRUSTED_PREVIEW_SANDBOX}
           />
         </ResponsiveFrame>
       ) : (

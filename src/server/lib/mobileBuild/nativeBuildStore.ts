@@ -5,7 +5,10 @@
 //   • mobile_native_builds/{buildId}     — one row per build, the job record and its history.
 //   • mobile_signing_keys/{keyId}        — one upload key per (user, application id), SEALED with the
 //                                          platform secret key (secrets.ts, AES-256-GCM, rotatable).
-//   • mobile_signing_key_events/{auto}   — the audit trail: imported / generated / used / deleted.
+//   • mobile_signing_key_events/{auto}   — the audit trail: imported / generated / used / exported / deleted.
+//
+// 🔴 ACCOUNT DELETION ERASES BOTH KEY COLLECTIONS (Q-3703, admin decision (a), 2026-11-27): the keys, then their
+// events, by `userId` (DataRetentionManager). The Danger zone warns first and offers each key's download.
 //
 // 🔒 OWNERSHIP IS READ FROM THE STORED ROW, never from an id's shape. Build ids are random, key ids are
 // hashes — but a guessable id must still never be enough to read somebody else's row.
@@ -256,20 +259,64 @@ export async function saveKey(
   return { ok: true, meta: keyMeta(row) };
 }
 
-/** Open a key for ONE signing. The plaintext lives only in this call's memory and the signing machine. */
+/**
+ * Open a key for ONE signing. The plaintext lives only in this call's memory and the signing machine.
+ *
+ * 🔒 THE KEY'S EXISTENCE AND ITS 'used' EVENT ARE ONE TRANSACTION (Q-3703). Account deletion erases
+ * `mobile_signing_keys` and then `mobile_signing_key_events`. Before this, a build that had read the key a
+ * moment before the erase wrote `lastUsedAt` and a 'used' event AFTER it — the event outliving the account it
+ * described. Now the event is written only while the key row still exists, in the same transaction that reads
+ * it, so an event can never appear after its key is gone: a write that commits first is swept by the events
+ * erase that follows, and a key that is already gone is answered `null` (the build fails honestly as
+ * SIGNING_KEY_MISSING). Nothing here can create a key row: `update` refuses a missing document.
+ */
 export async function openKeyForSigning(userId: string, appId: string, buildId: string): Promise<PlainSigningKey | null> {
-  const k = await getKeyRecord(userId, appId);
+  const ref = db().collection(KEYS).doc(signingKeyId(userId, appId));
+  const at = new Date().toISOString();
+  const k = await db().runTransaction(async (t) => {
+    const snap = await t.get(ref);
+    if (!snap.exists) return null;
+    const row = snap.data() as StoredSigningKey;
+    if (row.userId !== userId || row.appId !== appId) return null;
+    t.update(ref, { lastUsedAt: at });
+    t.set(db().collection(KEY_EVENTS).doc(), { keyId: row.id, userId, appId, event: 'used', buildId, at });
+    return row;
+  });
   if (!k) return null;
-  const plain: PlainSigningKey = {
+  return openPlain(k);
+}
+
+function openPlain(k: StoredSigningKey): PlainSigningKey {
+  return {
     keystore: Buffer.from(unseal(k.keystoreSealed), 'base64'),
     storePassword: unseal(k.storePassSealed),
     keyPassword: unseal(k.keyPassSealed),
     alias: k.alias,
     certSha256: k.certSha256,
   };
-  await db().collection(KEYS).doc(k.id).update({ lastUsedAt: new Date().toISOString() }).catch(() => {});
-  await recordKeyEvent(userId, appId, 'used', buildId);
-  return plain;
+}
+
+/** Every upload key this user has saved, newest first — what account deletion would erase (Q-3703). */
+export async function listKeysForUser(userId: string): Promise<StoredSigningKey[]> {
+  const snap = await db().collection(KEYS).where('userId', '==', userId).get();
+  const out: StoredSigningKey[] = [];
+  snap.forEach((d) => {
+    const k = d.data() as StoredSigningKey;
+    if (k.userId === userId) out.push(k);
+  });
+  return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Hand the user their OWN key back — the keystore file and its passwords — so they can keep a copy before they
+ * delete the key or their account (Q-3703). Ownership is read from the stored row. The export is audited.
+ */
+export async function exportKey(userId: string, appId: string): Promise<{ meta: SigningKeyMeta; plain: PlainSigningKey } | null> {
+  const k = await getKeyRecord(userId, appId);
+  if (!k) return null;
+  const plain = openPlain(k);
+  await recordKeyEvent(userId, appId, 'exported', null);
+  return { meta: keyMeta(k), plain };
 }
 
 export async function deleteKey(userId: string, appId: string): Promise<boolean> {
@@ -282,7 +329,7 @@ export async function deleteKey(userId: string, appId: string): Promise<boolean>
 
 export async function recordKeyEvent(
   userId: string, appId: string,
-  event: 'imported' | 'generated' | 'replaced' | 'used' | 'deleted',
+  event: 'imported' | 'generated' | 'replaced' | 'used' | 'exported' | 'deleted',
   buildId: string | null,
 ): Promise<void> {
   try {

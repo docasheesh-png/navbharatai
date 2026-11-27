@@ -167,13 +167,17 @@ describe('boundary, water, roads, density, region, time of day', () => {
 
 describe('honesty: what the world applies is read from its source, never assumed', () => {
   const p = plan('5 km ka registan shooter, pahaadon se ghira, do talab');
-  it('today\'s world reads none of boundary / water / roadStyle / density, so none is claimed', () => {
+  it('the note claims a layer APPLIED exactly when today\'s world reads it (road styles since #4626; the rest as they land)', () => {
     const world = generateAthreeMap().files['src/game/athree/world.ts'];
     const a = appliedMapLayers(world, p);
-    expect(a).toMatchObject({ frame: true, land: true, boundary: false, water: false, roadStyle: false, density: false });
+    expect(a).toMatchObject({ frame: true, land: true, roadStyle: true });   // #4626: the world reads options.roadStyle
+    expect(a.density).toBe(false);                                           // no density layer yet
     const note = describeMapPlan(p, a);
-    expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — recorded, not built into this world yet/);
-    expect(note).toMatch(/do not claim them/);
+    if (a.boundary) expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
+    else {
+      expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — recorded, not built into this world yet/);
+      expect(note).toMatch(/do not claim them/);
+    }
   });
   it('a world that reads an option is reported as applying it (the day the boundary layer lands)', () => {
     const a = appliedMapLayers('const b = options.boundary ?? "sea"; const { roadStyle, density } = options;', p);

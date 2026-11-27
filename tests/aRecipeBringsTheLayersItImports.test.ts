@@ -110,7 +110,9 @@ describe('the missing-import healer does not touch correct recipe code', () => {
   it('adds nothing to the whole recipe set (it added state/load imports to motor, ai and audio on every run)', async () => {
     const r = await addMissingProjectImports(all());
     expect(r.added).toEqual([]);
-  });
+    // A correctness check over the WHOLE recipe set (about 5 s locally, past 20 s under CI's coverage on a busy runner, as the
+    // kit grows): its own budget. Speed is the next test's job, which keeps its strict bound.
+  }, 60_000);
 
   it('walks each file ONCE, not once per exported name (17 s → under 2 s on the recipe set, 2026-10-05)', () => {
     // The candidate loop used to call getDescendantsOfKind for every name the project exports, so its

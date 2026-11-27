@@ -151,6 +151,18 @@ export const QUALITY: Record<AthreeQuality, QualityTier> = {
   desktop: { chunkSize: 256, viewRadius: 10, nearRes: 96, minRes: 12, maxBuildsPerUpdate: 3, budgetTriangles: 1400000 },
 };
 
+/**
+ * 🌊 HOW HIGH THE SEA REACHES (failedbr #2565/#2566: a pale, moving "water wave" over the road near the player; #2568: "the sea is
+ * so high its water comes into the city"). The wave mesh rose and fell up to several metres above sea level everywhere it was
+ * drawn — over the sea and over the land around it alike — so every road and pad laid a metre or two above the sea (a road is
+ * never laid lower than 1.5 m) had translucent foam rolling over it. Two bounds, used by the ocean that draws the waves and by
+ * the road that crosses the sea: in water d metres deep no wave stands higher than SEA_BREAK_RATIO × d above the sea (a wave
+ * breaks once it is 0.78 × the depth tall, and its crest is half of that), so there is no wave at all over land; and nowhere is
+ * a crest higher than SEA_CREST_MAX (every wave of the table at its strongest wind: a test holds this against water.ts).
+ */
+export const SEA_BREAK_RATIO = 0.39;
+export const SEA_CREST_MAX = 7.7;
+
 export interface OceanTier {
   /** Side of the square wave mesh that follows the camera, in metres. */
   extent: number;
@@ -201,7 +213,7 @@ const WORLD = `// Athree map — the world: height, normal, biome, wind and spaw
 // a smooth island mask closes a bounded world into an island; a slowly drifting noise field is the shared wind. Own implementation.
 
 import { fieldNoise, mulberry32 } from './noise';
-import { PROFILE_DEFAULTS, type AthreeProfile, type AthreeWorldMode } from './config';
+import { PROFILE_DEFAULTS, SEA_BREAK_RATIO, SEA_CREST_MAX, type AthreeProfile, type AthreeWorldMode } from './config';
 import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
@@ -305,6 +317,11 @@ export interface AthreeWorld {
   readonly mode: AthreeWorldMode;
   readonly sizeMeters: number;
   readonly seaLevel: number;
+  /**
+   * How much taller (above 1) or flatter (below 1) this map's heights are than the reference world's (heightStretch). A height
+   * written for the reference world (a beach, a dry spot) is that height times this on this map. 1 at the reference size.
+   */
+  readonly heightScale: number;
   /** The ground height, with the rivers, lakes and roads carved in (what is drawn, driven and floated on). */
   heightAt(x: number, z: number): number;
   /**
@@ -420,6 +437,8 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   // Biomes change over a few kilometres on a loop world, and over a few hundred metres on an 8 km arena.
   const biomeScale = mode === 'bounded' ? 6 : 1;
   const snowLine = mode === 'bounded' ? 400 : 650;
+  /** The sea's level: every place below it is sea (world.seaLevel). */
+  const seaLevel = 0;
 
   /** The reference world's ground, in the reference world's own metres. */
   function baseInner(x: number, z: number): number {
@@ -660,8 +679,24 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     line.push({ x: src[src.length - 1].x, z: src[src.length - 1].z });
     // Ground along the line (with the places' level pads), averaged over ±50 m, then the grade limited both ways.
     const ground = line.map((p) => heightAt(p.x, p.z));
-    const y = ground.map((_, i) => { let s = 0, c = 0; for (let j = Math.max(0, i - 5); j <= Math.min(ground.length - 1, i + 5); j++) { s += ground[j]; c++; } return Math.max(1.5, s / c); });
-    y[0] = Math.max(1.5, ground[0]); y[y.length - 1] = Math.max(1.5, ground[ground.length - 1]);
+    // 🌊 A ROAD ACROSS THE SEA STANDS ABOVE THE SEA'S WAVES (failedbr #2565/#2566: 70% of an 11 km map's highways ran over the sea
+    // at the 1.5 m floor, under crests of up to 4.8 m, and the foam rolled over the asphalt in front of the player). Where the
+    // ground under the road is sea, the road's floor is the highest crest that water can carry (config SEA_BREAK_RATIO × its
+    // depth, at most SEA_CREST_MAX) and half a metre more, and it climbs to that from the land on both sides at the grade a car
+    // can take (0.8 m in 10 m). A road over land has the same 1.5 m floor it always had.
+    // The sea is read under the road and beside it, past its asphalt and shoulder: a road on a strip of land along deep water
+    // has that water's waves beside it.
+    const beside = Math.max(2, width / 2) + ROAD_SHOULDER + 10;
+    const lowest = line.map((p, i) => {
+      const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)], l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const nx = -(b.z - a.z) / l, nz = (b.x - a.x) / l;
+      return Math.min(ground[i], heightAt(p.x + nx * beside, p.z + nz * beside), heightAt(p.x - nx * beside, p.z - nz * beside));
+    });
+    const floor = lowest.map((g) => (g < seaLevel ? Math.max(1.5, seaLevel + Math.min(SEA_CREST_MAX, SEA_BREAK_RATIO * (seaLevel - g)) + 0.5) : 1.5));
+    for (let i = 1; i < floor.length; i++) floor[i] = Math.max(floor[i], floor[i - 1] - 0.8);
+    for (let i = floor.length - 2; i >= 0; i--) floor[i] = Math.max(floor[i], floor[i + 1] - 0.8);
+    const y = ground.map((_, i) => { let s = 0, c = 0; for (let j = Math.max(0, i - 5); j <= Math.min(ground.length - 1, i + 5); j++) { s += ground[j]; c++; } return Math.max(floor[i], s / c); });
+    y[0] = Math.max(floor[0], ground[0]); y[y.length - 1] = Math.max(floor[floor.length - 1], ground[ground.length - 1]);
     // AN END ON LEVELLED GROUND KEEPS ITS LEVEL (failedbr #2499). The grade passes used to move an end too (the average next to
     // it lower or higher), and a road that ends metres off a place's levelled square cuts into it or leaves it floating, because
     // the road's height wins near the road. So an end on a pad is pinned: every point first stays within the grade a car can climb
@@ -950,7 +985,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -1302,7 +1337,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "export * from './dunes';",
     "export * from './roads';",
   );
-  if (has('sea')) add("export * from './water';", "export { createOcean, oceanVertexShader, oceanFragmentShader, type Ocean } from './ocean';");
+  if (has('sea')) add("export * from './water';", "export { createOcean, oceanVertexShader, oceanFragmentShader, crestReach, shoreCalm, type Ocean } from './ocean';");
   if (has('plants')) add("export * from './vegetation';", "export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';");
   if (has('rivers')) add("export { createRiverWater, riverVertexShader, riverFragmentShader, waterInRect, RIVER_TIERS, type RiverWater, type WaterArrays } from './riverwater';");
   if (has('sky')) add("export * from './sky';");

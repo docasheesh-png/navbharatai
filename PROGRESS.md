@@ -6761,6 +6761,22 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
 
+### 2026-11-27 (later) — autopsy #2565/#2566: cities on real land, no sea over the road (branch claude/cities-on-dry-land)
+- **Cities left out ("no dry ground … anywhere on the map").** Root cause: the plan's "10 km × 10 km map" became the project's
+  athree `MAP_OPTIONS` loop of 10–11 km, i.e. the 100 km continent squeezed ×9 in plan and ×0.137 in height. On seed 90551631 at
+  11 km only 18 of 3,025 spots have a dry 2.1 km square (2 level) — four 2.2 km cities could never fit; at 100 km the same 11 km
+  area around the start has 2,080 (120 level). Fix: `createOpenWorld` never squeezes a loop (it reads the project's MAP_OPTIONS
+  too): a smaller loop is made at the 100 km reference and the size asked is the land played on (rescue looks inside it first).
+  Siblings fixed in the same change: the absolute 2 m "dry" test in every place planner and the relic filter → `placeDryHeight`
+  (2 m × min(1, world.heightScale), never under 0.6 m; reference maps unchanged); tiles of a grown city whose root waits were
+  planned as separate cities (the reported "tech-city-west … left out") → they wait and stand in their cells; the rescue's road
+  clearance was a 1.5 × reach + 150 m circle (1.8 km for a grown city) → the pad rectangle keeps 100 m from a road.
+- **White moving "wave" over the road.** Root cause: the ocean mesh displaced waves (crest up to 4.8 m here, 7.7 m max) over land
+  and sea alike, and roads/pads sit at a 1.5 m floor — 70% of the squeezed map's highway points ran over the sea under a crest.
+  Fix: config `SEA_BREAK_RATIO` (0.39 × depth, the breaking limit) / `SEA_CREST_MAX`; the ocean's vertex shader and `floatAt`
+  bound every crest by the baked depth (no wave over land), and `addRoad` lifts a road over (or beside) the sea above the crest
+  its water can carry, ramping at 0.8 m / 10 m. Locked by `tests/citiesStandOnRealLand.test.ts` (reported layout, seed 90551631).
+- Not proven: a real-GPU screenshot of the fixed sea (numbers only: crest bound vs road heights).
 ## 2026-11-27 — Map maker wave 1, PART R: roads on every map size, in a style (branch `claude/feat/map-roads-styles`)
 The admin's map order is frame → natural boundary → water → ground → ROADS → colonies. This is the ROADS step (P, the wish→plan
 planner, and W, boundaries/sea depth/ponds, are other sessions).

@@ -611,8 +611,13 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + (options.roadStyle ?? '') + '|' + landLine, {
         seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile, roadStyle: options.roadStyle, landLine,
         terrain: terrainNoRoads,
-        water: (x, z) => { const w = waterAt(x, z); return w ? { surface: w.surface, kind: w.kind } : null; },
-        bodies: waterBodies,
+        // 🪷 The roads read the rivers and lakes WITHOUT the ponds. Ponds are placed after the roads, away from them (pondsOf's busy
+        // check), so a road never needs to avoid one — and reading them here was a cycle on a loop world: a region of roads built
+        // while the ponds were being placed asked for the ponds again (waterBodies → pondsOf → placePonds → ground → roads → …), and
+        // the world died with "Maximum call stack size exceeded" (found by the map preview, 2026-11-27: "3 talaab" on a 5 km loop).
+        // It also keeps the network true to its cache key, which never named the pond count.
+        water: (x, z) => { const w = withRivers ? rivers.waterAt(x, z) : null; return w ? { surface: w.surface, kind: w.kind } : null; },
+        bodies: () => (withRivers ? rivers.bodies() : { rivers: [], lakes: [] }),
       });
     }
     return roadNet;

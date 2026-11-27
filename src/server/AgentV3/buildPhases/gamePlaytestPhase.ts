@@ -162,7 +162,7 @@ async function playIt(p: GamePlaytestPorts): Promise<GamePlaytestResult> {
         // showed is not there becomes a defect the completion gate reads, so the build is never reported done without it.
         // A page that was not read says nothing (no finding), so "could not look" is never turned into "missing".
         for (const f of fromPage) {
-          if (f.kind !== 'MISSING_ENEMIES' && f.kind !== 'MISSING_HELD') continue;
+          if (!(f.kind === 'MISSING_ENEMIES' || f.kind === 'MISSING_HELD')) continue;
           out.played.defects.push({ code: 'GAME_DEFECT_ASK_NOT_MET', evidence: f.evidence });
           pageMissing.add(f.kind === 'MISSING_ENEMIES' ? 'enemies' : 'held');
         }

@@ -71,7 +71,8 @@ describe('🧱 the natural edge holds the player, its car and every bounded char
 describe('🌊 water and the ground sheet', () => {
   it('a car driven into deep water is held where it can still ford — never on the sea bed', () => {
     const c = context();
-    const world = open(c, 'sea');
+    // The play-area wall (boundary: false here) would otherwise stop the car before the water: the guard alone is measured.
+    const world = OW.createOpenWorld(c, { seed: 4, vegetation: false, mode: 'bounded', sizeMeters: 4000, naturalEdge: 'sea', boundary: false });
     world.frame(c, 1 / 60);
     const w = world.map.world;
     // Along a ray: the outermost shore, then a car driven out from the beach a few metres a frame.

@@ -157,6 +157,21 @@ describe('the sea shelf: a beach, then deeper and deeper away from the shore', (
     }
   });
 
+  it('the sea floor IS the shelf profile measured from the shore: a gentle beach, then the shelf (bounded island)', () => {
+    const wd = world('sea', { rivers: false });
+    for (const a of ANGLES) {
+      // The outermost shore along this ray, to a centimetre.
+      let hi = wd.boundary.limitAt(a), lo = hi;
+      while (wd.heightAt(...at(lo, a)) < 0) lo -= 10;
+      for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (wd.heightAt(...at(m, a)) < 0) hi = m; else lo = m; }
+      for (const d of [10, 20, 40, 100, 300, 800]) {
+        if (hi + d > wd.boundary.limitAt(a)) continue;
+        expect(wd.heightAt(...at(hi + d, a)), 'angle ' + a + ', ' + d + ' m out').toBeCloseTo(-A.shelfDepth(d), 0);
+      }
+      expect(-wd.heightAt(...at(hi + 40, a))).toBeLessThanOrEqual(2.5);
+    }
+  });
+
   it('the profile: 0 at the waterline, 2 m at the beach edge, the chosen depth past the shelf, never decreasing', () => {
     expect(A.shelfDepth(0)).toBe(0);
     expect(A.shelfDepth(40)).toBeCloseTo(2, 9);

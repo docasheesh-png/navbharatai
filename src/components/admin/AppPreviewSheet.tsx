@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, X } from 'lucide-react';
 import { previewPlan, type BuiltAppRow } from '../../lib/adminAppModeration';
-import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
+import { UNTRUSTED_PREVIEW_SANDBOX, LIVE_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 
 /**
  * OPEN ANY BUILT APP, from wherever the admin is looking at it (admin 2026-10-21: the user's profile lists the
@@ -11,7 +11,7 @@ import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
  * never a woken machine (see the preview route in admin.ts).
  */
 const PREVIEW_IFRAME_ALLOW = 'clipboard-write; fullscreen';
-const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups';
+const IFRAME_SANDBOX = LIVE_PREVIEW_SANDBOX;
 
 export function useAppPreview(headers: Record<string, string>) {
   const [preview, setPreview] = useState<{ row: BuiltAppRow; html: string | null; loading: boolean; error: string; kind: string } | null>(null);

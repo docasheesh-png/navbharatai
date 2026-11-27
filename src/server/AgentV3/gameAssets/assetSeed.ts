@@ -14,6 +14,7 @@ import { createDurableAssetCache } from './assetCache';
 import { gameAssetObjectStore } from './objectStore';
 import { downloadReviewedAsset, polyHavenTransport } from './assetTransport';
 import { externalGameAssetsEnabled, gameAssetRequirements } from './assetPlan';
+import { libraryPicksIn, type PickRole } from './libraryPicks';
 import { persistProjectAsset, type GameAssetWorkspace, type GameAssetPersistence } from './assetProject';
 import { proveAssetInSandbox } from './assetBrowserProof';
 import { saveWorkspaceAssets, readWorkspaceAssetBytes } from '../WorkspaceAssetStore';
@@ -107,21 +108,53 @@ export function addLibraryModels(options: Omit<GameAssetSeedOptions, 'prompt' | 
   return prepareExternalGameAssets({ ...options, prompt: '', existing: options.existing ?? {} });
 }
 
+/**
+ * What the builder is told about the user's Game library picks: which are in the game, under which name, and what each is
+ * already wired as — and, honestly, which could not be added. '' when the request named none. PURE.
+ */
+export function pickedModelsHandoff(picks: ReadonlyArray<{ id: string; role: PickRole; subject: string }>, ready: ReadonlySet<string>, playerSet: boolean): string {
+  if (!picks.length) return '';
+  const lines = picks.map((p) => {
+    if (!ready.has(p.subject)) return `"${p.id}" could not be added to the game, so it is not in it — tell the user plainly; do not draw a replacement and call it theirs`;
+    if (p.role === 'player') return playerSet ? `"${p.id}" is the player: PLAYER.model = '${p.subject}' is already set in ${GAME_PLAYER_FILE_PATH} — do not change it` : `"${p.id}" is saved as '${p.subject}'; set PLAYER.model = '${p.subject}' (and PLAYER.file = null) in ${GAME_PLAYER_FILE_PATH}`;
+    if (p.role === 'enemy') return `"${p.id}" is saved as '${p.subject}' for the enemies: ENEMIES.model = '${p.subject}' in src/game/features/enemies.ts dresses each one (Entities.dress) — never a second enemy system`;
+    return `"${p.id}" is saved as '${p.subject}'; place it where the user's words say`;
+  });
+  return ` 🎯 THE USER'S GAME LIBRARY PICKS: ${lines.join('; ')}.`;
+}
+
 async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
   if (!externalGameAssetsEnabled(options.env, options.verifiedOwnerUid)) return out;
-  const catalogue = options.catalogue ?? REVIEWED_GAME_ASSETS;
-  // Named subjects first, then the scenery this KIND of game needs (L3 step 4) — same bound of six models.
   const explicit = options.requirements !== undefined;
-  const named = explicit ? options.requirements!.slice(0, 6).map((r) => ({ subject: r.subject, ...(r.animation ? { animation: r.animation } : {}) })) : gameAssetRequirements(options.prompt, catalogue);
-  const starter = !explicit && options.starterPlayerSource === gamePlayerFileSource(options.workspaceId)
+  // 🎯 THE USER'S GAME LIBRARY PICKS COME FIRST, EXACTLY (build #2565: "@character:lib12-young-man ki hero banana hai, aur
+  // @model:q7-ranger-man ko enemy bot"). The request names exact library ids (libraryPicks.ts); each is pinned like
+  // add_library_models pins one — other models serving its subjects leave this call's catalogue — so the young man the user
+  // tapped never arrives as a different young man. The player's pick becomes PLAYER.model below; the enemies' pick is the
+  // subject their feature wears (GameEnemiesFeature.ts). A car pick is the race's own path (carSwap.ts), not this one.
+  const full = options.catalogue ?? REVIEWED_GAME_ASSETS;
+  const picks = explicit ? [] : libraryPicksIn(options.prompt)
+    .filter((p) => p.role !== 'car')
+    .map((p) => ({ ...p, entry: full.find((c) => c.id === p.id) }))
+    .filter((p): p is typeof p & { entry: ReviewedAsset } => !!p.entry && typeof p.entry.subjects[0] === 'string');
+  const pinnedSubjects = new Set(picks.flatMap((p) => p.entry.subjects));
+  const catalogue = picks.length ? full.filter((c) => picks.some((p) => p.entry === c) || !c.subjects.some((s) => pinnedSubjects.has(s))) : full;
+  const pickClip = (entry: ReviewedAsset, role: string) => (entry.animationRoles && role in entry.animationRoles ? { animation: role } : {});
+  const picked: AssetRequirement[] = picks.map((p) => ({ subject: p.entry.subjects[0], ...pickClip(p.entry, p.role === 'player' ? 'idle' : p.role === 'enemy' ? 'walk' : '') }));
+  // Named subjects first, then the scenery this KIND of game needs (L3 step 4) — same bound of six models.
+  const named = explicit ? options.requirements!.slice(0, 6).map((r) => ({ subject: r.subject, ...(r.animation ? { animation: r.animation } : {}) }))
+    : [...picked, ...gameAssetRequirements(options.prompt, catalogue).filter((r) => !picked.some((p) => p.subject === r.subject))];
+  const playerPick = picks.find((p) => p.role === 'player');
+  const freshPlayer = !explicit && options.starterPlayerSource === gamePlayerFileSource(options.workspaceId);
+  const starter = freshPlayer && playerPick ? playerPick.entry
+    : freshPlayer && !playerPick
     && needsHumanCharacter(options) && !/cartoon|stylized|stylised|low[ -]?poly|voxel|anime|pixel art/i.test(options.prompt)
     && !named.some(r => r.subject !== 'human' && catalogue.some(c => c.libraryCategory === 'character' && c.subjects.includes(r.subject)))
     ? pickVariant(options.workspaceId, 'human', REALISTIC_HUMANS)
     : undefined;
   const starterSubject = starter && catalogue.some(c => c.id === starter.id) ? starter.subjects[0] : undefined;
   const requested = starterSubject
-    ? [{ subject: starterSubject, animation: 'idle' }, ...named.filter(r => r.subject !== 'human')]
+    ? [{ subject: starterSubject, ...(playerPick && starter === playerPick.entry ? pickClip(playerPick.entry, 'idle') : { animation: 'idle' }) }, ...named.filter(r => r.subject !== 'human' && r.subject !== starterSubject)]
     : named;
   const scenery = explicit ? null : sceneryFor(options.prompt);
   const served = new Set(catalogue.flatMap((c) => c.subjects));
@@ -157,8 +190,17 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
   let downloadChain: Promise<unknown> = Promise.resolve();
   const proving = new Map<string, Promise<void>>();
   const proofKey = (bytes: Uint8Array, requirement: AssetRequirement) => `${createHash('sha256').update(bytes).digest('hex')}:${requirement.animation ?? ''}`;
+  // THE PIN HOLDS WHEREVER A CANDIDATE COMES FROM: a model left out for a pick (another young man) is refused from every
+  // source and every cached copy too, not only from the catalogue the default sources are built on.
+  const left = picks.length ? new Set(full.filter((c) => !catalogue.includes(c)).map((c) => c.id)) : null;
+  const sources = dependencies.providers;
+  const cache = dependencies.cache;
   const serialDependencies: AssetEngineDependencies = {
     ...dependencies,
+    ...(left ? {
+      providers: sources.map((p) => ({ id: p.id, search: async (r: AssetRequirement, s: AbortSignal) => (await p.search(r, s)).filter((c) => !left.has(c.id)) })),
+      cache: { find: async (r: AssetRequirement) => (await cache.find(r)).filter((e) => !left.has(e.candidate.id)), read: (sha: string) => cache.read(sha), put: (e, b) => cache.put(e, b) },
+    } : {}),
     // DOWNLOADS STAY ONE AT A TIME: the guarded transport allows one request per second per origin (assetProviderBudget.ts —
     // politeness to the providers, kept as designed). It used to refuse past one queued request (measured: three at once
     // failed "Provider rate limit"); since Q-3471 it queues up to 8 s, but this preparer still holds at most ONE request in
@@ -252,7 +294,8 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
     out.files = files;
     out.status = 'prepared';
     out.handoff = `${localModelsOverride(ready.map(r => r.subject))} LOCAL 3D MODELS PREPARED: ${ready.map(r => r.subject).join(', ')}. Import loadRequestedAsset from src/game/three/assetModels.ts. Await loadRequestedAsset(subject, proceduralFallback); add handle.root to the scene; call handle.update(dt) each frame and handle.dispose() on teardown. The fallback must return { root, source: 'procedural', update, dispose } using the existing appropriate real/lite builder. Use these matching local models for those subjects, preserve gameplay physics and controls, and do not fetch provider URLs. Keep manifest.json and ATTRIBUTION.txt in the published bundle. A model passed an isolated render check; the finished game's normal playtest still must verify its integration. EVERY MODEL IS CHANGEABLE: when the user asks to recolour, resize, turn, move, hide a part of, re-animate, swap to the code-built object, or fully replace a model with their own .glb (or add a new one), edit ONLY src/game/three/assetCustomizations.ts (examples are in that file) — never the library files, manifest.json, assetModels.ts or externalAssets.ts. ${WORLD_STREAMING_HANDOFF}`
-      + (dressed.length ? ` WORLD DRESSING READY (${dressed.join(', ')}; ${scenery!.layout} layout): import { dressWorld } from src/game/three/worldDressing.ts and call await dressWorld(scene, { heightAt, accept }) ONCE after the terrain/road exists — pass the kit's ground-height function as heightAt and an accept(x, z) that returns false on the road, track and play space. Solid scenery carries collision geometry into the scene with each clone. Do not also scatter procedural copies of these subjects.` : '');
+      + (dressed.length ? ` WORLD DRESSING READY (${dressed.join(', ')}; ${scenery!.layout} layout): import { dressWorld } from src/game/three/worldDressing.ts and call await dressWorld(scene, { heightAt, accept }) ONCE after the terrain/road exists — pass the kit's ground-height function as heightAt and an accept(x, z) that returns false on the road, track and play space. Solid scenery carries collision geometry into the scene with each clone. Do not also scatter procedural copies of these subjects.` : '')
+      + pickedModelsHandoff(picks.map((p) => ({ id: p.id, role: p.role, subject: p.entry.subjects[0] })), new Set(ready.map((r) => r.subject)), files[GAME_PLAYER_FILE_PATH] !== undefined);
     return out;
   } catch {
     return { ...out, files: {}, handoff: '', status: 'procedural' };

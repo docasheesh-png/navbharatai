@@ -45,7 +45,8 @@ describe('✋ PLAYER.holds with the kit person (the default body)', () => {
     await settle(); await settle();
     expect(under(item.root, g.hero.joints.rightHand)).toBe(true);
     const size = new THREE.Box3().setFromObject(item.root).getSize(new THREE.Vector3());
-    expect(Math.max(size.x, size.y, size.z)).toBeLessThan(0.9);       // about a third of 1.75 m, not the 2 m it came in at
+    // A rifle at a RIFLE's size (humanoid.ts gripFor: 0.95 m for a 1.75 m person), not the 2 m it came in at.
+    expect(Math.max(size.x, size.y, size.z)).toBeGreaterThan(0.8); expect(Math.max(size.x, size.y, size.z)).toBeLessThan(1.1);
     expect(held()).toEqual([{ side: 'right', subject: 'rifle' }]);
     body.dispose();
     expect(item.root.parent).toBe(null);

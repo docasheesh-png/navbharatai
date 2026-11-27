@@ -85,7 +85,7 @@ import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions, type H
 import type { MinimapOptions } from './ui/worldMap';
 // Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
 // (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
-export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions, WorldBounds, BoundaryOptions };
+export type { LightingPresetName, CameraKind, ShoulderOptions, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions, WorldBounds, BoundaryOptions };
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -1110,10 +1110,12 @@ export class Game {
     // has been (a 'chase' game too: its rig is third-person on foot, see the constructor).
     const chased = this.chased;
     const p = chased ? chased.position : this.player.object.position;
+    // The rig reads a long fall (freefall / parachute framing) from the player's feet; a seat ignores it.
+    this.rig.setGrounded(this.player.isGrounded);
     // A camera shot playing (play/cinematics.ts) owns the camera this frame; the rig takes it back when it ends.
     if (this.director.update(frameDelta, this.rig.camera, p)) { /* the shot placed the camera */ }
     else if (chased) this.rig.follow(chased, frameDelta);
-    else { this.rig.setGrounded(this.player.isGrounded); this.rig.update(p, frameDelta); }
+    else this.rig.update(p, frameDelta);
     if (!chased && !this.director.active) updateIndoorCamera(this.scene, this.rig.camera, p);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.

@@ -120,7 +120,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3c1991e63354af7a5be770e10f5401ee68027b6a458dc113e0ec1f2e8706225c",
     "15208f79de67db964f9f934c3e0ce3c5a20f7c119b18972ca7e3e8ba736ef17c",
     "f3445e4f9e652bfd06dedf2ffb6dff0f9c0b34a4e5b2ad440d64c5873b2dbeea",
-    "c7b3c76803880480eadda4724a7ff990e1d761a8678a9e1e8f7f105516d4c2eb"
+    "a6c593bb3757d5b74080984cf6c0ad9a893bd77bacb671ce2a0a6530b342176f"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",

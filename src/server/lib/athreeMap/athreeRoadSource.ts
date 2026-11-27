@@ -8,16 +8,24 @@
 // as the cut is deep), as a weighted blend of continuous candidates, so the SAME height function feeds the renderer, the physics
 // collider and the road mesh. A loop world is generated in 12.5 km regions on demand, so 100 km needs no up-front work.
 //
+// EVERY MAP SIZE (admin 2026-11-27): a map under 20 km (an island under 6 km), or any map up to 25 km that asks for a roadStyle, gets the
+// PLANNED network of athreeRoadPlanSource.ts instead (appended to roads.ts): a town laid in a style (grid, highway, organic, hill,
+// straight) with a highway hierarchy, junctions and roundabouts, ONE connected graph, the blocks between its roads as data, and a
+// left-lane route() over it. The regional network above is unchanged for the big maps.
+//
 // roads.ts is PURE (no three.js). roadmesh.ts draws it: asphalt ribbons with procedural lane markings, kerbs, a start line, bridge decks,
 // rails and piers, built per tile.
 //
 // PURE source strings; the generator writes them. Rule for editing: no backticks and no dollar-brace inside the strings below.
+
+import { ROAD_PLAN } from './athreeRoadPlanSource';
 
 export const ROADS = `// Athree map — roads, a race circuit, runways, village plazas and bridges (pure: no three.js).
 // Technique: flat-site hashing, A-star routing with slope and river costs, Chaikin smoothing, graded height profile, banked closed spline,
 // weighted carve of continuous candidates, 125 m spatial grid, regions generated on demand. Own implementation.
 
 import { mulberry32 } from './noise';
+// The planned network (roads on every map size) is appended at the end of this file: planRoadNetwork, RoadStyle, Junction, Block.
 
 export const ROAD_STEP = 10;
 export const REGION = 12500;
@@ -30,7 +38,8 @@ const BRIDGE_CLEARANCE = 3.5;
 /** A road may sit at most this far above or below the ground it was routed over (cut and fill), or it is not built there. */
 const MAX_CUT_FILL = 14;
 
-export type RoadKind = 'circuit' | 'highway' | 'runway';
+/** circuit, highway and runway are the regional network's; a planned network adds main roads, colony streets and lanes (galis). */
+export type RoadKind = 'circuit' | 'highway' | 'runway' | 'main' | 'street' | 'lane';
 export type RoadProfile = 'open-world' | 'racing' | 'battle-royale' | 'flight' | 'explore';
 
 export interface RoadPoint {
@@ -43,6 +52,10 @@ export interface RoadPoint {
   width: number;
   /** On a bridge deck: the ground below is not carved and the deck is above it. */
   bridge: boolean;
+  /** Planned roads only: metres along the road from its first point (their points are not all 10 m apart: a junction pad ends where it ends). */
+  s?: number;
+  /** Planned roads only: water is within this point's cut-and-fill shoulder, so the carve leaves water alone (a stream is never filled). */
+  nearWater?: boolean;
 }
 
 export interface Road {
@@ -52,9 +65,17 @@ export interface Road {
   points: RoadPoint[];
   /** Length in metres (a closed road includes the closing segment). */
   length: number;
-  /** Site ids at each end of a highway (-1 otherwise). */
+  /** Site ids at each end of a highway (-1 otherwise). A planned highway to a village has its site in to. */
   from: number;
   to: number;
+  /** Planned network only: true, the lane count (both ways), the graph junctions at each end, the ribbon trimmed off each end (the
+   * junction pad is drawn there), and the widest cut-and-fill shoulder. */
+  planned?: boolean;
+  lanes?: number;
+  a?: number;
+  b?: number;
+  trim?: [number, number];
+  shoulder?: number;
 }
 
 export interface Site {
@@ -75,6 +96,8 @@ export interface Circuit {
 
 export interface RoadHit {
   road: number;
+  /** On a planned junction pad (between its roads' ends): the junction's id. */
+  junction?: number;
   kind: RoadKind;
   /** Metres along the road's normal n = (-ez, ex) from the centre line (the side a positive bank raises). */
   across: number;
@@ -95,14 +118,25 @@ export interface RoadOptions {
   profile: RoadProfile;
   /** The ground WITHOUT roads. */
   terrain(x: number, z: number): number;
-  /** The surface height of a river or lake at a place, or null on dry ground. kind tells a river (bridgeable) from a lake. */
-  water(x: number, z: number): { surface: number; kind: 'river' | 'lake' } | null;
+  /** The surface height of a river or lake at a place, or null on dry ground. kind tells a river (bridgeable) from a lake (or pond, or any
+   * other still water: only a river is ever bridged). */
+  water(x: number, z: number): { surface: number; kind: string } | null;
+  /** How the roads are laid on a map up to 25 km (default grid on a map too small for the regional network). Unknown values are ignored. */
+  roadStyle?: RoadStyle;
+  /** The rivers and lakes as geometry. A small map's rivers are under a metre wide, so a planned road finds its crossings on these lines
+   * (a point test every few metres could step over one); still water is also kept clear this way. */
+  bodies?(): { rivers: Array<{ points: Array<{ x: number; z: number; surface: number; width: number }> }>; lakes: Array<{ x: number; z: number; radius: number }> };
+  /** Below this height (outside a river) the ground is sea or beach. Default 1.5 m; a small map whose heights are squeezed passes less. */
+  landLine?: number;
 }
 
 export interface Region {
   roads: Road[];
   sites: Site[];
   circuit: Circuit | null;
+  /** Planned network only: the junction pads and roundabouts, and the blocks enclosed by roads. */
+  junctions?: Junction[];
+  blocks?: Block[];
 }
 
 export interface RoadNetwork {
@@ -118,6 +152,21 @@ export interface RoadNetwork {
   home(): Region;
   /** Every region that overlaps a rectangle (the rectangle may be any copy of the loop world). Builds them. */
   regionsNear(x0: number, z0: number, x1: number, z1: number): Region[];
+  /** The style of the planned network, or null on a map that uses the regional network. */
+  style(): RoadStyle | null;
+  /**
+   * The blocks of the planned network: polygons enclosed by roads on every side (counter-clockwise, on the road centre lines, each side
+   * with its road and half-width so the kerb is one inset away). Pure data for the colony step. Empty on the regional network.
+   */
+  blocks(): Block[];
+  /** The planned network as ONE connected graph: junctions (nodes) and the roads between them (edges). Empty on the regional network. */
+  graph(): RoadGraph;
+  /**
+   * A driving route along the planned roads from near one point to near another: the shortest path over the graph, in the LEFT lane
+   * (India keeps left; facing (dx, dz) the left is (dz, -dx)), round a roundabout with its island on the right, at road height.
+   * Empty when there is no planned network or a point is nowhere near a road.
+   */
+  route(from: { x: number; z: number }, to: { x: number; z: number }): RoutePoint[];
 }
 
 function smooth(t: number): number {
@@ -171,14 +220,23 @@ interface Seg { road: number; j: number }
 export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   const P = o.period;
   const bounded = P <= 0;
-  const regionsPer = P > 0 ? Math.round(P / REGION) : 0;
-  const gridPer = P > 0 ? Math.round(P / GRID) : 0;
+  // EVERY MAP SIZE: a map too small for 12.5 km regions (or one up to 25 km that names a style) is one planned network instead.
+  const side = bounded ? o.radius * 2 : P;
+  const askedStyle: RoadStyle | null = typeof o.roadStyle === 'string' && ROAD_STYLES.includes(o.roadStyle) ? o.roadStyle : null;
+  const planned = side <= PLAN_MAX_SIDE && (askedStyle !== null || side < (bounded ? PLAN_BELOW.bounded : PLAN_BELOW.loop));
+  const planStyle: RoadStyle | null = planned ? (askedStyle ?? 'grid') : null;
+  // The sea and land thresholds below are for the reference heights; a small map squeezes its heights, and passes a lower land line.
+  // Planned maps only: the regional network of a bigger map keeps the reference thresholds it always had.
+  const LAND = planned ? Math.max(0.01, Math.min(1, (typeof o.landLine === 'number' && Number.isFinite(o.landLine) ? o.landLine : 1.5) / 1.5)) : 1;
+  const loopPlan = planned && P > 0;
+  const regionsPer = P > 0 && !planned ? Math.round(P / REGION) : 0;
+  const gridPer = P > 0 && !planned ? Math.round(P / GRID) : 0;
   const wrapG = (i: number): number => (gridPer > 0 ? ((i % gridPer) + gridPer) % gridPer : i);
   const wrapD = (d: number): number => (P > 0 ? d - Math.round(d / P) * P : d);
   const canon = (v: number): number => (P > 0 ? v - Math.floor(v / P) * P : v);
   const gkey = (cx: number, cz: number): number => (wrapG(cx) + 100000) * 400009 + (wrapG(cz) + 100000);
 
-  interface Built extends Region { grid: Map<number, Seg[]>; siteGrid: Map<number, number[]>; x0: number; z0: number; size: number }
+  interface Built extends Region { grid: Map<number, Seg[]>; siteGrid: Map<number, number[]>; junctionGrid: Map<number, number[]>; graph: RoadGraph | null; x0: number; z0: number; size: number }
   const regions = new Map<number, Built>();
 
   const terrain = o.terrain;
@@ -286,13 +344,19 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   }
 
   function buildRegion(rx: number, rz: number): Built {
-    const size = bounded ? o.radius * 2 : REGION;
-    const x0 = bounded ? -o.radius : rx * REGION;
-    const z0 = bounded ? -o.radius : rz * REGION;
+    // A planned loop map is one region centred on the origin, [-P/2, P/2) on each axis, kept clear of the seam.
+    const size = bounded ? o.radius * 2 : planned ? P : REGION;
+    const x0 = bounded ? -o.radius : planned ? -P / 2 : rx * REGION;
+    const z0 = bounded ? -o.radius : planned ? -P / 2 : rz * REGION;
     const rng = mulberry32(mix32(rx, rz, o.seed + 311));
+    // A planned (small) map's streams are under a metre wide: its circuit and runway keep off them by their geometry.
+    const pw: PlanWater | null = planned && o.bodies ? planWaterIndex(o.bodies(), P > 0 ? P : 0, 0) : null;
     const roads: Road[] = [];
     const sites: Site[] = [];
-    const home = bounded || (rx === 0 && rz === 0);
+    let junctions: Junction[] | undefined;
+    let blocks: Block[] | undefined;
+    let graph: RoadGraph | null = null;
+    const home = bounded || planned || (rx === 0 && rz === 0);
     const inner = 150;
     const inside = (x: number, z: number, m = inner): boolean => x >= x0 + m && x < x0 + size - m && z >= z0 + m && z < z0 + size - m && (!bounded || Math.hypot(x, z) < o.radius * 0.82);
 
@@ -300,21 +364,21 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     let circuit: Circuit | null = null;
     let circuitCentre: { x: number; z: number; r: number } | null = null;
     if (home && o.profile === 'racing') {
-      const R = bounded ? Math.min(320, o.radius * 0.13) : 600;
+      const R = planned ? Math.min(600, side * 0.1) : bounded ? Math.min(320, o.radius * 0.13) : 600;
       const cands: Array<{ x: number; z: number; score: number }> = [];
       for (let k = 0; k < 260; k++) {
         const cx = x0 + R * 1.6 + rng() * (size - R * 3.2);
         const cz = z0 + R * 1.6 + rng() * (size - R * 3.2);
         if (!inside(cx, cz, R * 1.6)) continue;
         const h0 = terrain(cx, cz);
-        if (h0 < 4 || h0 > 150) continue;
+        if (h0 < 4 * LAND || h0 > 150) continue;
         let sum = 0; let sum2 = 0; let wet = 0; let rivers = 0;
         for (let i = 0; i < 24; i++) {
           const a = (i / 24) * Math.PI * 2;
           const px = cx + Math.cos(a) * R; const pz = cz + Math.sin(a) * R;
           const h = terrain(px, pz); sum += h; sum2 += h * h;
           const w = o.water(px, pz);
-          if (h < 1.5 || (w && w.kind === 'lake')) wet++; else if (w) rivers++;
+          if (h < 1.5 * LAND || (w && w.kind !== 'river')) wet++; else if (w) rivers++;
         }
         const mean = sum / 24;
         const score = Math.sqrt(Math.max(0, sum2 / 24 - mean * mean)) + wet * 400 + rivers * 25;
@@ -333,6 +397,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
         const xy = resample(ctrl, true, 2);
         const pts = profile(xy, true, 14, false);
         if (pts.some((p) => !p.bridge && Math.abs(p.y - terrain(p.x, p.z)) > MAX_CUT_FILL)) continue;
+        if (pw && xy.some((p, i) => { const q = xy[(i + 1) % xy.length]; return pw.riverNear(p[0], p[1], q[0], q[1], 7 + 16) !== null || pw.lakeNear(p[0], p[1], 7 + 16); })) continue;
         bankCircuit(pts);
         let length = 0;
         for (let i = 0; i < pts.length; i++) length += Math.hypot(pts[(i + 1) % pts.length].x - pts[i].x, pts[(i + 1) % pts.length].z - pts[i].z);
@@ -349,7 +414,8 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     // ---- runways: a flat strip along +x --------------------------------------------------------------------------------------------
     const runwayCentres: Array<{ x: number; z: number }> = [];
     if (home && o.profile !== 'racing') {
-      const want = o.profile === 'flight' ? 2 : 1;
+      // A small planned map has no room for a 900 m strip unless it is a flight game (or 5 km and up).
+      const want = o.profile === 'flight' ? 2 : planned && side < 5000 ? 0 : 1;
       for (let w = 0; w < want; w++) {
         let best: { x: number; z: number; score: number } | null = null;
         for (let k = 0; k < 260; k++) {
@@ -361,10 +427,11 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
           let sum = 0; let sum2 = 0; let n = 0; let wet = false;
           for (let i = -9; i <= 9; i++) for (const dz of [-25, 0, 25]) {
             const h = terrain(cx + i * 50, cz + dz);
-            if (h < 5 || o.water(cx + i * 50, cz + dz)) wet = true;
+            if (h < 5 * LAND || o.water(cx + i * 50, cz + dz)) wet = true;
             sum += h; sum2 += h * h; n++;
           }
           if (wet) continue;
+          if (pw && (pw.riverNear(cx - 470, cz, cx + 470, cz, 32 + 16) !== null || pw.lakeNear(cx - 450, cz, 50) || pw.lakeNear(cx, cz, 50) || pw.lakeNear(cx + 450, cz, 50))) continue;
           // The roughest ground is simply levelled (a runway is cut and filled flat): the flattest of the places tried is the cheapest to build.
           const mean = sum / n;
           const score = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
@@ -380,10 +447,10 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       }
     }
 
-    // ---- villages: plazas on flat ground -------------------------------------------------------------------------------------------
+    // ---- villages: plazas on flat ground (the regional network; a planned map lays its own) -----------------------------------------
     const cell = size / (bounded ? 4 : 5);
     const nCells = bounded ? 4 : 5;
-    for (let cz = 0; cz < nCells; cz++) {
+    for (let cz = 0; cz < (planned ? 0 : nCells); cz++) {
       for (let cx = 0; cx < nCells; cx++) {
         const r2 = mulberry32(mix32(cx + rx * 7, cz + rz * 11, o.seed + 97));
         if (r2() > 0.85) continue;
@@ -395,12 +462,12 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
           if (circuitCentre && Math.hypot(sx - circuitCentre.x, sz - circuitCentre.z) < circuitCentre.r + 200) continue;
           if (runwayCentres.some((r) => Math.hypot(r.x - sx, r.z - sz) < 900)) continue;
           const h0 = terrain(sx, sz);
-          if (h0 < 6 || h0 > 150 || o.water(sx, sz)) continue;
+          if (h0 < 6 * LAND || h0 > 150 || o.water(sx, sz)) continue;
           let ok = true;
           for (let i = 0; i < 8 && ok; i++) {
             const a = (i / 8) * Math.PI * 2;
             const px = sx + Math.cos(a) * 65; const pz = sz + Math.sin(a) * 65;
-            if (Math.abs(terrain(px, pz) - h0) > 6 || o.water(px, pz) || terrain(px, pz) < 4) ok = false;
+            if (Math.abs(terrain(px, pz) - h0) > 6 || o.water(px, pz) || terrain(px, pz) < 4 * LAND) ok = false;
           }
           if (ok) { sites.push({ id: sites.length, x: sx, z: sz, y: h0, radius: PLAZA_RADIUS }); break; }
         }
@@ -428,7 +495,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       let c: number;
       const h = terrain(x, z);
       const w = o.water(x, z);
-      if (h < 1.5 || (w && w.kind === 'lake') || !inside(x, z, 60)) c = Infinity;
+      if (h < 1.5 * LAND || (w && w.kind !== 'river') || !inside(x, z, 60)) c = Infinity;
       else {
         // Steep ground is simply dear (25 x slope squared): a road that still has to cross it is refused by the cut and fill limit below.
         const s = slopeAt(x, z);
@@ -439,9 +506,10 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       costCache.set(k, c);
       return c;
     };
-    const route = (a: Site, b: Site): Array<[number, number]> | null => {
-      const sx = Math.floor(a.x / CELL); const sz = Math.floor(a.z / CELL);
-      const gx = Math.floor(b.x / CELL); const gz = Math.floor(b.z / CELL);
+    const route = (a: Site, b: Site): Array<[number, number]> | null => routeXZ(a.x, a.z, b.x, b.z, null);
+    function routeXZ(ax: number, az: number, bx: number, bz: number, avoid: ((x: number, z: number) => boolean) | null): Array<[number, number]> | null {
+      const sx = Math.floor(ax / CELL); const sz = Math.floor(az / CELL);
+      const gx = Math.floor(bx / CELL); const gz = Math.floor(bz / CELL);
       const heap = createHeap<[number, number]>();
       const gScore = new Map<number, number>();
       const came = new Map<number, number>();
@@ -473,6 +541,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
             const nx = cur[0] + dx; const nz = cur[1] + dz;
             const c = cellCost(nx, nz);
             if (!isFinite(c) && !(nx === gx && nz === gz) && !(nx === sx && nz === sz)) continue;
+            if (avoid && !(nx === gx && nz === gz) && avoid(nx * CELL + CELL / 2, nz * CELL + CELL / 2)) continue;
             const step = Math.hypot(dx, dz) * (isFinite(c) ? c : 1);
             const g = g0 + step;
             const nk = key(nx, nz);
@@ -481,7 +550,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
         }
       }
       return null;
-    };
+    }
     for (const [ai, bi] of edges) {
       if (roads.filter((r) => r.kind === 'highway').length >= 40) break;
       const a = sites[ai]; const b = sites[bi];
@@ -505,6 +574,19 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       roads.push({ id: roads.length, kind: 'highway', closed: false, points: pts, length, from: a.id, to: b.id });
     }
 
+    // ---- the planned network (a map under 20 km, an island under 6 km, or a map up to 25 km with a roadStyle) ---------------------------
+    if (planned && planStyle) {
+      const half = bounded ? Math.min(o.radius - inner, o.radius * 0.56) : P / 2 - inner;
+      const cc = circuitCentre as { x: number; z: number; r: number } | null;
+      const blockedAt = (x: number, z: number): boolean => (cc !== null && Math.hypot(x - cc.x, z - cc.z) < cc.r) || runwayCentres.some((r) => Math.abs(x - r.x) < 480 && Math.abs(z - r.z) < 60);
+      const plan = planRoadNetwork({
+        seed: o.seed, style: planStyle, cx: 0, cz: 0, half, side, period: P > 0 ? P : 0, landLine: 1.5 * LAND, terrain, water: o.water, blocked: blockedAt, bodies: o.bodies,
+        route: (ax, az, bx, bz, avoid) => routeXZ(ax, az, bx, bz, avoid), firstRoad: roads.length, firstSite: sites.length,
+      });
+      roads.push(...plan.roads); sites.push(...plan.sites);
+      junctions = plan.junctions; blocks = plan.blocks; graph = plan.graph;
+    }
+
     // ---- spatial grid ----------------------------------------------------------------------------------------------------------------
     const grid = new Map<number, Seg[]>();
     const siteGrid = new Map<number, number[]>();
@@ -522,16 +604,20 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       const segs = r.closed ? n : n - 1;
       for (let j = 0; j < segs; j++) {
         const a = r.points[j]; const b = r.points[(j + 1) % n];
-        const pad = Math.max(a.width, b.width) / 2 + MAX_SHOULDER + 5;
+        const pad = Math.max(a.width, b.width) / 2 + (r.shoulder ?? MAX_SHOULDER) + 5;
         register(grid, Math.min(a.x, b.x) - pad, Math.min(a.z, b.z) - pad, Math.max(a.x, b.x) + pad, Math.max(a.z, b.z) + pad, { road: r.id, j });
       }
     }
     for (const s of sites) { const pad = PLAZA_RADIUS + PLAZA_SHOULDER + 5; register(siteGrid, s.x - pad, s.z - pad, s.x + pad, s.z + pad, s.id); }
-    return { roads, sites, circuit, grid, siteGrid, x0, z0, size };
+    const junctionGrid = new Map<number, number[]>();
+    for (const j of junctions ?? []) { const pad = j.radius + PLAN_JSHOULDER + 5; register(junctionGrid, j.x - pad, j.z - pad, j.x + pad, j.z + pad, j.id); }
+    const built: Built = { roads, sites, circuit, grid, siteGrid, junctionGrid, graph, x0, z0, size };
+    if (planned) { built.junctions = junctions ?? []; built.blocks = blocks ?? []; }
+    return built;
   }
 
   function regionFor(x: number, z: number): Built {
-    if (bounded) {
+    if (bounded || planned) {
       let r = regions.get(0);
       if (!r) { r = buildRegion(0, 0); regions.set(0, r); }
       return r;
@@ -544,9 +630,12 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     return r;
   }
 
-  interface Cand { w: number; bed: number; d: number; seg: Seg | null; t: number; across: number; width: number; y: number; bridge: boolean }
+  // sharp: a planned road, pad or plaza, whose carve weight is raised to the 6th power so a road's own surface wins on its paved width
+  // (a crossing road's shoulder no longer pulls it). junction: the junction pad's id, or -1.
+  interface Cand { w: number; bed: number; d: number; seg: Seg | null; t: number; across: number; width: number; y: number; bridge: boolean; sharp: boolean; junction: number }
 
   function eachCandidate(x: number, z: number, groundHeight: number, cb: (c: Cand) => void): void {
+    if (loopPlan) { x = wrapD(x); z = wrapD(z); }
     const reg = regionFor(x, z);
     const gk = gkey(Math.floor(x / GRID), Math.floor(z / GRID));
     const list = reg.grid.get(gk);
@@ -572,9 +661,10 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
         const bridge = a.bridge && b.bridge;
         const edgeY = y + Math.max(-half, Math.min(half, across)) * Math.tan(bank);
         const e = d - half;
-        const shoulder = Math.min(MAX_SHOULDER, Math.max(5, 1.3 * Math.abs(groundHeight - edgeY)));
-        const w = bridge ? 0 : e <= 0 ? 1 : 1 - smooth(e / shoulder);
-        cb({ w, bed: edgeY, d, seg: s, t, across, width, y, bridge });
+        const shoulder = Math.min(road.shoulder ?? MAX_SHOULDER, Math.max(5, 1.3 * Math.abs(groundHeight - edgeY)));
+        let w = bridge ? 0 : e <= 0 ? 1 : 1 - smooth(e / shoulder);
+        if (w > 0 && e > 0 && (a.nearWater || b.nearWater) && o.water(x, z)) w = 0;
+        cb({ w, bed: edgeY, d, seg: s, t, across, width, y, bridge, sharp: road.planned === true, junction: -1 });
       }
     }
     const sl = reg.siteGrid.get(gk);
@@ -584,14 +674,37 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
         const d = Math.hypot(wrapD(s.x - x), wrapD(s.z - z));
         const e = d - s.radius;
         const w = e <= 0 ? 1 : 1 - smooth(e / PLAZA_SHOULDER);
-        cb({ w, bed: s.y, d, seg: null, t: 0, across: 0, width: s.radius * 2, y: s.y, bridge: false });
+        cb({ w, bed: s.y, d, seg: null, t: 0, across: 0, width: s.radius * 2, y: s.y, bridge: false, sharp: planned, junction: -1 });
+      }
+    }
+    const jl = reg.junctionGrid.get(gk);
+    if (jl && reg.junctions) {
+      for (const id of jl) {
+        const j = reg.junctions[id];
+        const d = Math.hypot(wrapD(j.x - x), wrapD(j.z - z));
+        const e = d - j.radius;
+        let w = e <= 0 ? 1 : 1 - smooth(e / PLAN_JSHOULDER);
+        if (w > 0 && e > 0 && j.nearWater && o.water(x, z)) w = 0;
+        cb({ w, bed: j.y, d, seg: null, t: 0, across: 0, width: j.radius * 2, y: j.y, bridge: false, sharp: true, junction: id });
       }
     }
   }
 
   function carve(x: number, z: number, groundHeight: number): number {
     let sumW = 0; let sumB = 0; let maxW = 0;
-    eachCandidate(x, z, groundHeight, (c) => { if (c.w > 0) { sumW += c.w; sumB += c.w * c.bed; if (c.w > maxW) maxW = c.w; } });
+    // ON A PLANNED ROAD THE GROUND IS THAT ROAD: on its paved width the nearest planned ribbon's surface is the answer, exactly (a blend
+    // with a neighbouring segment's end, or another road's shoulder, would put the wheels above or below the asphalt that is drawn).
+    // On a junction pad between the ribbons, the pad's height.
+    let onD = Infinity; let onBed = 0; let padD = Infinity; let padBed = 0;
+    eachCandidate(x, z, groundHeight, (c) => {
+      if (c.sharp && c.w >= 1) {
+        if (c.seg && !c.bridge && c.d < onD) { onD = c.d; onBed = c.bed; }
+        else if (c.junction >= 0 && c.d < padD) { padD = c.d; padBed = c.bed; }
+      }
+      if (c.w > 0) { const ww = c.sharp ? Math.pow(c.w, 6) : c.w; sumW += ww; sumB += ww * c.bed; if (c.w > maxW) maxW = c.w; }
+    });
+    if (onD < Infinity) return onBed;
+    if (padD < Infinity) return padBed;
     if (sumW <= 0) return groundHeight;
     return groundHeight + (sumB / sumW - groundHeight) * maxW;
   }
@@ -599,13 +712,28 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   function roadAt(x: number, z: number): RoadHit | null {
     const reg = regionFor(x, z);
     let best: RoadHit | null = null;
+    let pad: RoadHit | null = null;
+    let island = false;
     let bestD = Infinity;
     eachCandidate(x, z, 0, (c) => {
+      if (c.junction >= 0 && reg.junctions) {
+        // A junction pad (between the ends of its roads) is road too; a roundabout's island is not.
+        const j = reg.junctions[c.junction];
+        if (!pad && c.d <= j.radius && c.d >= j.island) { const r = reg.roads[j.roads[0]]; pad = { road: r.id, kind: r.kind, across: 0, along: 0, width: j.radius * 2, y: j.y, bridge: false, junction: j.id }; }
+        if (c.d < j.island) island = true;
+        return;
+      }
       if (!c.seg || c.d > c.width / 2 || c.d >= bestD) return;
       const road = reg.roads[c.seg.road];
+      const a = road.points[c.seg.j]; const b = road.points[(c.seg.j + 1) % road.points.length];
+      const along = a.s !== undefined && b.s !== undefined ? a.s + c.t * (b.s - a.s) : (c.seg.j + c.t) * ROAD_STEP;
       bestD = c.d;
-      best = { road: road.id, kind: road.kind, across: c.across, along: (c.seg.j + c.t) * ROAD_STEP, width: c.width, y: c.bed, bridge: c.bridge };
+      best = { road: road.id, kind: road.kind, across: c.across, along, width: c.width, y: c.bed, bridge: c.bridge };
     });
+    // On a junction pad the answer is the junction (along and across of one road mean nothing where roads cross), named by the road whose
+    // ribbon is nearest; a roundabout's island is not road at all, whichever ribbon runs under it.
+    if (island) return null;
+    if (pad) { const p = pad as RoadHit; const b = best as RoadHit | null; return b ? { ...p, road: b.road, kind: b.kind } : p; }
     return best;
   }
 
@@ -615,7 +743,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   }
 
   function regionsNear(ax: number, az: number, bx: number, bz: number): Region[] {
-    if (bounded) return [regionFor(0, 0)];
+    if (bounded || planned) return [regionFor(0, 0)];
     const out: Region[] = [];
     const seen = new Set<Region>();
     const cx0 = canon(ax); const cz0 = canon(az);
@@ -628,7 +756,19 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     return out;
   }
 
-  return { regionAt: regionFor, carve, roadAt, drivableHeightAt, home: () => regionFor(bounded ? 0 : 1, bounded ? 0 : 1), regionsNear };
+  const planHome = (): Built | null => (planned ? regionFor(0, 0) : null);
+  return {
+    regionAt: regionFor, carve, roadAt, drivableHeightAt, home: () => regionFor(bounded ? 0 : 1, bounded ? 0 : 1), regionsNear,
+    style: () => planStyle,
+    blocks: () => planHome()?.blocks ?? [],
+    graph: () => planHome()?.graph ?? { nodes: [], edges: [] },
+    route: (from, to) => {
+      const h = planHome();
+      if (!h || !h.graph) return [];
+      const c = (v: number): number => (loopPlan ? wrapD(v) : v);
+      return planRoute(h.roads, h.junctions ?? [], h.graph, { x: c(from.x), z: c(from.z) }, { x: c(to.x), z: c(to.z) });
+    },
+  };
 }
 
 const cache = new Map<string, RoadNetwork>();
@@ -642,14 +782,14 @@ export function roadNetworkFor(key: string, o: RoadOptions): RoadNetwork {
   cache.set(key, made);
   return made;
 }
-`;
+` + ROAD_PLAN;
 
 export const ROADMESH = `// Athree map — roads on screen: asphalt ribbons with lane markings, kerbs, a start line, runways, plazas, bridge decks, rails and piers.
 // Technique: ribbons along the road points built per tile and streamed a few per frame; all markings are drawn in the fragment shader from
 // the position across and along the road (no texture); lit by the sky's sun like the plants. Own implementation.
 
 import { type AthreeQuality } from './config';
-import { ROAD_STEP } from './roads';
+import { ROAD_STEP, type Road } from './roads';
 import type { AthreeWorld } from './world';
 
 // three.js is passed in by the caller (import * as THREE from 'three'); it is typed loosely here on purpose.
@@ -665,14 +805,20 @@ export interface RoadTier {
   tilesPerUpdate: number;
 }
 
+// A planned town is dense (a junction every 70 to 130 m), so the caps are higher than one highway needed; a straight stretch is one quad,
+// not one per 10 m. A tile that would pass the cap is left out whole (buildTiles), never drawn half. All three fit the triangle budget.
 export const ROAD_TIERS: Record<AthreeQuality, RoadTier> = {
-  phone: { radius: 400, tile: 256, maxTriangles: 1800, tilesPerUpdate: 2 },
-  mid: { radius: 700, tile: 256, maxTriangles: 5000, tilesPerUpdate: 3 },
-  desktop: { radius: 1300, tile: 512, maxTriangles: 10000, tilesPerUpdate: 4 },
+  phone: { radius: 400, tile: 256, maxTriangles: 9000, tilesPerUpdate: 2 },
+  mid: { radius: 700, tile: 256, maxTriangles: 18000, tilesPerUpdate: 3 },
+  desktop: { radius: 1300, tile: 512, maxTriangles: 36000, tilesPerUpdate: 4 },
 };
 
-/** What a vertex of the road mesh is: how the shader paints it. */
-export const ROAD_KIND = { highway: 0, deck: 1, concrete: 2, runway: 3, circuit: 4, plaza: 5 } as const;
+/**
+ * What a vertex of the road mesh is: how the shader paints it. multilane: a planned highway or main road (lane lines, a double centre
+ * line, zebra crossings at its ends); street: a colony street (dashed centre line, zebra crossings); lane: a gali (no markings);
+ * junction: a junction pad or roundabout ring; island: a roundabout's grass island.
+ */
+export const ROAD_KIND = { highway: 0, deck: 1, concrete: 2, runway: 3, circuit: 4, plaza: 5, multilane: 6, street: 7, lane: 8, junction: 9, island: 10 } as const;
 
 export interface RoadArrays {
   /** Positions in WORLD metres, relative to (x0, z0) in x and z. */
@@ -691,6 +837,7 @@ export interface RoadArrays {
 }
 
 const PLAZA_SIDES = 24;
+const PAD_SIDES = 16;
 
 /**
  * The roads whose segment centre (or plaza centre) lies inside [x0, x1) x [z0, z1): a ribbon of two triangles per segment, rails and piers on
@@ -709,10 +856,96 @@ export function roadsInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
   const quad = (a: number, b: number, c: number, d: number): void => { idx.push(a, b, c, b, d, c); };
   const net = world.roadNetwork();
   const regions = net.regionsNear(x0 - 60, z0 - 60, x1 + 60, z1 + 60);
+
+  /**
+   * A planned road: only between its two trims (the junction pads are drawn as discs), each segment in the tile that holds its middle,
+   * and a run of segments that is straight and evenly graded drawn as ONE quad (a 400 m straight street is 2 triangles, not 80).
+   */
+  function plannedRibbon(road: Road): void {
+    const p = road.points;
+    const L = road.length;
+    const [ta, tb] = road.trim ?? [0, 0];
+    const kind = road.kind === 'lane' ? ROAD_KIND.lane : road.kind === 'street' ? ROAD_KIND.street : ROAD_KIND.multilane;
+    const sOf = (i: number): number => p[i].s ?? i * ROAD_STEP;
+    const drawn = (j: number): boolean => sOf(j) >= ta - 1e-6 && sOf(j + 1) <= L - tb + 1e-6;
+    let j = 0;
+    while (j < p.length - 1) {
+      const a = p[j]; const b = p[j + 1];
+      const [sx, sz] = shiftFor((a.x + b.x) / 2, (a.z + b.z) / 2);
+      if (!drawn(j) || !inside((a.x + b.x) / 2 + sx, (a.z + b.z) / 2 + sz)) { j++; continue; }
+      if (a.bridge && b.bridge) {
+        bridgeSegment(road, j, sx, sz, ROAD_KIND.deck, sOf(j), sOf(j + 1), ta, tb);
+        j++;
+        continue;
+      }
+      // Extend the run while the next segment is drawn here, straight on, off any bridge, and the heights stay on one line.
+      let k = j + 1;
+      while (k < p.length - 1 && drawn(k) && !(p[k].bridge && p[k + 1].bridge)) {
+        const c = p[k + 1];
+        const [tx, tz] = shiftFor((p[k].x + c.x) / 2, (p[k].z + c.z) / 2);
+        if (tx !== sx || tz !== sz || !inside((p[k].x + c.x) / 2 + sx, (p[k].z + c.z) / 2 + sz)) break;
+        const d0 = Math.atan2(b.z - a.z, b.x - a.x); const d1 = Math.atan2(c.z - p[k].z, c.x - p[k].x);
+        let dd = d1 - d0; while (dd > Math.PI) dd -= Math.PI * 2; while (dd < -Math.PI) dd += Math.PI * 2;
+        if (Math.abs(dd) > 0.004) break;
+        const s0 = sOf(j); const s1 = sOf(k + 1);
+        let linear = true;
+        for (let m = j + 1; m <= k && linear; m++) { const t = (sOf(m) - s0) / Math.max(1e-9, s1 - s0); if (Math.abs(p[m].y - (a.y + (c.y - a.y) * t)) > 0.02) linear = false; }
+        if (!linear) break;
+        k++;
+      }
+      bridgeSegment(road, j, sx, sz, kind, sOf(j), sOf(k), ta, tb, k);
+      j = k;
+    }
+  }
+
+  /** One ribbon quad from point j to point e (default j + 1); a bridge deck also gets its rails and piers. */
+  function bridgeSegment(road: Road, j: number, sx: number, sz: number, kind: number, sa: number, sb: number, ta: number, tb: number, e = j + 1): void {
+    const a = road.points[j]; const b = road.points[e];
+    const ex = b.x - a.x; const ez = b.z - a.z; const len = Math.hypot(ex, ez) || 1;
+    const fx = ex / len; const fz = ez / len;
+    const nx = -fz; const nz = fx;
+    const bridge = kind === ROAD_KIND.deck;
+    const ends = [a, b]; const arcs = [sa, sb];
+    const rowIdx: number[] = [];
+    const rails: number[][] = [[], []];
+    for (let k = 0; k < 2; k++) {
+      const pt = ends[k];
+      const half = pt.width / 2;
+      const along = arcs[k];
+      const toEnd = Math.min(along - ta, road.length - tb - along);
+      const ox = fx * (k === 0 ? -0.25 : 0.25); const oz = fz * (k === 0 ? -0.25 : 0.25);
+      const cx = pt.x + sx + ox; const cz = pt.z + sz + oz;
+      const yl = pt.y + 0.07; const yr = pt.y + 0.07;
+      rowIdx.push(vert(cx - nx * half, yl, cz - nz * half, 0, along, kind, toEnd, pt.width));
+      rowIdx.push(vert(cx + nx * half, yr, cz + nz * half, 1, along, kind, toEnd, pt.width));
+      if (bridge) {
+        rails[0].push(vert(cx - nx * half, yl, cz - nz * half, 0, along, ROAD_KIND.concrete, toEnd, pt.width));
+        rails[0].push(vert(cx - nx * half, yl + 1.1, cz - nz * half, 0, along, ROAD_KIND.concrete, toEnd, pt.width));
+        rails[1].push(vert(cx + nx * half, yr, cz + nz * half, 1, along, ROAD_KIND.concrete, toEnd, pt.width));
+        rails[1].push(vert(cx + nx * half, yr + 1.1, cz + nz * half, 1, along, ROAD_KIND.concrete, toEnd, pt.width));
+      }
+    }
+    quad(rowIdx[0], rowIdx[1], rowIdx[2], rowIdx[3]);
+    if (bridge) {
+      for (const r of rails) quad(r[0], r[1], r[2], r[3]);
+      if (j % 3 === 0) {
+        const bed = world.heightAt(a.x, a.z) - 0.6;
+        const top = a.y - 0.4;
+        const hw = 1.2;
+        const corner = (sxn: number, szn: number): number[] => {
+          const px = a.x + sx + (fx * sxn + nx * szn) * hw; const pz = a.z + sz + (fz * sxn + nz * szn) * hw;
+          return [vert(px, top, pz, 0.5, 0, ROAD_KIND.concrete, 0, a.width), vert(px, bed, pz, 0.5, 0, ROAD_KIND.concrete, 0, a.width)];
+        };
+        const c0 = corner(-1, -1); const c1 = corner(1, -1); const c2 = corner(1, 1); const c3 = corner(-1, 1);
+        quad(c0[0], c0[1], c1[0], c1[1]); quad(c1[0], c1[1], c2[0], c2[1]); quad(c2[0], c2[1], c3[0], c3[1]); quad(c3[0], c3[1], c0[0], c0[1]);
+      }
+    }
+  }
   for (const reg of regions) {
     for (const road of reg.roads) {
       const n = road.points.length;
       const segs = road.closed ? n : n - 1;
+      if (road.planned) { plannedRibbon(road); continue; }
       for (let j = 0; j < segs; j++) {
         const a = road.points[j]; const b = road.points[(j + 1) % n];
         const [sx, sz] = shiftFor((a.x + b.x) / 2, (a.z + b.z) / 2);
@@ -773,6 +1006,20 @@ export function roadsInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       }
       for (let k = 0; k < PLAZA_SIDES; k++) idx.push(centre, ring[k], ring[(k + 1) % PLAZA_SIDES]);
     }
+    for (const j of reg.junctions ?? []) {
+      // A junction pad: a 16-sided disc whose edges (not only corners) reach the pad radius; a roundabout adds its grass island on top.
+      const [sx, sz] = shiftFor(j.x, j.z);
+      if (!inside(j.x + sx, j.z + sz)) continue;
+      const fan = (r: number, y: number, kind: number, sides: number): void => {
+        const R = r / Math.cos(Math.PI / sides);
+        const c = vert(j.x + sx, y, j.z + sz, 0.5, 0, kind, 0, r * 2);
+        const ring: number[] = [];
+        for (let k = 0; k < sides; k++) { const ang = (k / sides) * Math.PI * 2; ring.push(vert(j.x + sx + Math.cos(ang) * R, y, j.z + sz + Math.sin(ang) * R, 0.5, 0, kind, 0, r * 2)); }
+        for (let k = 0; k < sides; k++) idx.push(c, ring[k], ring[(k + 1) % sides]);
+      };
+      fan(j.radius, j.y + 0.06, ROAD_KIND.junction, PAD_SIDES);
+      if (j.island > 0) fan(j.island, j.y + 0.25, ROAD_KIND.island, 12);
+    }
   }
   return {
     position: Float32Array.from(pos), world: Float32Array.from(wor), across: Float32Array.from(acr), along: Float32Array.from(alo),
@@ -809,8 +1056,26 @@ export function roadFragmentShader(): string {
     '  vec3 col = vec3(0.15, 0.15, 0.16) + grain;',
     '  if (k > 1.5 && k < 2.5) {',
     '    col = vec3(0.56, 0.56, 0.54) + grain;',
-    '  } else if (k > 4.5) {',
+    '  } else if (k > 4.5 && k < 5.5) {',
     '    col = vec3(0.5, 0.46, 0.4) + vnoise(vWorld * 1.7) * 0.12 + vnoise(vWorld * 7.0) * 0.06;',
+    '  } else if (k > 9.5) {',
+    '    col = vec3(0.22, 0.4, 0.16) + vnoise(vWorld * 2.3) * 0.1;',
+    '  } else if (k > 5.5) {',
+    '    float pl = 0.0;',
+    '    if (k < 8.5 && edge > 0.3 && edge < 0.5) pl = 1.0;',
+    '    if (k < 6.5) {',
+    '      float lanes = max(1.0, floor(vWidth * 0.5 / 2.9));',
+    '      float lw = vWidth * 0.5 / lanes;',
+    '      if (abs(abs(lat) - 0.22) < 0.08) { col = mix(col, vec3(0.9, 0.72, 0.15), 0.9); }',
+    '      float r = abs(lat) / lw;',
+    '      if (abs(lat) > lw * 0.5 && edge > 0.8 && abs(r - floor(r + 0.5)) * lw < 0.07 && fract(vAlong / 9.0) < 0.4) pl = 1.0;',
+    '    } else if (k < 7.5) {',
+    '      if (abs(lat) < 0.07 && fract(vAlong / 6.0) < 0.5) pl = 1.0;',
+    '    } else {',
+    '      col += 0.03;',
+    '    }',
+    '    if (k < 7.5 && vEnd > 0.6 && vEnd < 3.6 && edge > 0.3 && fract(lat * 0.8) < 0.5) pl = 1.0;',
+    '    col = mix(col, vec3(0.92, 0.92, 0.88), pl * 0.9);',
     '  } else {',
     '    if (k > 2.5 && k < 3.5) col += 0.04;',
     '    float line = 0.0;',

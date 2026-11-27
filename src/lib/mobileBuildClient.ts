@@ -116,6 +116,24 @@ export function isGeneratedKeyAnswer(v: unknown): v is { key: SigningKeyMeta; ba
     && str(v.backup.keyAlias) && str(v.backup.sha256Fingerprint) && str(v.backup.validUntil);
 }
 
+/** Every upload key the user has saved (Q-3703): metadata only, read by the Danger zone's warning. */
+export function isKeyListAnswer(v: unknown): v is { keys: SigningKeyMeta[] } {
+  return isRecord(v) && Array.isArray(v.keys) && v.keys.every(isKeyMeta);
+}
+
+/** The user's own key handed back for safekeeping (Q-3703): the keystore file and its passwords. */
+export interface ExportedKey { base64: string; storePassword: string; keyPassword: string; keyAlias: string; sha256Fingerprint: string }
+
+export function isExportedKeyAnswer(v: unknown): v is { key: SigningKeyMeta; keystore: ExportedKey } {
+  return isRecord(v) && isKeyMeta(v.key) && isRecord(v.keystore) && str(v.keystore.base64) && v.keystore.base64.length > 0
+    && str(v.keystore.storePassword) && str(v.keystore.keyPassword) && str(v.keystore.keyAlias) && str(v.keystore.sha256Fingerprint);
+}
+
+/** The file name a downloaded upload key is saved under — the same one "Create a new key" uses. PURE. */
+export function keystoreFileName(appId: string): string {
+  return `${appId}-upload.keystore`;
+}
+
 export function isLogsAnswer(v: unknown): v is { lines: string[]; failedStep: string | null } {
   return isRecord(v) && Array.isArray(v.lines) && v.lines.every(str) && strOrNull(v.failedStep);
 }

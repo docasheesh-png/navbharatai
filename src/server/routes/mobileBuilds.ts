@@ -21,7 +21,7 @@ import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeN
 import { providerCapabilities, nativeMissing } from '../lib/mobileBuild/providerRegistry';
 import { isArtifactKind, toView, type NativeBuildJob } from '../lib/mobileBuild/types';
 import {
-  deleteKey, getKeyRecord, getOwnedJob, isIdempotencyKey, isNativeBuildId, keyMeta, listJobsForUser, requestCancel, saveKey,
+  deleteKey, exportKey, getKeyRecord, getOwnedJob, isIdempotencyKey, isNativeBuildId, keyMeta, listJobsForUser, listKeysForUser, requestCancel, saveKey,
 } from '../lib/mobileBuild/nativeBuildStore';
 import {
   advanceNativeBuild, decodeKeystore, defaultRunnerDeps, expireIfDue, startNativeBuild, startNativeBuildSweeper, verifyKeystoreInSandbox,
@@ -117,6 +117,53 @@ export function registerMobileBuildRoutes(app: Express, limiter?: RequestHandler
     if (!isValidAppId(appId)) return res.status(400).json({ error: 'A valid application id is required.' });
     const k = await getKeyRecord(id.uid, appId).catch(() => null);
     res.json({ key: k ? keyMeta(k) : null });
+  });
+
+  /**
+   * Every upload key this user has saved (metadata only — never a key, never a password). The Danger zone reads
+   * this so its "deleting your account deletes your Play signing key" warning appears exactly when it is true
+   * (Q-3703). An unreadable store answers 502, never an empty list: "no keys" would hide the warning.
+   */
+  app.get('/api/mobile-builds/signing-keys', async (req: Request, res: Response) => {
+    const id = await identity(req, res);
+    if (!id) return;
+    try {
+      const keys = await listKeysForUser(id.uid);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ keys: keys.map(keyMeta) });
+    } catch {
+      res.status(502).json({ error: 'Your saved signing keys could not be checked right now.' });
+    }
+  });
+
+  /**
+   * Download the user's OWN upload key — the keystore file and its passwords — so they keep a copy before deleting
+   * the key or their account (Q-3703). POST, not GET, so no prefetch, link preview or cache ever fetches a secret.
+   * Works even while the native provider is switched off: a user must always be able to take their key with them.
+   */
+  app.post('/api/mobile-builds/signing-key/export', ...limited, async (req: Request, res: Response) => {
+    const id = await identity(req, res);
+    if (!id) return;
+    const appId = ((req.body || {}) as Record<string, unknown>).appId;
+    if (!isValidAppId(appId)) return res.status(400).json({ error: 'A valid application id is required.' });
+    let out: Awaited<ReturnType<typeof exportKey>>;
+    try {
+      out = await exportKey(id.uid, appId);
+    } catch {
+      return res.status(502).json({ error: 'Your signing key could not be opened right now. It is still saved — please try again.', code: 'export-unavailable' });
+    }
+    if (!out) return res.status(404).json({ error: 'No saved key for that app.' });
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({
+      key: out.meta,
+      keystore: {
+        base64: out.plain.keystore.toString('base64'),
+        storePassword: out.plain.storePassword,
+        keyPassword: out.plain.keyPassword,
+        keyAlias: out.plain.alias,
+        sha256Fingerprint: out.plain.certSha256,
+      },
+    });
   });
 
   /**

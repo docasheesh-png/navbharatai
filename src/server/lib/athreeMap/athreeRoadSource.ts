@@ -364,7 +364,12 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     let circuit: Circuit | null = null;
     let circuitCentre: { x: number; z: number; r: number } | null = null;
     if (home && o.profile === 'racing') {
-      const R = planned ? Math.min(600, side * 0.1) : bounded ? Math.min(320, o.radius * 0.13) : 600;
+      // A planned (small) map tries smaller circuits when the big one finds no dry, gentle ring: a 5 km map's land is coast and steep
+      // hills, and one fixed size almost never fitted (racing on 5 km got a circuit on 1 seed in 24). The regional network: one size.
+      const R0 = planned ? Math.min(600, side * 0.1) : bounded ? Math.min(320, o.radius * 0.13) : 600;
+      const radii = planned ? [R0, R0 * 0.7, R0 * 0.5, R0 * 0.35, 120].filter((r, i, all) => r >= 110 && (i === 0 || r < all[i - 1] - 1)) : [R0];
+      for (const R of radii) {
+      if (circuit) break;
       const cands: Array<{ x: number; z: number; score: number }> = [];
       for (let k = 0; k < 260; k++) {
         const cx = x0 + R * 1.6 + rng() * (size - R * 3.2);
@@ -387,7 +392,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       cands.sort((p, q) => p.score - q.score);
       const shape = { a: rng() * 6.28, b: rng() * 6.28, c: rng() * 6.28 };
       // The best flat place first; if the road cannot follow the ground there within the cut and fill limit, the next best.
-      for (const best of cands.slice(0, 8)) {
+      for (const best of cands.slice(0, planned ? 16 : 8)) {
         const ctrl: Array<[number, number]> = [];
         for (let i = 0; i < 36; i++) {
           const th = (i / 36) * Math.PI * 2;
@@ -408,6 +413,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
         circuit = { road: road.id, length, checkpoints: cps };
         circuitCentre = { x: best.x, z: best.z, r: R * 1.55 };
         break;
+      }
       }
     }
 

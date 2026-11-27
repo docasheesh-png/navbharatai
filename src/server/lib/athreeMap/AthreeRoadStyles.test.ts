@@ -6,7 +6,8 @@
 // What they cannot prove — how it looks — is a render's job; a car driving a route is checked here with the kit's own vehicle physics.
 import { describe, it, expect, vi } from 'vitest';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
-import { mapOptionsFor, type Archetype } from './athreeMapKinds';
+import { mapOptionsFor, ARCHETYPES, type Archetype } from './athreeMapKinds';
+const ARCH_MODE = (a: Archetype): string => ARCHETYPES[a].mode;
 
 vi.setConfig({ testTimeout: 600000 });
 
@@ -209,6 +210,29 @@ describe('the invariants, on every style at 1, 2.2, 5 and 25 km', () => {
       const other = planned(world(s, 2.2, 'island', 6));
       expect(JSON.stringify(other.map((r: any) => r.points))).not.toBe(JSON.stringify(a.map((r: any) => r.points)));
     }
+  });
+});
+
+describe('CIRCUIT_RUNWAY_MIN_SIZE is true: the map planner raises a racing or flight game to it, so it must be where both really fit', () => {
+  it('at the floor every kind of land tried has a race circuit (racing) and a runway (flight); a loop map well under it does not always', () => {
+    const F = A.CIRCUIT_RUNWAY_MIN_SIZE;
+    expect(F.loop).toBeLessThanOrEqual(5000); expect(F.bounded).toBeLessThanOrEqual(F.loop);
+    const at = (a: Archetype, profile: string, seed: number) => {
+      const km = (ARCH_MODE(a) === 'bounded' ? F.bounded : F.loop) / 1000;
+      return A.createAthreeWorld({ seed, profile, ...mapOptionsFor({ archetype: a, sizeKm: km }) }).homeRoads();
+    };
+    for (const a of ['continental', 'plains', 'desert', 'hills', 'island'] as Archetype[]) {
+      for (const seed of [1, 2, 3]) {
+        const r = at(a, 'racing', seed);
+        expect(r.circuit, `${a} seed ${seed}: racing at the floor has a circuit`).not.toBeNull();
+        expect(r.roads[r.circuit.road].length).toBeGreaterThan(700);
+        expect(at(a, 'flight', seed).roads.filter((x: any) => x.kind === 'runway').length, `${a} seed ${seed}: flight at the floor has a runway`).toBeGreaterThanOrEqual(1);
+      }
+    }
+    // The floor is not padded for nothing: on a continent at 3 km a circuit does not fit on every seed.
+    let missing = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) if (!A.createAthreeWorld({ seed, profile: 'racing', ...mapOptionsFor({ archetype: 'continental', sizeKm: 3 }) }).homeRoads().circuit) missing++;
+    expect(missing).toBeGreaterThan(0);
   });
 });
 

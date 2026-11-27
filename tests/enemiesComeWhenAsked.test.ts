@@ -95,7 +95,8 @@ describe('#4 the enemies file compiles against the real kit', () => {
     const dir = makeTempDir('nbai-enemies-');
     const files = new Map<string, string>();
     for (const [p, f] of recipeFilePool()) files.set(p, f.content);
-    for (const req of [enemyRequestFrom('10 zombies banao')!, enemyRequestFrom('gun wale villain banao')!]) {
+    // Build #2565: the enemies dressed in a library model compile too (the model's loader is optional, read by import.meta.glob).
+    for (const req of [enemyRequestFrom('10 zombies banao')!, enemyRequestFrom('gun wale villain banao')!, { ...enemyRequestFrom('gun wale villain banao')!, model: { subject: 'ranger', id: 'q7-ranger-man' } }]) {
       files.set(ENEMIES_FEATURE_PATH, enemyFeatureSource(req));
       files.set(FEATURES_INDEX_PATH, featuresIndexWith(GAME_FEATURES_INDEX, 'enemies')!);
       files.set('src/vite-env.d.ts', `/// <reference path="${join(REPO_MODULES, 'vite', 'client.d.ts')}" />\n`);

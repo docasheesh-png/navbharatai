@@ -6777,6 +6777,21 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   bound every crest by the baked depth (no wave over land), and `addRoad` lifts a road over (or beside) the sea above the crest
   its water can carry, ramping at 0.8 m / 10 m. Locked by `tests/citiesStandOnRealLand.test.ts` (reported layout, seed 90551631).
 - Not proven: a real-GPU screenshot of the fixed sea (numbers only: crest bound vs road heights).
+## 2026-11-27 — Q-3464 (failedbr #2525): the route refusing two models trips Surplus for this build — admin option A (PR #4615)
+- Admin decision 2026-11-27, option A ("sabhi apke sujhao ke anusar banao"). A SECOND distinct Surplus model answering HTTP 404
+  at response_validation (no market-refusal code) trips Surplus for THIS build only: `isSurplusRouteRefusal` + `routeTrip` on the
+  build session in `src/server/AI/SurplusRegistry/buildSession.ts`. No in-turn retry, no stay-alive retry, and `authorize` refuses
+  any further Surplus call in that build; the turn falls open to the Weak chain at once. The next build tries Surplus afresh
+  ("Surplus marna nahi chahiye"). Q-3234's per-model bench is unchanged for every other failure.
+- Admin report: the tripping attempt's line adds "Surplus skipped for the rest of THIS build: 2 different models (…) each answered
+  HTTP 404 at response_validation …" and drops the false "the next turn moves to …".
+- Sibling (Q-3729): a parallel turn failing after another turn already dropped Surplus threw out of the build; it now continues on
+  the Weak chain (`surplusPreWriteFailOpen.ts`), and a policy refusal stays terminal.
+- Sibling hunt, checked and not the same class: MultiProviderTurnRunner retires a model only on an explicit model-not-found text
+  (one round trip, no backoff); surplusAdmitCircuit deliberately ignores 404; FreeChain and AIRouter have no per-model 404 bench.
+- Test: `src/server/AI/SurplusRegistry/theRouteRefusingTwoModelsTripsSurplus.test.ts` (11 tests, each proven by reversion).
+- Watch: the next 404 route shows two attempt lines, the skip line, then SURPLUS_FALLBACK, in seconds instead of ~87 s. Root cause
+  of the 404 itself still needs the engine's own error body (Q-3316).
 ## 2026-11-27 — failedbr #2555: Q-3720, Q-3721, Q-3722 closed (#4607 merged)
 #4607 merged on a green CI. Q-3720 (unstyled screens no longer score design 100/A), Q-3721 (prompt-only CYBER_INTRUSION
 triage rule) and Q-3722 (one 120%-of-balance wallet limit, read by the admission gate, decideAffordability and the mid-build
@@ -6808,3 +6823,9 @@ stop) are resolved and removed from the open queue; their IDs are in BUILD_REPOR
 - **Locked:** `tests/aCharacterHoldsThingsTheWayPeopleDo.test.ts` (wrong-way library pistol, upside-down bat, ball, rifle both
   hands over 40 walk frames, a mixamo-rigged arm; 7 of 8 fail with the fix reverted). Four older hold tests updated to the
   grip frame (the item now sits inside a `grip` group in the hand) and to real sizes.
+
+## 2026-11-27 — Q-3750, Q-3751, Q-3752 closed (#4608 merged)
+#4608 merged on a green CI (the world is never lifted over the ground; the playtest names a moved world as a kit fault; a game
+feature that does nothing is named; characters hold things the way people do). Q-3750..Q-3752 removed from the open queue and
+added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud Run logs), Q-3754 (Surplus recurrence), Q-3755
+(admin choice on 2–5 km cities) and Q-3756 (road-edge stair-steps) stay open.

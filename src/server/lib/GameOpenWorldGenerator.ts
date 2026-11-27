@@ -390,6 +390,12 @@ export interface OpenWorld {
   playerWorld(): { x: number; y: number; z: number };
   /** Ground height at a WORLD place — the same height the terrain is drawn at. */
   heightAt(x: number, z: number): number;
+  /**
+   * Dry land a character can stand and be seen on at a WORLD place: above the sea (with a margin) and not in a river. Every
+   * spawn on the open world asks this first (build #2565/#2566: enemies were put in the sea, shot from under the water and
+   * were never seen; on a map that is 44% sea, half of them).
+   */
+  dryAt(x: number, z: number): boolean;
   /** Put an object on the ground at a WORLD place (lift = metres above it). It then follows origin shifts by itself. */
   place(object: THREE.Object3D, x: number, z: number, lift?: number): void;
   /** Stop tracking an object placed with place(). */
@@ -1738,6 +1744,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       return found;
     },
     heightAt: (x, z) => map.world.heightAt(x, z),
+    dryAt: (x, z) => { const h = map.world.heightAt(x, z); return Number.isFinite(h) && h >= map.world.seaLevel + DRY_MARGIN_M && !map.world.waterAt(x, z); },
     place(object, x, z, lift = 0) {
       object.userData.nbBody = true;
       object.position.set(x - chunks.origin.x, 0, z - chunks.origin.z);
@@ -2287,10 +2294,15 @@ export default defineFeature<OpenWorld>({
     /** One person in the spawn ring around the player, on the map's own ground, kept through origin shifts. */
     const bring = (kind: 'enemy' | 'villager') => {
       const pp = ctx.player.object.position, pw = world.playerWorld();
-      const a = Math.random() * Math.PI * 2, r = STREET_DANGER.near + Math.random() * (STREET_DANGER.far - STREET_DANGER.near);
-      const x = pp.x + Math.sin(a) * r, z = pp.z + Math.cos(a) * r;
-      const wx = x + (pw.x - pp.x), wz = z + (pw.z - pp.z);
-      if (!Number.isFinite(world.heightAt(wx, wz))) return;
+      // A few tries for DRY land in the ring: a character in the sea is never seen (build #2565/#2566), so it is never spawned.
+      let x = 0, z = 0, wx = 0, wz = 0, found = false;
+      for (let tries = 0; tries < 12 && !found; tries++) {
+        const a = Math.random() * Math.PI * 2, r = STREET_DANGER.near + Math.random() * (STREET_DANGER.far - STREET_DANGER.near);
+        x = pp.x + Math.sin(a) * r; z = pp.z + Math.cos(a) * r;
+        wx = x + (pw.x - pp.x); wz = z + (pw.z - pp.z);
+        found = world.dryAt(wx, wz);
+      }
+      if (!found) return;
       const armed = kind === 'enemy' && Math.random() < STREET_DANGER.gunmen;
       const e = npcs.spawn(kind === 'enemy'
         ? { x, z, kind: 'enemy', hostile: true, ai: armed ? 'ranged' : Math.random() < 0.3 ? 'flanker' : 'melee', damage: armed ? STREET_DANGER.shotDamage : STREET_DANGER.enemyDamage, health: 100 }

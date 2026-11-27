@@ -6769,6 +6769,14 @@ existing 'aim' action (2.3 m, side 0.75, FOV × 0.82; the rig now owns the FOV s
 kept 0.4 m above `getGround()`, freefall / parachute framing (`forceAirMode` for a game's own drop), and aimFrom searching the
 crosshair ray from the hero's depth. Locked by `tests/theShooterCameraSeesPastTheHero.test.ts` (8 reversions each fail it).
 Open: no touch Aim button yet (phones have Zoom); the hero's arms are not raised while aiming (`hero.aim`) — left to avoid #4611.
+### 2026-11-27 (later) — autopsy of failedbr #2566 (7ac680e1) — Q-3757…Q-3760 (#4620)
+A "continue … finish/fix the build" turn, weak tier, STOPPED by the 25-min cap while a preview-render repair was still investigating.
+- Q-3757 (in this PR): the user got the 830 s reply ("The clean console confirms it.") although a later check still saw
+  `[world] no dry ground was found for "riverside-town"`. Root: `adoptHealResult` keeps the build's reply through repairs and an
+  unfinished repair changes nothing, so no step compared the reply's moment with later findings. Class fix: `staleSummary.ts`.
+- Q-3759 (in this PR): `probe.test.ts` shipped. Root: no net knew probe files, and the scratch-copy net ran before the repair that
+  wrote it. Class fix: `scratchProbes.ts` + a turn-end sweep (`turnEndScratch.ts`) after every writer, before the durable save.
+- Q-3758 BLOCKED (admin): `ok:true`/"succeeded" beside STOPPED — options in the queue row. Q-3760 OPEN: claim-audit sibling.
 ## 2026-11-27 — Q-3703: saved signing keys leave with the account, warned first, with a real download (PR #4616)
 - Admin decision (a), 2026-11-27. `mobile_signing_keys` and `mobile_signing_key_events` are now erased by DELETE /api/profile
   (`USER_SCOPED_COLLECTIONS`, keys before events); the census reclassifies both from `blocked` to `user`.

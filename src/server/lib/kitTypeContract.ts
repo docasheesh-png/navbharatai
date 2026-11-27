@@ -238,10 +238,11 @@ const CONTRACT: readonly ContractEntry[] = [
  * whole contract fits it (it was two copies). 12_000 → 12_500 (2026-11-22, the touch-layout options) → 13_000 (2026-11-25,
  * ctx.aim and ctx.onStep joined GameContext) → 13_100 (2026-11-26, ctx.setRespawn: Restart stands the player at the start)
  * → 13_300 (2026-11-26, ctx.cinematic and GameOptions.cinematics: the camera shots the user describes, Q-3509)
- * → 13_700 (2026-11-27, the camera kit: GameOptions.shoulderCamera and CameraRig's shoulder / aim / air framing):
+ * → 13_700 (2026-11-27, the camera kit: GameOptions.shoulderCamera and CameraRig's shoulder / aim / air framing)
+ * → 13_800 (2026-11-27, the camera kit merged with main after #4608's grip surface on the humanoid — 13_706 together):
  * a whole section dropped from every game turn costs more than the characters.
  */
-export const KIT_CONTRACT_BUDGET = 13_700;
+export const KIT_CONTRACT_BUDGET = 13_800;
 
 /** Every name the contract covers, for the census that keeps this honest. */
 export const KIT_CONTRACT_NAMES: readonly string[] = CONTRACT.flatMap((e) => e.names);

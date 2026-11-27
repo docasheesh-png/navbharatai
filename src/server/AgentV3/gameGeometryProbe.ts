@@ -16,6 +16,11 @@ export const GAME_GEOMETRY_CODE = 'GAME_GEOMETRY_FINDINGS';
 export interface GeometryRead {
   /** notNumber (failedbr #2499): sampled points where the drawn terrain or heightAt was not a number (NaN reads as null in JSON). */
   terrain?: { samples?: number; off?: number; worst?: number; notNumber?: number } | null;
+  /**
+   * failedbr #2559–#2561: how far the world's OWN containers (the terrain, highways, map edge, each place's root) stand from
+   * where the world put them. A moved container moves the whole drawn ground — a kit defect, never the game's.
+   */
+  moved?: { worst?: number; name?: string } | null;
   slabs?: Array<{ name?: string; size?: number; above?: number; below?: number }> | null;
   roads?: Array<{ name?: string; down?: number; faces?: number }> | null;
   player?: number | null;
@@ -69,7 +74,9 @@ export function geometryFindings(geometry: GeometryRead | null | undefined, mode
     // First, because nothing else on the map is true while it holds: with the ground not a number, no terrain is drawn, the
     // player falls into the sea and every place hangs in the sky at its own height (failedbr #2499, "vertical layers").
     if (notNumber > 0) out.push(`The map's ground is NOT A NUMBER at ${notNumber}${samples ? ` of ${samples}` : ''} sampled points: no terrain is drawn there, the player drops into the sea and the places float above it as flat layers. A ground edit or a region got a value that is not a number — check every levelGround/setLand/addRoad call and every region's toward (one of the eight directions) and distance (metres) in WORLD.regions.`);
-    if (off > 0 && worst > 0.5) out.push(`The drawn terrain is up to ${worst.toFixed(1)} m away from map.world.heightAt at ${off} sampled points — the ground was changed after it was drawn. Call levelGround/addRoad before the world's first update (at the top of the world file), never from a feature.`);
+    const moved = num(g.moved?.worst, 0, 1e5) ?? 0;
+    if (moved > 0.5) out.push(`The world's own part "${name(g.moved?.name)}" was drawn ${moved.toFixed(1)} m away from where the world put it, so everything standing on the real ground looks sunk under it or floating over it. This is a fault in the game kit, not in this game's code: do NOT move levelGround/addRoad or change the ground to "fix" it — tell the user plainly that the kit's world was moved, and change nothing for it.`);
+    else if (off > 0 && worst > 0.5) out.push(`The drawn terrain is up to ${worst.toFixed(1)} m away from map.world.heightAt at ${off} sampled points — the ground was changed after it was drawn. Call levelGround/addRoad before the world's first update (at the top of the world file), never from a feature.`);
     for (const s of (Array.isArray(g.slabs) ? g.slabs : []).slice(0, 3)) {
       const size = num(s?.size, 0, 1e6) ?? 0, above = num(s?.above, -1e5, 1e5) ?? 0, below = num(s?.below, -1e5, 1e5) ?? 0;
       out.push(`"${name(s?.name)}" is a flat ${Math.round(size)} m mesh the game added that does not follow the land: it floats up to ${Math.max(0, above).toFixed(1)} m above the ground and the ground pokes up to ${Math.max(0, below).toFixed(1)} m through it. Make it follow the land, or leave the ground to the open world, which already draws it; for a flat place, use world.levelGround on that spot before the first update. (If it is water on purpose, ignore this.)`);

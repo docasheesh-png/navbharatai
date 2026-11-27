@@ -1135,6 +1135,11 @@ export function createChunkManager(THREE: ThreeLike, world: AthreeWorld, quality
   const tier = QUALITY[quality];
   const size = tier.chunkSize;
   const group = new THREE.Group();
+  // THE MAP IS THE GROUND, NEVER A THING STANDING ON IT (failedbr #2559-#2561): the game shell lifts every top-level scene
+  // object whose origin is under the ground. This group sits at render (0, 0, 0) and holds the terrain, the sea, plants and
+  // roads, so it was lifted to the height of the land at the render origin and every character, car and street below it
+  // looked sunk under a green layer. ground = false: it is the ground, it is never grounded.
+  group.userData.ground = false;
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
   // Until the water phase, the sea is one flat plane that follows the camera.
   const sea = new THREE.Mesh(

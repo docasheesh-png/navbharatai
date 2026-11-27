@@ -10,7 +10,7 @@
 // them — never anything a user typed. Any crash is caught and reported as "could not run", never as a pass.
 
 import ts from 'typescript';
-import type { AthreeProfile } from './AthreeMapGenerator';
+import type { MapProfile as AthreeProfile } from './athreeMapLibrary';
 
 const DIR = 'src/game/athree/';
 

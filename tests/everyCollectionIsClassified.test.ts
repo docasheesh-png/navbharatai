@@ -198,8 +198,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   gift_code_daily:     { kind: 'user', why: "one doc per buyer per UTC day bounding chargeback exposure; it is that person's own purchase tally and nothing needs it once the account is gone" },
 
   mobile_native_builds: { kind: 'user', why: 'one row per native .apk/.aab build, `userId` field (nativeBuildStore.ts); erased with the account after eraseUserNativeArtifacts deletes the files (Q-3702)' },
-  mobile_signing_keys: { kind: 'blocked', why: "the user's SEALED app signing keys, one per (user, app id) — whether account deletion deletes them is an admin decision (irreversible: no key, no app update on Play), owned by Q-3703" },
-  mobile_signing_key_events: { kind: 'blocked', why: 'the audit trail of a signing key (imported / generated / used / deleted, with userId); its fate follows the key decision in Q-3703' },
+  mobile_signing_keys: { kind: 'user', why: "the user's SEALED app signing keys, one per (user, app id), `userId` field; erased with the account by the admin's decision (a) in Q-3703 — the Danger zone warns first and offers each key's download" },
+  mobile_signing_key_events: { kind: 'user', why: "the audit trail of a signing key (imported / generated / used / exported / deleted, `userId` field); erased with the account after the keys (Q-3703), and a build's 'used' event is written only while its key row exists" },
   mobile_build_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many .apk/.aab/.ipa builds finished and of what — counts only, no person in it, purged at 400 days' },
   mobile_build_counted:  { kind: 'retained', why: 'one marker per finished run so a POLLED status endpoint cannot count it twice; the id is a digest and the body names no owner' },
   referral_claim_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many referral claims were tried, paid or refused and why — counts only, no person in it, purged at 400 days' },

@@ -306,6 +306,18 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    * is reached as `db().collection(BUILDS)` — a call receiver the census did not read.
    */
   { collection: 'mobile_native_builds', key: { field: 'userId' } },
+  /**
+   * Their sealed app signing keys, one per (user, app id) (`nativeBuildStore.ts`, StoredSigningKey.userId) — Q-3703,
+   * the admin's decision (a) of 2026-11-27: the keys leave with the account. Irreversible for the user (no key, no
+   * Play update under the same listing), which is why the Danger zone reads `/api/mobile-builds/signing-keys` and,
+   * when any exist, warns in red and offers each key's download before the delete can be confirmed.
+   * 🔴 KEYS BEFORE EVENTS, and the order is load-bearing: a build signing at this moment writes its 'used' event only
+   * in the same transaction that sees the key row (`openKeyForSigning`), so an event committed before the key
+   * erase is swept by the events erase below, and none can be written after it.
+   */
+  { collection: 'mobile_signing_keys', key: { field: 'userId' } },
+  /** The audit trail of those keys (imported / generated / used / exported / deleted, each with `userId`) — Q-3703. */
+  { collection: 'mobile_signing_key_events', key: { field: 'userId' } },
   /** A .zip they uploaded (`zipUploadStore.ts:78`, SharedUploadRecord.uid). */
   { collection: 'zip_uploads', key: { field: 'uid' } },
   /** A spreadsheet they uploaded (`spreadsheetFileStore.ts:47` writes `uid`). */

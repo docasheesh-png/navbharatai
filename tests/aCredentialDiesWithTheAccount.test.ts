@@ -73,6 +73,18 @@ const CREDENTIAL_STORES: Array<{
     source: 'src/server/WebhookManager.ts',
     proof: /\.collection\('webhooks'\)\.doc\(userId\)/,
   },
+  /**
+   * Q-3703 (admin decision (a), 2026-11-27) — the sealed Play upload keys. The FIFTH sibling of this class, found
+   * only once Q-3702 taught the census to read `db().collection(KEYS)`; it was held back as an admin decision
+   * because erasing is irreversible for the user, and the decision was to erase with a warning and a download.
+   */
+  {
+    collection: 'mobile_signing_keys',
+    key: { field: 'userId' },
+    what: "the user's sealed app signing (upload) keys and their passwords",
+    source: 'src/server/lib/mobileBuild/nativeBuildStore.ts',
+    proof: /\.collection\(KEYS\)\.where\('userId',\s*'==',\s*userId\)/,
+  },
 ];
 
 // ── A Firestore just large enough to run the cascade ───────────────────────────────────────────────
@@ -152,6 +164,11 @@ describe('a credential dies with the account', () => {
     db.seed('bots', 'b2', { ownerUid: 'bystander', token: 't', appSecret: 'a' });
     db.seed('webhooks', 'victim', { hooks: [{ url: 'https://example.invalid/hook' }] });
     db.seed('webhooks', 'bystander', { hooks: [] });
+    db.seed('mobile_signing_keys', 'sk_v', { userId: 'victim', appId: 'com.v.app', keystoreSealed: 'x', storePassSealed: 'y', keyPassSealed: 'z' });
+    db.seed('mobile_signing_keys', 'sk_b', { userId: 'bystander', appId: 'com.b.app', keystoreSealed: 'x', storePassSealed: 'y', keyPassSealed: 'z' });
+    db.seed('mobile_signing_key_events', 'e1', { userId: 'victim', appId: 'com.v.app', event: 'generated' });
+    db.seed('mobile_signing_key_events', 'e2', { userId: 'victim', appId: 'com.v.app', event: 'used' });
+    db.seed('mobile_signing_key_events', 'e3', { userId: 'bystander', appId: 'com.b.app', event: 'imported' });
 
     await deleteUserData(db, 'victim');
 
@@ -160,6 +177,9 @@ describe('a credential dies with the account', () => {
     expect(db.ids('api_keys')).toEqual(['k2']);
     expect(db.ids('bots')).toEqual(['b2']);
     expect(db.ids('webhooks')).toEqual(['bystander']);
+    // Q-3703: the key AND its audit trail leave; another user's key is untouched.
+    expect(db.ids('mobile_signing_keys')).toEqual(['sk_b']);
+    expect(db.ids('mobile_signing_key_events')).toEqual(['e3']);
   });
 
   it('the erase report names each credential store, so the person can see it happened', async () => {

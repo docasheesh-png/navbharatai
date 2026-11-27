@@ -6769,6 +6769,19 @@ A "continue … finish/fix the build" turn, weak tier, STOPPED by the 25-min cap
 - Q-3759 (in this PR): `probe.test.ts` shipped. Root: no net knew probe files, and the scratch-copy net ran before the repair that
   wrote it. Class fix: `scratchProbes.ts` + a turn-end sweep (`turnEndScratch.ts`) after every writer, before the durable save.
 - Q-3758 BLOCKED (admin): `ok:true`/"succeeded" beside STOPPED — options in the queue row. Q-3760 OPEN: claim-audit sibling.
+## 2026-11-27 — Q-3703: saved signing keys leave with the account, warned first, with a real download (PR #4616)
+- Admin decision (a), 2026-11-27. `mobile_signing_keys` and `mobile_signing_key_events` are now erased by DELETE /api/profile
+  (`USER_SCOPED_COLLECTIONS`, keys before events); the census reclassifies both from `blocked` to `user`.
+- `openKeyForSigning` is one transaction (read key → update `lastUsedAt` → write 'used' event), so a build signing during
+  the erase cannot leave an event behind or re-create a row; a key already gone fails the build as SIGNING_KEY_MISSING.
+- No key download existed (only the one-time backup at "Create a new key"). Built: `GET /api/mobile-builds/signing-keys`
+  (metadata, 502 when unreadable, never `[]`), `POST /api/mobile-builds/signing-key/export` (own key only, audited
+  'exported', no-store, rate-limited), client `src/lib/signingKeyDownload.ts`; used by the Danger zone and a new
+  "Download my key" button in the Native Cloud Build panel.
+- Danger zone: red warning only when the server reports keys (or the check failed), per-app "Download key", passwords
+  shown after download, and an "I understand" tick before "Permanently delete" can be pressed.
+- Still open (noted in the PR): an import/generate request already running in another tab when the account is deleted
+  could still save a key after the erase — the same race every user store has with the deletion route.
 ### 2026-11-27 — Kadam 1: the game photo judge (`gamePhotoJudge.ts`)
 - After a game turn's playtest, at most 3 yes/no questions from THIS request (item in hand, enemies, ground/road not hazed or
   under water, houses) go with the proof pictures to the vision chain in one call (25 s hard limit). A clear NO →

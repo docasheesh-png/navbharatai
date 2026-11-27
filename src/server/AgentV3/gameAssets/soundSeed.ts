@@ -27,7 +27,7 @@ export const GAME_SOUND_DIR = 'public/sfx/library';
 /** Bounds per game: an ambience loop is ~1 MB, so a prompt naming everything still ships a light game. */
 export const SOUND_BUDGET = Object.freeze({ maxSounds: 28, maxBytes: 8 * 1024 * 1024, maxLoops: 4 });
 const ORIGIN = 'https://raw.githubusercontent.com';
-/** One retry after a refused download, just past the downloader's one-second per-origin window. */
+/** One retry after a refused download (a backlog past the permit's 8 s queue, or a provider cooldown), just past the one-second per-origin window. */
 export const RETRY_AFTER_MS = 1200;
 
 export const gameSoundLibraryEnabled = (env: NodeJS.ProcessEnv = process.env): boolean => parseEnvFlag(env.AGENTV3_GAME_SOUND_LIBRARY) ?? true;
@@ -148,8 +148,10 @@ export async function prepareGameSounds(options: GameSoundSeedOptions): Promise<
   const verified = (s: LibrarySound, b: Uint8Array | null | undefined): b is Uint8Array => !!b && b.byteLength === s.bytes && sha256(b) === s.sha256 && Buffer.from(b.subarray(0, 4)).toString('latin1') === 'OggS';
   /**
    * The shared cache first, then the pinned source. ONE download at a time (2026-11-19, found by the end-to-end
-   * village build: 17 of 18 sounds skipped): the downloader allows one request per second per origin and refuses
-   * any that would wait longer, so four parallel fetches from raw.githubusercontent.com lost three of every four.
+   * village build: 17 of 18 sounds skipped): the downloader allows one request per second per origin and then refused
+   * any that would wait longer, so four parallel fetches from raw.githubusercontent.com lost three of every four. Since
+   * Q-3471 it queues a request up to 8 s instead (assetProviderBudget.ts), which is what lets the 3D models — same
+   * origin — download beside these sounds (seedMedia.ts); this preparer still holds at most one request in that queue.
    * A cache hit costs no origin request at all, so a sound any earlier game fetched is instant.
    */
   const fetchSound = async (s: LibrarySound): Promise<Uint8Array> => {

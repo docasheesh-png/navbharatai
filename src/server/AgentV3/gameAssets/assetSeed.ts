@@ -159,9 +159,10 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
   const proofKey = (bytes: Uint8Array, requirement: AssetRequirement) => `${createHash('sha256').update(bytes).digest('hex')}:${requirement.animation ?? ''}`;
   const serialDependencies: AssetEngineDependencies = {
     ...dependencies,
-    // DOWNLOADS STAY ONE AT A TIME: the guarded transport allows about one request per second per origin and throws
-    // past one queued request (assetProviderBudget.ts — politeness to the providers, kept as designed). Measured: three
-    // at once failed "Provider rate limit". So downloads are chained and only the browser proofs overlap them.
+    // DOWNLOADS STAY ONE AT A TIME: the guarded transport allows one request per second per origin (assetProviderBudget.ts —
+    // politeness to the providers, kept as designed). It used to refuse past one queued request (measured: three at once
+    // failed "Provider rate limit"); since Q-3471 it queues up to 8 s, but this preparer still holds at most ONE request in
+    // that queue, so the sounds prepared beside it (seedMedia.ts) and other builds on the instance keep their turns.
     download: (candidate, s) => {
       const key = `${candidate.provider}:${candidate.id}:${candidate.revision}:${candidate.sha256}`;
       let p = downloading.get(key);

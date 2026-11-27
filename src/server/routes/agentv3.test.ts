@@ -2572,7 +2572,8 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // laid down src/game/fx/audio.ts. It writes only the files prepareGameSounds returns AFTER their durable
     // acknowledgement (loader, customizations, credits), and the seed accounting below attributes every one to
     // the platform (preseededGolden + kitSeededFiles), never to the model. Cannot run on a survey/import/edit. ✓
-    expect(seed).toContain("if (writtenFiles.has('src/game/fx/audio.ts') && !abort.signal.aborted)");
+    // Q-3471: the gate is now a const, and the sounds run side by side with the assets (seedMedia.ts).
+    expect(seed).toContain("const prepareSounds = writtenFiles.has('src/game/fx/audio.ts') && !abort.signal.aborted;");
     expect(seed).toContain('for (const [path, content] of Object.entries(sounds.files)) writtenFiles.set(path, content)');
     expect(seed.indexOf('Object.entries(sounds.files)')).toBeLessThan(seed.indexOf('preseededGolden.set(kp, kc)'));
     // +2 (2026-11-21, failedbr #2485):

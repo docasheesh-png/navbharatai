@@ -7,7 +7,7 @@ import ts from 'typescript';
 import { join } from 'node:path';
 import { generateAthreeMap } from './AthreeMapGenerator';
 import { MAP_CHECKS } from './athreeMapCheckSource';
-import { loadEmittedAthree, runRobotChecksOnFiles, describeRobotRun } from './mapRobotRun';
+import { loadEmittedAthree, runRobotChecksOnFiles, runRobotChecksInWorker, describeRobotRun } from './mapRobotRun';
 import { applyMapPlanToFiles, planAthreeMap, MAP_CHECKS_PATH } from './mapPlanWiring';
 
 vi.setConfig({ testTimeout: 120000 });
@@ -125,5 +125,24 @@ describe('every check FAILS on a world broken on purpose, and names the place', 
     const run = runRobotChecksOnFiles({ 'src/game/athree/index.ts': 'export {};' }, 'open-world');
     expect(run.ran).toBe(false);
     expect(describeRobotRun(run)).toMatch(/could not run .* do not claim the map passed/);
+  });
+});
+
+describe('the build-time run happens in a worker thread, within a budget', () => {
+  it('gives the same verdict as the in-thread run', async () => {
+    const files = filesFor('battle royale game banao').files;
+    const inWorker = await runRobotChecksInWorker(files, 'battle-royale');
+    expect(inWorker.ran, inWorker.error).toBe(true);
+    expect(inWorker).toEqual(runRobotChecksOnFiles(files, 'battle-royale'));
+  });
+  it('a run past its budget is stopped and said as not run, never as passed', async () => {
+    const files = filesFor('athree map par 1000 km ka open world').files;
+    const run = await runRobotChecksInWorker(files, 'open-world', { budgetMs: 100 });
+    expect(run.ran).toBe(false); expect(run.error).toMatch(/did not finish within 0.1 s/);
+    expect(describeRobotRun(run)).toMatch(/could not run/);
+  });
+  it('a broken file set in the worker is reported, not thrown', async () => {
+    const run = await runRobotChecksInWorker({ 'src/game/athree/index.ts': 'export {};' }, 'open-world');
+    expect(run.ran).toBe(false); expect(run.error).toMatch(/mapChecks|entry point/);
   });
 });

@@ -339,7 +339,7 @@ export function planMap(input: MapPlanInput): MapPlan {
   if (said) {
     side = Math.sqrt(said.areaKm2); areaSource = 'user';
     if (builderSide !== null && Math.abs(clampSizeKm(builderSide) - clampSizeKm(side)) > 0.005) notes.push(`The builder asked for ${round2(builderSide)} km, but the user's own size wins.`);
-    if (said.said === 'side') notes.push(`"${round2(side)} km" was read as the side of the map: a ${round2(side)} x ${round2(side)} km frame (${round2(said.areaKm2)} km²). Say "${round2(side)} sq km" for an area.`);
+    if (said.said === 'side') notes.push(`"${round2(side)} km" was read as the side of the map: a ${round2(side)} x ${round2(side)} km frame (${round2(said.areaKm2)} km²). An area is written with sq km (for example ${round2(side)} sq km).`);
     if (said.said === 'area') notes.push(`${round2(said.areaKm2)} km² was read as the AREA: a square frame about ${round2(side)} km on each side.`);
     if (said.said === 'rectangle') notes.push(`The ${round2(said.areaKm2)} km² rectangle is made a square frame of the same area (about ${round2(side)} km on each side); the world's frame is square.`);
   } else if (builderSide !== null) { side = builderSide; areaSource = 'builder';

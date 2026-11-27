@@ -952,7 +952,7 @@ above for the other builders without separate admin sign-off.
 
 ⚠️ **Confirm with the admin before changing any of it.** The short form:
 - **Three tiers, three ladders** (`src/server/AgentV3/tierLadder.ts` is the only source of truth). A build runs exactly its tier's rungs, in order.
-- **Weak never runs Sonnet or Opus.** Haiku is its only Claude rung, enforced by three nets (`enforceNoClaude`, `noClaudeZone`, the report detector).
+- **Weak never runs Sonnet or Opus.** Haiku is its only Claude rung, enforced by three nets (`enforceNoClaude`, `noClaudeZone`, the report detector). One exception (admin 2026-11-27): through Surplus only, on a guaranteed ≥ 90% discount (`/min90`; `SurplusRegistry/config.ts`).
 - **Billing:** real provider cost + tiered markup; a failed build is never charged; the markup needs a preview that ran; one wallet for every AI (`THE ONE-WALLET LAW`); a cost is never invented.
 - **White-Label Law:** a user never sees a vendor or model name anywhere; provider names are admin-only.
 

@@ -274,7 +274,7 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
     expect(panel).toContain('useAppPreview(headers)');
     expect(sheet).toContain('src={plan.url}');
     expect(sheet).toContain('srcDoc={preview.html}');
-    expect(sheet).toContain("const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups';");
+    expect(sheet).toContain('const IFRAME_SANDBOX = LIVE_PREVIEW_SANDBOX;');   // the one shared list (previewSandbox.ts), pointer lock included
   });
 
   it('the dashboard renders the panel on the Security tab and refreshes ONE row after a moderation', () => {

@@ -50,9 +50,10 @@ describe('the tool and the prompt offer the choice', () => {
     expect(systems).not.toHaveProperty('size_km');
     expect(systems).not.toHaveProperty('composition');
   });
-  it('the architect prompt names the 12 kinds, the 1 to 1000 km range and the road limit', () => {
+  it('the architect prompt names the 12 kinds, the 1 to 1000 km range, and that every size has roads (a small map a planned town)', () => {
     const p = architectSystemPrompt();
-    expect(p).toMatch(/12 kinds/); expect(p).toMatch(/1 to 1000 km/); expect(p).toMatch(/under 20 km has no roads/);
+    expect(p).toMatch(/12 kinds/); expect(p).toMatch(/1 to 1000 km/); expect(p).toMatch(/under 20 km gets one planned town road network/);
+    expect(p).not.toMatch(/has no roads/);
   });
 });
 
@@ -62,7 +63,8 @@ describe('what the user said chooses the map', () => {
     expect(r.is_error).toBeFalsy();
     expect(optionsIn()).toMatchObject({ mode: 'loop', sizeMeters: 5000, style: { aridity: 0.45 } });
     expect(String(r.content)).toMatch(/THE MAP CHOSEN FOR THIS GAME: desert map, 5 km/);
-    expect(String(r.content)).toMatch(/no roads and no runway/);
+    expect(String(r.content)).toMatch(/planned town network/);
+    expect(String(r.content)).not.toMatch(/no roads/);
   });
   it('"a huge island" is a bounded island, hundreds of km across', async () => {
     await run('athree map par ek huge island battle royale');

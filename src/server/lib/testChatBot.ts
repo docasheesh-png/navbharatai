@@ -21,6 +21,7 @@ import { exactModelId, zero } from '../AI/LiveRegistry/eligibility';
 import { catalogJson, OPENROUTER_MODELS_URL } from '../AI/LiveRegistry/sync';
 import { FreeRoutingError } from '../AI/LiveRegistry/dispatcher';
 import { realRateFor } from '../AgentV3/providerRates';
+import { surplusBuildEndpoint } from '../AI/SurplusRegistry/config';
 import { ROUTER_ONE_DEFAULT_BASE_URL, ROUTER_ONE_DEFAULT_MODEL, routerOneApiKey, routerOneBaseUrl, routerOneModels } from '../AI/RouterOne/routerOne';
 import { ROUTER_ONE_AUTO_MODEL } from '../AI/RouterOne/routerOneCatalog';
 import { routerOnePublicPrices } from '../AI/RouterOne/publicPriceSource';
@@ -189,7 +190,8 @@ const firstModel = (raw: string | undefined, fallback: string): string =>
 function kimiBase(): string { return (process.env.KIMI_BASE_URL?.trim() || 'https://api.moonshot.ai/v1').replace(/\/+$/, ''); }
 function glmBuilderBase(): string { return (process.env.GLM_BASE_URL?.trim() || 'https://api.z.ai/api/paas/v4').replace(/\/+$/, ''); }
 function bedrockBase(): string { return `https://bedrock-runtime.${(process.env.BEDROCK_REGION || 'us-west-2').trim()}.amazonaws.com/openai/v1`; }
-const SURPLUS_TEST_URL = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
+/** The builder's own floor route for the model under test (admin 2026-11-27: min85, or min90 for a Claude-family model). */
+const surplusTestUrl = (model: string): string => `${surplusBuildEndpoint(model)}/chat/completions`;
 const SURPLUS_DEFAULT_MODEL = 'deepseek-v4.1-flash';
 /** Each non-chat service names what it actually does, so the list is a complete census without a fake button. */
 const NON_CHAT_REASON: Partial<Record<TestChatProviderId, string>> = {
@@ -432,7 +434,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   if (meta.kind === 'surplus') {
     const configured = !!firstPresent(process.env, ['SURPLUS_API_KEY']);
     return { ...base, configured, enabled: configured, model: SURPLUS_DEFAULT_MODEL, billed: true, approvalRequired: false,
-      note: 'One direct call to Surplus’s min90 chat endpoint (its price-first route), never the builder transport that retries. Surplus publishes no per-model price this page can read, so the reserve uses the Claude Sonnet rate card for the 1,024-token bound — deliberately above any min90 price; it is a ceiling, not the bill.',
+      note: 'One direct call to Surplus’s minimum-discount chat endpoint (its price-first route — the builder’s own floor: at least 85% off, or 90% for a Claude-family model), never the builder transport that retries. Surplus publishes no per-model price this page can read, so the reserve uses the Claude Sonnet rate card for the 1,024-token bound — deliberately above any discounted price; it is a ceiling, not the bill.',
       ...(configured ? {} : { unavailableReason: MISSING_KEY }) };
   }
   if (meta.kind === 'router-one') {
@@ -964,7 +966,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         const target = meta.kind === 'glm-builder' ? { url: `${glmBuilderBase()}/chat/completions`, apiKey: firstPresent(process.env, ['GLM_API_KEY']) }
           : meta.kind === 'nemotron' ? { url: `${nemotronBaseUrl().replace(/\/+$/, '')}/chat/completions`, apiKey: nemotronKey() }
           : meta.kind === 'bedrock-glm' ? { url: `${bedrockBase()}/chat/completions`, apiKey: firstPresent(process.env, ['BEDROCK_API_KEY']) }
-          : { url: SURPLUS_TEST_URL, apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
+          : { url: surplusTestUrl(model), apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
         const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           ...target, model, messages: action.messages, signal: bounded,
           // Streamed like the builder; Surplus stays non-streamed, as the builder's dedicated Surplus runner is.

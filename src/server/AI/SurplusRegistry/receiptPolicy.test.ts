@@ -35,15 +35,21 @@ function prior(result: SurplusReceiptDecision): SurplusPriorSettlement {
 function unsafeEvaluate(input: unknown) { return evaluateSurplusReceipt(input as SurplusReceiptPolicyInput); }
 
 describe('isolated exact Surplus app-builder receipt policy', () => {
+  // Deliberate update (admin 2026-11-27, policy v2): with a known list price at a 95% discount, 10 × actual is below
+  // list, so the charge is still 10 × actual and the reason says so. The list-price cap itself is locked in
+  // tests/surplusDiscountFloor85.test.ts.
   it('charges ten times the provider-reported actual, with an exact same-usage ceiling', () => {
-    expect(evaluateSurplusReceipt(fixture())).toMatchObject({ status: 'chargeable', actualCostUsd: '0.0001',
+    const input = fixture(); input.listPrice = { rates: { input: '5', output: '10' }, referenceRates: { input: '100', output: '200' } };
+    expect(evaluateSurplusReceipt(input)).toMatchObject({ status: 'chargeable', actualCostUsd: '0.0001',
       userChargeUsd: '0.001', officialCeilingUsd: '0.00111', absorbedCostUsd: '0',
-      expenseEvidence: 'provider-reported-actual', reason: 'ten_times_verified_actual_cost' });
+      expenseEvidence: 'provider-reported-actual', reason: 'ten_times_verified_actual_cost', policyId: 'surplus-build-10x-list-cap-v2' });
   });
-  it('charges a flat ten times actual even above the official tariff (no cap)', () => {
+  // Deliberate update: without a readable list price the charge stays the v1 flat 10 × actual (a cost is never
+  // invented), and the decision now SAYS the list price was unknown instead of looking like a capped charge.
+  it('charges a flat ten times actual when no list price is known, even above the official tariff', () => {
     const input = fixture(); input.receipt!.buyerCostMicro = '200';
     expect(evaluateSurplusReceipt(input)).toMatchObject({ actualCostUsd: '0.0002', userChargeUsd: '0.002',
-      reason: 'ten_times_verified_actual_cost' });
+      reason: 'ten_times_verified_actual_cost_list_price_unknown' });
   });
   it('preserves expense and charges ten times cost even when official price is below cost', () => {
     const input = fixture(); input.receipt!.buyerCostMicro = '2000';

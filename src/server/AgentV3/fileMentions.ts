@@ -12,6 +12,8 @@
 //
 // Pure — parsing and block assembly, so resolution is a test rather than a guess.
 
+import { libraryMentionAt } from './gameAssets/libraryPicks';
+
 /** Most mentions we will honour in one message. Past this it is not scoping, it is the whole project. */
 export const MAX_FILE_MENTIONS = 10;
 
@@ -259,6 +261,11 @@ export interface FileMentions {
   resolved: string[];
   /** Mentioned tokens that match no file. Told to the user; never silently dropped. */
   unresolved: string[];
+  /**
+   * Game library picks (`<use>:<id>`, e.g. `model:q7-ranger-x`) still in the request. The build reads every pick the
+   * library holds before this runs, so these name ids the library does not have. Told to the user as such; never a file.
+   */
+  library?: string[];
 }
 
 /**
@@ -274,6 +281,7 @@ export function parseFileMentions(prompt: string | null | undefined, knownPaths:
   const paths = (knownPaths ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
   const resolved: string[] = [];
   const unresolved: string[] = [];
+  const library: string[] = [];
   const seen = new Set<string>();
 
   const push = (map: Map<string, string[]>, key: string, value: string): void => {
@@ -293,6 +301,16 @@ export function parseFileMentions(prompt: string | null | undefined, knownPaths:
   for (const m of text.matchAll(MENTION_RE)) {
     const token = m[2];
     if (!token) continue;
+    // A GAME LIBRARY PICK IS NOT A FILE (build #2565). `@character:<id>` stops this pattern at the colon, so the pick was
+    // read as a file named "character" and the user was told "I could not find @character in this project". The build
+    // reads every pick the library holds before this runs (libraryMention.ts), so one still here names an id the library
+    // does not have: that is what the user is told, with the id.
+    const pick = libraryMentionAt(text.slice((m.index ?? 0) + m[1].length));
+    if (pick) {
+      const named = `${pick.use}:${pick.id}`;
+      if (!library.includes(named)) library.push(named);
+      continue;
+    }
     const key = token.replace(/^\.\//, '').toLowerCase();
     const exact = byLower.get(key);
     // A basename is only usable when it is UNAMBIGUOUS — three index.ts files must not silently
@@ -312,7 +330,7 @@ export function parseFileMentions(prompt: string | null | undefined, knownPaths:
     if (resolved.length < MAX_FILE_MENTIONS) resolved.push(hit);
   }
 
-  return { resolved, unresolved };
+  return library.length ? { resolved, unresolved, library } : { resolved, unresolved };
 }
 
 /**
@@ -342,9 +360,19 @@ export function fileMentionsBlock(mentions: FileMentions | null | undefined): st
  */
 export function unresolvedMentionsNotice(mentions: FileMentions | null | undefined): string {
   const unresolved = mentions?.unresolved ?? [];
-  if (unresolved.length === 0) return '';
-  const list = unresolved.map((t) => `@${t}`).join(', ');
-  return unresolved.length === 1
-    ? `⚠️ I could not find ${list} in this project, so I worked from the rest of your message.`
-    : `⚠️ I could not find these in this project: ${list} — I worked from the rest of your message.`;
+  const library = mentions?.library ?? [];
+  const parts: string[] = [];
+  if (library.length) {
+    const ids = library.map((t) => `"${t.slice(t.indexOf(':') + 1)}"`).join(', ');
+    parts.push(library.length === 1
+      ? `⚠️ The NavBharatAI game library has no item with the id ${ids}, so it is not in your game. I worked from the rest of your message.`
+      : `⚠️ The NavBharatAI game library has no items with these ids: ${ids}, so they are not in your game. I worked from the rest of your message.`);
+  }
+  if (unresolved.length) {
+    const list = unresolved.map((t) => `@${t}`).join(', ');
+    parts.push(unresolved.length === 1
+      ? `⚠️ I could not find ${list} in this project, so I worked from the rest of your message.`
+      : `⚠️ I could not find these in this project: ${list} — I worked from the rest of your message.`);
+  }
+  return parts.join('\n');
 }

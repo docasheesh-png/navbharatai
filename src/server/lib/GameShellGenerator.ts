@@ -61,7 +61,7 @@ import { disposeMaterials } from './three/materials';
 import { groundScene, softwareRenderer } from './three/surfaces';
 import { interactHouseDoor, updateHouseDoors, updateIndoorCamera, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
-import { CameraRig, type CameraKind } from './three/camera';
+import { CameraRig, type CameraKind, type ShoulderOptions } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift, onVehicleCrash, createVehicleState, driveVehicle, type VehicleState } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction, type HumanoidOptions } from './three/humanoid';
@@ -85,7 +85,7 @@ import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions, type H
 import type { MinimapOptions } from './ui/worldMap';
 // Every type GameOptions names is exported from here too, so the app can type its options without guessing their module
 // (failedbr #1334: "Module './game/Game' declares 'LightingPresetName' locally, but it is not exported" — 4 errors, 4 builds).
-export type { LightingPresetName, CameraKind, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions, WorldBounds, BoundaryOptions };
+export type { LightingPresetName, CameraKind, ShoulderOptions, TouchControlsOptions, DoorOccupant, HumanoidAction, HumanoidOptions, GameLanguage, StringKey, PlayerChoice, MinimapOptions, WorldBounds, BoundaryOptions };
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -259,6 +259,13 @@ export interface GameOptions {
   players?: 1 | 2;
   /** Capture the mouse for looking around on a desktop (click to capture, Esc to let go). Default true. */
   pointerLock?: boolean;
+  /**
+   * The shooter's over-the-shoulder camera on foot (three/camera.ts ShoulderOptions): behind and above the hero, 0.6 m to
+   * its right, and holding Aim (right mouse / left trigger) moves in closer with a narrower view. Default: on when the
+   * player holds a gun (PLAYER.holds), off otherwise. true always; false never; an object tunes it, e.g. { side: -0.6 }
+   * for the left shoulder. Walls, the ground and a long fall are handled by the rig in every case.
+   */
+  shoulderCamera?: boolean | ShoulderOptions;
   /**
    * The music that follows the game (fx/music.ts: calm on the start screen, action in play, tense for a boss, a sting on a
    * win or a loss; lowered while paused or talking). false = none; a table changes cues, e.g. { GAME_STARTED: 'tense' }.
@@ -464,6 +471,9 @@ export class Game {
     const firstPerson = (options.camera ?? 'third-person') === 'first-person';
     this.playerChoice = resolvePlayerChoice(options.player);
     this.handGun = handGunFor(this.playerChoice);
+    // A gun in the hand is a shooter: the camera goes over the shoulder by itself (the game never wires it).
+    const shoulder = options.shoulderCamera ?? !!this.handGun;
+    if (shoulder) this.rig.setShoulder(shoulder);
     const look = { height: 1.75, shirt: options.playerColor ?? 0x2e5a87, ...(options.playerLook || { ...(this.playerChoice?.look || {}), ...(options.playerColor !== undefined ? { shirt: options.playerColor } : {}) }) };
     // The kit's own body sizes the walking capsule from its proportions; a game's own body keeps the default capsule.
     const kitBody = !(options.playerBody && typeof options.playerBody === 'object') && options.playerBody !== false && !firstPerson;
@@ -858,6 +868,8 @@ export class Game {
     // runs before the next render. Read it there and the camera never turns at all.
     // Deliberately outside the hit-stop freeze — freezing the simulation should not make aiming sticky.
     if (this.input.lookX || this.input.lookY) this.rig.look(this.input.lookX * this.lookSensitivity, this.input.lookY * this.lookSensitivity);
+    // Aim held (right mouse / left trigger): the shoulder camera moves in. Never in a seat or outside play.
+    this.rig.setAiming(!this.seated && state.status === 'playing' && this.input.isDown('aim'));
 
     // Hit-stop: the simulation freezes for a few frames so a hit lands. Input still ticks, or the
     // press that happened during the freeze is swallowed.
@@ -1040,7 +1052,6 @@ export class Game {
   /** The scope's steps (admin 2026-11-26: "zoom button 2x, 4x, 8x"): each Zoom press goes to the next, then back to 1x. */
   static readonly ZOOM_STEPS: readonly number[] = [1, 2, 4, 8];
   private zoomLevel = 0;
-  private baseFov = 0;
 
   /**
    * 🔭 THE HELD GUN'S SCOPE. With a gun in the hand (handGunFor) the Zoom button (Z on a keyboard) steps the view 1x → 2x →
@@ -1048,15 +1059,12 @@ export class Game {
    * reads the same camera). Back to 1x in a seat, outside play, or with no gun. A game that reads 'zoom' itself keeps its own.
    */
   private zoomScope(): void {
-    const cam = this.rig.camera;
-    if (!this.baseFov) this.baseFov = cam.fov;
     const usable = !!this.handGun && !this.seated && state.status === 'playing' && !this.gameReadActions.has('zoom');
     let level = usable ? this.zoomLevel : 0;
     if (usable && this.input.wasPressed('zoom')) level = (level + 1) % Game.ZOOM_STEPS.length;
-    if (level === this.zoomLevel && cam.fov === this.baseFov / Game.ZOOM_STEPS[level]) return;
     this.zoomLevel = level;
-    cam.fov = this.baseFov / Game.ZOOM_STEPS[level];
-    cam.updateProjectionMatrix();
+    // The rig writes the field of view (camera.ts settleLens) — zoom and the shoulder camera's aim, together.
+    this.rig.setZoom(Game.ZOOM_STEPS[level]);
   }
 
   /** The scope's zoom now (1, 2, 4 or 8). */
@@ -1102,6 +1110,8 @@ export class Game {
     // has been (a 'chase' game too: its rig is third-person on foot, see the constructor).
     const chased = this.chased;
     const p = chased ? chased.position : this.player.object.position;
+    // The rig reads a long fall (freefall / parachute framing) from the player's feet; a seat ignores it.
+    this.rig.setGrounded(this.player.isGrounded);
     // A camera shot playing (play/cinematics.ts) owns the camera this frame; the rig takes it back when it ends.
     if (this.director.update(frameDelta, this.rig.camera, p)) { /* the shot placed the camera */ }
     else if (chased) this.rig.follow(chased, frameDelta);

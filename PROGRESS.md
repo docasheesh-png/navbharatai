@@ -6981,3 +6981,8 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
 - **After #4624 merged (natural edges, ponds):** the plan's `boundary` and `water.ponds` now read APPLIED (names match: `options.boundary`,
   `options.water … .ponds`); density stays recorded. The robot boundary check now reads the world's own `boundary.limitAt` (an island
   ringed by mountains is land at the frame edge, so the sea-only ring would have called a closed edge open — reverted → test fails).
+
+### 2026-11-27 — Queue: Q-3464, Q-3471, Q-3703, Q-3729 closed; Q-3730 opened
+- Admin approved options (2026-11-27, "sabhi apke sujhao ke anusar banao"): #4615 (Surplus tripped per build after a second distinct model's HTTP 404 at response_validation; Q-3729 parallel-turn sibling), #4617 (asset permit queues up to 8 s; 3D assets and sounds prepared side by side; serialized workspace asset list saves), #4616 (signing keys + events erased with the account after a red warning, a real key download and an "I understand" tick). All merged and deployed (Cloud Build succeeded for 3402a0cc, 0d85280e, 61f25737).
+- Q-3730 OPEN: an in-flight key import/generate can write after the account erase; needs a deletion tombstone checked by user-scoped writers.
+- Map wave 1 live: #4624 (natural edges, sea shelf, ponds, mover rules), #4626 (roads on every size, five styles), #4625 (map planner with admin default sizes 5/25/100 km², circuit/runway floor, robot checks). Wave 2 (colonies; preview, layer edit, map library) in progress.

@@ -559,7 +559,7 @@ export function prepareOpenWorld(options: OpenWorldOptions = {}): { step(budgetM
 
 export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
   const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, naturalEdge, mapWater, ...mapOptions } = options;
-  const { spread, looping, askedArea, worldSize, lateEdits, athreeOptions } = openWorldMapSetup(options);
+  const { spread, looping, askedArea, lateEdits, athreeOptions } = openWorldMapSetup(options);
   const map = createAthreeMap({ ...athreeOptions, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);

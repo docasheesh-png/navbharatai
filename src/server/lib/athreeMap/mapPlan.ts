@@ -430,8 +430,9 @@ export function appliedMapLayers(worldSource: string, plan: MapPlan): Record<Map
     water: reads('water') && /\.ponds\b/.test(worldSource),
     roadStyle: reads('roadStyle'),
     density: reads('density'),
-    // The colonies (wave 2) count only when the world both reads the density AND lays the plots from it.
-    colonies: reads('density') && /\bplanColonies\s*\(/.test(worldSource),
+    // The colonies (wave 2) count only when the world both reads the density AND lays the plots from it (planColonies, or the same plan
+    // in time slices, planColonySteps: Q-3763).
+    colonies: reads('density') && /\bplanColon(?:ies|ySteps)\s*\(/.test(worldSource),
     timeOfDay: false,
   };
 }

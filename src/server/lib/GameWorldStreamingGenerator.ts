@@ -27,6 +27,8 @@
  *
  * PURE generator: no I/O, no model call.
  */
+import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
+
 export const GAME_WORLD_STREAMING_PATH = 'src/game/three/worldStreaming.ts';
 
 const MODULE = String.raw`// World streaming — written by NavBharatAI. A world of any size: only what is near the camera is loaded and drawn.
@@ -117,7 +119,7 @@ interface Part { geometry: THREE.BufferGeometry; far?: THREE.BufferGeometry; mat
 interface Template { handle: GameAssetHandle | null; parts: Part[]; actor: boolean; users: number; lastUsed: number }
 interface Cell { cx: number; cz: number; items: Placement[]; group: THREE.Group | null; meshes: Array<{ mesh: THREE.InstancedMesh; part: Part }>; actors: GameAssetHandle[]; far: boolean; building: boolean; subjects: Set<string> }
 
-const COLLIDER_KEY = 'navbharatWorldCollider';
+const COLLIDER_KEY = ${JSON.stringify(GAME_WORLD_COLLIDER_KEY)};
 
 /** Split a loaded model into instanceable parts (full-detail meshes; the LOD's reduced mesh kept as 'far'). */
 function partsOf(root: THREE.Object3D): { parts: Part[]; actor: boolean } {

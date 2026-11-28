@@ -256,7 +256,7 @@ import { riverNetworkFor, riverNetworkStepsFor, type River, type Lake, type Wate
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
 import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, type Boundary, type BoundaryKind, type Pond } from './boundary';
-import { planColonySteps, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity, type ColonyInput } from './colonies';
+import { planColonySteps, plotBoxes, boxesTouch, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity, type ColonyInput } from './colonies';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
@@ -469,6 +469,13 @@ export interface AthreeWorld {
   colonies(): ColonyPlan;
   /** The colony plot at a place (grown by \`grow\` metres), or null: a building stands there, so keep a mover or a prop out. */
   colonyAt(x: number, z: number, grow?: number): ColonyPlot | null;
+  /**
+   * 🧱 True when a circle of radius r at (x, z) touches a colony WALL (Q-3761): a building, a compound wall (never its open gate), a
+   * temple, a swing frame — the solid boxes colonies.ts draws (plotBoxes, full detail). For a mover a game positions by hand and for a
+   * bot's path (createNavGrid({ blocked: (x, z) => world.colonySolidAt(x, z, 0.4) })). Bodies the kit moves (the player, a driven car,
+   * kit characters) are already stopped by the tile walls colonyMesh carries.
+   */
+  colonySolidAt?(x: number, z: number, radius?: number): boolean;
   /** True when this world lays colonies (a density on a planned road network), answered WITHOUT planning them. */
   hasColonies?(): boolean;
   /**
@@ -1125,6 +1132,25 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (stepUntil(townSteps, nowMs() + ms)) townSteps = null;
     return planned();
   }
+  function colonySolidAt(x: number, z: number, radius = 0): boolean {
+    if (!withColonies || placingColonies || !Number.isFinite(x) || !Number.isFinite(z)) return false;
+    const r = Math.min(8, Math.max(0, Number.isFinite(radius) ? radius : 0));
+    const plan = coloniesOf();
+    const seen = new Set<number>();
+    let hit = false;
+    for (let cx = Math.floor((x - r) / COLONY_CELL); cx <= Math.floor((x + r) / COLONY_CELL) && !hit; cx++) {
+      for (let cz = Math.floor((z - r) / COLONY_CELL); cz <= Math.floor((z + r) / COLONY_CELL) && !hit; cz++) {
+        for (const id of colonyCells.get(cx + ',' + cz) ?? []) {
+          if (hit || seen.has(id) || colonyGone.has(id)) continue;
+          seen.add(id);
+          const p = plan.plots[id];
+          if (plotLocal(p, x, z) > r + 1) continue;
+          plotBoxes(p, 2, (b, _c, solid) => { if (!hit && solid && boxesTouch([b], x, z, r)) hit = true; });
+        }
+      }
+    }
+    return hit;
+  }
   function hasColonies(): boolean {
     if (!withColonies || roadsOf().style() === null) return false;
     return colonyPlan ? colonyPlan.plots.length > 0 : true;
@@ -1405,7 +1431,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt, hasColonies, planStep, planned };
+  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt, colonySolidAt, hasColonies, planStep, planned };
 }
 `;
 

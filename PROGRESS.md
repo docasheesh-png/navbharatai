@@ -7069,6 +7069,24 @@ The admin's map order is frame → natural boundary → water → ground → roa
 - Q-3730 OPEN: an in-flight key import/generate can write after the account erase; needs a deletion tombstone checked by user-scoped writers.
 - Map wave 1 live: #4624 (natural edges, sea shelf, ponds, mover rules), #4626 (roads on every size, five styles), #4625 (map planner with admin default sizes 5/25/100 km², circuit/runway floor, robot checks). Wave 2 (colonies; preview, layer edit, map library) in progress.
 
+### 2026-11-28 — Q-3765: ponds asked are placed in towns, and every map layer is reported as measured (branch claude/fix/ponds-placed-honestly)
+- **Found by #4628's preview:** 3 ponds on the 5 km loop map → 0 placed after #4627's 20 m pond-vs-road ring, while the note said
+  "water: 3 ponds — APPLIED". **Class:** a layer verdict read from the world's SOURCE (it reads `options.water.ponds`) instead of
+  measured from the built world. **Siblings found and fixed in the same change:** "a ring of mountains — APPLIED" on a LOOPING map (it has
+  no edge; `tests/theMapPlannerChoosesTheMap` had locked that lie in), road style on a map over 25 km (regional roads), colonies with 0
+  plots; the layer-edit card (`changeVerdict`) used the same source read.
+- **Honesty fix:** the robot-check worker measures the built world (`measureLayers`: ponds placed, rivers, lakes, edge kind, road style,
+  colony plots/colonies → `RobotRun.measured`); `mapPlan.layerVerdicts` turns plan + source capability + measurement into
+  APPLIED / ONLY PARTLY BUILT / NOT BUILT (with the measured reason, e.g. "ponds: 40 asked, 9 placed — …") / recorded / not measured.
+  `measuredMapNote` writes the build note after the checks; without a measurement nothing the world merely reads is called APPLIED.
+- **Placement fix (two causes):** (1) the dry-land margin was an absolute 1 m above `minLand` on a map whose heights are x0.067 (5 km),
+  so ~2/3 of candidates were "too low" — now `rise = 1 x heightScale`; (2) random points in a planned town almost never have a 20 m clear
+  ring between roads every 100–250 m — the world now offers `PondSite.sites`: the middle of each road block and half way to each corner,
+  sized to keep POND_CLEAR from every kerb, tried first (flatness 3 m there: the pond's rim terraces it). Ponds are still placed before
+  the colonies (which build round them) and the roads still never read the ponds (#4627's order kept). Kit history regenerated.
+- **Locked:** `tests/pondsArePlacedInTownsAndSaidHonestly.test.ts` (3 asked → 3 placed on the 5 km loop map and on a 2.2 km grid town
+  over 4 seeds each, no road on any pond's water or bank, no colony plot within 1.35 r; measured counts in the note) — reverting the
+  block sites fails the town case, reverting the scaled margin fails both, reverting the measured verdicts fails 8 tests.
 ## 2026-11-28 — Athree colonies: walls, life and a load without a frozen frame (Q-3761, Q-3762, Q-3763; branch `claude/feat/colony-walls-life-streaming`)
 
 #4627 (colonies between the roads) recorded three open limits. All three are fixed in this PR.

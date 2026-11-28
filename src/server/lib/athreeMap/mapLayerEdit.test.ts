@@ -99,23 +99,35 @@ describe('nothing changes on a guess', () => {
   });
 });
 
-describe('the honest verdict per layer, read from the world\'s own source', () => {
+describe('the honest verdict per layer: what the world MEASURABLY built, never the source alone', () => {
   const worldSource = Object.entries(shooter.files).filter(([p]) => p !== CONFIG).map(([, s]) => s).join('\n');
   const applied = appliedMapLayers(worldSource, mapPlanFromData(shooter.data));
-  it('density before colonies exist is recorded, not built', () => {
+  const measured = { ponds: 3, rivers: 1, lakes: 0, boundary: 'none', roadStyle: 'grid', plots: 50, colonies: 4 };
+  it('without a measurement nothing is claimed built', () => {
     const v = mapLayerEditsIn('colony badi karo', shooter.data);
     if (v.kind !== 'changed') throw new Error('expected a change');
-    const verdict = changeVerdict(v.changes[0], applied, v.data);
-    if (!applied.density) expect(verdict).toEqual({ built: false, why: expect.stringMatching(/colonies layer/) });
-    else expect(verdict.built).toBe(true);
+    expect(changeVerdict(v.changes[0], applied, v.data)).toEqual({ built: false, why: expect.stringMatching(/could not be measured/) });
   });
-  it('a river turned into a lake is recorded (the world makes its own); ponds are carved', () => {
-    const v = mapLayerEditsIn('nadi ki jagah jheel karo', { ...shooter.data, water: { ...shooter.data.water, rivers: 1 } });
+  it('colonies: built when plots were laid, not when none were', () => {
+    const v = mapLayerEditsIn('colony badi karo', shooter.data);
     if (v.kind !== 'changed') throw new Error('expected a change');
-    expect(changeVerdict(v.changes[0], applied, v.data).built).toBe(false);
+    expect(changeVerdict(v.changes[0], applied, v.data, measured).built).toBe(true);
+    expect(changeVerdict(v.changes[0], applied, v.data, { ...measured, plots: 0, colonies: 0 })).toEqual({ built: false, why: expect.stringMatching(/no colony plots were laid/) });
+  });
+  it('ponds: "3 asked, 1 placed" is said with the numbers; a river turned into a lake is recorded (the world makes its own)', () => {
     const p = mapLayerEditsIn('3 talaab daalo', shooter.data);
     if (p.kind !== 'changed') throw new Error('expected a change');
-    expect(changeVerdict(p.changes[0], applied, p.data).built).toBe(applied.water);
+    expect(changeVerdict(p.changes[0], applied, p.data, measured).built).toBe(true);
+    expect(changeVerdict(p.changes[0], applied, p.data, { ...measured, ponds: 1 })).toEqual({ built: false, why: expect.stringMatching(/^ponds: 3 asked, 1 placed/) });
+    const v = mapLayerEditsIn('nadi ki jagah jheel karo', { ...shooter.data, water: { ...shooter.data.water, rivers: 1 } });
+    if (v.kind !== 'changed') throw new Error('expected a change');
+    expect(changeVerdict(v.changes[0], applied, v.data, measured).built).toBe(false);
+  });
+  it('a road style the world did not lay (a map over 25 km keeps its village roads) is not built', () => {
+    const v = mapLayerEditsIn('sadkein tedhi-medhi karo', shooter.data);
+    if (v.kind !== 'changed') throw new Error('expected a change');
+    expect(changeVerdict(v.changes[0], applied, v.data, { ...measured, roadStyle: 'organic' }).built).toBe(true);
+    expect(changeVerdict(v.changes[0], applied, v.data, { ...measured, roadStyle: null })).toEqual({ built: false, why: expect.stringMatching(/wider than 25 km/) });
   });
 });
 

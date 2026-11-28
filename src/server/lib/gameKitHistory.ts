@@ -176,7 +176,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/athree/boundary.ts": [
     "44aceb3f275111b245752b0c8f3f2411cf32f575d7a327d7a374dd42895735a3",
-    "fb43049457dcf4399975e53590b430a442bdc4fc7ec5e9c4446ddcb963a12718"
+    "fb43049457dcf4399975e53590b430a442bdc4fc7ec5e9c4446ddcb963a12718",
+    "59fd10895b0fc8e81c0e5c305e06adff4b9958eb451e185fb1dc92077d943bb8"
   ],
   "src/game/athree/budget.ts": [
     "62862e8c1b57809d1227783b4c773fb0ab0dc15cef41bd5d418f5510b2b345c6",
@@ -329,8 +330,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "06548f1aa72426d9bc55dc6c3dc19490c16aefc38a8d55faa4b8c7d8cab00741",
     "2eebdce300ee7051a3f330cc8c2b759b2acad8d6c2f669d39f3b46fb81d705d7",
     "2c71032cba071a88983932e4b46ecf7ff2b1a61e915d9272b93983f39bc38f7b",
+    "555b26af29542f9701a5a487562ffba98f4cc8ab92ed037deb9437f5ea1a5288",
     "19b654bcdeddce0c0922d118402b68e99507feb9570a9411af32cdb9f5f04ed3",
-    "38cb7fd78a03773a97c4ef0c700bd0ff9008c9a2b60fcec1d3a6e17059e69bf9"
+    "38cb7fd78a03773a97c4ef0c700bd0ff9008c9a2b60fcec1d3a6e17059e69bf9",
+    "cffab865fa287e6ea85733005b1f19ab916bac0c22f66a2825e76421e0283eb2"
   ],
   "src/game/board/business.ts": [
     "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",

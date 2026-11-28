@@ -17,6 +17,7 @@ import ts from 'typescript';
 import { Worker } from 'node:worker_threads';
 import { BoundedCache } from '../boundedCache';
 import type { MapProfile as AthreeProfile } from './athreeMapLibrary';
+import type { MeasuredLayers } from './mapPlan';
 
 /**
  * The loader and the runner as plain JavaScript (they must run inside a worker, which has no bundler): `loadEmitted(compile, files, entry)`
@@ -44,6 +45,18 @@ function loadEmitted(compile, files, entry) {
   }
   return load(entry || 'index');
 }
+function measureLayers(w) {
+  var net = typeof w.roadNetwork === 'function' ? w.roadNetwork() : null;
+  var style = net && typeof net.style === 'function' ? net.style() : null;
+  var cp = typeof w.colonies === 'function' ? w.colonies() : null;
+  var ponds = typeof w.ponds === 'function' ? w.ponds().length : 0;
+  var bodies = typeof w.waterBodies === 'function' ? w.waterBodies() : { rivers: [], lakes: [] };
+  return {
+    ponds: ponds, rivers: bodies.rivers.length, lakes: Math.max(0, bodies.lakes.length - ponds),
+    boundary: w.boundary && w.boundary.kind ? String(w.boundary.kind) : 'none', roadStyle: style === undefined ? null : style,
+    plots: cp && Array.isArray(cp.plots) ? cp.plots.length : 0, colonies: cp && Array.isArray(cp.colonies) ? cp.colonies.length : 0,
+  };
+}
 function runChecks(compile, files, profile, seeds) {
   try {
     var index = loadEmitted(compile, files, 'index');
@@ -52,12 +65,14 @@ function runChecks(compile, files, profile, seeds) {
       return { ran: false, seeds: seeds.slice(), ok: false, results: [], error: 'the emitted map or its checks have no entry point' };
     }
     var results = [];
+    var measured = null;
     for (var i = 0; i < seeds.length; i++) {
       var map = index.createAthreeMap({ seed: seeds[i], profile: profile });
+      if (i === 0) measured = measureLayers(map.world);
       var rs = checks.runMapChecks(map.world).results;
       for (var j = 0; j < rs.length; j++) results.push({ id: rs[j].id, applicable: rs[j].applicable, ok: rs[j].ok, detail: rs[j].detail, seed: seeds[i] });
     }
-    return { ran: true, seeds: seeds.slice(), ok: results.every(function (r) { return r.ok; }), results: results };
+    return { ran: true, seeds: seeds.slice(), ok: results.every(function (r) { return r.ok; }), results: results, measured: measured };
   } catch (error) {
     return { ran: false, seeds: seeds.slice(), ok: false, results: [], error: error && error.message ? error.message : String(error) };
   }
@@ -91,7 +106,11 @@ export function loadEmittedAthree(files: Readonly<Record<string, string>>, entry
 }
 
 export interface RobotCheckLine { id: string; applicable: boolean; ok: boolean; detail: string }
-export interface RobotRun { ran: boolean; seeds: number[]; ok: boolean; results: Array<RobotCheckLine & { seed: number }>; error?: string }
+export interface RobotRun {
+  ran: boolean; seeds: number[]; ok: boolean; results: Array<RobotCheckLine & { seed: number }>; error?: string;
+  /** What the world really built on the first seed (ponds, edge, road style, colony plots …): the note's verdicts read this, never the source. */
+  measured?: MeasuredLayers | null;
+}
 
 export const ROBOT_SAMPLE_SEEDS: readonly number[] = [1];
 /** The most a build-time run may take before it is stopped (a 500 km world takes about two seconds). */

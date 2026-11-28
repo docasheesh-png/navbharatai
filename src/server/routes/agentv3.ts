@@ -83,6 +83,8 @@ import { enemiesAtTurnStart } from '../AgentV3/buildPhases/enemiesTurn';
 import { housesAtTurnStart } from '../AgentV3/buildPhases/housesTurn';
 import { libraryActionsForTurn, platformDoneRunResult, capPlatformDoneEstimate, platformDoneEtaLine, type PlatformDone } from '../AgentV3/platformDoneTurn';
 import { worldWishAtTurnStart, withPlatformHandoff, worldClaimFacts, WORLD_PATH } from '../AgentV3/worldTurn';
+import { mapLayerEditAtTurnStart } from '../AgentV3/buildPhases/mapLayerTurn';
+import { listSavedMaps } from '../lib/mapLibraryStore';
 import { raceWorldAtTurnStart } from '../AgentV3/raceWorld';
 import { startPreviewAfterSeed, SEED_PREVIEW_HANDOFF, seedRecipeTimes } from '../AgentV3/seedPreview';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
@@ -19610,6 +19612,13 @@ async function noteBuildOutcome(
       // expansion item 8): the platform writes the switch itself, last, after the files it needs. OFF unless AGENTV3_RACING_WORLD=on.
       buildPrompt = withPlatformHandoff(await raceWorldAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
         write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue) }), buildPrompt);
+      // ✏️🗺️ "NADI KI JAGAH JHEEL KARO", "SADKEIN TEDHI-MEDHI KARO", "MAP 2 GUNA BADA KARO" — ONE LAYER OF THE GAME'S MAP, CHANGED BY THE
+      // PLATFORM ITSELF (mapLayerTurn.ts): the plan's diff, the same seed, the checks and the top-down picture re-run, the user shown
+      // exactly which layer changed. A saved map named here is put on this game. Where it cannot be done, nothing changes and it is said.
+      buildPrompt = withPlatformHandoff(await mapLayerEditAtTurnStart({ skip: isImportTurn || !!projectModuleRef, prompt, filesAtTurnStart: projectFilesAtTurnStart, read: (p) => actuator.readFile(workspaceId, p),
+        write: async (p, c) => { await actuator.writeFile(workspaceId, p, c); writtenFiles.set(p, c); preseededGolden.set(p, c); }, record: (issue) => buildDiag.record(issue),
+        showMap: (card) => events.emit({ type: 'map_preview', card, ts: Date.now() }),
+        ...(verified?.uid ? { savedMaps: () => listSavedMaps(verified.uid) } : {}) }), buildPrompt);
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
         if (kitPlan.length === 0) {

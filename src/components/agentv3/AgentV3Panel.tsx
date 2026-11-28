@@ -81,6 +81,9 @@ import { SplitDivider } from './SplitDivider';
 import { loadSplit, saveSplit, clampSplit, paneSplitVars } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { GameLibraryPicker } from './GameLibraryPicker';
+import { MapPreviewCard } from './MapPreviewCard';
+import { MapLibraryPicker } from './MapLibraryPicker';
+import type { MapPreviewCard as MapPreviewCardData } from '../../lib/mapPreview';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
@@ -159,6 +162,8 @@ interface ChatMsg {
   streaming?: boolean;
   /** A spreadsheet this reply made — rendered as a Download card under the text. */
   file?: SheetFileRef;
+  /** A top-down picture of the game's map (or why there is none) — rendered as a map card under the text. */
+  mapPreview?: MapPreviewCardData;
 }
 
 // Last `resume` nonce actually applied — at MODULE scope on purpose, so it SURVIVES the panel
@@ -233,6 +238,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [adviseIdeasOpen, setAdviseIdeasOpen] = useState(false);
   const [gameLibraryOpen, setGameLibraryOpen] = useState(false);
+  const [mapLibraryOpen, setMapLibraryOpen] = useState(false);
   const [adviseCount, setAdviseCount] = useState(0);
   const modeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -1246,7 +1252,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       ts: n.ts,
       kind: n.kind,
       streaming: n.streaming,
-      ...(n.file ? { file: n.file } : {}),
+      ...(n.file ? { file: n.file } : {}), ...(n.mapPreview ? { mapPreview: n.mapPreview } : {}),
     })),
   ]
     // "⏱️ Still building… N min in" is a TRANSIENT live-progress line (server ETA heartbeat), not chat
@@ -1895,7 +1901,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               text: n.text,
               ts: n.ts,
               kind: n.kind,
-              ...(n.file ? { file: n.file } : {}),
+              ...(n.file ? { file: n.file } : {}), ...(n.mapPreview ? { mapPreview: n.mapPreview } : {}),
             })),
           ]);
         }
@@ -2384,7 +2390,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
         ...h,
-        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) })),
+        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}), ...(n.mapPreview ? { mapPreview: n.mapPreview } : {}) })),
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
@@ -2486,7 +2492,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           const userMessageTs = nextUserMessageTs(Date.now(), [userMsgs, agentHistory, state.narration, state.activity, state.activityLog]);
           setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: userMessageTs }]);
           if (state.narration.length > 0) {
-            setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
+            setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}), ...(n.mapPreview ? { mapPreview: n.mapPreview } : {}) }))]);
           }
           void start(item.prompt, { queueItemId: item.id, queueClaimToken: item.claimToken, queueContinuationProtocol: 1, userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: scope.sessionId, userMessageTs, framework, frameworkExplicit, appSignature: appSignaturePref() });
         },
@@ -5910,14 +5916,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <div className="relative">
                 {modeMenuOpen && (
                   <ComposerPopover anchorRef={modeTriggerRef} label="Chat mode"
-                    width={gameLibraryOpen ? 320 : adviseIdeasOpen ? 300 : 240}
-                    onClose={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setModeMenuOpen(false); }}>
+                    width={gameLibraryOpen || mapLibraryOpen ? 320 : adviseIdeasOpen ? 300 : 240}
+                    onClose={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setMapLibraryOpen(false); setModeMenuOpen(false); }}>
                       <div className="flex items-center justify-end px-1.5 pt-1">
                         <button
                           type="button"
                           aria-label="Close"
                           title="Close"
-                          onClick={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setModeMenuOpen(false); }}
+                          onClick={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setMapLibraryOpen(false); setModeMenuOpen(false); }}
                           className="h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised"
                         >
                           <X className="w-4 h-4" />
@@ -5953,7 +5959,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       ))}
                       <button
                         type="button"
-                        onClick={() => { setGameLibraryOpen(false); setAdviseIdeasOpen((v) => !v); }}
+                        onClick={() => { setGameLibraryOpen(false); setMapLibraryOpen(false); setAdviseIdeasOpen((v) => !v); }}
                         title="Advise — ideas for what to build next"
                         className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${adviseIdeasOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
                       >
@@ -5965,7 +5971,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       </button>
                       <button
                         type="button"
-                        onClick={() => { setAdviseIdeasOpen(false); setGameLibraryOpen((v) => !v); }}
+                        onClick={() => { setAdviseIdeasOpen(false); setMapLibraryOpen(false); setGameLibraryOpen((v) => !v); }}
                         title="Game library — ready 3D models to add to your game"
                         aria-expanded={gameLibraryOpen}
                         className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${gameLibraryOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
@@ -5973,11 +5979,29 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         <span>🎮</span>
                         <span>Game library</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setMapLibraryOpen((v) => !v); }}
+                        title="My maps — game maps you saved, to use again"
+                        aria-expanded={mapLibraryOpen}
+                        data-testid="mode-menu-my-maps"
+                        className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${mapLibraryOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
+                      >
+                        <span>🗺️</span>
+                        <span>My maps</span>
+                      </button>
                       </div>
                       {gameLibraryOpen && (
                         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
                           <GameLibraryPicker
                             onPick={(mention) => { const el = composerRef.current; const next = insertAtCursor(prompt, mention, el?.selectionStart ?? null, el?.selectionEnd ?? null); setPrompt(next.text); setGameLibraryOpen(false); setModeMenuOpen(false); setTimeout(() => { const c = composerRef.current; if (c) { c.focus(); c.setSelectionRange(next.caret, next.caret); } }, 0); }}
+                          />
+                        </div>
+                      )}
+                      {mapLibraryOpen && (
+                        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
+                          <MapLibraryPicker
+                            onUse={(message) => { setPrompt(message); setMapLibraryOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
                           />
                         </div>
                       )}
@@ -7572,6 +7596,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
             : <FoldableMessage text={msg.text} className="nb-selectable" />}
         </div>
         {msg.file && !msg.streaming && <SheetFileCard file={msg.file} />}
+        {msg.mapPreview && !msg.streaming && <MapPreviewCard card={msg.mapPreview} />}
       </div>
       {!isThinking && !msg.streaming && (
         <div className={MESSAGE_ACTION_ROW_CLASS}>

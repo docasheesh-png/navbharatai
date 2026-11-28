@@ -617,6 +617,10 @@ export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
   // city houses enterable. The answer is the engine update (the kit refresh), not a prompt — a prompt would only tempt a
   // painted door that "opens". The message says plainly that the game needs the update.
   'HOUSES_NOT_ENTERABLE',
+  // mapLayerTurn.ts (2026-11-27): the user asked to change one layer of the map, but the game's src/game/athree/config.ts was edited
+  // into a shape the platform cannot rewrite safely, so nothing was changed. No prompt fixes it — a prompt would tempt a hand edit
+  // of the plan that the preview and checks then disagree with; the builder tells the user plainly.
+  'MAP_LAYER_NOT_CHANGED',
   // gameRegression.ts (admin 2026-11-21): this turn made the game worse. Its answer is not a prompt to send but the one-tap
   // "Go back" card (the ❗️ list row, gameUndo.ts) that restores the saved version from just before the turn — a new prompt would build
   // on top of the broken game.

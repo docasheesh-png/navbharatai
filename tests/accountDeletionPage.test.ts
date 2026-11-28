@@ -155,6 +155,7 @@ describe('the page and the deletion code do not drift apart', () => {
       user_notification_reads: /which admin notices you had already read/i,
       zip_uploads: /\.zip archives/i,
       agentv3_sheet_files: /spreadsheets you gave to a build/i,
+      user_saved_maps: /saved game maps.*My maps/i,
       shares: /share links/i,
       // Added 2026-11-26 (Q-3702): the native build rows, erased after their files.
       mobile_native_builds: /phone app builds.*\.apk \/ \.aab/i,

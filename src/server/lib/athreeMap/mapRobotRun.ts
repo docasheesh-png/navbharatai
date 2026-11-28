@@ -23,7 +23,7 @@ import type { MapProfile as AthreeProfile } from './athreeMapLibrary';
  * compiles each emitted module and resolves its relative imports among the set; `runChecks(compile, files, profile, seeds)` builds the
  * world for each seed and runs the emitted checks on it.
  */
-const RUNNER_SOURCE = String.raw`
+export const ATHREE_RUNNER_SOURCE = String.raw`
 function loadEmitted(compile, files, entry) {
   var DIR = 'src/game/athree/';
   var cache = new Map();
@@ -69,7 +69,7 @@ type LoadFn = (compile: Compile, files: Readonly<Record<string, string>>, entry?
 type RunFn = (compile: Compile, files: Readonly<Record<string, string>>, profile: string, seeds: number[]) => RobotRun;
 // Our own constant source (above), evaluated once — the same text the worker runs.
 // eslint-disable-next-line no-new-func
-const RUNNER = new Function(RUNNER_SOURCE + '\nreturn { loadEmitted: loadEmitted, runChecks: runChecks };')() as { loadEmitted: LoadFn; runChecks: RunFn };
+const RUNNER = new Function(ATHREE_RUNNER_SOURCE + '\nreturn { loadEmitted: loadEmitted, runChecks: runChecks };')() as { loadEmitted: LoadFn; runChecks: RunFn };
 
 /**
  * TypeScript → JavaScript, cached by source text. The Athree modules are constants (only config.ts carries the map's choice), so a
@@ -77,7 +77,7 @@ const RUNNER = new Function(RUNNER_SOURCE + '\nreturn { loadEmitted: loadEmitted
  */
 // About 25 module sources exist; config.ts varies per map choice, so the least-recently-used entries give way past 200.
 const transpiled = new BoundedCache<string, string>({ maxEntries: 200 });
-function transpile(source: string): string {
+export function transpileAthreeModule(source: string): string {
   const hit = transpiled.get(source);
   if (hit !== undefined) return hit;
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
@@ -87,7 +87,7 @@ function transpile(source: string): string {
 
 /** Load the emitted Athree modules from a file set: transpile each and resolve its relative imports among the set. */
 export function loadEmittedAthree(files: Readonly<Record<string, string>>, entry = 'index'): Record<string, unknown> {
-  return RUNNER.loadEmitted(transpile, files, entry);
+  return RUNNER.loadEmitted(transpileAthreeModule, files, entry);
 }
 
 export interface RobotCheckLine { id: string; applicable: boolean; ok: boolean; detail: string }
@@ -99,12 +99,12 @@ export const ROBOT_BUDGET_MS = 8000;
 
 /** Run the emitted robot checks on the emitted world, in this thread (tests). Never throws. */
 export function runRobotChecksOnFiles(files: Readonly<Record<string, string>>, profile: AthreeProfile, seeds: readonly number[] = ROBOT_SAMPLE_SEEDS): RobotRun {
-  return RUNNER.runChecks(transpile, files, profile, [...seeds]);
+  return RUNNER.runChecks(transpileAthreeModule, files, profile, [...seeds]);
 }
 
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
-${RUNNER_SOURCE}
+${ATHREE_RUNNER_SOURCE}
 let result;
 try { result = runChecks(function (js) { return js; }, workerData.files, workerData.profile, workerData.seeds); }
 catch (error) { result = { ran: false, seeds: workerData.seeds, ok: false, results: [], error: error && error.message ? error.message : String(error) }; }
@@ -112,33 +112,51 @@ parentPort.postMessage(result);
 `;
 
 /**
+ * Run a script on the emitted Athree files in a worker thread, within a time budget, so the server's main thread is never blocked.
+ * The script sees `workerData.files` already compiled to JavaScript (load them with `loadEmitted(function (js) { return js; }, …)`)
+ * and posts ONE message. Never rejects: a worker that fails to start, crashes, posts something unusable or runs past its budget
+ * resolves to `failed(reason)`. The ONE worker runner the robot checks and the map preview share.
+ */
+export function runAthreeScriptInWorker<T>(
+  script: string,
+  files: Readonly<Record<string, string>>,
+  extra: Record<string, unknown>,
+  budgetMs: number,
+  failed: (error: string) => T,
+  usable: (value: unknown) => value is T,
+): Promise<T> {
+  const budget = Math.max(100, budgetMs);
+  return new Promise<T>((resolve) => {
+    let worker: Worker;
+    let compiled: Record<string, string>;
+    try { compiled = Object.fromEntries(Object.entries(files).map(([p, src]) => [p, transpileAthreeModule(src)])); }
+    catch (error) { resolve(failed('the map could not be compiled: ' + (error instanceof Error ? error.message : String(error)))); return; }
+    try { worker = new Worker(script, { eval: true, workerData: { ...extra, files: compiled } }); }
+    catch (error) { resolve(failed('the worker could not start: ' + (error instanceof Error ? error.message : String(error)))); return; }
+    let settled = false;
+    const finish = (value: T): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate().catch(() => undefined);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(failed(`it did not finish within ${Math.round(budget / 100) / 10} s and was stopped`)), budget);
+    worker.once('message', (value: unknown) => finish(usable(value) ? value : failed('the worker returned nothing usable')));
+    worker.once('error', (error) => finish(failed('the worker crashed: ' + (error instanceof Error ? error.message : String(error)))));
+    worker.once('exit', (code) => finish(failed(`the worker exited (code ${code}) without a result`)));
+  });
+}
+
+/**
  * Run the robot checks in a worker thread, within a time budget, so the server's main thread is never blocked. Never rejects: a
  * worker that fails to start, crashes or runs past its budget resolves to a run that says it could not run.
  */
 export function runRobotChecksInWorker(files: Readonly<Record<string, string>>, profile: AthreeProfile, options: { seeds?: readonly number[]; budgetMs?: number } = {}): Promise<RobotRun> {
   const seeds = [...(options.seeds ?? ROBOT_SAMPLE_SEEDS)];
-  const budget = Math.max(100, options.budgetMs ?? ROBOT_BUDGET_MS);
-  const failed = (error: string): RobotRun => ({ ran: false, seeds, ok: false, results: [], error });
-  return new Promise<RobotRun>((resolve) => {
-    let worker: Worker;
-    let compiled: Record<string, string>;
-    try { compiled = Object.fromEntries(Object.entries(files).map(([p, src]) => [p, transpile(src)])); }
-    catch (error) { resolve(failed('the map could not be compiled: ' + (error instanceof Error ? error.message : String(error)))); return; }
-    try { worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { files: compiled, profile, seeds } }); }
-    catch (error) { resolve(failed('the check worker could not start: ' + (error instanceof Error ? error.message : String(error)))); return; }
-    let settled = false;
-    const finish = (run: RobotRun): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      void worker.terminate().catch(() => undefined);
-      resolve(run);
-    };
-    const timer = setTimeout(() => finish(failed(`it did not finish within ${Math.round(budget / 100) / 10} s and was stopped`)), budget);
-    worker.once('message', (run: RobotRun) => finish(run && typeof run === 'object' && Array.isArray(run.results) ? run : failed('the check worker returned nothing usable')));
-    worker.once('error', (error) => finish(failed('the check worker crashed: ' + (error instanceof Error ? error.message : String(error)))));
-    worker.once('exit', (code) => finish(failed(`the check worker exited (code ${code}) without a result`)));
-  });
+  const failed = (error: string): RobotRun => ({ ran: false, seeds, ok: false, results: [], error: error.replace(/^the worker /, 'the check worker ') });
+  const usable = (run: unknown): run is RobotRun => !!run && typeof run === 'object' && Array.isArray((run as RobotRun).results);
+  return runAthreeScriptInWorker(WORKER_SOURCE, files, { profile, seeds }, options.budgetMs ?? ROBOT_BUDGET_MS, failed, usable);
 }
 
 /** The build-note lines for a run: every failure named, every check that does not apply said so, a crash said as a crash. */

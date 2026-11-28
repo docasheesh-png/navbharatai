@@ -4,6 +4,7 @@ import { isLiveStatusId } from '../../lib/liveStatusLine';
 import type { ActivityEntry, AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 import { readQueueContinuationTicket } from '../../lib/queueContinuation';
 import { rupeeCharge } from './rupeeCharge';
+import { parseMapPreviewCard } from '../../lib/mapPreview';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
 // all merged surfaces (narration, files, diffs, terminal, git/history, todos,
@@ -181,6 +182,17 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         ...state,
         narration,
         agents: touchAgent(state.agents, event.agent, event.text, true, event.ts),
+      };
+    }
+
+    // 🗺️ A picture of the game's map: a line in the chat that carries it. Checked here, the one place it enters state — a card that
+    // is not shaped like one is dropped, never drawn.
+    case 'map_preview': {
+      const card = parseMapPreviewCard(event.card);
+      if (!card) return state;
+      return {
+        ...state,
+        narration: [...state.narration, { agent: 'architect' as AgentRole, text: card.title, ts: event.ts, mapPreview: card }].slice(-MAX_NARRATION),
       };
     }
 

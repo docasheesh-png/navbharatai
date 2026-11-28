@@ -20,6 +20,8 @@
 //     the project's episodic memory, injected into the plain-chat prompt so "what were we
 //     building?" is answered from the real session history even years later.
 
+import { parseMapPreviewCard, type MapPreviewCard } from '../../lib/mapPreview';
+
 // ── Compact timeline events (the durable form of the live wire events) ─────────────────────────
 
 export type TimelineEvent =
@@ -28,7 +30,9 @@ export type TimelineEvent =
   | { t: 'file'; path: string; kind: 'create' | 'modify' | 'delete'; agent: string; ts: number }
   | { t: 'agent'; agent: string; task: string; ts: number }
   | { t: 'preview'; url: string; ts: number }
-  | { t: 'diff'; path: string; patch: string; ts: number };
+  | { t: 'diff'; path: string; patch: string; ts: number }
+  /** The top-down map picture a build showed (mapPreviewRun.ts) — about 17 KB, so a reopened session shows the same map. */
+  | { t: 'map'; card: MapPreviewCard; ts: number };
 
 /**
  * Terminal facts of a finished build turn — restores the done-footer (₹ / tokens / health).
@@ -141,6 +145,11 @@ export function createTimelineRecorder(): TimelineRecorder {
             if (diff && typeof diff.path === 'string' && typeof diff.patch === 'string') {
               push({ t: 'diff', path: diff.path, patch: truncate(diff.patch, MAX_DIFF_PATCH_CHARS, DIFF_TRUNCATION_NOTE), ts });
             }
+            return;
+          }
+          case 'map_preview': {
+            const card = parseMapPreviewCard(e.card);
+            if (card) push({ t: 'map', card, ts });
             return;
           }
           case 'done':

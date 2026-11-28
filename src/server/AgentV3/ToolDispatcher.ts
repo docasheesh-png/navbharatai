@@ -426,6 +426,11 @@ import { ARCHETYPES, ARCHETYPE_IDS, type Archetype } from '../lib/athreeMap/athr
 import { applyMapPlanToFiles, planAthreeMap } from '../lib/athreeMap/mapPlanWiring';
 import { describeRobotRun, runRobotChecksInWorker } from '../lib/athreeMap/mapRobotRun';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
+import { mapPlanFromData } from '../lib/athreeMap/mapPlanData';
+import { gameWorldSeed, mapPreviewCardFor } from '../lib/athreeMap/mapPreviewCard';
+import { savedMapNamed } from '../lib/athreeMap/savedMapRequest';
+import { listSavedMaps, type SavedMap } from '../lib/mapLibraryStore';
+import { varietySeed } from '../lib/projectVariety';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
 import { generateBoardGames, cricketRulesFileSource, CRICKET_RULES_PATH } from '../lib/BoardGamesGenerator';
@@ -10573,7 +10578,18 @@ export class ToolDispatcher {
         if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
         // 🗺️ THE MAP PLANNER (mapPlan.ts) is the one reader of size, land, boundary, water, roads, density, region, game type and
         // time of day. The builder's archetype / size_km win field by field; the user's stated size always beats a default.
-        const athPlan = planAthreeMap(this.worldRequest(), { archetype: (athArchetype || null) as Archetype | null, sizeKm: athSize });
+        // 📚 A SAVED MAP the request names ("mera 'Ganga Nagar' map use karo", the map library's Use button) is reused as it was saved:
+        // its plan and its seed, unchanged — never on a map this project already has. The owner is the build's VERIFIED account.
+        let athSaved: SavedMap | null = null;
+        if (this.libraryOwnerUid && !athreeStored) {
+          try { athSaved = savedMapNamed(this.worldRequest(), await listSavedMaps(this.libraryOwnerUid)); } catch { athSaved = null; }
+        }
+        const athPlan = athSaved
+          ? mapPlanFromData(athSaved.plan, `The user's saved map "${athSaved.name}" was used: its plan and its seed, unchanged.`)
+          : planAthreeMap(this.worldRequest(), { archetype: (athArchetype || null) as Archetype | null, sizeKm: athSize });
+        // The map's seed: a saved map keeps its own; a new map gets this project's (the same one the open-world kit writes as WORLD.seed).
+        const athSeed = athSaved ? athSaved.plan.seed : varietySeed(this.workspaceId, 'world');
+        const athProfile = athreeDecision.profile ?? 'open-world';
         let athChoice = athPlan.choice;
         if (composition !== undefined) {
           const promptSize = athPlan.areaSource === 'user' ? athPlan.sideKm : null;
@@ -10583,7 +10599,7 @@ export class ToolDispatcher {
           if (athChoice && typeof width === 'number') athChoice = {...athChoice,sizeKm:width};
         }
         const athGenerated = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
-        const athPlanned = applyMapPlanToFiles(athGenerated.files, athPlan, athChoice);
+        const athPlanned = applyMapPlanToFiles(athGenerated.files, athPlan, athChoice, { seed: athSeed, profile: athProfile });
         const ath = { ...athGenerated, files: athPlanned.files };
         // Additive only: a read failure is not a missing file, and custom project source must not be replaced.
         if (composition !== undefined) {
@@ -10618,8 +10634,16 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('athree map');
         // The robot checks run once here, in a worker thread with a time budget (never on the main thread), on the exact files this recipe
         // generated (a sample seed; the game re-checks its own seed).
-        const athRobots = describeRobotRun(await runRobotChecksInWorker(ath.files, athreeDecision.profile ?? 'open-world'));
-        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${athPlanned.note}\n${athRobots}\n\n${ath.instructions}${athLayers}`;
+        // 🗺️ THE MAP FROM ABOVE (mapPreviewRun.ts), measured in a worker beside the checks, on the SAME files and the seed the game uses.
+        const athWorldTs = await this.actuator.readFile(this.workspaceId, 'src/game/world.ts').then((t) => (typeof t === 'string' ? t : null), () => null);
+        const athGameSeed = gameWorldSeed(athWorldTs, athSeed);
+        const [athRobotRun, athCard] = await Promise.all([
+          runRobotChecksInWorker(ath.files, athProfile, { seeds: [athGameSeed] }),
+          mapPreviewCardFor(ath.files, athPlanned.data, athGameSeed, { title: athSaved ? `Your saved map "${athSaved.name}", from above` : 'Your map, from above' }),
+        ]);
+        this.events?.emit({ type: 'map_preview', card: athCard.card, ts: Date.now() });
+        const athRobots = describeRobotRun(athRobotRun);
+        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${athPlanned.note}\n${athRobots}\n${athCard.note}\n\n${ath.instructions}${athLayers}`;
       }
 
       case 'generate_game_2d': {

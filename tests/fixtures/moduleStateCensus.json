@@ -33,6 +33,7 @@
   "src/server/lib/ownAudience.ts::lifetimePending": "flush buffer: emptied on every flush",
   "src/server/lib/persistenceHealth.ts::lastLoggedAt": "closed key set: store scope and operation names",
   "src/server/lib/spreadsheetFileStore.ts::memory": "bounded in code: evicts the oldest past MEMORY_CAP",
+  "src/server/lib/mapLibraryStore.ts::memory": "bounded in code: evicts the oldest past MEMORY_CAP (used only when there is no Firestore)",
   "src/server/routes/agentv3.ts::activeBuildOwner": "lifecycle: builds running on this instance (must never be evicted)",
   "src/server/routes/agentv3.ts::activeBuilds": "lifecycle: builds running on this instance (must never be evicted)",
   "src/server/routes/agentv3.ts::mcpCheckCooldown": "bounded in code: allowAfterCooldown caps it at COOLDOWN_MAX_ENTRIES; keys are verified workspaces",

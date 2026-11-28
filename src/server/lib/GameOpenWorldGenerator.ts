@@ -2189,7 +2189,7 @@ export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions, MinimapOptions } from './Game';
-import { createExploration, createOpenWorld, type Exploration, type ExploreOptions, type ExploreStatus, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
+import { createExploration, createOpenWorld, prepareOpenWorld, type Exploration, type ExploreOptions, type ExploreStatus, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
 import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
 import type { PlayerChoice } from './play/playerBody';
 

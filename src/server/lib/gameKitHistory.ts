@@ -145,7 +145,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8b44a60c73113e176f0659394b2f41109755dcc85b8e2b57c35efcb8b40b2471",
     "cedddcccbd26bf548aacbe302cc9721948a5fb439cccb72973b6bc6f14f29bf7",
     "467bdd3f5b5df3b14a095dfaa06d3d48d207e4d7571581e374fbc4305deb9919",
-    "b117c2f902d1eb08465c7bda9fccb0d48c1adc8a1b1d02b0630f531bd19a1d2c"
+    "b117c2f902d1eb08465c7bda9fccb0d48c1adc8a1b1d02b0630f531bd19a1d2c",
+    "7dbaf6581560f40505111333b46a7e631980568269398f06101d46c1816ed652"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",

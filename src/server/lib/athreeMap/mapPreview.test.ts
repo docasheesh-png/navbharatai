@@ -135,6 +135,15 @@ describe('the worker gives the same picture, within a budget, and never a stand-
     if (!r.ok) expect(r.error).toMatch(/did not finish within/);
   });
 
+  it('a map too big to measure in time says so at once (it does not burn the budget and time out)', async () => {
+    const { files } = filesFor('ek 3D game banao jiska map bahut bada ho');
+    const started = Date.now();
+    const r = await previewMapInWorker(files, { seed: 1, profile: 'open-world' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/^a map 500 km across is too big to measure from above in time \(pictures are drawn for maps up to 120 km\)$/);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
   it('a world that cannot be built is a failure with its reason', () => {
     const { files } = filesFor('battle royale game banao');
     const broken = { ...files, 'src/game/athree/index.ts': 'export const createAthreeMap = () => { throw new Error("broken world"); };' };

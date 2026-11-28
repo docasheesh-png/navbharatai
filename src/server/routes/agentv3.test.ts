@@ -2606,7 +2606,11 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      skip, only when the words ask to go inside the houses and the game's kit copy can; entered in preseededGolden. ✓.
     expect(SRC).toContain('enemiesAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
     expect(SRC).toContain('housesAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
-    expect(count).toBe(46);
+    //   1× one map layer changed by chat at turn start (buildPhases/mapLayerTurn.ts: MAP_PLAN / MAP_OPTIONS in
+    //      src/game/athree/config.ts) — the same skip, only when the words ask to change a layer of a game that has a plan;
+    //      entered in preseededGolden. ✓.
+    expect(SRC).toContain('mapLayerEditAtTurnStart({ skip: isImportTurn || !!projectModuleRef,');
+    expect(count).toBe(47);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

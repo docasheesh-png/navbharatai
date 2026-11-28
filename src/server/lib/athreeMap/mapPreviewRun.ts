@@ -21,6 +21,8 @@ import { parseMapPreview, type MapPreview } from '../../../lib/mapPreview';
 
 /** Cells across the picture. 128 x 128 = 16,384 samples: a 5 km map at 39 m a cell, a 100 km loop at 780 m. */
 export const MAP_PREVIEW_SIDE = 128;
+/** The widest map drawn (metres): its road regions are built in about three seconds; a wider one is said to be too big, not timed out. */
+export const MAP_PREVIEW_MAX_SIDE_METERS = 120_000;
 /** The most a build-time preview may take before it is stopped. */
 export const MAP_PREVIEW_BUDGET_MS = 10_000;
 
@@ -63,6 +65,9 @@ function samplePreview(index, opts) {
   var map = index.createAthreeMap({ seed: opts.seed, profile: opts.profile });
   var w = map.world;
   var S = w.sizeMeters, half = S / 2, cell = S / N;
+  // Measuring a map means building every road region its ground is carved by (12.5 km each): 64 for a 100 km map (about two
+  // seconds), 1,600 for a 500 km map (over twenty). Past the largest map that is measured in time, say so instead of trying.
+  if (S > opts.maxSideMeters) return { tooBig: true, sideMeters: S };
   var edge = w.boundary && w.boundary.kind !== 'none' && w.boundary.kind !== 'sea' && typeof w.boundary.limitAt === 'function' ? w.boundary : null;
   var cells = new Array(N * N);
   for (var j = 0; j < N; j++) {
@@ -139,7 +144,9 @@ function runPreview(compile, files, opts) {
   try {
     var index = loadEmitted(compile, files, 'index');
     if (typeof index.createAthreeMap !== 'function') return { ok: false, error: 'the emitted map has no entry point' };
-    return { ok: true, preview: samplePreview(index, opts) };
+    var p = samplePreview(index, opts);
+    if (p.tooBig) return { ok: false, error: 'a map ' + Math.round(p.sideMeters / 1000) + ' km across is too big to measure from above in time (pictures are drawn for maps up to ' + Math.round(opts.maxSideMeters / 1000) + ' km)' };
+    return { ok: true, preview: p };
   } catch (error) {
     return { ok: false, error: error && error.message ? error.message : String(error) };
   }
@@ -149,7 +156,7 @@ function runPreview(compile, files, opts) {
 export type MapPreviewRun = { ok: true; preview: MapPreview } | { ok: false; error: string };
 export interface MapPreviewOptions { seed: number; profile: string; size?: number }
 
-type RunFn = (compile: (s: string) => string, files: Readonly<Record<string, string>>, opts: { seed: number; profile: string; size: number }) => { ok: boolean; preview?: unknown; error?: string };
+type RunFn = (compile: (s: string) => string, files: Readonly<Record<string, string>>, opts: { seed: number; profile: string; size: number; maxSideMeters: number }) => { ok: boolean; preview?: unknown; error?: string };
 // Our own constant source (above and the shared loader), evaluated once — the same text the worker runs.
 // eslint-disable-next-line no-new-func
 const RUN = new Function(ATHREE_RUNNER_SOURCE + PREVIEW_SOURCE + '\nreturn runPreview;')() as RunFn;
@@ -165,7 +172,7 @@ function checked(raw: { ok: boolean; preview?: unknown; error?: string } | null 
 
 /** The preview, computed in this thread (tests). Never throws. */
 export function previewMapOnFiles(files: Readonly<Record<string, string>>, options: MapPreviewOptions): MapPreviewRun {
-  try { return checked(RUN(transpileAthreeModule, files, { seed: options.seed | 0, profile: options.profile, size: side(options.size) })); }
+  try { return checked(RUN(transpileAthreeModule, files, { seed: options.seed | 0, profile: options.profile, size: side(options.size), maxSideMeters: MAP_PREVIEW_MAX_SIDE_METERS })); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
 }
 
@@ -182,7 +189,7 @@ parentPort.postMessage(result);
 /** The preview, computed in a worker thread within a time budget. Never rejects. */
 export async function previewMapInWorker(files: Readonly<Record<string, string>>, options: MapPreviewOptions & { budgetMs?: number }): Promise<MapPreviewRun> {
   const raw = await runAthreeScriptInWorker<{ ok: boolean; preview?: unknown; error?: string }>(
-    WORKER_SOURCE, files, { opts: { seed: options.seed | 0, profile: options.profile, size: side(options.size) } }, options.budgetMs ?? MAP_PREVIEW_BUDGET_MS,
+    WORKER_SOURCE, files, { opts: { seed: options.seed | 0, profile: options.profile, size: side(options.size), maxSideMeters: MAP_PREVIEW_MAX_SIDE_METERS } }, options.budgetMs ?? MAP_PREVIEW_BUDGET_MS,
     (error) => ({ ok: false, error }),
     (v): v is { ok: boolean; preview?: unknown; error?: string } => !!v && typeof v === 'object' && typeof (v as { ok?: unknown }).ok === 'boolean',
   );

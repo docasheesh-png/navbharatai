@@ -6987,5 +6987,6 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
   `mapLayerEdit.test.ts` (each phrase changes only its layer and keeps the seed; non-requests change nothing; the turn), 
   `tests/theMapLibraryIsMineOnly.test.ts` (routes on a real server, IDOR, bounds, reuse through the real dispatcher), 
   `MapPreviewCard.test.tsx` (card states incl. unavailable, buttons wired, reducer + timeline replay).
+- **Preview size cap:** maps wider than 120 km get "Map preview unavailable: … too big to measure in time" at once (measuring builds every 12.5 km road region: 64 at 100 km ≈ 2 s, 1,600 at 500 km ≈ 22 s).
 - **Open / limits:** location words ("yahan") are read as the whole map's plan; colonies are drawn only once `world.colonies()` lands
   (the parallel colonies branch); a platform-only layer edit still runs the builder (it is told the change is done) — not a platform-done turn.

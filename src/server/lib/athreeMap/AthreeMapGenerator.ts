@@ -99,6 +99,34 @@ export function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// ⏱️ TIME-SLICED PLANNING (Q-3763). The town plan (roads, then colonies) is written ONCE, as a step generator: drainSteps runs it to its
+// end in one go (what heightAt does when it needs the plan now), stepUntil runs it until a clock deadline (what a frame does while the
+// game is still loading). Both walk the same code in the same order, so a plan made in slices is the plan made at once, to the bit.
+
+/** Milliseconds from a monotonic clock (performance.now where there is one). */
+export function nowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+/** A step generator: each yield is a point where the work may pause; its return value is the result. */
+export type Steps<T> = Generator<void, T, void>;
+
+/** Run a step generator to its end (the unsliced path) and return its result. */
+export function drainSteps<T>(steps: Steps<T>): T {
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Run a step generator until it ends (true) or the clock passes the deadline (false: call again to go on). */
+export function stepUntil(steps: Steps<unknown>, deadline: number): boolean {
+  for (;;) {
+    if (steps.next().done) return true;
+    if (nowMs() >= deadline) return false;
+  }
+}
 `;
 
 const CONFIG = `// Athree map — profiles and quality tiers.
@@ -222,13 +250,13 @@ const WORLD = `// Athree map — the world: height, normal, biome, wind and spaw
 // Technique: continental fractal noise shapes land and sea; ridged noise (1 - |2n - 1|, squared) raises mountains where the land is high;
 // a smooth island mask closes a bounded world into an island; a slowly drifting noise field is the shared wind. Own implementation.
 
-import { fieldNoise, mulberry32 } from './noise';
+import { fieldNoise, mulberry32, stepUntil, nowMs, type Steps } from './noise';
 import { PROFILE_DEFAULTS, SEA_BREAK_RATIO, SEA_CREST_MAX, type AthreeProfile, type AthreeWorldMode } from './config';
-import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
+import { riverNetworkFor, riverNetworkStepsFor, type River, type Lake, type WaterHit } from './rivers';
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
 import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, type Boundary, type BoundaryKind, type Pond } from './boundary';
-import { planColonies, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity } from './colonies';
+import { planColonySteps, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity, type ColonyInput } from './colonies';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
@@ -441,7 +469,27 @@ export interface AthreeWorld {
   colonies(): ColonyPlan;
   /** The colony plot at a place (grown by \`grow\` metres), or null: a building stands there, so keep a mover or a prop out. */
   colonyAt(x: number, z: number, grow?: number): ColonyPlot | null;
+  /** True when this world lays colonies (a density on a planned road network), answered WITHOUT planning them. */
+  hasColonies?(): boolean;
+  /**
+   * ⏱️ PLAN THE TOWN A SLICE AT A TIME (Q-3763). The town plan — the river network, the planned roads (or a bounded island's roads), the
+   * ponds and the colonies — used to be made all at once by the first heightAt (about half a second on the default 2.2 km map, over two
+   * seconds on a dense 5 km one: a frozen first frame). planStep(ms) plans for about that many milliseconds and returns true once the
+   * whole plan is made; createAthreeMap's update() calls it every frame until then (and draws the terrain only after). Reading heightAt,
+   * colonies() or roadNetwork() before it ends finishes the plan at once, from where the slices left it. Either way the town is the same,
+   * to the bit: one code path, run in pieces or in one go.
+   */
+  planStep?(budgetMs?: number): boolean;
+  /** True once the town plan is complete (nothing left that heightAt would stop to plan). */
+  planned?(): boolean;
 }
+
+/** How long one frame may spend planning the town while a map loads (planStep's default), in milliseconds. */
+export const PLAN_SLICE_MS = 4;
+// The colony plans made in this page, by everything that shapes them (a second world with the same options — a game that prepared its map
+// before its first frame, the map preview — plans nothing again). The plan is never changed after it is made: a world keeps the plots its
+// game took away in its own colonyGone.
+const colonyPlanCache = new Map<string, ColonyPlan>();
 
 const ISLAND_BASE = 0.45;
 const ISLAND_SWING = 0.3;
@@ -542,10 +590,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
 
   const withRivers = options.rivers !== false;
   let network: ReturnType<typeof riverNetworkFor> | null = null;
+  const riverKey = seed + '|' + mode + '|' + refSize + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers;
+  const riverOptions = () => ({ seed, period, radius: mode === 'bounded' ? radius : 0, baseHeight: baseInner, minSource: mode === 'bounded' ? 12 : 20, density: style.rivers });
   const net = (): ReturnType<typeof riverNetworkFor> => {
-    if (!network) {
-      network = riverNetworkFor(seed + '|' + mode + '|' + refSize + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers, { seed, period, radius: mode === 'bounded' ? radius : 0, baseHeight: baseInner, minSource: mode === 'bounded' ? 12 : 20, density: style.rivers });
-    }
+    if (!network) network = riverNetworkFor(riverKey, riverOptions());
     return network;
   };
   // The rivers are traced in the reference world; this is that network in the game's metres.
@@ -905,44 +953,55 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   function emptyColonies(): ColonyPlan {
     return { density: colonyDensity ?? 'normal', centre: { x: 0, z: 0 }, colonies: [], plots: [], trees: [], skipped: { water: 0, road: 0, steep: 0, outside: 0, access: 0, crowded: 0 } };
   }
-  function coloniesOf(): ColonyPlan {
-    if (colonyPlan) return colonyPlan;
-    if (!withColonies) { colonyPlan = emptyColonies(); return colonyPlan; }
+  // Everything a colony plan is made from (the land, its edge and sea floor, the rivers, the roads, the ponds, the density): two worlds with
+  // the same key plan the same town, so the second one takes the first one's plan (colonyPlanCache).
+  const colonyKey = JSON.stringify([seed, mode, sizeMeters, profile, withRivers, style, options.roadStyle ?? '', edgeKind, shelfOn, seaMaxDepth, pondCount, colonyDensity ?? 'normal']);
+  /** What planColonies reads from this world; null when the road network has no blocks. Never reads heightAt (no pads in it). */
+  function colonyInput(): ColonyInput | null {
+    const roads = roadsOf();
+    const blocks = roads.blocks();
+    if (!blocks.length) return null;
+    const home = roads.home();
+    const byId = new Map(home.roads.map((r) => [r.id, r]));
+    const landLine = 1.5 * Math.min(1, vs);
+    // River and lake geometry is moved to the copy of a loop world the town is in (a river can be listed one period away).
+    let bx = 0, bz = 0;
+    for (const b of blocks) { bx += b.centroid.x; bz += b.centroid.z; }
+    bx /= blocks.length; bz /= blocks.length;
+    const near = (v: number, c: number): number => (mode === 'loop' ? v + Math.round((c - v) / sizeMeters) * sizeMeters : v);
+    const bodies = withRivers ? rivers.bodies() : { rivers: [], lakes: [] };
+    const riverLines: Array<Array<{ x: number; z: number; width: number }>> = [];
+    for (const r of bodies.rivers) for (let i = 0; i < r.points.length - 1; i++) {
+      const a = r.points[i], b = r.points[i + 1];
+      const sx = near((a.x + b.x) / 2, bx) - (a.x + b.x) / 2, sz = near((a.z + b.z) / 2, bz) - (a.z + b.z) / 2;
+      riverLines.push([{ x: a.x + sx, z: a.z + sz, width: a.width }, { x: b.x + sx, z: b.z + sz, width: b.width }]);
+    }
+    const pools = bodies.lakes.map((l) => ({ x: near(l.x, bx), z: near(l.z, bz), radius: l.radius }))
+      .concat(pondsOf().map((p) => ({ x: p.x, z: p.z, radius: p.radius * 1.35 })));
+    return {
+      seed, density: colonyDensity ?? 'normal', blocks,
+      roadKind: (id) => byId.get(id)?.kind ?? 'street',
+      roadLine: (id) => { const r = byId.get(id); return r ? r.points.map((p) => ({ x: p.x, z: p.z, width: p.width })) : null; },
+      junctions: (home.junctions ?? []).map((j) => ({ x: j.x, z: j.z, radius: j.radius })),
+      rivers: riverLines, pools,
+      ground: naturalHeightAt,
+      wet: (x, z) => (withRivers && !!rivers.waterAt(x, z)) || !!pondAt(x, z),
+      onRoad: (x, z) => !!roads.roadAt(x, z),
+      inside: (x, z) => boundary.inside(x, z, 12),
+      landLine,
+    };
+  }
+  /** The colony plan being made in slices (planStep), or null. heightAt that needs the plan first finishes THESE steps. */
+  let colonySteps: Steps<ColonyPlan> | null = null;
+  /** One step of the colony plan (placingColonies only while it runs, so heightAt read between two frames is never the plan-less ground). */
+  function colonyStep(): IteratorResult<void, ColonyPlan> {
     placingColonies = true;
-    try {
-      const roads = roadsOf();
-      const blocks = roads.blocks();
-      if (!blocks.length) { colonyPlan = emptyColonies(); return colonyPlan; }
-      const home = roads.home();
-      const byId = new Map(home.roads.map((r) => [r.id, r]));
-      const landLine = 1.5 * Math.min(1, vs);
-      // River and lake geometry is moved to the copy of a loop world the town is in (a river can be listed one period away).
-      let bx = 0, bz = 0;
-      for (const b of blocks) { bx += b.centroid.x; bz += b.centroid.z; }
-      bx /= blocks.length; bz /= blocks.length;
-      const near = (v: number, c: number): number => (mode === 'loop' ? v + Math.round((c - v) / sizeMeters) * sizeMeters : v);
-      const bodies = withRivers ? rivers.bodies() : { rivers: [], lakes: [] };
-      const riverLines: Array<Array<{ x: number; z: number; width: number }>> = [];
-      for (const r of bodies.rivers) for (let i = 0; i < r.points.length - 1; i++) {
-        const a = r.points[i], b = r.points[i + 1];
-        const sx = near((a.x + b.x) / 2, bx) - (a.x + b.x) / 2, sz = near((a.z + b.z) / 2, bz) - (a.z + b.z) / 2;
-        riverLines.push([{ x: a.x + sx, z: a.z + sz, width: a.width }, { x: b.x + sx, z: b.z + sz, width: b.width }]);
-      }
-      const pools = bodies.lakes.map((l) => ({ x: near(l.x, bx), z: near(l.z, bz), radius: l.radius }))
-        .concat(pondsOf().map((p) => ({ x: p.x, z: p.z, radius: p.radius * 1.35 })));
-      colonyPlan = planColonies({
-        seed, density: colonyDensity ?? 'normal', blocks,
-        roadKind: (id) => byId.get(id)?.kind ?? 'street',
-        roadLine: (id) => { const r = byId.get(id); return r ? r.points.map((p) => ({ x: p.x, z: p.z, width: p.width })) : null; },
-        junctions: (home.junctions ?? []).map((j) => ({ x: j.x, z: j.z, radius: j.radius })),
-        rivers: riverLines, pools,
-        ground: naturalHeightAt,
-        wet: (x, z) => (withRivers && !!rivers.waterAt(x, z)) || !!pondAt(x, z),
-        onRoad: (x, z) => !!roads.roadAt(x, z),
-        inside: (x, z) => boundary.inside(x, z, 12),
-        landLine,
-      });
-    } finally { placingColonies = false; }
+    try { return colonySteps!.next(); } finally { placingColonies = false; }
+  }
+  /** The plan is made: index its plots, and take back those the game already levelled or laid a road over. */
+  function adoptColonies(plan: ColonyPlan): ColonyPlan {
+    colonyPlan = plan;
+    colonySteps = null;
     for (const p of colonyPlan.plots) {
       const reach = Math.hypot(p.width, p.depth) / 2 + COLONY_PAD_MARGIN + 1;
       for (let cx = Math.floor((p.x - reach) / COLONY_CELL); cx <= Math.floor((p.x + reach) / COLONY_CELL); cx++) {
@@ -954,6 +1013,35 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       if ((pads.length || gameRoads.length) && colonyHitByGame(p)) colonyGone.add(p.id);
     }
     return colonyPlan;
+  }
+  /** Start the colony plan: a cached one is taken at once (true), else its steps are set up (false). */
+  function startColonies(): boolean {
+    if (colonyPlan) return true;
+    if (!withColonies) { adoptColonies(emptyColonies()); return true; }
+    const cached = colonyPlanCache.get(colonyKey);
+    if (cached) { adoptColonies(cached); return true; }
+    if (!colonySteps) {
+      placingColonies = true;
+      let input: ColonyInput | null;
+      try { input = colonyInput(); } finally { placingColonies = false; }
+      if (!input) { adoptColonies(emptyColonies()); return true; }
+      colonySteps = planColonySteps(input);
+    }
+    return false;
+  }
+  function finishColonies(plan: ColonyPlan): ColonyPlan {
+    if (colonyPlanCache.size >= 8) colonyPlanCache.delete(colonyPlanCache.keys().next().value as string);
+    colonyPlanCache.set(colonyKey, plan);
+    return adoptColonies(plan);
+  }
+  function coloniesOf(): ColonyPlan {
+    if (colonyPlan) return colonyPlan;
+    if (startColonies()) return colonyPlan!;
+    // Needed now: the rest of the plan in one go (from where planStep left it).
+    for (;;) {
+      const r = colonyStep();
+      if (r.done) return finishColonies(r.value);
+    }
   }
   /** After a game edit: the plots it reaches are taken away, and their ground (no longer levelled) is noted as changed. */
   function colonyYield(x0: number, z0: number, x1: number, z1: number): void {
@@ -998,6 +1086,48 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       t += (p.y - t) * w;
     }
     return t;
+  }
+  // ⏱️ THE TOWN PLAN IN SLICES (Q-3763): the river network, the home roads, the ponds, then the colonies, each from where the last slice
+  // stopped. Every step is the code a lookup would run at once (drained there), so slicing never changes a single plot or road.
+  function* townPlanSteps(): Steps<void> {
+    if (withRivers && !network) {
+      const made = yield* riverNetworkStepsFor(riverKey, riverOptions());
+      if (!network) network = made;
+    }
+    if (withRoads) {
+      const rn = roadsOf();
+      if (rn.prepare) yield* rn.prepare();
+    }
+    if (pondCount && !pondList) { pondsOf(); yield; }
+    if (withColonies && !colonyPlan && !startColonies()) {
+      yield;
+      for (;;) {
+        if (colonyPlan) return; // a lookup needed the plan and finished it
+        const r = colonyStep();
+        if (r.done) { finishColonies(r.value); return; }
+        yield;
+      }
+    }
+  }
+  let townSteps: Steps<void> | null = null;
+  let townDone = false;
+  function planned(): boolean {
+    if (townDone) return true;
+    const roadsReady = !withRoads || !roadNet || (roadNet.ready ? roadNet.ready() : true);
+    townDone = (!withRivers || network !== null) && (!withRoads || roadNet !== null) && roadsReady && (!pondCount || pondList !== null) && (!withColonies || colonyPlan !== null);
+    if (townDone) townSteps = null;
+    return townDone;
+  }
+  function planStep(budgetMs = PLAN_SLICE_MS): boolean {
+    if (planned()) return true;
+    const ms = typeof budgetMs === 'number' && Number.isFinite(budgetMs) ? Math.min(1000, Math.max(0.25, budgetMs)) : PLAN_SLICE_MS;
+    if (!townSteps) townSteps = townPlanSteps();
+    if (stepUntil(townSteps, nowMs() + ms)) townSteps = null;
+    return planned();
+  }
+  function hasColonies(): boolean {
+    if (!withColonies || roadsOf().style() === null) return false;
+    return colonyPlan ? colonyPlan.plots.length > 0 : true;
   }
   let liveColonies: { key: string; plan: ColonyPlan } | null = null;
   /** The plan as it stands now: plots the game took away left out, heights read from heightAt (what is drawn). */
@@ -1275,7 +1405,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt };
+  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt, hasColonies, planStep, planned };
 }
 `;
 
@@ -1669,6 +1799,13 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '   * ground edits belong before the first update(), and what is drawn is never redrawn.',
     '   */',
     '  lateEdits?: boolean;',
+    '  /**',
+    '   * ⏱️ PLANNING IN SLICES (default true). While the town (roads, ponds, colonies) is not planned yet, update() spends about',
+    '   * planSliceMs (default PLAN_SLICE_MS, 4 ms) planning it and draws nothing else that frame, so a big town never freezes the first frame.',
+    '   * Read map.world.planned() to know when it is done (hold the player until then). false: the first ground lookup plans it all at once.',
+    '   */',
+    '  slicedPlanning?: boolean;',
+    '  planSliceMs?: number;',
   );
   if (has('plants')) add('  /** Set false to leave grass and trees out (a flat racing circuit that wants every triangle for the road). Default true. */', '  vegetation?: boolean;');
   if (has('sky')) add('  /** Set false to leave the sky out (you bring your own sky and lights). Default true. */', '  sky?: boolean;', '  /** Time of day, weather, day length and lights for the sky. */', '  skyOptions?: SkyOptions;');
@@ -1687,7 +1824,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     `  const chunks = options.three ? createChunkManager(options.three, world, quality, 3000, ${has('sea') || excludedModules.includes('sea') ? 'false' : 'true'}) : null;`,
     "  const boundaryWall = options.three && world.boundary.kind === 'wall' ? createBoundaryWall(options.three, world.boundary, (x, z) => world.heightAt(x, z)) : null;",
     '  if (chunks && boundaryWall) chunks.group.add(boundaryWall.group);',
-    "  const colonyMesh = options.three && world.colonies && world.colonies().plots.length ? createColonyMesh(options.three, world, quality) : null;",
+    // Asked WITHOUT planning the colonies (the plan is made in slices by update(), or by the first ground lookup).
+    "  const colonyMesh = options.three && world.hasColonies && world.hasColonies() ? createColonyMesh(options.three, world, quality) : null;",
     '  if (chunks && colonyMesh) chunks.group.add(colonyMesh.group);',
   );
   if (has('sea')) add('  const ocean = options.three ? createOcean(options.three, world, quality) : null;', '  if (chunks && ocean) chunks.group.add(ocean.mesh);');
@@ -1697,7 +1835,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('roads')) add('  const roadMesh = options.three && options.roads !== false ? createRoadMesh(options.three, world, quality) : null;', '  if (chunks && roadMesh) chunks.group.add(roadMesh.group);');
   const lit = ['sea', 'plants', 'rivers', 'roads'].some(has); // modules that take their light from the sky
   if (has('sky') && lit) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
-  add('  const lateEdits = options.lateEdits === true;', '  let editsSeen = 0;');
+  add('  const lateEdits = options.lateEdits === true;', '  let editsSeen = 0;', '  const slicedPlanning = options.slicedPlanning !== false;');
   add('  return {', '    world,', '    chunks,', '    boundaryWall,', '    colonyMesh,');
   if (has('sea')) add('    ocean,');
   if (has('plants')) add('    vegetation,');
@@ -1706,6 +1844,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('roads')) add('    roadMesh,');
   add(
     '    update: (cameraX, cameraZ, time, cameraY = 0) => {',
+    '      // ⏱️ The town is planned a slice a frame while the map loads (Q-3763); nothing that reads the ground is drawn until it is made.',
+    '      if (slicedPlanning && world.planned && world.planStep && !world.planned()) { world.planStep(options.planSliceMs); return null; }',
     '      // A late ground edit redraws what it touched when the game asked for lateEdits. Without it the terrain is not redrawn,',
     '      // but a plant never stays on a new road, pad or water: the ones standing there are taken away (admin 2026-11-23).',
     '      if (world.editCount && world.editsSince) {',

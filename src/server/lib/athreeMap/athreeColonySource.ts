@@ -37,7 +37,7 @@ export const COLONIES = `// Athree map — colonies: plots facing the roads in e
 // axes, point and segment distances) keep each plot off roads, junctions and water; union-find over shared colony streets groups blocks
 // into colonies; buildings are merged into one mesh per tile and streamed nearest first inside a triangle cap. Own implementation.
 
-import { mulberry32 } from './noise';
+import { mulberry32, drainSteps, type Steps } from './noise';
 import type { AthreeQuality } from './config';
 import type { Block } from './roads';
 import type { AthreeWorld } from './world';
@@ -304,6 +304,14 @@ function blockRuns(block: Block, roadKind: (road: number) => string): Run[] {
 
 /** The colonies of a town: plots, their kinds and pads, colonies, trees. PURE and deterministic per seed. */
 export function planColonies(input: ColonyInput): ColonyPlan {
+  return drainSteps(planColonySteps(input));
+}
+
+/**
+ * The same plan as planColonies, as steps (Q-3763): it pauses after every measured plot, civic plot and footpath, so a frame can plan a
+ * few milliseconds of the town and the next frame go on. Run to its end it returns exactly what planColonies returns (it IS planColonies).
+ */
+export function* planColonySteps(input: ColonyInput): Steps<ColonyPlan> {
   const rule = COLONY_DENSITY[input.density] ?? COLONY_DENSITY.normal;
   const density: ColonyDensity = COLONY_DENSITY[input.density] ? input.density : 'normal';
   const skipped: ColonySkips = { water: 0, road: 0, steep: 0, outside: 0, access: 0, crowded: 0 };
@@ -462,7 +470,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         const w = commercial ? wShop : wHome;
         if (s + w > L - 3) break;
         const ring = gateRing(w);
-        if (!commercial && r() > rule.fill) { s += w + COLONY_GAP; continue; }
+        if (!commercial && r() > rule.fill) { s += w + COLONY_GAP; yield; continue; }
         const dTarget = (rule.depth[0] + (rule.depth[1] - rule.depth[0]) * r()) * (commercial ? 0.85 : 1);
         let placed = false;
         let reason: keyof ColonySkips = 'crowded';
@@ -480,6 +488,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         }
         if (placed) s += w + COLONY_GAP;
         else { skipped[reason]++; s += Math.max(3, w / 2); }
+        yield;
       }
     }
   }
@@ -531,6 +540,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
     groups.delete(small[0]);
     groups.set(best[0], best[1].concat(small[1]));
     for (const [k, v] of [...groups.entries()]) if (countIn(v) === 0) groups.delete(k);
+    yield;
   }
 
   // ---- 3. every colony's park, school, temple, clinic and playground (a hospital nearest the centre, a market where shops are) -------
@@ -547,8 +557,9 @@ export function planColonies(input: ColonyInput): ColonyPlan {
   for (const block of blocks) {
     const runs = blockRuns(block, input.roadKind);
     for (const d of blockDrafts.get(block.id) ?? []) { const rr = runs.find((x) => x.key === d.run); if (rr) runOf.set(d, rr); }
+    yield;
   }
-  function convert(bl: number[], kind: ColonyKind, k: number, from: (d: Draft) => boolean, c: ColonyPoint, r: () => number): boolean {
+  function* convert(bl: number[], kind: ColonyKind, k: number, from: (d: Draft) => boolean, c: ColonyPoint, r: () => number): Steps<boolean> {
     const pool = plotsIn(bl).filter(from).sort((p, q) => Math.hypot(p.rect.cx - c.x, p.rect.cz - c.z) - Math.hypot(q.rect.cx - c.x, q.rect.cz - c.z));
     for (let want = k; want >= 1; want--) {
       for (const first of pool) {
@@ -573,6 +584,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
           rect = { ...first.rect, cx: fx + first.rect.nx * d / 2, cz: fz + first.rect.nz * d / 2, w, d };
         }
         const m = measure(rect, block, run, blockDrafts.get(first.block) ?? [], group);
+        yield;
         if (typeof m === 'string') continue;
         const merged: Draft = { ...first, rect, s1: group[group.length - 1].s1, y: m.y, access: m.access, kind, floors: civicFloors(kind, r), color: civicColor(kind) };
         const list = blockDrafts.get(first.block)!;
@@ -585,19 +597,22 @@ export function planColonies(input: ColonyInput): ColonyPlan {
   }
   const isHome = (d: Draft): boolean => COLONY_ZONE[d.kind] === 'residential';
   const notCivic = (d: Draft): boolean => COLONY_ZONE[d.kind] === 'residential' || COLONY_ZONE[d.kind] === 'commercial';
-  colonyBlocks.forEach((bl, ci) => {
+  for (let ci = 0; ci < colonyBlocks.length; ci++) {
+    const bl = colonyBlocks[ci];
     const r = mulberry32((input.seed * 31 + ci * 977 + 5) | 0);
     const c = colonyCentres[ci];
     const needs: Array<[ColonyKind, number]> = [...COLONY_NEEDS];
     if (ci === central) needs.splice(3, 0, ['hospital', 3]);
-    for (const [kind, k] of needs) if (!convert(bl, kind, k, isHome, c, r)) convert(bl, kind, 1, notCivic, c, r);
-    if (plotsIn(bl).filter((d) => d.kind === 'shop').length >= 6) convert(bl, 'market', 3, (d) => d.kind === 'shop', c, r);
-  });
+    for (const [kind, k] of needs) if (!(yield* convert(bl, kind, k, isHome, c, r))) yield* convert(bl, kind, 1, notCivic, c, r);
+    if (plotsIn(bl).filter((d) => d.kind === 'shop').length >= 6) yield* convert(bl, 'market', 3, (d) => d.kind === 'shop', c, r);
+    yield;
+  }
 
   // ---- 4. the final plots, colonies and trees ---------------------------------------------------------------------------------------
   const plots: ColonyPlot[] = [];
   const colonies: Colony[] = [];
-  colonyBlocks.forEach((bl, ci) => {
+  for (let ci = 0; ci < colonyBlocks.length; ci++) {
+    const bl = colonyBlocks[ci];
     const ids: number[] = [];
     const ordered = plotsIn(bl).slice().sort((p, q) => p.block - q.block || p.run - q.run || p.s0 - q.s0);
     for (const d of ordered) {
@@ -613,9 +628,11 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         entrance: { x: d.access.x, y: input.ground(d.access.x, d.access.z), z: d.access.z }, floors: kind === 'park' || kind === 'playground' ? 0 : d.floors,
         height, color: d.color, ring: ringAt(gate.x, gate.z),
       });
+      if ((id & 15) === 15) yield;
     }
     colonies.push({ id: ci, centre: colonyCentres[ci], blocks: bl.slice().sort((p, q) => p - q), plots: ids, ring: ringAt(colonyCentres[ci].x, colonyCentres[ci].z) });
-  });
+    yield;
+  }
 
   const trees: ColonyTree[] = [];
   const plotGrid = new Grid<ColonyPlot>();
@@ -644,6 +661,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         if (gy < input.landLine + 0.3) continue;
         trees.push({ x, y: gy, z, scale: 0.8 + 0.5 * r(), park: false });
       }
+      yield;
     }
   }
   for (const p of plots) {

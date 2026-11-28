@@ -87,6 +87,21 @@ describe('every pixel is the world\'s own answer', () => {
     });
   }
 
+  it('🏘️ colonies (#4627): every red plot cell holds a plot centre of world.colonies(), on dry land', () => {
+    const { files, plan } = filesFor('5 km ka open world game, ghani basti, smart city', 21);
+    expect(plan.density).toBe('dense');
+    const r = previewMapOnFiles(files, { seed: 21, profile: 'open-world', size: 128 });
+    expect(r.ok, r.ok ? '' : r.error).toBe(true);
+    if (!r.ok) return;
+    const w = (loadEmittedAthree(files) as any).createAthreeMap({ seed: 21, profile: 'open-world' }).world;
+    const N = r.preview.width, cell = w.sizeMeters / N, half = w.sizeMeters / 2;
+    const plotCells = new Set<number>((w.colonies().plots as Array<{ x: number; z: number }>).map((p) => Math.floor((p.z + half) / cell) * N + Math.floor((p.x + half) / cell)));
+    const red = [...r.preview.cells].map((c, i) => (c === MAP_CELL.plot ? i : -1)).filter((i) => i >= 0);
+    expect(red.length).toBeGreaterThan(0);
+    expect(r.preview.counts.plots).toBe(red.length);
+    for (const i of red) expect(plotCells.has(i), `plot cell ${i}`).toBe(true);
+  });
+
   it('a bounded map with a mountain edge draws the edge where the world puts its limit', () => {
     const { files } = filesFor('pahaadon se ghira 4 km ka island shooter', 3);
     const r = previewMapOnFiles(files, { seed: 3, profile: 'open-world', size: 64 });
@@ -109,12 +124,13 @@ describe('every pixel is the world\'s own answer', () => {
   });
 });
 
-describe('🪷 ponds on a loop world (found by the preview): the world no longer dies of recursion', () => {
+describe('🪷 ponds on a loop world (found by the preview, fixed on main by #4627): the world does not die of recursion', () => {
   it('"3 talaab" on a 5 km loop: heightAt, the roads and the ponds all answer', () => {
     const { files } = filesFor('pahaadon se ghira 5 km ka shooter jisme 3 talaab ho', 1);
     const w = (loadEmittedAthree(files) as any).createAthreeMap({ seed: 1, profile: 'open-world' }).world;
     expect(() => { for (let i = 0; i < 50; i++) w.heightAt(i * 97 - 2400, i * 53 - 2400); }).not.toThrow();
-    expect(w.ponds().length).toBe(3);
+    expect(w.ponds().length).toBeLessThanOrEqual(3); // as many as found flat, dry ground away from roads (the world says how many in the console)
+    for (const p of w.ponds()) expect(w.waterAt(p.x, p.z)).not.toBeNull();
     expect(w.roadNetwork().home().roads.length).toBeGreaterThan(0);
   });
 });

@@ -43,7 +43,13 @@ describe('real prompts choose the map through the one planner', () => {
     expect(text).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
     expect(text).toMatch(/water: 2 ponds — APPLIED/);
     expect(text).toMatch(/pass skyOptions \{ hours: 22 \}/);
-    expect(text).toMatch(/density .*do not claim it/);
+    // Since the colonies (wave 2) the world reads the density and lays the plots: both are APPLIED, and the build-time robot check now
+    // measures real lots. Before the roads-then-ponds order was fixed this very map (ponds on a planned network) overflowed the stack
+    // in every check ("could not run"); it now runs and passes.
+    expect(text).toMatch(/density: normal — APPLIED/);
+    expect(text).toMatch(/colonies: plots facing every road[^\n]*— APPLIED/);
+    expect(text).toMatch(/lots-clear: passed — All \d+ lots are on dry land and off the roads/);
+    expect(text).not.toMatch(/could not run/);
   });
   it('"athree map par battle royale": the 8 km island, sea all round, and the robot checks ran and passed on it', async () => {
     const r = await run('athree map par ek battle royale game banao');

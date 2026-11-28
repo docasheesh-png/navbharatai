@@ -23,6 +23,7 @@ import { ROADS, ROADMESH } from './athreeRoadSource';
 import { VEHICLES } from './athreeVehicleSource';
 import { BUDGET } from './athreeBudgetSource';
 import { BOUNDARY, MOVERS } from './athreeBoundarySource';
+import { COLONIES } from './athreeColonySource';
 
 export interface AthreeMapResult {
   files: Record<string, string>;
@@ -135,6 +136,10 @@ export interface MapOptions {
   boundary?: 'sea' | 'mountains' | 'canyon' | 'forest-river' | 'dunes' | 'wall';
   /** Ponds and the sea shelf (see AthreeWorldOptions.water). */
   water?: { ponds?: number; shelf?: boolean; seaMaxDepth?: number };
+  /** How crowded the colonies between the roads are (see AthreeWorldOptions.density); given, the blocks are filled with plots. */
+  density?: 'sparse' | 'normal' | 'dense';
+  /** Colonies on (true) or off (false) whatever the density (see AthreeWorldOptions.colonies). */
+  colonies?: boolean;
 }
 
 export interface QualityTier {
@@ -223,6 +228,7 @@ import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers'
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
 import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, type Boundary, type BoundaryKind, type Pond } from './boundary';
+import { planColonies, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity } from './colonies';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
@@ -271,6 +277,15 @@ export interface AthreeWorldOptions {
    * seaMaxDepth metres (5 .. 50, default 50).
    */
   water?: { ponds?: number; shelf?: boolean; seaMaxDepth?: number };
+  /**
+   * 🏘️ COLONIES (admin 2026-11-27, wave 2): how crowded the town between the roads is — 'sparse' (a village: big plots, low houses, open
+   * land between), 'normal' or 'dense' (small plots, tall flats near the centre). Given (the map planner always gives it), every block of
+   * the planned road network is filled with plots that face its roads: shops on main roads, homes inside, a park, school, temple, clinic
+   * and playground per colony, each plot levelled into heightAt. world.colonies() lists them; colonies.ts draws them.
+   */
+  density?: ColonyDensity;
+  /** true: colonies even without a density (normal); false: never, whatever the density. Default: on exactly when density is given. */
+  colonies?: boolean;
 }
 
 /** The knobs that make one map a desert, another a jungle, another an archipelago. All neutral at 0 (relief and rivers at 1). */
@@ -417,6 +432,15 @@ export interface AthreeWorld {
   readonly boundary: Boundary;
   /** Every pond (talab) carved into the ground. Each is also a lake in waterBodies() and answers waterAt(). */
   ponds(): Pond[];
+  /**
+   * 🏘️ The colonies between the roads (pure data; empty unless density or colonies was given and the map has a planned road network):
+   * every plot with its building kind, zone, corners, levelled height, the road it faces, its gate and entrance; the colonies (each with
+   * a park, school, temple, clinic and playground); the trees along the footpaths and in the parks; and how many places were measured
+   * and refused (water, road, steep, outside, no access, crowded). A plot the game later levels or lays a road over is taken away.
+   */
+  colonies(): ColonyPlan;
+  /** The colony plot at a place (grown by \`grow\` metres), or null: a building stands there, so keep a mover or a prop out. */
+  colonyAt(x: number, z: number, grow?: number): ColonyPlot | null;
 }
 
 const ISLAND_BASE = 0.45;
@@ -611,11 +635,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + (options.roadStyle ?? '') + '|' + landLine, {
         seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile, roadStyle: options.roadStyle, landLine,
         terrain: terrainNoRoads,
-        // 🪷 The roads read the rivers and lakes WITHOUT the ponds. Ponds are placed after the roads, away from them (pondsOf's busy
-        // check), so a road never needs to avoid one — and reading them here was a cycle on a loop world: a region of roads built
-        // while the ponds were being placed asked for the ponds again (waterBodies → pondsOf → placePonds → ground → roads → …), and
-        // the world died with "Maximum call stack size exceeded" (found by the map preview, 2026-11-27: "3 talaab" on a 5 km loop).
-        // It also keeps the network true to its cache key, which never named the pond count.
+        // 🔁 ROADS FIRST, PONDS AFTER (found 2026-11-27 building the colonies: a planned-network map with ponds overflowed the stack on its
+        // first heightAt). The ponds are placed AWAY from the roads (pondsOf reads roadAt and the road-carved ground), so the roads may
+        // not read the ponds back: they see the rivers and lakes only. Reading waterAt / waterBodies here (both include the ponds) made
+        // roads → ponds → road-carved ground → roads, a loop with no end. tests/pondsAndPlannedRoadsBuild.test.ts holds the order.
         water: (x, z) => { const w = withRivers ? rivers.waterAt(x, z) : null; return w ? { surface: w.surface, kind: w.kind } : null; },
         bodies: () => (withRivers ? rivers.bodies() : { rivers: [], lakes: [] }),
       });
@@ -791,6 +814,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       const z0 = Math.floor((Math.min(pts[i].z, pts[i + 1].z) - r) / ROAD_CELL), z1 = Math.floor((Math.max(pts[i].z, pts[i + 1].z) + r) / ROAD_CELL);
       for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) { const key = cx + ',' + cz; const list = roadCells.get(key) || []; list.push([id, i]); roadCells.set(key, list); }
     }
+    colonyYield(ex0 - reachOut - 2, ez0 - reachOut - 2, ex1 + reachOut + 2, ez1 + reachOut + 2);
     return pts;
   }
   /** The nearest game road at a place: its surface height there, how far from its centre line, and its half width. */
@@ -835,6 +859,168 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return null;
   }
 
+  // 🏘️ COLONIES (admin 2026-11-27, wave 2): plots facing the roads inside every block of the planned network (colonies.ts plans them,
+  // PURE, from this world's own ground, water, roads and boundary). Each plot is one levelled pad that heightAt answers below, so the
+  // drawn terrain, the colliders and every mover stand on the same ground under a house. Planned once, on first use, from the ground
+  // WITHOUT the pads (naturalHeightAt): planning never reads heightAt, so it cannot read itself.
+  const colonyDensity: ColonyDensity | null = COLONY_DENSITIES.includes(options.density as ColonyDensity) ? (options.density as ColonyDensity) : null;
+  if (options.density !== undefined && colonyDensity === null) console.warn('[map] density "' + String(options.density) + '" is not one of ' + COLONY_DENSITIES.join(', ') + '; no colonies were laid for it.');
+  const withColonies = withRoads && (options.colonies === true || (options.colonies !== false && colonyDensity !== null));
+  let colonyPlan: ColonyPlan | null = null;
+  let placingColonies = false;
+  /** Plots the game took back (it levelled ground or laid a road over them after they were planned). */
+  const colonyGone = new Set<number>();
+  const COLONY_CELL = 64;
+  const colonyCells = new Map<string, number[]>();
+  function plotLocal(p: ColonyPlot, x: number, z: number): number {
+    // How far outside the plot's rectangle a point is (negative inside), in the plot's own frame.
+    const ux = -p.facing.z, uz = p.facing.x;
+    const dx = x - p.x, dz = z - p.z;
+    const du = Math.abs(dx * ux + dz * uz) - p.width / 2, dv = Math.abs(dx * p.facing.x + dz * p.facing.z) - p.depth / 2;
+    // Outside, the TRUE distance (round at the corners): two plots kept 1.6 m apart never reach into each other's pad over 1.5 m,
+    // whatever their angle. A square margin did, at the corner of a plot turned against its neighbour.
+    return du <= 0 && dv <= 0 ? Math.max(du, dv) : Math.hypot(Math.max(du, 0), Math.max(dv, 0));
+  }
+  /** True when ground the game levelled, or a road it laid, reaches the plot (its pad or its margin). */
+  function colonyHitByGame(p: ColonyPlot): boolean {
+    const reach = Math.hypot(p.width, p.depth) / 2 + COLONY_PAD_MARGIN;
+    const probe = p.corners.concat([{ x: p.x, z: p.z }]);
+    for (const d of pads) {
+      if (Math.abs(p.x - d.x) > d.hx + d.margin + reach || Math.abs(p.z - d.z) > d.hz + d.margin + reach) continue;
+      // Separating axes: the pad's square grown by its margin (and the plot's) against the plot's rectangle.
+      const ex = d.hx + d.margin + COLONY_PAD_MARGIN, ez = d.hz + d.margin + COLONY_PAD_MARGIN;
+      const ux = -p.facing.z, uz = p.facing.x, nx = p.facing.x, nz = p.facing.z, hw = p.width / 2, hd = p.depth / 2;
+      const dx = d.x - p.x, dz = d.z - p.z;
+      const apart = Math.abs(dx) > ex + Math.abs(ux) * hw + Math.abs(nx) * hd
+        || Math.abs(dz) > ez + Math.abs(uz) * hw + Math.abs(nz) * hd
+        || Math.abs(dx * ux + dz * uz) > hw + Math.abs(ux) * ex + Math.abs(uz) * ez
+        || Math.abs(dx * nx + dz * nz) > hd + Math.abs(nx) * ex + Math.abs(nz) * ez;
+      if (!apart) return true;
+    }
+    if (gameRoads.length) {
+      for (const c of probe) { const r = gameRoadNear(c.x, c.z); if (r && r.d < r.half + ROAD_SHOULDER + COLONY_PAD_MARGIN) return true; }
+    }
+    return false;
+  }
+  function emptyColonies(): ColonyPlan {
+    return { density: colonyDensity ?? 'normal', centre: { x: 0, z: 0 }, colonies: [], plots: [], trees: [], skipped: { water: 0, road: 0, steep: 0, outside: 0, access: 0, crowded: 0 } };
+  }
+  function coloniesOf(): ColonyPlan {
+    if (colonyPlan) return colonyPlan;
+    if (!withColonies) { colonyPlan = emptyColonies(); return colonyPlan; }
+    placingColonies = true;
+    try {
+      const roads = roadsOf();
+      const blocks = roads.blocks();
+      if (!blocks.length) { colonyPlan = emptyColonies(); return colonyPlan; }
+      const home = roads.home();
+      const byId = new Map(home.roads.map((r) => [r.id, r]));
+      const landLine = 1.5 * Math.min(1, vs);
+      // River and lake geometry is moved to the copy of a loop world the town is in (a river can be listed one period away).
+      let bx = 0, bz = 0;
+      for (const b of blocks) { bx += b.centroid.x; bz += b.centroid.z; }
+      bx /= blocks.length; bz /= blocks.length;
+      const near = (v: number, c: number): number => (mode === 'loop' ? v + Math.round((c - v) / sizeMeters) * sizeMeters : v);
+      const bodies = withRivers ? rivers.bodies() : { rivers: [], lakes: [] };
+      const riverLines: Array<Array<{ x: number; z: number; width: number }>> = [];
+      for (const r of bodies.rivers) for (let i = 0; i < r.points.length - 1; i++) {
+        const a = r.points[i], b = r.points[i + 1];
+        const sx = near((a.x + b.x) / 2, bx) - (a.x + b.x) / 2, sz = near((a.z + b.z) / 2, bz) - (a.z + b.z) / 2;
+        riverLines.push([{ x: a.x + sx, z: a.z + sz, width: a.width }, { x: b.x + sx, z: b.z + sz, width: b.width }]);
+      }
+      const pools = bodies.lakes.map((l) => ({ x: near(l.x, bx), z: near(l.z, bz), radius: l.radius }))
+        .concat(pondsOf().map((p) => ({ x: p.x, z: p.z, radius: p.radius * 1.35 })));
+      colonyPlan = planColonies({
+        seed, density: colonyDensity ?? 'normal', blocks,
+        roadKind: (id) => byId.get(id)?.kind ?? 'street',
+        roadLine: (id) => { const r = byId.get(id); return r ? r.points.map((p) => ({ x: p.x, z: p.z, width: p.width })) : null; },
+        junctions: (home.junctions ?? []).map((j) => ({ x: j.x, z: j.z, radius: j.radius })),
+        rivers: riverLines, pools,
+        ground: naturalHeightAt,
+        wet: (x, z) => (withRivers && !!rivers.waterAt(x, z)) || !!pondAt(x, z),
+        onRoad: (x, z) => !!roads.roadAt(x, z),
+        inside: (x, z) => boundary.inside(x, z, 12),
+        landLine,
+      });
+    } finally { placingColonies = false; }
+    for (const p of colonyPlan.plots) {
+      const reach = Math.hypot(p.width, p.depth) / 2 + COLONY_PAD_MARGIN + 1;
+      for (let cx = Math.floor((p.x - reach) / COLONY_CELL); cx <= Math.floor((p.x + reach) / COLONY_CELL); cx++) {
+        for (let cz = Math.floor((p.z - reach) / COLONY_CELL); cz <= Math.floor((p.z + reach) / COLONY_CELL); cz++) {
+          const key = cx + ',' + cz; const l = colonyCells.get(key); if (l) l.push(p.id); else colonyCells.set(key, [p.id]);
+        }
+      }
+      // Ground the game levelled, or a road it laid, before the colonies were first read takes those plots.
+      if ((pads.length || gameRoads.length) && colonyHitByGame(p)) colonyGone.add(p.id);
+    }
+    return colonyPlan;
+  }
+  /** After a game edit: the plots it reaches are taken away, and their ground (no longer levelled) is noted as changed. */
+  function colonyYield(x0: number, z0: number, x1: number, z1: number): void {
+    if (!colonyPlan || !colonyPlan.plots.length) return;
+    const seen = new Set<number>();
+    for (let cx = Math.floor(x0 / COLONY_CELL); cx <= Math.floor(x1 / COLONY_CELL); cx++) {
+      for (let cz = Math.floor(z0 / COLONY_CELL); cz <= Math.floor(z1 / COLONY_CELL); cz++) {
+        for (const id of colonyCells.get(cx + ',' + cz) ?? []) {
+          if (seen.has(id) || colonyGone.has(id)) continue;
+          seen.add(id);
+          const p = colonyPlan.plots[id];
+          if (!colonyHitByGame(p)) continue;
+          colonyGone.add(id);
+          const r = Math.hypot(p.width, p.depth) / 2 + COLONY_PAD_MARGIN;
+          noteEdit(p.x - r, p.z - r, p.x + r, p.z + r);
+        }
+      }
+    }
+  }
+  function colonyAt(x: number, z: number, grow = 0): ColonyPlot | null {
+    if (!withColonies || placingColonies || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    const plan = coloniesOf();
+    const g = Math.max(0, Number.isFinite(grow) ? grow : 0);
+    for (const id of colonyCells.get(Math.floor(x / COLONY_CELL) + ',' + Math.floor(z / COLONY_CELL)) ?? []) {
+      if (colonyGone.has(id)) continue;
+      const p = plan.plots[id];
+      if (plotLocal(p, x, z) <= g) return p;
+    }
+    return null;
+  }
+  function colonyHeight(x: number, z: number, t: number): number {
+    const plan = coloniesOf();
+    if (!plan.plots.length) return t;
+    const ids = colonyCells.get(Math.floor(x / COLONY_CELL) + ',' + Math.floor(z / COLONY_CELL));
+    if (!ids) return t;
+    for (const id of ids) {
+      if (colonyGone.has(id)) continue;
+      const p = plan.plots[id];
+      const d = plotLocal(p, x, z);
+      if (d >= COLONY_PAD_MARGIN) continue;
+      const w = d <= 0 ? 1 : 1 - smoothstep(0, COLONY_PAD_MARGIN, d);
+      t += (p.y - t) * w;
+    }
+    return t;
+  }
+  let liveColonies: { key: string; plan: ColonyPlan } | null = null;
+  /** The plan as it stands now: plots the game took away left out, heights read from heightAt (what is drawn). */
+  function colonies(): ColonyPlan {
+    const plan = coloniesOf();
+    const key = colonyGone.size + '|' + pads.length + '|' + gameRoads.length;
+    if (liveColonies && liveColonies.key === key) return liveColonies.plan;
+    const plots = plan.plots.filter((p) => !colonyGone.has(p.id)).map((p) => ({ ...p, corners: p.corners.map((c) => ({ ...c })), facing: { ...p.facing }, gate: { ...p.gate }, entrance: { ...p.entrance, y: heightAt(p.entrance.x, p.entrance.z) } }));
+    const kept = new Set(plots.map((p) => p.id));
+    const gameAt = (x: number, z: number): boolean => {
+      for (const d of pads) if (Math.abs(x - d.x) <= d.hx + d.margin && Math.abs(z - d.z) <= d.hz + d.margin) return true;
+      const r = gameRoads.length ? gameRoadNear(x, z) : null;
+      return !!r && r.d < r.half + ROAD_SHOULDER;
+    };
+    const trees = plan.trees.filter((t) => !gameAt(t.x, t.z) && !(t.park && !colonyAt(t.x, t.z))).map((t) => ({ ...t, y: heightAt(t.x, t.z) }));
+    const out: ColonyPlan = {
+      density: plan.density, centre: { ...plan.centre }, skipped: { ...plan.skipped }, plots, trees,
+      colonies: plan.colonies.map((c) => ({ ...c, centre: { ...c.centre }, blocks: c.blocks.slice(), plots: c.plots.filter((id) => kept.has(id)) })).filter((c) => c.plots.length > 0),
+    };
+    liveColonies = { key, plan: out };
+    return out;
+  }
+
   function heightAt(x: number, z: number): number {
     let t = naturalHeightAt(x, z);
     if (pondCount && !placingPonds) for (const p of pondsOf()) if (Math.abs(x - p.x) < p.radius * 1.35 && Math.abs(z - p.z) < p.radius * 1.35) t = pondHeight(p, x, z, t);
@@ -851,6 +1037,8 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
         if (mw > 0 && t > 2) t += mw * (mountainLine * 1.6 * vs) * (0.65 + 0.35 * fieldNoise(x, z, seed + 37, 3, 220, 0));
       }
     }
+    // A colony plot's pad comes before the game's own levelled ground, so a place the game levels over a plot always wins.
+    if (withColonies && !placingColonies) t = colonyHeight(x, z, t);
     const padIds = placeIds(padCells, padsEverywhere, x, z);
     const padCount = padIds ? padIds.length : pads.length;
     for (let k = 0; k < padCount; k++) {
@@ -888,6 +1076,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     // Reaches as far as its margin eases (heightAt) or clearAt's 2 m, whichever is wider, and a metre more.
     const reach = Math.max(pad.margin, 2) + 1;
     indexPlace(padCells, padsEverywhere, pads.length - 1, x, z, pad.hx + reach, pad.hz + reach);
+    colonyYield(x - pad.hx - pad.margin - 2, z - pad.hz - pad.margin - 2, x + pad.hx + pad.margin + 2, z + pad.hz + pad.margin + 2);
     return y;
   }
   function clearAt(x: number, z: number): boolean {
@@ -895,6 +1084,8 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const count = ids ? ids.length : pads.length;
     for (let k = 0; k < count; k++) { const p = pads[ids ? ids[k] : k]; if (Math.abs(x - p.x) <= p.hx + 2 && Math.abs(z - p.z) <= p.hz + 2) return true; }
     if (gameRoads.length) { const r = gameRoadNear(x, z); if (r && r.d <= r.half + 4) return true; }
+    // A colony plot is built on: nothing grows through a house.
+    if (withColonies && colonyAt(x, z, 1)) return true;
     return false;
   }
 
@@ -1049,6 +1240,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       }
       if (y < minLand || y > maxLand) continue;
       if (waterAt(x, z)) continue; // never spawn in a river or a lake
+      if (withColonies && colonyAt(x, z, 3)) continue; // never spawn inside a house's plot
       if (kind === 'plane') {
         if (stripAt(x, z)) out.push({ x, y, z, heading: 0, strip: 600 });
         continue;
@@ -1083,7 +1275,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice() };
+  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt };
 }
 `;
 
@@ -1386,14 +1578,14 @@ export const ATHREE_OPTIONAL_MODULES: Record<string, { files: string[]; what: st
 };
 
 /** The modules every build gets. */
-export const ATHREE_CORE_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'rivers', 'dunes', 'roads', 'boundary', 'movers', 'index'];
+export const ATHREE_CORE_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'rivers', 'dunes', 'roads', 'boundary', 'movers', 'colonies', 'index'];
 
 /** Every file this recipe can write. */
-export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'roads', 'roadmesh', 'vehicles', 'budget', 'boundary', 'movers', 'index'];
+export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'roads', 'roadmesh', 'vehicles', 'budget', 'boundary', 'movers', 'colonies', 'index'];
 
 const SOURCES: Record<string, string> = {
   noise: NOISE, config: CONFIG, world: WORLD, collider: COLLIDER, chunks: CHUNKS, water: WATER, ocean: OCEAN, vegetation: VEGETATION, plants: PLANTS,
-  rivers: RIVERS, riverwater: RIVERWATER, dunes: DUNES, sky: SKY, roads: ROADS, roadmesh: ROADMESH, vehicles: VEHICLES, budget: BUDGET, boundary: BOUNDARY, movers: MOVERS,
+  rivers: RIVERS, riverwater: RIVERWATER, dunes: DUNES, sky: SKY, roads: ROADS, roadmesh: ROADMESH, vehicles: VEHICLES, budget: BUDGET, boundary: BOUNDARY, movers: MOVERS, colonies: COLONIES,
 };
 
 /** The optional modules named in a request: unknown names are reported back, never ignored silently. Undefined means all of them. */
@@ -1419,6 +1611,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "import { heightfieldFor, type HeightfieldData } from './collider';",
     "import { MAP_OPTIONS, type AthreeQuality } from './config';",
     "import { createBoundaryWall, type BoundaryWall } from './boundary';",
+    "import { createColonyMesh, type ColonyMesh } from './colonies';",
   );
   if (has('sea')) add("import { createOcean, type Ocean } from './ocean';");
   if (has('plants')) add("import { createVegetation, type Vegetation } from './plants';");
@@ -1437,6 +1630,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "export * from './roads';",
     "export * from './boundary';",
     "export * from './movers';",
+    "export * from './colonies';",
   );
   if (has('sea')) add("export * from './water';", "export { createOcean, oceanVertexShader, oceanFragmentShader, crestReach, shoreCalm, type Ocean } from './ocean';");
   if (has('plants')) add("export * from './vegetation';", "export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';");
@@ -1446,7 +1640,9 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('vehicles')) add("export * from './vehicles';");
   if (everything) add("export * from './budget';");
   add('', 'export interface AthreeMap {', '  readonly world: AthreeWorld;', '  /** Terrain streaming; present when three.js was given. */', '  readonly chunks: ChunkManager | null;',
-    "  /** The fort wall of a 'wall' boundary, drawn round the camera; null for any other edge or without three.js. */", '  readonly boundaryWall: BoundaryWall | null;');
+    "  /** The fort wall of a 'wall' boundary, drawn round the camera; null for any other edge or without three.js. */", '  readonly boundaryWall: BoundaryWall | null;',
+    '  /** The colonies between the roads (houses, flats, shops, a school, temple, clinic, parks, trees), streamed round the camera; null without three.js or without colonies (MAP_OPTIONS density, or colonies: true). */',
+    '  readonly colonyMesh: ColonyMesh | null;');
   if (has('sea')) add('  /** The sea: waves, shore foam, and what a boat floats on. Present when three.js was given. */', '  readonly ocean: Ocean | null;');
   if (has('plants')) add('  /** Grass and trees: wind-bent, streamed in tiles. Present when three.js was given (and vegetation was not switched off). */', '  readonly vegetation: Vegetation | null;');
   if (has('rivers')) add('  /** Rivers and lakes on screen, and what a boat on them floats on. Present when three.js was given. */', '  readonly riverWater: RiverWater | null;');
@@ -1491,6 +1687,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     `  const chunks = options.three ? createChunkManager(options.three, world, quality, 3000, ${has('sea') || excludedModules.includes('sea') ? 'false' : 'true'}) : null;`,
     "  const boundaryWall = options.three && world.boundary.kind === 'wall' ? createBoundaryWall(options.three, world.boundary, (x, z) => world.heightAt(x, z)) : null;",
     '  if (chunks && boundaryWall) chunks.group.add(boundaryWall.group);',
+    "  const colonyMesh = options.three && world.colonies && world.colonies().plots.length ? createColonyMesh(options.three, world, quality) : null;",
+    '  if (chunks && colonyMesh) chunks.group.add(colonyMesh.group);',
   );
   if (has('sea')) add('  const ocean = options.three ? createOcean(options.three, world, quality) : null;', '  if (chunks && ocean) chunks.group.add(ocean.mesh);');
   if (has('plants')) add('  const vegetation = options.three && options.vegetation !== false ? createVegetation(options.three, world, quality) : null;', '  if (chunks && vegetation) chunks.group.add(vegetation.group);');
@@ -1500,7 +1698,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   const lit = ['sea', 'plants', 'rivers', 'roads'].some(has); // modules that take their light from the sky
   if (has('sky') && lit) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
   add('  const lateEdits = options.lateEdits === true;', '  let editsSeen = 0;');
-  add('  return {', '    world,', '    chunks,', '    boundaryWall,');
+  add('  return {', '    world,', '    chunks,', '    boundaryWall,', '    colonyMesh,');
   if (has('sea')) add('    ocean,');
   if (has('plants')) add('    vegetation,');
   if (has('rivers')) add('    riverWater,');
@@ -1524,6 +1722,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '      }',
     '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;',
     '      if (boundaryWall && chunks) boundaryWall.update(cameraX, cameraZ, chunks.origin);',
+    '      if (colonyMesh && chunks) colonyMesh.update(cameraX, cameraZ, chunks.origin);',
   );
   if (has('sky')) {
     add('      if (sky && chunks) {', '        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);');
@@ -1539,7 +1738,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
   if (has('plants')) add('      if (vegetation && chunks) vegetation.update(cameraX, cameraZ, time, chunks.origin);');
   if (has('rivers')) add('      if (riverWater && chunks) riverWater.update(cameraX, cameraZ, time, chunks.origin);');
   if (has('roads')) add('      if (roadMesh && chunks) roadMesh.update(cameraX, cameraZ, chunks.origin);');
-  const disposers = ['chunks?.dispose();', 'boundaryWall?.dispose();'];
+  const disposers = ['chunks?.dispose();', 'boundaryWall?.dispose();', 'colonyMesh?.dispose();'];
   if (has('sea')) disposers.push('ocean?.dispose();');
   if (has('plants')) disposers.push('vegetation?.dispose();');
   if (has('rivers')) disposers.push('riverWater?.dispose();');
@@ -1581,7 +1780,8 @@ const RULE_BY_MODULE: Record<string, string> = {
   roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, junction pads, roundabout islands, zebra crossings, bridge decks, rails and piers. Do not draw your own roads.',
   vehicles: 'VEHICLES: createVehicle(THREE, map.world, {kind: car or bike, color, quality}) gives a lofted sports car or bike with four or two wheels that spin and steer, brake lights, headlights (setLights) and its own driving physics: engine that fades with speed, braking limited by the surface, steering that narrows with speed, a grip limit, a handbrake slide, pitch and roll from the ground, flight off a crest, water measured by depth (it fords shallow water slowly, stalls deeper and SINKS past 1.2 m — vehicle.state.sunk — never driving on the sea bed; a bridge deck is dry); you call vehicle.update(dt, {throttle -1..1, steer -1..1, brake 0..1, handbrake}, map.chunks.origin) every frame and read vehicle.state (speed, slip, position). Vehicles do not collide with trees or other vehicles yet.',
 };
-const NOT_BUILT = 'NOT built yet — do not draw them by hand: buildings, animals, birds and people, sand ripple textures and heat haze. A plane to fly comes from the game kit (createAircraft / flyAircraft in three/flight.ts).';
+const RULE_COLONIES = "COLONIES (colonies.ts): when MAP_OPTIONS has a density ('sparse' village, 'normal', 'dense' city — the map planner sets it) or colonies: true, every block of the planned road network is filled with plots that face its roads: shops, a market, offices and towers on main roads and highways (a bazaar near the centre), homes on colony streets and lanes (tall flats with black roof water tanks near the town centre, houses and havelis with compound walls and gates at the edge), and in EVERY colony a park, a school, a temple, a clinic and a playground (a hospital in the central one); trees line the footpaths and fill the parks. Each plot is levelled with cut and fill INTO heightAt (no flat city at y = 0); nothing is in water, on a road, on steep ground or outside the boundary. map.world.colonies() is the data (plots with kind, zone, corners, pad height y, the road faced, gate and entrance; colonies; trees; what was skipped and why); map.world.colonyAt(x, z) says whether a place is inside a plot; map.colonyMesh draws them (one merged mesh per 160 m tile, streamed nearest first inside the tier's triangle cap: COLONY_TIERS; colonyMesh.stats()). Do NOT also put a separate flat city on the planned network; level your own place with levelGround and the plots under it give way. Honest limits: houses have no physics collider (use colonyAt to stop a body), the colonies add no people or traffic (drive cars along map.world.roadNetwork().route(), in the left lane).";
+const NOT_BUILT = 'NOT built yet — do not draw them by hand: animals, birds and people, sand ripple textures and heat haze; buildings come only from the colonies (above) or the game kit\'s own city and houses. A plane to fly comes from the game kit (createAircraft / flyAircraft in three/flight.ts).';
 
 function exampleSource(chosen: readonly string[]): string {
   const has = (m: string): boolean => chosen.includes(m);
@@ -1633,6 +1833,6 @@ export function generateAthreeMap(include?: string[], choiceOrExclusions?: MapCh
       (unknown.length ? `Unknown module names ignored: ${unknown.join(', ')}. The names are: ${Object.keys(ATHREE_OPTIONAL_MODULES).join(', ')}.\n` : '') +
       '```ts\n' + exampleSource(chosen) + '\n```\n' +
       (excludedModules.includes('sea') ? 'Sea visuals, including the fallback water plane, are disabled. Terrain still retains sea-level biome data; this is not a certified dry-land-only world. ' : '') +
-      (excludedModules.some(m => m === 'roads' || m === 'rivers') ? 'Explicit request exclusions: ' + excludedModules.filter(m => m === 'roads' || m === 'rivers').join(', ') + ' are disabled in world data as well as rendering; do not re-enable them. ' : '') + RULE_CORE + ' ' + RULE_EDGE + ' ' + chosen.map((m) => RULE_BY_MODULE[m]).join(' ') + (chosen.includes('sky') ? '' : ' No sky is in this build, so bring your own lights (a DirectionalLight for the sun and a HemisphereLight) and your own background colour.') + ' ' + NOT_BUILT,
+      (excludedModules.some(m => m === 'roads' || m === 'rivers') ? 'Explicit request exclusions: ' + excludedModules.filter(m => m === 'roads' || m === 'rivers').join(', ') + ' are disabled in world data as well as rendering; do not re-enable them. ' : '') + RULE_CORE + ' ' + RULE_EDGE + ' ' + RULE_COLONIES + ' ' + chosen.map((m) => RULE_BY_MODULE[m]).join(' ') + (chosen.includes('sky') ? '' : ' No sky is in this build, so bring your own lights (a DirectionalLight for the sun and a HemisphereLight) and your own background colour.') + ' ' + NOT_BUILT,
   };
 }

@@ -52,14 +52,6 @@ function previewClassify(w, x, z, edge) {
   if (b === 'ocean') return '2';
   return '7';
 }
-function previewLots(v, out, depth) {
-  if (!v || depth > 4 || out.length >= 5000) return;
-  if (Array.isArray(v)) { for (var i = 0; i < v.length && out.length < 5000; i++) previewLots(v[i], out, depth + 1); return; }
-  if (typeof v !== 'object') return;
-  if (typeof v.x === 'number' && typeof v.z === 'number' && Number.isFinite(v.x) && Number.isFinite(v.z) && !Array.isArray(v.points)) { out.push({ x: v.x, z: v.z }); return; }
-  var keys = ['lots', 'plots', 'houses', 'colonies'];
-  for (var k = 0; k < keys.length; k++) if (v[keys[k]]) previewLots(v[keys[k]], out, depth + 1);
-}
 function samplePreview(index, opts) {
   var N = opts.size;
   var map = index.createAthreeMap({ seed: opts.seed, profile: opts.profile });
@@ -120,11 +112,11 @@ function samplePreview(index, opts) {
       if ((px - pd.x) * (px - pd.x) + (pz - pd.z) * (pz - pd.z) <= pd.radius * pd.radius && w.waterAt(px, pz)) cells[jj * N + ii] = '4';
     }
   }
-  // Building plots: only when the world has colonies (the colonies layer), and only on dry land off the water.
+  // Building plots: world.colonies().plots (the colonies layer, #4627), each at its centre, only on dry land off the water.
   var plots = 0;
   if (typeof w.colonies === 'function') {
-    var lots = [];
-    previewLots(w.colonies(), lots, 0);
+    var plan = w.colonies();
+    var lots = plan && Array.isArray(plan.plots) ? plan.plots : [];
     for (var l = 0; l < lots.length; l++) {
       var lc = pix(lots[l].x, lots[l].z);
       if (lc < 0 || cells[lc] === 'c' || cells[lc] === 'b' || w.waterAt(lots[l].x, lots[l].z) || w.heightAt(lots[l].x, lots[l].z) < w.seaLevel) continue;

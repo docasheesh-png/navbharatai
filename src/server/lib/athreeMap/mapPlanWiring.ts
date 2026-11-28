@@ -63,6 +63,6 @@ export function applyMapPlanToFiles(
   const worldSource = Object.entries(out).filter(([p]) => p.startsWith(DIR + '/') && p !== `${DIR}/config.ts` && p !== MAP_CHECKS_PATH).map(([, src]) => src).join('\n');
   const applied = appliedMapLayers(worldSource, effective);
   const note = describeMapPlan(effective, applied)
-    + '\nROBOT CHECKS: import { publishMapChecks } from \'./game/athree/mapChecks\' and call publishMapChecks(map.world, { lots, placed }) once, after createAthreeMap and after the game has placed its houses and props. It measures: spawns on dry land, no lot in water or on a road, the road graph in one piece, nothing under the ground, the boundary closed. Every failure is printed to the console and left on window.__nbMapChecks for the playtest; show failures honestly, never hide them.';
+    + '\nROBOT CHECKS: import { publishMapChecks } from \'./game/athree/mapChecks\' and call publishMapChecks(map.world, { placed }) once, after createAthreeMap and after the game has placed its houses and props (leave lots out and the world\'s own colony plots are checked; pass lots only for plots the game made itself). It measures: spawns on dry land, no lot in water or on a road, the road graph in one piece, nothing under the ground, the boundary closed. Every failure is printed to the console and left on window.__nbMapChecks for the playtest; show failures honestly, never hide them.';
   return { files: out, applied, note, data };
 }

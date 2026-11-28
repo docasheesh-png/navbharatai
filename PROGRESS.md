@@ -6996,6 +6996,10 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
   network read the water bodies WITH ponds, so building a road region during pond placement re-entered pond placement. Class: a lower layer
   reading a higher one. Fix: roads read rivers/lakes without ponds (ponds are placed after and away from roads; also true to the road cache
   key, which never named the pond count). Kit history regenerated. Locked in `mapPreview.test.ts` (reverted → RangeError).
+  **Update after merging #4627 (colonies):** the colonies branch found and fixed the SAME cycle independently ("roads first, ponds
+  after", the identical change, locked by tests/pondsAndPlannedRoadsBuild.test.ts), so main's AthreeMapGenerator.ts is kept and this PR
+  no longer changes the world source; the loop-world test here stays as a second lock. The preview now draws `world.colonies().plots`
+  (test: every red cell holds a plot centre).
 - **One layer by chat (`mapLayerEdit.ts`, `buildPhases/mapLayerTurn.ts`, wired at turn start in `routes/agentv3.ts`):** on a game with a
   MAP_PLAN, "nadi ki jagah jheel karo" / "colony badi karo" / "sadkein tedhi-medhi karo" / "map 2 guna bada karo" / "kinara pahaadon wala
   karo" change only that layer (same seed), read by meaning with the planner's parsers; config.ts is rewritten by the platform
@@ -7013,3 +7017,54 @@ added to BUILD_REPORT_QUEUE_CLOSED.txt. Q-3753 (blocked: always-on CPU / Cloud R
 - **Preview size cap:** maps wider than 120 km get "Map preview unavailable: … too big to measure in time" at once (measuring builds every 12.5 km road region: 64 at 100 km ≈ 2 s, 1,600 at 500 km ≈ 22 s).
 - **Open / limits:** location words ("yahan") are read as the whole map's plan; colonies are drawn only once `world.colonies()` lands
   (the parallel colonies branch); a platform-only layer edit still runs the builder (it is told the change is done) — not a platform-done turn.
+## 2026-11-27 — Athree map wave 2 part 1: COLONIES between the roads (branch `claude/feat/map-colonies`)
+
+The admin's map order is frame → natural boundary → water → ground → roads → **colonies of houses between the roads**. Wave 1
+(#4624 edges/ponds, #4626 roads + `blocks()`, #4625 planner + robot checks) is on main; this fills the blocks.
+
+- **New core kit file `src/game/athree/colonies.ts`** (`athreeColonySource.ts`): `planColonies` (PURE, deterministic per seed) cuts
+  every block side into straight runs and every run into plots behind a 3 m footpath, each plot's front parallel to and facing its
+  road. A plot is kept only when it is dry (river lines, lakes, ponds + banks, sea), off every road / junction pad / dead-end lane
+  (geometry + `roadAt`), inside the boundary, has real road access, and its ground (5 x 5 grid) can be levelled within 3.5 m of cut or
+  fill and a 0.2 slope; refusals are counted in `skipped`. Zoning: main roads / highways → shops (market, offices, towers near the
+  centre; every main-road plot inside ring 0.5 is commercial, ~40% beyond), colony streets / lanes → homes (flats with roof tanks
+  near the centre, houses / havelis at the edge). Blocks joined by a colony street are one colony (main roads separate; a lane web
+  is split into ~400 m neighbourhoods; tiny colonies merge); every colony gets park, school, temple, clinic, playground from
+  neighbouring plots; one hospital in the most central big colony; a market where there are 6+ shops. Density
+  (`sparse|normal|dense`) sets plot size, fill and tallest flats; floors fall with distance from the centre. Trees on the footpaths
+  and in parks. Drawing: `createColonyMesh` — one merged vertex-coloured mesh per 160 m tile (one draw call), nearest first, inside
+  `COLONY_TIERS` (phone 10k / mid 10k / desktop 26k triangles); `budget.ts` gains `colonyBudget`, and `vehicleBudget` now subtracts
+  the colony cap (phone 23 → 11, mid 15 → 9, desktop 18 → 10 vehicles; the ≥ 8 floor test holds).
+- **World:** `options.density` / `options.colonies` (on exactly when a density is given — the planner always gives one; old games
+  unchanged). Each plot is a pad inside `heightAt` (before the game's own pads; round margin so a turned neighbour never reaches in),
+  so drawn terrain, heightfield and movers agree. `world.colonies()` (live: plots a later `levelGround` / `addRoad` reaches are
+  taken away and their ground noted as edited), `world.colonyAt(x, z)`, `clearAt` true on plots (no plants through houses),
+  spawns never inside a plot. `createAthreeMap` returns `colonyMesh`.
+- **Planner:** new layer `colonies`, APPLIED only when the world reads `density` AND calls `planColonies`; density is APPLIED now.
+- **Robot check:** `lots-clear` defaults to the world's own colony plots (`colonyLots`, centre + inscribed circle + corners), so it
+  really measures; a broken world (plot moved onto a road / into the sea) fails it (test).
+- **Two pre-existing bugs found and fixed (class: a layer reading a layer that is placed against it):**
+  1. A map with ponds on a planned road network (every map < 20 km) **overflowed the stack on its first heightAt** — roads read
+     `waterBodies()` (incl. ponds), ponds read road-carved ground. In builds it showed only as robot checks "could not run". Fix:
+     roads read rivers + lakes only; ponds come after and avoid roads. `tests/pondsAndPlannedRoadsBuild.test.ts`.
+  2. Ponds landed ON streets: the road clearance was 8 samples on a 60 m ring. Now read every 4 m on a ring 20 m off the rim (+ the
+     bank ring); `POND_CLEAR = 20` (a 60 m ring read properly leaves no room for a talab anywhere in a town).
+- **Tests:** `AthreeColonies.test.ts` (21) on six real worlds; each claim reverted → its test fails (road access via set-back plots,
+  pad in heightAt, round margin, zoning, civic, density, fall-off, 25-point cut/fill, water layers, robot default lots, phone cap,
+  overlap, game pad yield, spawns, roads-read-ponds, pond rings).
+- **Honest limits / OPEN:** houses have no physics collider (use `colonyAt`); no people/traffic in colonies (the kit's city
+  people/traffic are bound to the three/city grid, not this graph); plots line the roads so the middle of a superblock stays open;
+  on the phone terrain grid (8 m) a slope beside a park can cover the slab edge. **Planning cost:** the first CI run hit the 60-min
+  job limit and the 8 km battle-royale robot check ran past its 8 s budget ("could not run"). Root: roads.ts indexed a planned town's
+  10 m segments in 125 m cells, so every height / road lookup walked dozens. Fixed: a planned network indexes into 32 m cells
+  (`INDEX_CELL`; same answers bit for bit — `tests/aFinerRoadIndexGivesTheSameAnswers.test.ts`, which also caught a shadowed
+  `CELL` in buildRegion on the first try). Now ~0.4–0.6 s once on a 2.2 km map, ~2.4 s on a dense 5 km map, ~2 s per robot run on
+  the 8 km island (local CPU). **Still OPEN:** planning is synchronous at the first heightAt — on a budget phone the default map
+  may pause ~1–2 s at load; next lever is time-sliced planning. Wiring the
+  open-world kit's own cities onto colonies is not done: where both exist (e.g. a battle-royale island with a planned network) the
+  kit's city is levelled with levelGround and the plots under it give way (tested), so they never overlap, but the two styles sit
+  side by side.
+### 2026-11-27 — Queue: Q-3464, Q-3471, Q-3703, Q-3729 closed; Q-3730 opened
+- Admin approved options (2026-11-27, "sabhi apke sujhao ke anusar banao"): #4615 (Surplus tripped per build after a second distinct model's HTTP 404 at response_validation; Q-3729 parallel-turn sibling), #4617 (asset permit queues up to 8 s; 3D assets and sounds prepared side by side; serialized workspace asset list saves), #4616 (signing keys + events erased with the account after a red warning, a real key download and an "I understand" tick). All merged and deployed (Cloud Build succeeded for 3402a0cc, 0d85280e, 61f25737).
+- Q-3730 OPEN: an in-flight key import/generate can write after the account erase; needs a deletion tombstone checked by user-scoped writers.
+- Map wave 1 live: #4624 (natural edges, sea shelf, ponds, mover rules), #4626 (roads on every size, five styles), #4625 (map planner with admin default sizes 5/25/100 km², circuit/runway floor, robot checks). Wave 2 (colonies; preview, layer edit, map library) in progress.

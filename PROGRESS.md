@@ -7011,9 +7011,13 @@ The admin's map order is frame → natural boundary → water → ground → roa
   overlap, game pad yield, spawns, roads-read-ponds, pond rings).
 - **Honest limits / OPEN:** houses have no physics collider (use `colonyAt`); no people/traffic in colonies (the kit's city
   people/traffic are bound to the three/city grid, not this graph); plots line the roads so the middle of a superblock stays open;
-  on the phone terrain grid (8 m) a slope beside a park can cover the slab edge. **Planning cost (open root cause):** ~0.8–1.4 s
-  once on a 2.2 km map and ~5 s on a dense 5 km map (server CPU), 60%+ inside roads.ts `eachCandidate` (125 m grid cells hold
-  dozens of 10 m planned segments); next lever: a finer road index (identical answers) or time-sliced planning. Wiring the
+  on the phone terrain grid (8 m) a slope beside a park can cover the slab edge. **Planning cost:** the first CI run hit the 60-min
+  job limit and the 8 km battle-royale robot check ran past its 8 s budget ("could not run"). Root: roads.ts indexed a planned town's
+  10 m segments in 125 m cells, so every height / road lookup walked dozens. Fixed: a planned network indexes into 32 m cells
+  (`INDEX_CELL`; same answers bit for bit — `tests/aFinerRoadIndexGivesTheSameAnswers.test.ts`, which also caught a shadowed
+  `CELL` in buildRegion on the first try). Now ~0.4–0.6 s once on a 2.2 km map, ~2.4 s on a dense 5 km map, ~2 s per robot run on
+  the 8 km island (local CPU). **Still OPEN:** planning is synchronous at the first heightAt — on a budget phone the default map
+  may pause ~1–2 s at load; next lever is time-sliced planning. Wiring the
   open-world kit's own cities onto colonies is not done: where both exist (e.g. a battle-royale island with a planned network) the
   kit's city is levelled with levelGround and the plots under it give way (tested), so they never overlap, but the two styles sit
   side by side.

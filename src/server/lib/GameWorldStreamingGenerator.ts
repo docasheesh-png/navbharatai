@@ -27,7 +27,11 @@
  *
  * PURE generator: no I/O, no model call.
  */
+import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
+
 export const GAME_WORLD_STREAMING_PATH = 'src/game/three/worldStreaming.ts';
+/** Moving actors alive at once near the camera, by device tier: the streaming kit's maxActors, and the colonies' share (open world). */
+export const STREAM_ACTORS = { phone: 12, mid: 24, desktop: 48 } as const;
 
 const MODULE = String.raw`// World streaming — written by NavBharatAI. A world of any size: only what is near the camera is loaded and drawn.
 //   const world = createWorldStreamer(scene, { heightAt });
@@ -52,9 +56,9 @@ export interface StreamTier {
   maxTemplates: number;
 }
 export const STREAM_TIERS: Readonly<Record<StreamQuality, StreamTier>> = {
-  phone: { viewRadius: 3, farRing: 2, maxBuildsPerUpdate: 1, maxActors: 12, maxTemplates: 24 },
-  mid: { viewRadius: 4, farRing: 2, maxBuildsPerUpdate: 2, maxActors: 24, maxTemplates: 48 },
-  desktop: { viewRadius: 6, farRing: 3, maxBuildsPerUpdate: 3, maxActors: 48, maxTemplates: 96 },
+  phone: { viewRadius: 3, farRing: 2, maxBuildsPerUpdate: 1, maxActors: ${STREAM_ACTORS.phone}, maxTemplates: 24 },
+  mid: { viewRadius: 4, farRing: 2, maxBuildsPerUpdate: 2, maxActors: ${STREAM_ACTORS.mid}, maxTemplates: 48 },
+  desktop: { viewRadius: 6, farRing: 3, maxBuildsPerUpdate: 3, maxActors: ${STREAM_ACTORS.desktop}, maxTemplates: 96 },
 };
 
 export interface Placement {
@@ -117,7 +121,7 @@ interface Part { geometry: THREE.BufferGeometry; far?: THREE.BufferGeometry; mat
 interface Template { handle: GameAssetHandle | null; parts: Part[]; actor: boolean; users: number; lastUsed: number }
 interface Cell { cx: number; cz: number; items: Placement[]; group: THREE.Group | null; meshes: Array<{ mesh: THREE.InstancedMesh; part: Part }>; actors: GameAssetHandle[]; far: boolean; building: boolean; subjects: Set<string> }
 
-const COLLIDER_KEY = 'navbharatWorldCollider';
+const COLLIDER_KEY = ${JSON.stringify(GAME_WORLD_COLLIDER_KEY)};
 
 /** Split a loaded model into instanceable parts (full-detail meshes; the LOD's reduced mesh kept as 'far'). */
 function partsOf(root: THREE.Object3D): { parts: Part[]; actor: boolean } {

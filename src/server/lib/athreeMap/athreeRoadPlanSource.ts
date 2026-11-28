@@ -271,6 +271,11 @@ export function planWaterIndex(bodies: { rivers: Array<{ points: Array<{ x: numb
 
 /** Lay out, check, profile and measure a planned network. Deterministic for a seed. */
 export function planRoadNetwork(o: PlanInput): PlanOutput {
+  return drainSteps(planRoadNetworkSteps(o));
+}
+
+/** The same network as planRoadNetwork, as steps that pause inside every long loop (Q-3763: a frame plans a few milliseconds of it). */
+export function* planRoadNetworkSteps(o: PlanInput): Steps<PlanOutput> {
   const rng = mulberry32(mix32(o.seed, ROAD_STYLES.indexOf(o.style) + 1, 7717));
   const nodes: PNode[] = [];
   const edges: PEdge[] = [];
@@ -377,6 +382,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
     let best = -Infinity;
     const span = o.half - C / 2;
     for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) {
+      yield;
       const x = o.cx + (i / 3) * span; const z = o.cz + (j / 3) * span;
       let dry = 0; let rough = 0;
       for (let a = 0; a <= 8; a++) for (let b = 0; b <= 8; b++) {
@@ -443,6 +449,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   // A long road is split at JOINTS (no pad, no crossing) about every 130 m, so where one stretch meets the shore or a cliff only that
   // stretch is lost, not the whole road from crossing to crossing.
   for (let e = 0, n0 = edges.length; e < n0; e++) {
+    yield;
     const E = edges[e];
     if (!E.alive) continue;
     const A = nodes[E.a]; const B = nodes[E.b];
@@ -470,6 +477,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   if (o.style === 'organic') {
     // An old town: about a quarter of the inner links are not there (two lanes join into one bigger block), and every lane bends a little.
     for (let e = 0; e < edges.length; e++) {
+      yield;
       const E = edges[e];
       if (!E.alive || E.frame) continue;
       if (rng() < 0.27 && degree(E.a) >= 3 && degree(E.b) >= 3) { kill(e); continue; }
@@ -496,6 +504,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
     // Each road winds: of a few serpentines (1 to 3 bends, 12 to 30 percent of its length to the side) one that keeps the raw ground
     // nearest a 6 percent climb wins; a road on level ground still winds.
     for (const E of edges) {
+      yield;
       if (!E.alive) continue;
       const A = nodes[E.a]; const B = nodes[E.b];
       let best: XZ[] = serpentine(A, B, 1, 0.12); let bestScore = Infinity;
@@ -522,6 +531,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
     const rot = rng() * Math.PI * 2;
     const inCore = (x: number, z: number): boolean => x > X0 - 40 && x < X1 + 40 && z > Z0 - 40 && z < Z1 + 40;
     for (let k = 0; k < want; k++) {
+      yield;
       const ang = rot + (k / want) * Math.PI * 2;
       let site: Site | null = null;
       for (let d = C / 2 + 450; d < C / 2 + outer - 250 && !site; d += 150) {
@@ -587,6 +597,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
     return { x0, z0, x1, z1 };
   };
   for (const e of order) {
+    yield;
     const E = edges[e];
     const tryPoly = (): boolean => {
       const poly = polyOf(E);
@@ -615,6 +626,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   const riverNear = waterIdx.riverNear; const lakeNear = waterIdx.lakeNear;
   // ---- 6. never in the sea, a lake or a pond, never through a circuit or runway; a river is bridged -----------------------------------
   for (const E of edges) {
+    yield;
     if (!E.alive) continue;
     const poly = polyOf(E);
     const L = planLength(poly);
@@ -623,6 +635,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
     const pts = planAt(poly, Array.from({ length: n + 1 }, (_, i) => (i / n) * L));
     let wetRun = 0; let bad = false;
     for (let i = 0; i <= n && !bad; i++) {
+      if ((i & 31) === 31) yield;
       const [x, z] = pts[i];
       const k = Math.min(n - 1, i);
       const dx = pts[k + 1][0] - pts[k][0]; const dz = pts[k + 1][1] - pts[k][1]; const l = Math.hypot(dx, dz) || 1;
@@ -669,6 +682,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   // ---- 7. junction pads and roundabouts ------------------------------------------------------------------------------------------------
   for (let pass = 0; pass < 2; pass++) {
     for (let i = 0; i < nodes.length; i++) {
+      yield;
       const N = nodes[i];
       const deg = N.edges.length;
       N.pad = 0; N.flat = 0; N.island = 0;
@@ -699,6 +713,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   // A road whose ends differ by more than a 7 percent climb plus the cut and fill at BOTH ends can never be built: it goes first, so it
   // does not drag the junctions round it off their ground.
   for (let e = 0; e < edges.length; e++) {
+    yield;
     const E = edges[e];
     if (!E.alive) continue;
     const A = nodes[E.a]; const B = nodes[E.b];
@@ -711,6 +726,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   const before = live();
   profiles.fill(null);
   for (const N of nodes) {
+    yield;
     if (!N.edges.length || N.fixed) continue;
     const r = Math.max(4, N.pad / 2);
     N.y = (o.terrain(N.x, N.z) * 2 + o.terrain(N.x + r, N.z) + o.terrain(N.x - r, N.z) + o.terrain(N.x, N.z + r) + o.terrain(N.x, N.z - r)) / 6;
@@ -718,6 +734,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   for (let it = 0; it < 80; it++) {
     let moved = 0;
     for (let e = 0; e < edges.length; e++) {
+      yield;
       const E = edges[e];
       if (!E.alive) continue;
       const A = nodes[E.a]; const B = nodes[E.b];
@@ -734,6 +751,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
 
   // ---- 9. each road's profile: flat on its pads, bridged over rivers, the smoothed ground inside 7 percent and 14 m of cut and fill -------
   for (let e = 0; e < edges.length; e++) {
+    yield;
     const E = edges[e];
     if (!E.alive) continue;
     const poly = polys[e]!; const L = lens[e];
@@ -821,6 +839,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
   const roads: Road[] = [];
   const roadOfEdge = new Map<number, number>();
   for (let e = 0; e < edges.length; e++) {
+    yield;
     const E = edges[e];
     if (!E.alive || !profiles[e]) continue;
     const pts = profiles[e]!;
@@ -900,6 +919,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
     const used = new Set<string>();
     const faces: Array<{ pts: Array<{ x: number; z: number }>; sides: Array<{ road: number; half: number }>; area: number }> = [];
     for (const rid of live) {
+      yield;
       for (const fwd of [true, false]) {
         if (used.has(rid + (fwd ? '+' : '-'))) continue;
         const pts: Array<{ x: number; z: number }> = []; const sides: Array<{ road: number; half: number }> = [];
@@ -935,6 +955,7 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
         return inside;
       };
       for (let i = 0; i < faces.length; i++) {
+        yield;
         const f = faces[i];
         if (i === outer || Math.sign(f.area) === sign || Math.abs(f.area) < 600) continue;
         let cx = 0; let cz = 0; let a6 = 0;
@@ -962,7 +983,9 @@ export function planRoadNetwork(o: PlanInput): PlanOutput {
         const sides = rev ? f.sides.slice().reverse() : f.sides;
         const fixedSides = rev ? sides.slice(1).concat(sides.slice(0, 1)) : sides;
         const inner: number[] = [];
+        let tick = 0;
         for (const r of roads) {
+          if ((++tick & 63) === 0) yield;
           if (live.has(r.id)) continue;
           const mp = r.points[Math.floor(r.points.length / 2)];
           if (mp.x >= x0 && mp.x <= x1 && mp.z >= z0 && mp.z <= z1 && insidePoly(f.pts, mp.x, mp.z)) inner.push(r.id);

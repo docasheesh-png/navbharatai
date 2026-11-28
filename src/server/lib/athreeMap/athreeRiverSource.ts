@@ -15,7 +15,7 @@ export const RIVERS = `// Athree map — rivers and lakes (pure: no three.js).
 // Technique: steepest-descent tracing with momentum on the carving-free terrain, confluences that add flow, pit-filling lakes with an
 // outlet, a monotone water level, a spatial grid for queries, and a carve profile (bed, bank, terrain). Own implementation.
 
-import { mulberry32 } from './noise';
+import { mulberry32, drainSteps, type Steps } from './noise';
 
 export const RIVER_STEP = 62.5;
 const GRID = 125;
@@ -101,6 +101,11 @@ function mix32(a: number, b: number, c: number): number {
 }
 
 export function createRiverNetwork(o: RiverOptions): RiverNetwork {
+  return drainSteps(riverNetworkSteps(o));
+}
+
+/** createRiverNetwork as steps (Q-3763): it pauses after every source cell and every river, so a loading frame traces a few ms of it. */
+export function* riverNetworkSteps(o: RiverOptions): Steps<RiverNetwork> {
   const P = o.period;
   const bh = o.baseHeight;
   const cellsPer = P > 0 ? Math.round(P / RIVER_STEP) : 0;
@@ -279,6 +284,7 @@ export function createRiverNetwork(o: RiverOptions): RiverNetwork {
   const n = P > 0 ? Math.round(P / cell) : Math.ceil((2 * o.radius) / cell);
   for (let cz = 0; cz < n; cz++) {
     for (let cx = 0; cx < n; cx++) {
+      yield;
       const rng = mulberry32(mix32(cx, cz, o.seed + 77));
       const sx = lo + (cx + 0.15 + 0.7 * rng()) * cell;
       const sz = lo + (cz + 0.15 + 0.7 * rng()) * cell;
@@ -377,14 +383,16 @@ export function createRiverNetwork(o: RiverOptions): RiverNetwork {
       }
     }
   };
-  rivers.forEach((r, ri) => {
+  for (let ri = 0; ri < rivers.length; ri++) {
+    const r = rivers[ri];
     for (let j = 0; j < r.points.length - 1; j++) {
       const a = r.points[j];
       const b = r.points[j + 1];
       const pad = Math.max(a.width, b.width) * 0.58 + Math.max(6 + 0.8 * Math.max(a.width, b.width), MAX_BANK) + 10;
       register(segGrid, Math.min(a.x, b.x) - pad, Math.min(a.z, b.z) - pad, Math.max(a.x, b.x) + pad, Math.max(a.z, b.z) + pad, { r: ri, j });
     }
-  });
+    yield;
+  }
   for (const l of lakes) register(lakeGrid, l.x - l.radius * 1.6, l.z - l.radius * 1.6, l.x + l.radius * 1.6, l.z + l.radius * 1.6, l.id);
 
   type Metrics = { e: number; d: number; w: number; surface: number; fx: number; fz: number };
@@ -485,11 +493,29 @@ const cache = new Map<string, RiverNetwork>();
 export function riverNetworkFor(key: string, o: RiverOptions): RiverNetwork {
   const hit = cache.get(key);
   if (hit) return hit;
-  const made = createRiverNetwork(o);
-  if (cache.size > 24) cache.delete(cache.keys().next().value as string);
-  cache.set(key, made);
-  return made;
+  return drainSteps(riverNetworkStepsFor(key, o));
 }
+
+/** The network a few ms at a time (Q-3763), from where an earlier call stopped; shared and cached exactly like riverNetworkFor. */
+export function* riverNetworkStepsFor(key: string, o: RiverOptions): Steps<RiverNetwork> {
+  const hit = cache.get(key);
+  if (hit) return hit;
+  let steps = building.get(key);
+  if (!steps) { steps = riverNetworkSteps(o); building.set(key, steps); }
+  for (;;) {
+    const done = cache.get(key);
+    if (done) return done;
+    const r = steps.next();
+    if (r.done) {
+      building.delete(key);
+      if (cache.size > 24) cache.delete(cache.keys().next().value as string);
+      cache.set(key, r.value);
+      return r.value;
+    }
+    yield;
+  }
+}
+const building = new Map<string, Steps<RiverNetwork>>();
 `;
 
 export const RIVERWATER = `// Athree map — river and lake water on screen.

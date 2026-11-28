@@ -23,13 +23,19 @@
 //      playgrounds), streamed round the camera, nearest first, inside a per-tier triangle cap (COLONY_TIERS; budget.ts sets it
 //      against the other modules) — one draw call per tile.
 //
-// HONEST LIMITS: houses have no physics collider (world.colonyAt(x, z) answers whether a place is inside a plot, for a game that wants
-// to stop a body at a wall); people and traffic are not added by the colonies (the kit's city people and traffic follow the separate
-// three/city grid, not this road graph — a game drives its own cars along world.roadNetwork().route(), in the left lane); a block that
-// the road network did not close (a superblock cut by the shore) has no plots; plots line the roads, so the middle of a very large block
-// stays open land.
+//   7. WALLS (Q-3761, 2026-11-28): plotBoxes is the one description of a plot; its solid boxes (buildings, compound walls with the gate
+//      left open, swing frames, tree trunks) become an invisible wall mesh per drawn tile within the tier's physicsRadius, marked for the
+//      game kit's collision, so the player, cars and kit characters stop at a house; world.colonySolidAt answers the same walls by hand.
+//   8. FOOTPATHS (Q-3762): footpathPaths gives the walking lines the game kit's createPathPeople walks; its createRoadTraffic drives the
+//      planned roads. 9. The plan is made in slices (planColonySteps, Q-3763), identical to planColonies.
+//
+// HONEST LIMITS: a house is a solid shell (its door is painted, not walked through); colony people stay on their block's footpaths and
+// never cross a road; the junctions have no traffic lights (one vehicle in a junction at a time instead); a block that the road network
+// did not close (a superblock cut by the shore) has no plots; plots line the roads, so the middle of a very large block stays open land.
 //
 // PURE source string; rule for editing: no backticks and no dollar-brace inside it.
+
+import { GAME_WORLD_COLLIDER_KEY } from '../GameAssetRuntimeGenerator';
 
 export const COLONIES = `// Athree map — colonies: plots facing the roads in every block, zoned (shops on main roads, homes inside, a park, school, temple,
 // clinic and playground per colony), denser near the town centre, each plot levelled with cut and fill into the world's own height.
@@ -37,7 +43,7 @@ export const COLONIES = `// Athree map — colonies: plots facing the roads in e
 // axes, point and segment distances) keep each plot off roads, junctions and water; union-find over shared colony streets groups blocks
 // into colonies; buildings are merged into one mesh per tile and streamed nearest first inside a triangle cap. Own implementation.
 
-import { mulberry32 } from './noise';
+import { mulberry32, drainSteps, type Steps } from './noise';
 import type { AthreeQuality } from './config';
 import type { Block } from './roads';
 import type { AthreeWorld } from './world';
@@ -304,6 +310,14 @@ function blockRuns(block: Block, roadKind: (road: number) => string): Run[] {
 
 /** The colonies of a town: plots, their kinds and pads, colonies, trees. PURE and deterministic per seed. */
 export function planColonies(input: ColonyInput): ColonyPlan {
+  return drainSteps(planColonySteps(input));
+}
+
+/**
+ * The same plan as planColonies, as steps (Q-3763): it pauses after every measured plot, civic plot and footpath, so a frame can plan a
+ * few milliseconds of the town and the next frame go on. Run to its end it returns exactly what planColonies returns (it IS planColonies).
+ */
+export function* planColonySteps(input: ColonyInput): Steps<ColonyPlan> {
   const rule = COLONY_DENSITY[input.density] ?? COLONY_DENSITY.normal;
   const density: ColonyDensity = COLONY_DENSITY[input.density] ? input.density : 'normal';
   const skipped: ColonySkips = { water: 0, road: 0, steep: 0, outside: 0, access: 0, crowded: 0 };
@@ -462,7 +476,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         const w = commercial ? wShop : wHome;
         if (s + w > L - 3) break;
         const ring = gateRing(w);
-        if (!commercial && r() > rule.fill) { s += w + COLONY_GAP; continue; }
+        if (!commercial && r() > rule.fill) { s += w + COLONY_GAP; yield; continue; }
         const dTarget = (rule.depth[0] + (rule.depth[1] - rule.depth[0]) * r()) * (commercial ? 0.85 : 1);
         let placed = false;
         let reason: keyof ColonySkips = 'crowded';
@@ -480,6 +494,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         }
         if (placed) s += w + COLONY_GAP;
         else { skipped[reason]++; s += Math.max(3, w / 2); }
+        yield;
       }
     }
   }
@@ -531,6 +546,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
     groups.delete(small[0]);
     groups.set(best[0], best[1].concat(small[1]));
     for (const [k, v] of [...groups.entries()]) if (countIn(v) === 0) groups.delete(k);
+    yield;
   }
 
   // ---- 3. every colony's park, school, temple, clinic and playground (a hospital nearest the centre, a market where shops are) -------
@@ -547,8 +563,9 @@ export function planColonies(input: ColonyInput): ColonyPlan {
   for (const block of blocks) {
     const runs = blockRuns(block, input.roadKind);
     for (const d of blockDrafts.get(block.id) ?? []) { const rr = runs.find((x) => x.key === d.run); if (rr) runOf.set(d, rr); }
+    yield;
   }
-  function convert(bl: number[], kind: ColonyKind, k: number, from: (d: Draft) => boolean, c: ColonyPoint, r: () => number): boolean {
+  function* convert(bl: number[], kind: ColonyKind, k: number, from: (d: Draft) => boolean, c: ColonyPoint, r: () => number): Steps<boolean> {
     const pool = plotsIn(bl).filter(from).sort((p, q) => Math.hypot(p.rect.cx - c.x, p.rect.cz - c.z) - Math.hypot(q.rect.cx - c.x, q.rect.cz - c.z));
     for (let want = k; want >= 1; want--) {
       for (const first of pool) {
@@ -573,6 +590,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
           rect = { ...first.rect, cx: fx + first.rect.nx * d / 2, cz: fz + first.rect.nz * d / 2, w, d };
         }
         const m = measure(rect, block, run, blockDrafts.get(first.block) ?? [], group);
+        yield;
         if (typeof m === 'string') continue;
         const merged: Draft = { ...first, rect, s1: group[group.length - 1].s1, y: m.y, access: m.access, kind, floors: civicFloors(kind, r), color: civicColor(kind) };
         const list = blockDrafts.get(first.block)!;
@@ -585,19 +603,22 @@ export function planColonies(input: ColonyInput): ColonyPlan {
   }
   const isHome = (d: Draft): boolean => COLONY_ZONE[d.kind] === 'residential';
   const notCivic = (d: Draft): boolean => COLONY_ZONE[d.kind] === 'residential' || COLONY_ZONE[d.kind] === 'commercial';
-  colonyBlocks.forEach((bl, ci) => {
+  for (let ci = 0; ci < colonyBlocks.length; ci++) {
+    const bl = colonyBlocks[ci];
     const r = mulberry32((input.seed * 31 + ci * 977 + 5) | 0);
     const c = colonyCentres[ci];
     const needs: Array<[ColonyKind, number]> = [...COLONY_NEEDS];
     if (ci === central) needs.splice(3, 0, ['hospital', 3]);
-    for (const [kind, k] of needs) if (!convert(bl, kind, k, isHome, c, r)) convert(bl, kind, 1, notCivic, c, r);
-    if (plotsIn(bl).filter((d) => d.kind === 'shop').length >= 6) convert(bl, 'market', 3, (d) => d.kind === 'shop', c, r);
-  });
+    for (const [kind, k] of needs) if (!(yield* convert(bl, kind, k, isHome, c, r))) yield* convert(bl, kind, 1, notCivic, c, r);
+    if (plotsIn(bl).filter((d) => d.kind === 'shop').length >= 6) yield* convert(bl, 'market', 3, (d) => d.kind === 'shop', c, r);
+    yield;
+  }
 
   // ---- 4. the final plots, colonies and trees ---------------------------------------------------------------------------------------
   const plots: ColonyPlot[] = [];
   const colonies: Colony[] = [];
-  colonyBlocks.forEach((bl, ci) => {
+  for (let ci = 0; ci < colonyBlocks.length; ci++) {
+    const bl = colonyBlocks[ci];
     const ids: number[] = [];
     const ordered = plotsIn(bl).slice().sort((p, q) => p.block - q.block || p.run - q.run || p.s0 - q.s0);
     for (const d of ordered) {
@@ -613,9 +634,11 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         entrance: { x: d.access.x, y: input.ground(d.access.x, d.access.z), z: d.access.z }, floors: kind === 'park' || kind === 'playground' ? 0 : d.floors,
         height, color: d.color, ring: ringAt(gate.x, gate.z),
       });
+      if ((id & 15) === 15) yield;
     }
     colonies.push({ id: ci, centre: colonyCentres[ci], blocks: bl.slice().sort((p, q) => p - q), plots: ids, ring: ringAt(colonyCentres[ci].x, colonyCentres[ci].z) });
-  });
+    yield;
+  }
 
   const trees: ColonyTree[] = [];
   const plotGrid = new Grid<ColonyPlot>();
@@ -644,6 +667,7 @@ export function planColonies(input: ColonyInput): ColonyPlan {
         if (gy < input.landLine + 0.3) continue;
         trees.push({ x, y: gy, z, scale: 0.8 + 0.5 * r(), park: false });
       }
+      yield;
     }
   }
   for (const p of plots) {
@@ -692,15 +716,103 @@ export function buildingHeight(kind: ColonyKind, floors: number): number {
   return floors * 3.1 + (kind === 'flats' || kind === 'hospital' ? 1.6 : 0.6);
 }
 
+// ---- footpaths (Q-3762: the people of the colonies walk here) --------------------------------------------------------------------------
+
+/** How far a footpath's walking line runs from the kerb, metres (inside the 3 m footpath, behind the trees at 1.3 m). */
+export const COLONY_WALK_LINE = 2.4;
+
+/** A walking line along a footpath: closed round a block, or open where a road, a plot or water cut it. */
+export interface ColonyFootpath { block: number; points: ColonyPoint[]; closed: boolean; length: number }
+
+/**
+ * The footpaths of the blocks: each block's road centre lines inset by their own half width and COLONY_WALK_LINE, sampled every 2 m and
+ * cut wherever ok(x, z) is false (a road, a junction pad, a plot, water, outside the map), so nobody is ever led onto a road or into a house.
+ * PURE given ok.
+ */
+export function footpathPaths(blocks: ReadonlyArray<Block>, ok: (x: number, z: number) => boolean): ColonyFootpath[] {
+  const out: ColonyFootpath[] = [];
+  for (const block of blocks) {
+    const poly = block.polygon, n = poly.length;
+    if (n < 3) continue;
+    // One offset line per side (the block is on the left of its counter-clockwise sides), joined at the corners by their meeting point.
+    const lines: Array<{ ax: number; az: number; bx: number; bz: number; ux: number; uz: number } | null> = [];
+    for (let i = 0; i < n; i++) {
+      const a = poly[i], b = poly[(i + 1) % n];
+      const L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (L < 1e-6) { lines.push(null); continue; }
+      const ux = (b.x - a.x) / L, uz = (b.z - a.z) / L, nx = -uz, nz = ux;
+      const d = (block.sides[i] ? block.sides[i].half : 3.5) + COLONY_WALK_LINE;
+      lines.push({ ax: a.x + nx * d, az: a.z + nz * d, bx: b.x + nx * d, bz: b.z + nz * d, ux, uz });
+    }
+    const ring: ColonyPoint[] = [];
+    for (let i = 0; i < n; i++) {
+      const l0 = lines[(i - 1 + n) % n], l1 = lines[i];
+      if (!l1) continue;
+      if (!l0) { ring.push({ x: l1.ax, z: l1.az }); continue; }
+      const cr = l0.ux * l1.uz - l0.uz * l1.ux;
+      let p = { x: (l0.bx + l1.ax) / 2, z: (l0.bz + l1.az) / 2 };
+      if (Math.abs(cr) > 0.05) {
+        const t = ((l1.ax - l0.ax) * l1.uz - (l1.az - l0.az) * l1.ux) / cr;
+        const q = { x: l0.ax + l0.ux * t, z: l0.az + l0.uz * t };
+        if (Math.hypot(q.x - poly[i].x, q.z - poly[i].z) < 30) p = q;
+      }
+      ring.push(p);
+    }
+    if (ring.length < 3) continue;
+    // Sampled every 2 m round the ring; cut into runs of good points.
+    const samples: Array<{ x: number; z: number; good: boolean }> = [];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      const L = Math.hypot(b.x - a.x, b.z - a.z), k = Math.max(1, Math.ceil(L / 2));
+      for (let j = 0; j < k; j++) { const x = a.x + ((b.x - a.x) * j) / k, z = a.z + ((b.z - a.z) * j) / k; samples.push({ x, z, good: ok(x, z) }); }
+    }
+    const all = samples.every((q) => q.good);
+    const lengthOf = (pts: ColonyPoint[], closed: boolean): number => {
+      let len = 0;
+      for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      return closed && pts.length > 1 ? len + Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].z - pts[pts.length - 1].z) : len;
+    };
+    if (all) { const pts = samples.map((q) => ({ x: q.x, z: q.z })); out.push({ block: block.id, points: pts, closed: true, length: lengthOf(pts, true) }); continue; }
+    // Start just after a bad point so no run wraps round the start.
+    const first = samples.findIndex((q) => !q.good);
+    let run: ColonyPoint[] = [];
+    const flush = (): void => { if (run.length >= 4) { const len = lengthOf(run, false); if (len >= 8) out.push({ block: block.id, points: run, closed: false, length: len }); } run = []; };
+    for (let k = 1; k <= samples.length; k++) {
+      const q = samples[(first + k) % samples.length];
+      if (q.good) run.push({ x: q.x, z: q.z }); else flush();
+    }
+    flush();
+  }
+  return out;
+}
+
 // ---- drawing -------------------------------------------------------------------------------------------------------------------------
 
-/** Per quality tier: how far colonies are drawn, the most triangles they may take, tiles built per update, and how much detail. */
-export interface ColonyTier { radius: number; maxTriangles: number; buildsPerUpdate: number; detail: 0 | 1 | 2 }
+/**
+ * Per quality tier: how far colonies are drawn, the most triangles they may take, tiles built per update, and how much detail; and how far
+ * from the camera a drawn tile also carries its physics wall (physicsRadius, Q-3761: every body and car near the player is stopped by the
+ * houses; a tile farther than that has no collider at all, so far colonies cost the physics nothing).
+ */
+export interface ColonyTier { radius: number; maxTriangles: number; buildsPerUpdate: number; detail: 0 | 1 | 2; physicsRadius: number }
 export const COLONY_TIERS: Record<AthreeQuality, ColonyTier> = {
-  phone: { radius: 260, maxTriangles: 10000, buildsPerUpdate: 1, detail: 0 },
-  mid: { radius: 420, maxTriangles: 10000, buildsPerUpdate: 2, detail: 1 },
-  desktop: { radius: 800, maxTriangles: 26000, buildsPerUpdate: 3, detail: 2 },
+  phone: { radius: 260, maxTriangles: 10000, buildsPerUpdate: 1, detail: 0, physicsRadius: 160 },
+  mid: { radius: 420, maxTriangles: 10000, buildsPerUpdate: 2, detail: 1, physicsRadius: 200 },
+  desktop: { radius: 800, maxTriangles: 26000, buildsPerUpdate: 3, detail: 2, physicsRadius: 240 },
 };
+/**
+ * The game kit's world-collider mark (three/collision.ts markWorldCollider: the character controller, every driven car and every kit
+ * character collide with meshes marked 'solid' and pass meshes marked 'none'). A tile's drawn mesh is 'none' and its invisible wall mesh is
+ * 'solid', so a body meets the wall boxes (colonyColliderBoxes), never the awnings and crowns drawn over its head.
+ */
+export const COLONY_COLLIDER_KEY = ` + JSON.stringify(GAME_WORLD_COLLIDER_KEY) + `;
+/** The wall geometry of one tile (positions only, relative to the tile corner), and how many boxes made it. */
+export function colonyColliderArrays(tile: { ix: number; iz: number; plots: ReadonlyArray<ColonyPlot>; trees: ReadonlyArray<ColonyTree> }, detail: 0 | 1 | 2): { position: Float32Array; normal: Float32Array; boxes: number; triangles: number } {
+  const out = { p: [] as number[], n: [] as number[], c: [] as number[] };
+  const ox = tile.ix * COLONY_TILE, oz = tile.iz * COLONY_TILE;
+  const boxes = colonyColliderBoxes(tile, detail);
+  for (const b of boxes) boxInto(out, ox, oz, b.x, b.y0, b.z, b.w, b.h, b.d, b.ux, b.uz, 0);
+  return { position: Float32Array.from(out.p), normal: Float32Array.from(out.n), boxes: boxes.length, triangles: out.p.length / 9 };
+}
 /** Side of a streamed colony tile, metres: one merged mesh (one draw call) per tile. */
 export const COLONY_TILE = 160;
 
@@ -724,29 +836,45 @@ function boxInto(out: { p: number[]; n: number[]; c: number[] }, ox: number, oz:
   quad(P(-1, 1, y0), P(-1, -1, y0), P(-1, -1, y1), P(-1, 1, y1), -ux, 0, -uz, 0.86);
 }
 
+/**
+ * 🧱 One box of a colony, in WORLD metres: centre (x, z), standing on y0, h tall, w along (ux, uz) and d across it. A SOLID box is a wall a
+ * body or a car cannot pass (Q-3761): the building, a compound wall (its gate gap stays open), a temple, a swing frame, a tree trunk. What is
+ * not solid is the ground slab of a park, an awning or a signboard over the footpath, a balcony, a roof tank, a flag: drawn, never in the way.
+ */
+export interface ColonyBox { x: number; z: number; y0: number; h: number; w: number; d: number; ux: number; uz: number }
+type BoxSink = (b: ColonyBox, color: number, solid: boolean) => void;
+
 /** Every triangle of one plot's building at a detail level (0: phone, 1: mid, 2: desktop), into the tile arrays. */
 export function plotGeometry(out: { p: number[]; n: number[]; c: number[] }, ox: number, oz: number, plot: ColonyPlot, detail: 0 | 1 | 2): void {
+  plotBoxes(plot, detail, (b, color) => boxInto(out, ox, oz, b.x, b.y0, b.z, b.w, b.h, b.d, b.ux, b.uz, color));
+}
+
+/**
+ * The boxes one plot is drawn with at a detail level, each said solid or not. The ONE description of a plot: the drawing (plotGeometry), the
+ * physics wall (colonyColliderBoxes, the per-tile collider) and world.colonySolidAt all read it, so a wall is exactly where a wall is drawn.
+ */
+export function plotBoxes(plot: ColonyPlot, detail: 0 | 1 | 2, sink: BoxSink): void {
   const ux = -plot.facing.z, uz = plot.facing.x;
   const fx = plot.facing.x, fz = plot.facing.z;
   const y = plot.y;
-  const box = (along: number, back: number, y0: number, w: number, h: number, d: number, color: number): void => {
+  const box = (along: number, back: number, y0: number, w: number, h: number, d: number, color: number, solid = true): void => {
     // along: offset along the frontage; back: offset from the plot centre away from the road.
-    boxInto(out, ox, oz, plot.x + ux * along - fx * back, y0, plot.z + uz * along - fz * back, w, h, d, ux, uz, color);
+    sink({ x: plot.x + ux * along - fx * back, z: plot.z + uz * along - fz * back, y0, h, w, d, ux, uz }, color, solid);
   };
   const W = plot.width, D = plot.depth, H = plot.height;
   // A plinth from below the pad's lowest eased edge to just above it: a slope never shows a gap under a building.
   const plinth = 1.6;
   switch (plot.kind) {
     case 'park': {
-      box(0, 0, y - 0.3, W, 0.36, D, 0x5d9b45);
-      if (detail >= 1) { box(0, 0, y, 2.2, 0.8, 2.2, 0xb8b8b8); box(-W / 4, 0, y, 1.6, 0.45, 0.5, 0x8b5a2b); box(W / 4, 0, y, 1.6, 0.45, 0.5, 0x8b5a2b); }
-      if (detail >= 2) box(0, 0, y + 0.8, 1, 1.2, 1, 0x9fc5e8);
+      box(0, 0, y - 0.3, W, 0.36, D, 0x5d9b45, false);
+      if (detail >= 1) { box(0, 0, y, 2.2, 0.8, 2.2, 0xb8b8b8); box(-W / 4, 0, y, 1.6, 0.45, 0.5, 0x8b5a2b, false); box(W / 4, 0, y, 1.6, 0.45, 0.5, 0x8b5a2b, false); }
+      if (detail >= 2) box(0, 0, y + 0.8, 1, 1.2, 1, 0x9fc5e8, false);
       return;
     }
     case 'playground': {
-      box(0, 0, y - 0.3, W, 0.34, D, 0xc9a66b);
+      box(0, 0, y - 0.3, W, 0.34, D, 0xc9a66b, false);
       box(-W / 5, 0, y, 3, 2.4, 0.2, 0xd62828);
-      if (detail >= 1) { box(W / 5, D / 6, y, 1.2, 1.8, 3.5, 0x2a9d8f); box(-W / 5, 0, y + 2.3, 3, 0.15, 1.6, 0xd62828); }
+      if (detail >= 1) { box(W / 5, D / 6, y, 1.2, 1.8, 3.5, 0x2a9d8f); box(-W / 5, 0, y + 2.3, 3, 0.15, 1.6, 0xd62828, false); }
       return;
     }
     default: break;
@@ -757,8 +885,8 @@ export function plotGeometry(out: { p: number[]; n: number[]; c: number[] }, ox:
   box(0, back, y - plinth, bw, H + plinth, bd, plot.color);
   if (plot.kind === 'flats' || plot.kind === 'house' || plot.kind === 'haveli' || plot.kind === 'school' || plot.kind === 'clinic' || plot.kind === 'hospital') {
     // The black roof water tank every Indian roof carries.
-    box(bw / 4, back + bd / 4, y + H, 1.6, 1.5, 1.6, 0x1c1c1c);
-    if (plot.kind === 'flats' && detail >= 1) box(-bw / 4, back + bd / 4, y + H, 1.6, 1.5, 1.6, 0x1c1c1c);
+    box(bw / 4, back + bd / 4, y + H, 1.6, 1.5, 1.6, 0x1c1c1c, false);
+    if (plot.kind === 'flats' && detail >= 1) box(-bw / 4, back + bd / 4, y + H, 1.6, 1.5, 1.6, 0x1c1c1c, false);
   }
   if (plot.kind === 'house' || plot.kind === 'haveli' || plot.kind === 'school') {
     // Compound wall with a gate gap in the front.
@@ -774,35 +902,35 @@ export function plotGeometry(out: { p: number[]; n: number[]; c: number[] }, ox:
   }
   switch (plot.kind) {
     case 'haveli':
-      box(0, back, y + H, 2.4, 2.2, 2.4, 0xe6b566);
+      box(0, back, y + H, 2.4, 2.2, 2.4, 0xe6b566, false);
       break;
     case 'flats':
-      if (detail >= 1) for (let f = 1; f < plot.floors; f += 2) box(0, back - bd / 2 - 0.5, y + f * 3.1, bw * 0.8, 0.2, 1, 0xcfcfcf);
+      if (detail >= 1) for (let f = 1; f < plot.floors; f += 2) box(0, back - bd / 2 - 0.5, y + f * 3.1, bw * 0.8, 0.2, 1, 0xcfcfcf, false);
       break;
     case 'shop': case 'market': {
       // A coloured awning over the shop front and a bright signboard above it.
       const awn = [0xd62828, 0x2a9d8f, 0xf77f00, 0x457b9d, 0x6a4c93][plot.id % 5];
-      box(0, back - bd / 2 - 0.9, y + 2.6, bw * 0.95, 0.15, 1.8, awn);
-      box(0, back - bd / 2 - 0.1, y + 3.1, bw * 0.8, 0.9, 0.2, [0xffd166, 0x06d6a0, 0xef476f, 0x118ab2, 0xffffff][plot.id % 5]);
+      box(0, back - bd / 2 - 0.9, y + 2.6, bw * 0.95, 0.15, 1.8, awn, false);
+      box(0, back - bd / 2 - 0.1, y + 3.1, bw * 0.8, 0.9, 0.2, [0xffd166, 0x06d6a0, 0xef476f, 0x118ab2, 0xffffff][plot.id % 5], false);
       break;
     }
     case 'tower': case 'office':
-      box(0, back, y + H, bw * 0.4, 1.5, bd * 0.4, 0x5c6b73);
+      box(0, back, y + H, bw * 0.4, 1.5, bd * 0.4, 0x5c6b73, false);
       break;
     case 'temple':
       // A stepped shikhara on a raised plinth, with a saffron flag.
-      box(0, back, y + 3, bw * 0.55, 3, bd * 0.55, 0xf7f0e3);
-      box(0, back, y + 6, bw * 0.38, 3, bd * 0.38, 0xf4a259);
-      box(0, back, y + 9, bw * 0.2, 3.5, bd * 0.2, 0xe76f51);
-      if (detail >= 1) box(0, back, y + 12.5, 0.12, 2, 0.12, 0x6b4f3a);
-      if (detail >= 1) box(0.4, back, y + 13.8, 0.8, 0.5, 0.05, 0xff9933);
+      box(0, back, y + 3, bw * 0.55, 3, bd * 0.55, 0xf7f0e3, false);
+      box(0, back, y + 6, bw * 0.38, 3, bd * 0.38, 0xf4a259, false);
+      box(0, back, y + 9, bw * 0.2, 3.5, bd * 0.2, 0xe76f51, false);
+      if (detail >= 1) box(0, back, y + 12.5, 0.12, 2, 0.12, 0x6b4f3a, false);
+      if (detail >= 1) box(0.4, back, y + 13.8, 0.8, 0.5, 0.05, 0xff9933, false);
       break;
     case 'clinic': case 'hospital':
-      box(0, back - bd / 2 - 0.05, y + H - 2.2, 1.6, 0.5, 0.1, 0xd62828);
-      box(0, back - bd / 2 - 0.05, y + H - 2.75, 0.5, 1.6, 0.1, 0xd62828);
+      box(0, back - bd / 2 - 0.05, y + H - 2.2, 1.6, 0.5, 0.1, 0xd62828, false);
+      box(0, back - bd / 2 - 0.05, y + H - 2.75, 0.5, 1.6, 0.1, 0xd62828, false);
       break;
     case 'school':
-      if (detail >= 1) box(-bw / 2 + 1, back - bd / 2 - 2, y, 0.12, 6, 0.12, 0xdddddd);
+      if (detail >= 1) box(-bw / 2 + 1, back - bd / 2 - 2, y, 0.12, 6, 0.12, 0xdddddd, false);
       break;
     default: break;
   }
@@ -810,10 +938,34 @@ export function plotGeometry(out: { p: number[]; n: number[]; c: number[] }, ox:
 
 /** A tree: a trunk and a crown (one crown on a phone). */
 export function treeGeometry(out: { p: number[]; n: number[]; c: number[] }, ox: number, oz: number, t: ColonyTree, detail: 0 | 1 | 2): void {
+  treeBoxes(t, detail, (b, color) => boxInto(out, ox, oz, b.x, b.y0, b.z, b.w, b.h, b.d, b.ux, b.uz, color));
+}
+
+/** A tree's boxes: the trunk is solid (nobody walks through a tree), the crown above head height is not. */
+export function treeBoxes(t: ColonyTree, detail: 0 | 1 | 2, sink: BoxSink): void {
   const s = t.scale;
-  boxInto(out, ox, oz, t.x, t.y - 0.3, t.z, 0.35 * s, 2.4 * s, 0.35 * s, 1, 0, 0x6b4f3a);
-  boxInto(out, ox, oz, t.x, t.y + 2 * s, t.z, 2.6 * s, 2.4 * s, 2.6 * s, 0.7071, 0.7071, 0x3f7d3a);
-  if (detail >= 1) boxInto(out, ox, oz, t.x, t.y + 3.8 * s, t.z, 1.7 * s, 1.6 * s, 1.7 * s, 1, 0, 0x4c9a45);
+  sink({ x: t.x, z: t.z, y0: t.y - 0.3, h: 2.4 * s, w: 0.35 * s, d: 0.35 * s, ux: 1, uz: 0 }, 0x6b4f3a, true);
+  sink({ x: t.x, z: t.z, y0: t.y + 2 * s, h: 2.4 * s, w: 2.6 * s, d: 2.6 * s, ux: 0.7071, uz: 0.7071 }, 0x3f7d3a, false);
+  if (detail >= 1) sink({ x: t.x, z: t.z, y0: t.y + 3.8 * s, h: 1.6 * s, w: 1.7 * s, d: 1.7 * s, ux: 1, uz: 0 }, 0x4c9a45, false);
+}
+
+/** The SOLID boxes of a tile's plots and trees at a detail level (Q-3761): the walls of the colony, for any physics engine (a Rapier cuboid each). */
+export function colonyColliderBoxes(tile: { plots: ReadonlyArray<ColonyPlot>; trees: ReadonlyArray<ColonyTree> }, detail: 0 | 1 | 2): ColonyBox[] {
+  const out: ColonyBox[] = [];
+  const keep: BoxSink = (b, _c, solid) => { if (solid) out.push(b); };
+  for (const p of tile.plots) plotBoxes(p, detail, keep);
+  for (const t of tile.trees) treeBoxes(t, detail, keep);
+  return out;
+}
+
+/** True when a circle of radius r at (x, z) touches a solid box (its footprint, whatever its height). */
+export function boxesTouch(boxes: ReadonlyArray<ColonyBox>, x: number, z: number, r = 0): boolean {
+  for (const b of boxes) {
+    const dx = x - b.x, dz = z - b.z;
+    const u = Math.abs(dx * b.ux + dz * b.uz) - b.w / 2, v = Math.abs(-dx * b.uz + dz * b.ux) - b.d / 2;
+    if (Math.hypot(Math.max(0, u), Math.max(0, v)) <= r) return true;
+  }
+  return false;
 }
 
 /** The tiles that hold anything, keyed "ix,iz", with their plots and trees. */
@@ -842,13 +994,15 @@ export function colonyTileArrays(tile: { ix: number; iz: number; plots: Readonly
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ThreeLike = any;
 
-export interface ColonyStats { tiles: number; drawCalls: number; triangles: number; plots: number; trees: number; capped: boolean }
+export interface ColonyStats { tiles: number; drawCalls: number; triangles: number; plots: number; trees: number; capped: boolean; colliders: number; colliderBoxes: number }
 export interface ColonyMesh {
   readonly group: ThreeLike;
   /** Call every frame with the camera in WORLD metres and the floating origin: builds the nearest tiles, drops far ones. */
   update(cameraX: number, cameraZ: number, origin: { x: number; z: number }): void;
-  /** What is drawn now: tiles (one draw call each), triangles, and whether the tier's triangle cap held tiles back. */
+  /** What is drawn now: tiles (one draw call each), triangles, whether the tier's triangle cap held tiles back, and the tiles with a wall. */
   stats(): ColonyStats;
+  /** The wall meshes live now (one per tile within physicsRadius), marked 'solid' with COLONY_COLLIDER_KEY: for a game's own physics. */
+  colliders(): ThreeLike[];
   dispose(): void;
 }
 
@@ -861,9 +1015,29 @@ export function createColonyMesh(THREE: ThreeLike, world: AthreeWorld, quality: 
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
   let tiles: ReturnType<typeof colonyTiles> | null = null;
   let seenEdits = -1;
-  const live = new Map<string, { mesh: ThreeLike; triangles: number; plots: number; trees: number }>();
+  const wallMaterial = new THREE.MeshBasicMaterial({ visible: false });
+  type Live = { mesh: ThreeLike; tile: ThreeLike; triangles: number; plots: number; trees: number; data: { ix: number; iz: number; plots: ColonyPlot[]; trees: ColonyTree[] }; wall: ThreeLike | null; boxes: number };
+  const live = new Map<string, Live>();
   let capped = false;
-  const drop = (k: string): void => { const t = live.get(k); if (!t) return; group.remove(t.mesh); t.mesh.geometry.dispose(); live.delete(k); };
+  const dropWall = (t: Live): void => { if (!t.wall) return; t.tile.remove(t.wall); t.wall.geometry.dispose(); t.wall = null; t.boxes = 0; };
+  const drop = (k: string): void => { const t = live.get(k); if (!t) return; dropWall(t); group.remove(t.tile); t.mesh.geometry.dispose(); live.delete(k); };
+  const buildWall = (t: Live): void => {
+    const arr = colonyColliderArrays(t.data, tier.detail);
+    if (!arr.boxes) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(arr.position, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(arr.normal, 3));
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    const wall = new THREE.Mesh(geo, wallMaterial);
+    wall.name = 'Colony walls';
+    wall.visible = false;
+    wall.userData[COLONY_COLLIDER_KEY] = 'solid';
+    wall.userData.ground = false;
+    t.tile.add(wall);
+    t.wall = wall;
+    t.boxes = arr.boxes;
+  };
   function refresh(): void {
     // A ground edit by the game (a levelled place, a road) can take plots away: the tiles are rebuilt from the world's live list.
     const edits = world.editCount ? world.editCount() : 0;
@@ -907,20 +1081,34 @@ export function createColonyMesh(THREE: ThreeLike, world: AthreeWorld, quality: 
         geo.computeBoundingSphere();
         const mesh = new THREE.Mesh(geo, material);
         mesh.name = 'Colony tile ' + e.k;
-        mesh.position.set(e.t.ix * COLONY_TILE, 0, e.t.iz * COLONY_TILE);
         mesh.userData.ground = false;
-        group.add(mesh);
-        live.set(e.k, { mesh, triangles: arr.triangles, plots: e.t.plots.length, trees: e.t.trees.length });
+        // The drawn mesh is never a wall (its awnings and crowns hang over the footpath); the tile's wall mesh is (buildWall).
+        mesh.userData[COLONY_COLLIDER_KEY] = 'none';
+        const tile = new THREE.Group();
+        tile.name = 'Colony ' + e.k;
+        tile.position.set(e.t.ix * COLONY_TILE, 0, e.t.iz * COLONY_TILE);
+        tile.add(mesh);
+        group.add(tile);
+        live.set(e.k, { mesh, tile, triangles: arr.triangles, plots: e.t.plots.length, trees: e.t.trees.length, data: e.t, wall: null, boxes: 0 });
         used += arr.triangles;
         builds++;
       }
+      // 🧱 The walls (Q-3761): a drawn tile near the camera carries its collider; one that moved away drops it. Built with the tile's
+      // own data and detail, so a wall stands exactly where a wall is drawn and nowhere else.
+      const P = tier.physicsRadius;
+      for (const t of live.values()) {
+        const d = dist(t.data.ix, t.data.iz);
+        if (!t.wall && d <= P) buildWall(t);
+        else if (t.wall && d > P * 1.15) dropWall(t);
+      }
     },
     stats() {
-      let triangles = 0, plots = 0, trees = 0;
-      for (const t of live.values()) { triangles += t.triangles; plots += t.plots; trees += t.trees; }
-      return { tiles: live.size, drawCalls: live.size, triangles, plots, trees, capped };
+      let triangles = 0, plots = 0, trees = 0, colliders = 0, colliderBoxes = 0;
+      for (const t of live.values()) { triangles += t.triangles; plots += t.plots; trees += t.trees; if (t.wall) { colliders++; colliderBoxes += t.boxes; } }
+      return { tiles: live.size, drawCalls: live.size, triangles, plots, trees, capped, colliders, colliderBoxes };
     },
-    dispose() { for (const k of [...live.keys()]) drop(k); material.dispose(); },
+    colliders() { return [...live.values()].filter((t) => t.wall).map((t) => t.wall); },
+    dispose() { for (const k of [...live.keys()]) drop(k); material.dispose(); wallMaterial.dispose(); },
   };
 }
 `;

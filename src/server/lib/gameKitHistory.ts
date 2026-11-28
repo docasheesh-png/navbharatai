@@ -144,7 +144,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3a44eef271b79b2123ff648fcb758f07ee91484d87277409d2a552bc55fcd218",
     "8b44a60c73113e176f0659394b2f41109755dcc85b8e2b57c35efcb8b40b2471",
     "cedddcccbd26bf548aacbe302cc9721948a5fb439cccb72973b6bc6f14f29bf7",
-    "467bdd3f5b5df3b14a095dfaa06d3d48d207e4d7571581e374fbc4305deb9919"
+    "467bdd3f5b5df3b14a095dfaa06d3d48d207e4d7571581e374fbc4305deb9919",
+    "b117c2f902d1eb08465c7bda9fccb0d48c1adc8a1b1d02b0630f531bd19a1d2c",
+    "7dbaf6581560f40505111333b46a7e631980568269398f06101d46c1816ed652"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
@@ -193,7 +195,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/athree/colonies.ts": [
     "6f3f04d6020e0aec42c3e42c3b6786f34019378959bb81b0d94b1a0b88e00b3d",
-    "5ad845703a15b9b4937c98dd16bc1c509b73bbd3315cf34dfd2392cfad99ba52"
+    "5ad845703a15b9b4937c98dd16bc1c509b73bbd3315cf34dfd2392cfad99ba52",
+    "3578eb4c19a8cc3628abc4260552cad3c9744b7c3c5f8ba0d1d82e97b779092c"
   ],
   "src/game/athree/config.ts": [
     "0daa780af7666b5884ab80dc784accc7928edd551c23a01a108e54a78da53202",
@@ -224,13 +227,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c6dbce9eba777633cbc4a77e234b578176ca94fe7cca0fbbe4bd9b06b31ca055",
     "cea47b0290c1b2c9d908a6c218d93de35738809f3c7b301732c30ab71df8e148",
     "5ae94122c6df6484b18cba25c1f88588695cf74138f131c8479fc8dae803ad2f",
-    "c10d26e4efb778aa526cd1eebbbdf365af45ffeac0f0be2b005dda74cd7e8f0b"
+    "c10d26e4efb778aa526cd1eebbbdf365af45ffeac0f0be2b005dda74cd7e8f0b",
+    "ea007e28e2750a1ae6449cb373d5db5b38c19c5bdc063b45c10e6a13cde0db01"
   ],
   "src/game/athree/movers.ts": [
     "92f2ce72df43b23f8dbe31ed3ce020d2a910528d5469fb7266fc5ceffac957ad"
   ],
   "src/game/athree/noise.ts": [
-    "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
+    "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98",
+    "0d76697da6d8f3e81e41488b1a1467a02d544626d96a99d68e3444a6daa0883d"
   ],
   "src/game/athree/ocean.ts": [
     "b30d24fcf9d1fc581798e8a30eff71daacad22f08cc6d9ab886822d70e726b77",
@@ -247,7 +252,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "8ca7148c58ea6f6bf4cd8b514495a6015bbc60743087abe42e5511e317dbdfb4",
     "5cdfde7611af7eb2418f657afe3f0d0cad7c4c61d0dd0cf928bf0d873689df27",
     "6dca612126f52177de5a837110e423aab2bd0c687a8a530b0ef18a34e09509ae",
-    "1bfc518effd3bd8bbfad01a48c04dbc08bd1a8c897729120b3cd077e4c950eb6"
+    "1bfc518effd3bd8bbfad01a48c04dbc08bd1a8c897729120b3cd077e4c950eb6",
+    "06c8002d86fced2cc4d41f8c07f15923b37c00ffad8624309cda1d4e769cb162"
   ],
   "src/game/athree/riverwater.ts": [
     "6ee30341e76bfe28e764e70685ee0145dcace6dd6565c067be6afe5f3c393eb7",
@@ -264,7 +270,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "7483429b247808379d59a0c8b6697bd8a1d79546de1c19f6328140357962fcd2",
     "43777cbc4b47d46176395c9a28b82bcb27b0e06178f5dc6d344433caf87ebf48",
     "5b2a10e54a14ea360a068c6aa015b3e9f3244dc810bdfafbe8b59c7338ea195f",
-    "2ea369a1ebe62eda1a0800d4e9a2feb0d5129c3105c519e29be32e83b49bb823"
+    "2ea369a1ebe62eda1a0800d4e9a2feb0d5129c3105c519e29be32e83b49bb823",
+    "92dd084f7c74fbf5d1409ab1b035ea5be295118d02e832b4de8c0efc8e096c42"
   ],
   "src/game/athree/sky.ts": [
     "32c209e29681a69852896fea713e956df10c8aa3253eccd7ec2f1d3354eb70c3",
@@ -321,7 +328,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b9f3ca78541854780869879989fbc508b15b7397fb60abba152c1eb3509f6dd4",
     "06548f1aa72426d9bc55dc6c3dc19490c16aefc38a8d55faa4b8c7d8cab00741",
     "2eebdce300ee7051a3f330cc8c2b759b2acad8d6c2f669d39f3b46fb81d705d7",
-    "2c71032cba071a88983932e4b46ecf7ff2b1a61e915d9272b93983f39bc38f7b"
+    "2c71032cba071a88983932e4b46ecf7ff2b1a61e915d9272b93983f39bc38f7b",
+    "19b654bcdeddce0c0922d118402b68e99507feb9570a9411af32cdb9f5f04ed3",
+    "38cb7fd78a03773a97c4ef0c700bd0ff9008c9a2b60fcec1d3a6e17059e69bf9"
   ],
   "src/game/board/business.ts": [
     "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",
@@ -656,7 +665,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a028f148151602cfed983376f486b9ee684967c279c98b48387e3a7275783ac0",
     "443c0e2fbd5d84ec979e31912bf708a38b6a1559f75c317f65a5b16471bafdc2",
     "a7d09d5b2a1bdf6cf76db40c614228cc337ac9710242581b09bb1401799d2cdf",
-    "cfd525626dfdc1eb2ea9aebc1cf8cbd538e8dcd171b663ae7969b03a750e49a4"
+    "cfd525626dfdc1eb2ea9aebc1cf8cbd538e8dcd171b663ae7969b03a750e49a4",
+    "0eaf4b568985d9b01461190db32d11202ed09898c2b8be8f513a04127b4f5497",
+    "a874807e933c7e24111076392c688a0bd706c42ee309b78b4a8c38da4428f88b"
   ],
   "src/game/play/playerBody.ts": [
     "2e2543847b4288c61ccb57de82aa1f9c5ace4789cc25b3f454a994e9147d909f",
@@ -798,13 +809,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "e3411c230fe3afdb7e7fe312a3707eca9a3858a1b98312439d8d8a785ae94745",
     "47269d73710bc869cd350562a794763c0b9dfff6adaae87a7e3fbb61c5c6ded0",
     "0ebde6dd71bc2bd9c12e00873c352c2ea641e345df9acb8983bd51f7b8b11df6",
-    "0e562a97e47d75325c80cab5e55b93a18d71953b106898bcc69d4b5ccf3b6339"
+    "0e562a97e47d75325c80cab5e55b93a18d71953b106898bcc69d4b5ccf3b6339",
+    "5d317af28412c5ca94bb1bad186b28613694f1788f6aeebfc1cd6ddb134dbfae"
   ],
   "src/game/three/citytraffic.ts": [
     "a1c64e0c58cd2a3975747dfd84bc554249b3b54f4b00568e1216f58b35946a76",
     "78f1ec87615b536a1e215a87ae7d53b867177f856f9a5633027777c0d9587f32",
     "22f70211b7897386f45827c28fd2763b0a95e67d70fb62000de18163fd278e45",
-    "c4bf75fa8790755061b51a7b9a2db56463246a557108463a3e1eea633ed1bfc8"
+    "c4bf75fa8790755061b51a7b9a2db56463246a557108463a3e1eea633ed1bfc8",
+    "b10c66adb4108945a1f2c7cae761a1c6fad228786111109c0cde91a861550da2"
   ],
   "src/game/three/collision.ts": [
     "17d7db8f5f5aee65d637043365d0b94e67e4f7bdcd9f92da616b77928fdd3866",

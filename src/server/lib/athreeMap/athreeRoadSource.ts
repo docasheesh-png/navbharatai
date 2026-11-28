@@ -24,7 +24,7 @@ export const ROADS = `// Athree map — roads, a race circuit, runways, village 
 // Technique: flat-site hashing, A-star routing with slope and river costs, Chaikin smoothing, graded height profile, banked closed spline,
 // weighted carve of continuous candidates, 125 m spatial grid, regions generated on demand. Own implementation.
 
-import { mulberry32 } from './noise';
+import { mulberry32, drainSteps, type Steps } from './noise';
 // The planned network (roads on every map size) is appended at the end of this file: planRoadNetwork, RoadStyle, Junction, Block.
 
 export const ROAD_STEP = 10;
@@ -167,6 +167,13 @@ export interface RoadNetwork {
    * Empty when there is no planned network or a point is nowhere near a road.
    */
   route(from: { x: number; z: number }, to: { x: number; z: number }): RoutePoint[];
+  /**
+   * ⏱️ The home region (a planned town, or a bounded island) as steps (Q-3763): drive it with stepUntil a few milliseconds a frame and
+   * the first lookup afterwards finds it built. A lookup made before it ends builds the region at once (the same region: one code path).
+   */
+  prepare?(): Steps<void>;
+  /** True when nothing is left for prepare() to build (the home region is built, or the network builds its regions on demand). */
+  ready?(): boolean;
 }
 
 function smooth(t: number): number {
@@ -244,6 +251,8 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
 
   interface Built extends Region { grid: Map<number, Seg[]>; siteGrid: Map<number, number[]>; junctionGrid: Map<number, number[]>; graph: RoadGraph | null; x0: number; z0: number; size: number }
   const regions = new Map<number, Built>();
+  /** The home region being built in slices by prepare() (Q-3763), or null. */
+  let homeSteps: Steps<Built> | null = null;
 
   const terrain = o.terrain;
   function slopeAt(x: number, z: number): number {
@@ -350,6 +359,11 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   }
 
   function buildRegion(rx: number, rz: number): Built {
+    return drainSteps(buildRegionSteps(rx, rz));
+  }
+
+  /** buildRegion as steps (Q-3763): the home region of a planned or bounded map pauses inside its long loops, so it can be built a few ms a frame. */
+  function* buildRegionSteps(rx: number, rz: number): Steps<Built> {
     // A planned loop map is one region centred on the origin, [-P/2, P/2) on each axis, kept clear of the seam.
     const size = bounded ? o.radius * 2 : planned ? P : REGION;
     const x0 = bounded ? -o.radius : planned ? -P / 2 : rx * REGION;
@@ -378,6 +392,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       if (circuit) break;
       const cands: Array<{ x: number; z: number; score: number }> = [];
       for (let k = 0; k < 260; k++) {
+        yield;
         const cx = x0 + R * 1.6 + rng() * (size - R * 3.2);
         const cz = z0 + R * 1.6 + rng() * (size - R * 3.2);
         if (!inside(cx, cz, R * 1.6)) continue;
@@ -399,6 +414,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       const shape = { a: rng() * 6.28, b: rng() * 6.28, c: rng() * 6.28 };
       // The best flat place first; if the road cannot follow the ground there within the cut and fill limit, the next best.
       for (const best of cands.slice(0, planned ? 16 : 8)) {
+        yield;
         const ctrl: Array<[number, number]> = [];
         for (let i = 0; i < 36; i++) {
           const th = (i / 36) * Math.PI * 2;
@@ -429,8 +445,10 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       // A small planned map has no room for a 900 m strip unless it is a flight game (or 5 km and up).
       const want = o.profile === 'flight' ? 2 : planned && side < 5000 ? 0 : 1;
       for (let w = 0; w < want; w++) {
+        yield;
         let best: { x: number; z: number; score: number } | null = null;
         for (let k = 0; k < 260; k++) {
+          yield;
           const cx = x0 + 700 + rng() * (size - 1400);
           const cz = z0 + 700 + rng() * (size - 1400);
           if (!inside(cx, cz, 700)) continue;
@@ -464,6 +482,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     const nCells = bounded ? 4 : 5;
     for (let cz = 0; cz < (planned ? 0 : nCells); cz++) {
       for (let cx = 0; cx < nCells; cx++) {
+        yield;
         const r2 = mulberry32(mix32(cx + rx * 7, cz + rz * 11, o.seed + 97));
         if (r2() > 0.85) continue;
         // Up to eight tries inside the cell for flat, dry ground: a village needs only one good place.
@@ -564,6 +583,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       return null;
     }
     for (const [ai, bi] of edges) {
+      yield;
       if (roads.filter((r) => r.kind === 'highway').length >= 40) break;
       const a = sites[ai]; const b = sites[bi];
       const path = route(a, b);
@@ -591,7 +611,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
       const half = bounded ? Math.min(o.radius - inner, o.radius * 0.56) : P / 2 - inner;
       const cc = circuitCentre as { x: number; z: number; r: number } | null;
       const blockedAt = (x: number, z: number): boolean => (cc !== null && Math.hypot(x - cc.x, z - cc.z) < cc.r) || runwayCentres.some((r) => Math.abs(x - r.x) < 480 && Math.abs(z - r.z) < 60);
-      const plan = planRoadNetwork({
+      const plan = yield* planRoadNetworkSteps({
         seed: o.seed, style: planStyle, cx: 0, cz: 0, half, side, period: P > 0 ? P : 0, landLine: 1.5 * LAND, terrain, water: o.water, blocked: blockedAt, bodies: o.bodies,
         route: (ax, az, bx, bz, avoid) => routeXZ(ax, az, bx, bz, avoid), firstRoad: roads.length, firstSite: sites.length,
       });
@@ -631,7 +651,8 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   function regionFor(x: number, z: number): Built {
     if (bounded || planned) {
       let r = regions.get(0);
-      if (!r) { r = buildRegion(0, 0); regions.set(0, r); }
+      // Needed now: the home region in one go — from where prepare() left it, when it was being built in slices.
+      if (!r) { r = homeSteps ? drainSteps(homeSteps) : buildRegion(0, 0); homeSteps = null; regions.set(0, r); }
       return r;
     }
     const rx = Math.floor(canon(x) / REGION) % regionsPer;
@@ -769,7 +790,20 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   }
 
   const planHome = (): Built | null => (planned ? regionFor(0, 0) : null);
+  function* prepare(): Steps<void> {
+    if (!(bounded || planned) || regions.has(0)) return;
+    if (!homeSteps) homeSteps = buildRegionSteps(0, 0);
+    for (;;) {
+      // A lookup that needed the region has finished it meanwhile (the same steps, run to their end): nothing is left.
+      if (regions.has(0) || !homeSteps) return;
+      const r = homeSteps.next();
+      if (r.done) { regions.set(0, r.value); homeSteps = null; return; }
+      yield;
+    }
+  }
   return {
+    prepare,
+    ready: () => !(bounded || planned) || regions.has(0),
     regionAt: regionFor, carve, roadAt, drivableHeightAt, home: () => regionFor(bounded ? 0 : 1, bounded ? 0 : 1), regionsNear,
     style: () => planStyle,
     blocks: () => planHome()?.blocks ?? [],

@@ -439,6 +439,8 @@ describe('createAthreeMap with vegetation', () => {
     const map = A.createAthreeMap({ seed: 3, quality: 'phone', three: THREE });
     expect(map.vegetation).not.toBeNull();
     expect(map.chunks.group.children).toContain(map.vegetation.group);
+    // The town is planned a few ms a frame first (Q-3763): update() draws once it is planned.
+    for (let frame = 0; frame < 100000 && !map.world.planned(); frame++) map.update(100, 100, 1);
     map.update(100, 100, 1);
     expect(map.vegetation.stats().tilesLoaded).toBeGreaterThan(0);
     map.dispose();

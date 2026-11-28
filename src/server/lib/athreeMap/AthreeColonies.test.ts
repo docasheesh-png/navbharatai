@@ -289,7 +289,8 @@ describe('performance: the phone tier holds its draw calls and triangles on the 
       for (let i = 0; i < 40; i++) mesh.update(spot.x, spot.z, { x: 0, z: 0 });
       const st = mesh.stats();
       let tris = 0, meshes = 0;
-      mesh.group.traverse((o: any) => { if (o.isMesh) { meshes++; tris += o.geometry.getAttribute('position').count / 3; } });
+      // Drawn meshes only: a tile's wall mesh (Q-3761) is invisible — physics, never a draw call or a drawn triangle.
+      mesh.group.traverse((o: any) => { if (o.isMesh && o.visible) { meshes++; tris += o.geometry.getAttribute('position').count / 3; } });
       expect(st.triangles).toBe(tris);
       expect(st.drawCalls).toBe(meshes);
       expect(tris).toBeLessThanOrEqual(tier.maxTriangles);

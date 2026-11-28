@@ -17,6 +17,7 @@ interface RecipeOutput { files: Record<string, string>; dependencies?: Array<{ n
 
 import { GAME_PLAYER_BODY, GAME_PLAYER_BODY_PATH, GAME_PLAYER_FILE, GAME_PLAYER_FILE_PATH } from './GamePlayerBodyGenerator';
 import { GAME_WORLD_LAYER, WORLD_LAYER_PATH } from './GameWorldLayerGenerator';
+import { STREAM_ACTORS } from './GameWorldStreamingGenerator';
 
 export const GAME_OPEN_WORLD_BRIDGE = String.raw`// THE BRIDGE BETWEEN THE BIG MAP AND THE GAME — the player, the camera and everything the game adds stand ON the Athree
 // world. The map streams terrain around the player and re-bases its render origin far from the start; the character
@@ -32,8 +33,8 @@ import * as athreeConfig from '../athree/config';
 import * as athreeKit from '../athree';
 import type { LandBiome } from '../athree/world';
 import { createCity, planCity, type City, type CityOptions, type CityPlan } from '../three/city';
-import { createCityTraffic, type CityTraffic, type CityTrafficOptions } from '../three/citytraffic';
-import { createCityPeople, type CityPeople, type CityPeopleOptions } from '../three/citypeople';
+import { createCityTraffic, createRoadTraffic, type CityTraffic, type CityTrafficOptions, type RoadTraffic } from '../three/citytraffic';
+import { createCityPeople, createPathPeople, type CityPeople, type CityPeopleOptions, type PathPeople } from '../three/citypeople';
 import { createCar } from '../three/objects';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { softwareRenderer } from '../three/surfaces';
@@ -198,6 +199,8 @@ export function placeDryHeight(world: { seaLevel: number; heightScale?: unknown 
 const ROAD_PAD_CLEAR = 100;
 /** How many cities stand built at once, by the map's quality tier (owner decision 2026-11-23: phone 2, mid 5, desktop 8). */
 export const LIVE_CITIES = { phone: 2, mid: 5, desktop: 8 } as const;
+/** The colonies' share of moving people and vehicles near the player, by tier: the streaming kit's maxActors (three/worldStreaming.ts). */
+export const COLONY_ACTORS = ${JSON.stringify(STREAM_ACTORS)} as const;
 /** A standing city is freed for a nearer one only when it is this many metres farther from the player — never back and forth. */
 export const LIVE_MARGIN = 300;
 /** Metres past a city's edge at which it is no longer drawn. A city closer than this is still in view and is never taken down. */
@@ -411,6 +414,8 @@ export interface OpenWorld {
   release(object: THREE.Object3D): void;
   /** Call once per update(): streams the map, keeps the ground under the player, applies origin shifts. */
   frame(ctx: GameContext, delta: number): void;
+  /** 🏘️ The traffic and the people of the map's colonies (Q-3762), near the player; both null on a map without colonies. */
+  readonly colonyLife: { traffic: RoadTraffic | null; people: PathPeople | null };
   dispose(): void;
 }
 
@@ -495,8 +500,12 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
   return [from, to];
 }
 
-export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, naturalEdge, mapWater, ...mapOptions } = options;
+/**
+ * The map an open world stands on, worked out from its options alone (no three.js, nothing built): createOpenWorld makes exactly this map,
+ * and prepareOpenWorld plans the same one before the game's first frame (Q-3763), so the two are one decision, never two copies.
+ */
+export function openWorldMapSetup(options: OpenWorldOptions = {}) {
+  const { patchSize: _patch, city: _city, regions: _regions, spreadMeters, liveCities: _live, water: _water, boundary: _boundary, citizens: _citizens, runOver: _runOver, openBuildings: _open, enterableHouses: _enter, naturalEdge, mapWater, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -527,7 +536,31 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // the first draw, but a game feature that levels ground later used to leave the drawn terrain at the old height while the
   // player walked on the new one — one place on two layers. Nothing is redrawn while nothing changes, so it costs nothing then.
   const lateEdits = options.lateEdits !== false;
-  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...(naturalEdge ? { boundary: naturalEdge } : {}), ...(mapWater ? { water: mapWater } : {}), ...sized, lateEdits, three: THREE } as AthreeMapOptions);
+  const athreeOptions = { profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...(naturalEdge ? { boundary: naturalEdge } : {}), ...(mapWater ? { water: mapWater } : {}), ...sized, lateEdits } as Omit<AthreeMapOptions, 'three'>;
+  return { spread, looping, askedArea, worldSize, lateEdits, athreeOptions };
+}
+
+/**
+ * ⏱️ PLAN THE MAP BEFORE THE FIRST FRAME (Q-3763). An open world reads the ground all through its setup (its places, its spawn), so the
+ * town plan of its map (roads, ponds, colonies: up to a few seconds on a big dense map) would freeze the game's first frame. This plans
+ * the SAME map a few milliseconds at a time — OpenWorldGame calls step() every frame while it shows "Preparing the map…" — and the map
+ * createOpenWorld then makes takes the finished plan at once (the kit keeps it by the options that shaped it). step() returns true when
+ * done; a map with nothing to plan is done at once.
+ */
+export function prepareOpenWorld(options: OpenWorldOptions = {}): { step(budgetMs?: number): boolean; readonly done: boolean } {
+  const { athreeOptions } = openWorldMapSetup(options);
+  const world = createAthreeMap(athreeOptions as AthreeMapOptions).world as unknown as { planStep?(ms?: number): boolean; planned?(): boolean };
+  let done = !world.planStep || !world.planned || world.planned();
+  return {
+    step(budgetMs = 6) { if (!done) done = world.planStep!(budgetMs); return done; },
+    get done() { return done; },
+  };
+}
+
+export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, naturalEdge, mapWater, ...mapOptions } = options;
+  const { spread, looping, askedArea, lateEdits, athreeOptions } = openWorldMapSetup(options);
+  const map = createAthreeMap({ ...athreeOptions, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   // Dry ground for a place (PLACE_DRY_M), one test for every planner below: above the sea in this map's own metres, and not in a
@@ -596,9 +629,10 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       const r = (Number(p.range) || 1.6) * 0.6, yaw = Number(p.yaw) || 0;
       const at = { x: p.position.x + Math.sin(yaw) * r, y: p.position.y, z: p.position.z + Math.cos(yaw) * r };
       for (const c of towns) c.people?.hitAt(at, r);
+      colonyLife.people?.hitAt(at, r);
     }),
     events.on('SHOT_HIT', (p: { point?: { x: number; y: number; z: number } } | undefined) => {
-      if (p?.point) for (const c of towns) c.people?.hitAt(p.point, 0.5);
+      if (p?.point) { for (const c of towns) c.people?.hitAt(p.point, 0.5); colonyLife.people?.hitAt(p.point, 0.5); }
     }),
   ];
   // The ground already given to a place, a land or a user map. Kept in 1 km cells as well as in order, so "is anything here?"
@@ -1779,10 +1813,42 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       if (moverGuard.hold(o, q, moverKind(o, false)).moved) o.position.set(q.x - chunks.origin.x, q.y, q.z - chunks.origin.z);
     }
   };
+  // 🏘️ LIFE IN THE COLONIES (Q-3762): the map's colonies (athree colonies.ts, when MAP_OPTIONS has a density) get the kit's own traffic
+  // on their planned roads (left lane, junctions and roundabouts, one vehicle in a junction at a time) and its own people on their
+  // footpaths — near the player only, inside the device's actor share (COLONY_ACTORS: the streaming kit's maxActors), the same rules
+  // as a city's. An older athree world without colonies (or a map without a density) gets none, as before.
+  const colonyWorld = map.world as unknown as {
+    hasColonies?(): boolean;
+    colonyFootpaths?(): Array<{ points: Array<{ x: number; z: number }>; closed: boolean }>;
+    roadNetwork(): { route(a: { x: number; z: number }, b: { x: number; z: number }): Array<{ x: number; y: number; z: number }>; home(): { roads: Array<{ planned?: boolean; points: Array<{ x: number; z: number }> }>; junctions?: Array<{ x: number; z: number; radius: number }> } };
+  };
+  const colonyLife: { traffic: RoadTraffic | null; people: PathPeople | null } = { traffic: null, people: null };
+  if (colonyWorld.hasColonies?.() && colonyWorld.colonyFootpaths) {
+    const share = COLONY_ACTORS[tier as keyof typeof COLONY_ACTORS] ?? COLONY_ACTORS.mid;
+    const roads = colonyWorld.roadNetwork();
+    const lifeTier = softwareRenderer() ? 'light' as const : undefined;
+    const home = roads.home();
+    const targets = home.roads.filter((r) => r.planned && r.points.length > 2).map((r) => r.points[Math.floor(r.points.length / 2)]);
+    colonyLife.traffic = createRoadTraffic({ targets, route: (a, b) => roads.route(a, b), junctions: home.junctions ?? [] }, { count: Math.max(1, Math.floor(share / 2)), seed: map.world.seed + 71, ...(lifeTier ? { tier: lifeTier } : {}) });
+    colonyLife.people = createPathPeople({ paths: colonyWorld.colonyFootpaths(), heightAt: (x, z) => map.world.heightAt(x, z) }, { count: share, seed: map.world.seed + 73, solid: citizensOption?.solid === true, hittable: citizensOption?.hittable === true, ...(lifeTier ? { tier: lifeTier } : {}) });
+    ctx.scene.add(colonyLife.traffic.root, colonyLife.people.root);
+  }
+  const colonyLifeFrame = (delta: number, at: { x: number; z: number }, seated: THREE.Object3D | null): void => {
+    const { traffic, people } = colonyLife;
+    if (!traffic || !people) return;
+    // Their own frame is WORLD metres; the floating origin moves it.
+    traffic.root.position.set(-chunks.origin.x, 0, -chunks.origin.z);
+    people.root.position.set(-chunks.origin.x, 0, -chunks.origin.z);
+    const me = seated ?? ctx.player.object;
+    traffic.update(delta, at, [me, ...people.bodies]);
+    people.update(delta, at, [me, ...traffic.cars.map((c) => c.object)]);
+    if (seated) traffic.pushOut(seated, 1.2); else { traffic.pushOut(ctx.player.object, 0.45); people.pushOut(ctx.player.object, 0.4); people.pushOut(ctx.player.object.position); }
+  };
   const probeHook = { geometry: geometryReport, standing: standingReport };
   const probeWindow = typeof window !== 'undefined' ? (window as unknown as { __nbWorld?: typeof probeHook }) : null;
   if (probeWindow) probeWindow.__nbWorld = probeHook;
   return {
+    colonyLife,
     map, spawn, playerWorld, playArea, city: town, regions: towns, lands: landList, highways: roadLines,
     userMaps: userMaps.map((m) => ({ get id() { return m.id; }, get model() { return m.model; }, get centre() { return m.centre; }, get size() { return m.size; }, get status() { return m.status; }, get reason() { return m.reason; } })),
     venues: venueList.map((v): OpenWorldVenue => ({
@@ -1934,6 +2000,8 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
           if (fell) { try { events.emit('CITIZEN_HIT', { position: { x: fell.x, y: fell.y, z: fell.z } }); } catch { /* a listener must not undo the hit */ } }
         }
       });
+      colonyLifeFrame(delta, at, seated ?? null);
+      if (struck) colonyLife.people?.hitAt(seated!.position, 1.8);
       if (struck) events.emit('VEHICLE_STRUCK', { position: { x: seated!.position.x, y: seated!.position.y, z: seated!.position.z }, radius: 1.8, damage: RUN_OVER_DAMAGE });
       reapHidden(at);
     },
@@ -1942,6 +2010,7 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
       setGround(null);
       disposed = true;
       for (const off of offCrowdBlows) off();
+      colonyLife.traffic?.dispose(); colonyLife.people?.dispose();
       towns.forEach((t, i) => { t.people?.dispose(); t.traffic?.dispose(); t.city.dispose(); ctx.scene.remove(roots[i]); });
       for (const root of userRoots) ctx.scene.remove(root);
       userRoots.length = 0;
@@ -2120,7 +2189,7 @@ export const GAME_OPEN_WORLD_STARTER = String.raw`// THE OPEN-WORLD STARTER — 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GameCanvas } from './GameCanvas';
 import type { GameContext, GameOptions, MinimapOptions } from './Game';
-import { createExploration, createOpenWorld, type Exploration, type ExploreOptions, type ExploreStatus, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
+import { createExploration, createOpenWorld, prepareOpenWorld, type Exploration, type ExploreOptions, type ExploreStatus, type OpenWorld, type OpenWorldOptions } from './play/openWorld';
 import { createFeatureHost, type FeatureHost, type GameFeature } from './play/features';
 import type { PlayerChoice } from './play/playerBody';
 
@@ -2197,9 +2266,22 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     const id = setInterval(() => { if (exploring.current) setFound(exploring.current.status()); }, 250);
     return () => { clearInterval(id); exploring.current?.dispose(); exploring.current = null; };
   }, []);
+  // ⏱️ The map's town (roads, ponds, colonies) is planned a few ms a frame BEFORE the game mounts (Q-3763): the game's setup reads the
+  // ground everywhere, and a plan made there would freeze its first frame for up to a few seconds on a big dense map.
+  const [mapReady, setMapReady] = useState(false);
+  useEffect(() => {
+    const prep = prepareOpenWorld(worldOptions);
+    if (prep.done) { setMapReady(true); return; }
+    let handle: ReturnType<typeof setTimeout> | number = 0, cancelled = false;
+    const later = (f: () => void) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(f) : setTimeout(f, 0));
+    const tick = () => { if (cancelled) return; if (prep.step(8)) setMapReady(true); else handle = later(tick); };
+    handle = later(tick);
+    return () => { cancelled = true; if (typeof cancelAnimationFrame === 'function' && typeof handle === 'number') cancelAnimationFrame(handle); else clearTimeout(handle as ReturnType<typeof setTimeout>); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const chip = { background: '#0f172acc', color: 'white', borderRadius: 8, padding: '4px 10px', fontSize: 13 } as const;
   return <>
-    <GameCanvas options={gameOptions} />
+    {mapReady ? <GameCanvas options={gameOptions} /> : <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b1220', color: 'white', fontSize: 16 }}>Preparing the map…</div>}
     {/* THE EXPLORING BAR — places found, relics, the next place and the last discovery. Move or restyle it here. */}
     {found && <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }}>
       {found.places > 0 && <span style={chip}>📍 {found.found}/{found.places} places</span>}

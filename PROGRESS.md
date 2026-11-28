@@ -7068,3 +7068,49 @@ The admin's map order is frame → natural boundary → water → ground → roa
 - Admin approved options (2026-11-27, "sabhi apke sujhao ke anusar banao"): #4615 (Surplus tripped per build after a second distinct model's HTTP 404 at response_validation; Q-3729 parallel-turn sibling), #4617 (asset permit queues up to 8 s; 3D assets and sounds prepared side by side; serialized workspace asset list saves), #4616 (signing keys + events erased with the account after a red warning, a real key download and an "I understand" tick). All merged and deployed (Cloud Build succeeded for 3402a0cc, 0d85280e, 61f25737).
 - Q-3730 OPEN: an in-flight key import/generate can write after the account erase; needs a deletion tombstone checked by user-scoped writers.
 - Map wave 1 live: #4624 (natural edges, sea shelf, ponds, mover rules), #4626 (roads on every size, five styles), #4625 (map planner with admin default sizes 5/25/100 km², circuit/runway floor, robot checks). Wave 2 (colonies; preview, layer edit, map library) in progress.
+
+## 2026-11-28 — Athree colonies: walls, life and a load without a frozen frame (Q-3761, Q-3762, Q-3763; branch `claude/feat/colony-walls-life-streaming`)
+
+#4627 (colonies between the roads) recorded three open limits. All three are fixed in this PR.
+
+- **Q-3761 houses had no physics wall.** Root: the colony tiles were drawn meshes only; the game kit's collision (three/collision.ts
+  `markWorldCollider`, read by the character controller, `driveVehicle` and every kit character) never saw them. Fix: `plotBoxes` is the
+  ONE description of a plot (drawing, wall, `colonySolidAt` all read it; each box is said solid or not — awnings, crowns, park slabs, roof
+  tanks, balconies are never solid). Each drawn tile within the tier's new `physicsRadius` (phone 160 / mid 200 / desktop 240 m) carries
+  an invisible wall mesh marked `'solid'` with `COLONY_COLLIDER_KEY` (= `GAME_WORLD_COLLIDER_KEY`, interpolated, never copied); the drawn
+  mesh is marked `'none'`. Far tiles carry none. `world.colonySolidAt(x, z, r)` for hand-moved movers and nav grids;
+  `colonyColliderBoxes(tile, detail)` for Rapier. Sibling found and fixed: `GameWorldStreamingGenerator` hard-coded the collider key.
+  Test `tests/aColonyHouseIsAWall.test.ts` (5): a walker goes through the open gate and stops at the house, a car stops at a shop, a bot is
+  held and its nav path goes round, walls stream with the tiles and are dropped far away, every solid box is a drawn box. Each walk is
+  repeated with the walls marked `'none'` and goes in; reverted `buildWall` → 4 of 5 fail.
+- **Q-3762 no people or traffic in colonies.** Root: city traffic and people are bound to the three/city grid. Fix (adapters over shared
+  helpers, no private copy): citytraffic.ts now shares `trafficFleet`, `followSpeed`, `roomBefore`, `pushOutOfVehicles`, `VEHICLE_LENGTH`,
+  `TRAFFIC_GAP` between `createCityTraffic` (behaviour unchanged, its tests green) and the new `createRoadTraffic` (left-lane `route()`s
+  between road middles — never a junction centre, which is a roundabout's island: found by the test — one vehicle per junction pad, gap,
+  stops for the player, no U-turn when another way exists, near the camera only). citypeople.ts shares `crowdMeshes`, `pushOutOfWalkers`,
+  `walkerInFront` between `createCityPeople` and the new `createPathPeople` (athree `world.colonyFootpaths()`: walking lines 2.4 m off the
+  kerb, cut wherever a road, junction, plot, water or the edge is). The open-world bridge gives a colony map both
+  (`world.colonyLife`), inside `COLONY_ACTORS` = the streaming kit's `maxActors` (one server constant `STREAM_ACTORS` feeds both).
+  Test `tests/aColonyHasPeopleAndTraffic.test.ts` (5): a minute of traffic on the paved road, left lane on > 98 % of samples, never in a
+  plot or water; a minute of people never on a road, in a plot or water; caps (count, light tier); the open world has both inside its share.
+  Reverted the light cap and the far-vehicle removal → 2 fail.
+- **Q-3763 load pause.** Root: rivers, roads, ponds and colonies were planned all at once by the first heightAt. Fix: each planner is a
+  step generator (`riverNetworkSteps`, `planRoadNetworkSteps` / `buildRegionSteps`, `planColonySteps`); `drainSteps` runs one at once (the
+  old call names are kept and drain), `stepUntil` to a clock deadline. `world.planStep(ms)` / `world.planned()`; `createAthreeMap.update()`
+  spends `PLAN_SLICE_MS` (4 ms) a frame planning and draws nothing that reads the ground until done (`slicedPlanning: false` opts out);
+  `createAthreeMap` no longer plans the colonies to decide whether to make their mesh (`world.hasColonies()`). Colony plans and ponds are
+  cached by every option that shapes them, so `prepareOpenWorld` (the open-world starter shows "Preparing the map…" and plans the same map
+  in slices before mounting the game; `openWorldMapSetup` is the one place its options are worked out) hands the finished plan to the game's
+  map. Measured (local CPU, 4 ms budget): median slice ≈ 4 ms, p95 ≈ 4.5–5.2 ms, p99 ≤ 12 ms, worst 8–21 ms (GC); total sliced time ≈
+  unsliced (0.65 s on 2.2 km, 2.6 s on 5 km dense / 8 km island). Test `tests/theTownIsPlannedInSlices.test.ts` (4): sliced == at once on
+  four towns (separately loaded kit copies; road graph, ponds, every plot, a height grid), slice percentiles, no terrain while planning,
+  the hand-over. Reverted the update() slice and the cache → 2 fail. mapPlan's "colonies APPLIED" check now accepts `planColonySteps`.
+  The server robot run still plans at once inside its worker (same code; unchanged budget).
+- **Honest limits / OPEN:** a house is a solid shell (no walk-in); colony people stay on their block's footpaths and never cross a road;
+  junctions have no traffic lights (one vehicle at a time instead); a non-open-world game that reads heightAt in its own setup still plans
+  at once there (the map's update() and `prepareOpenWorld` are the sliced paths); a slice can still overrun its budget by one step
+  (worst seen 21 ms, mostly GC).
+- **Q-3764 (found while slicing): a cache key that left out an input.** The road network's cache key left out the natural edge and the sea
+  floor, and the river network's left out the edge (the island mask the rivers are traced on follows it), so a second world of one seed
+  with another edge (the map preview, a prepared world) took the first one's rivers and roads. Both keys now name them; the new colony and
+  pond keys were written with every input from the start. `tests/aRoadNetworkIsNotSharedAcrossEdges.test.ts` (reverted keys → fails).

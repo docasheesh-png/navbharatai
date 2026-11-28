@@ -191,7 +191,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2850d2e45da49fe157853599556dc526ec3a4e30964284c895a34d53a29f86ac"
   ],
   "src/game/athree/colonies.ts": [
-    "6f3f04d6020e0aec42c3e42c3b6786f34019378959bb81b0d94b1a0b88e00b3d"
+    "6f3f04d6020e0aec42c3e42c3b6786f34019378959bb81b0d94b1a0b88e00b3d",
+    "5ad845703a15b9b4937c98dd16bc1c509b73bbd3315cf34dfd2392cfad99ba52"
   ],
   "src/game/athree/config.ts": [
     "0daa780af7666b5884ab80dc784accc7928edd551c23a01a108e54a78da53202",
@@ -261,7 +262,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/roads.ts": [
     "7483429b247808379d59a0c8b6697bd8a1d79546de1c19f6328140357962fcd2",
     "43777cbc4b47d46176395c9a28b82bcb27b0e06178f5dc6d344433caf87ebf48",
-    "5b2a10e54a14ea360a068c6aa015b3e9f3244dc810bdfafbe8b59c7338ea195f"
+    "5b2a10e54a14ea360a068c6aa015b3e9f3244dc810bdfafbe8b59c7338ea195f",
+    "2ea369a1ebe62eda1a0800d4e9a2feb0d5129c3105c519e29be32e83b49bb823"
   ],
   "src/game/athree/sky.ts": [
     "32c209e29681a69852896fea713e956df10c8aa3253eccd7ec2f1d3354eb70c3",

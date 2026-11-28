@@ -235,6 +235,12 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   const wrapD = (d: number): number => (P > 0 ? d - Math.round(d / P) * P : d);
   const canon = (v: number): number => (P > 0 ? v - Math.floor(v / P) * P : v);
   const gkey = (cx: number, cz: number): number => (wrapG(cx) + 100000) * 400009 + (wrapG(cz) + 100000);
+  // ⚡ A planned town's roads are a dense web of 10 m segments: a 125 m cell held dozens of them, and every height and road lookup
+  // walked them all (found 2026-11-27: the colony planner spent most of its time here, and a battle-royale island's build-time robot
+  // check ran out of its 8 s). A planned network indexes into 32 m cells instead. Every segment is still listed in every cell its
+  // padded reach touches (width, shoulder and 5 m), so a lookup sees exactly the segments that can weigh on it: the answers are the
+  // same, to the bit (tests/aFinerRoadIndexGivesTheSameAnswers.test.ts). The regional network keeps its 125 m cells (it wraps by them).
+  const INDEX_CELL = planned ? 32 : GRID;
 
   interface Built extends Region { grid: Map<number, Seg[]>; siteGrid: Map<number, number[]>; junctionGrid: Map<number, number[]>; graph: RoadGraph | null; x0: number; z0: number; size: number }
   const regions = new Map<number, Built>();
@@ -597,8 +603,8 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
     const grid = new Map<number, Seg[]>();
     const siteGrid = new Map<number, number[]>();
     const register = <T>(map: Map<number, T[]>, ax: number, az: number, bx: number, bz: number, item: T): void => {
-      for (let cz = Math.floor(az / GRID); cz <= Math.floor(bz / GRID); cz++) {
-        for (let cx = Math.floor(ax / GRID); cx <= Math.floor(bx / GRID); cx++) {
+      for (let cz = Math.floor(az / INDEX_CELL); cz <= Math.floor(bz / INDEX_CELL); cz++) {
+        for (let cx = Math.floor(ax / INDEX_CELL); cx <= Math.floor(bx / INDEX_CELL); cx++) {
           const k = gkey(cx, cz);
           const list = map.get(k);
           if (list) list.push(item); else map.set(k, [item]);
@@ -643,7 +649,7 @@ export function createRoadNetwork(o: RoadOptions): RoadNetwork {
   function eachCandidate(x: number, z: number, groundHeight: number, cb: (c: Cand) => void): void {
     if (loopPlan) { x = wrapD(x); z = wrapD(z); }
     const reg = regionFor(x, z);
-    const gk = gkey(Math.floor(x / GRID), Math.floor(z / GRID));
+    const gk = gkey(Math.floor(x / INDEX_CELL), Math.floor(z / INDEX_CELL));
     const list = reg.grid.get(gk);
     if (list) {
       for (const s of list) {

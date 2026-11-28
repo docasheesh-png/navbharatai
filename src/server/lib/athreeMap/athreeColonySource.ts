@@ -64,6 +64,8 @@ export const COLONY_PAD_MARGIN = 1.5;
 /** The most ground a plot cuts or fills, metres, and the steepest ground it levels (rise over the plot's diagonal). */
 export const COLONY_MAX_CUT = 3.5;
 export const COLONY_MAX_SLOPE = 0.2;
+/** A plot whose nine ground points stay within this of its pad is not read on the full 5 x 5 grid (see measure). */
+export const COLONY_SMOOTH_CUT = 1.5;
 
 export interface ColonyPoint { x: number; z: number }
 
@@ -392,7 +394,10 @@ export function planColonies(input: ColonyInput): ColonyPlan {
     if (y < input.landLine + 0.5) return 'water';
     // A plot that passed every test above is read at the other 16 points of the 5 x 5 grid: a bump or a road's fill between the nine
     // points must not hide a cut or fill past the limit (a hill town's ground is not a plane).
-    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+    // Ground that the nine points already find within COLONY_SMOOTH_CUT of the pad is gentle enough (the land's finest detail is
+    // ~260 m across, so it cannot hide a step of the remaining ~2 m between points under 13 m apart): only a plot that already cuts or
+    // fills more than that is read on the full grid. The 25-point test in AthreeColonies.test.ts holds this on six kinds of town.
+    if (Math.max(hi - y, y - lo) > COLONY_SMOOTH_CUT) for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
       if (i % 2 === 0 && j % 2 === 0) continue;
       const g = at(i, j);
       if (!Number.isFinite(g) || g < input.landLine + 0.3) return 'water';

@@ -23,11 +23,15 @@
 //      playgrounds), streamed round the camera, nearest first, inside a per-tier triangle cap (COLONY_TIERS; budget.ts sets it
 //      against the other modules) — one draw call per tile.
 //
-// HONEST LIMITS: houses have no physics collider (world.colonyAt(x, z) answers whether a place is inside a plot, for a game that wants
-// to stop a body at a wall); people and traffic are not added by the colonies (the kit's city people and traffic follow the separate
-// three/city grid, not this road graph — a game drives its own cars along world.roadNetwork().route(), in the left lane); a block that
-// the road network did not close (a superblock cut by the shore) has no plots; plots line the roads, so the middle of a very large block
-// stays open land.
+//   7. WALLS (Q-3761, 2026-11-28): plotBoxes is the one description of a plot; its solid boxes (buildings, compound walls with the gate
+//      left open, swing frames, tree trunks) become an invisible wall mesh per drawn tile within the tier's physicsRadius, marked for the
+//      game kit's collision, so the player, cars and kit characters stop at a house; world.colonySolidAt answers the same walls by hand.
+//   8. FOOTPATHS (Q-3762): footpathPaths gives the walking lines the game kit's createPathPeople walks; its createRoadTraffic drives the
+//      planned roads. 9. The plan is made in slices (planColonySteps, Q-3763), identical to planColonies.
+//
+// HONEST LIMITS: a house is a solid shell (its door is painted, not walked through); colony people stay on their block's footpaths and
+// never cross a road; the junctions have no traffic lights (one vehicle in a junction at a time instead); a block that the road network
+// did not close (a superblock cut by the shore) has no plots; plots line the roads, so the middle of a very large block stays open land.
 //
 // PURE source string; rule for editing: no backticks and no dollar-brace inside it.
 

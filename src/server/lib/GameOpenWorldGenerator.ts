@@ -500,8 +500,12 @@ export function routeAroundVenues(from: { x: number; z: number }, to: { x: numbe
   return [from, to];
 }
 
-export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
-  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, naturalEdge, mapWater, ...mapOptions } = options;
+/**
+ * The map an open world stands on, worked out from its options alone (no three.js, nothing built): createOpenWorld makes exactly this map,
+ * and prepareOpenWorld plans the same one before the game's first frame (Q-3763), so the two are one decision, never two copies.
+ */
+export function openWorldMapSetup(options: OpenWorldOptions = {}) {
+  const { patchSize: _patch, city: _city, regions: _regions, spreadMeters, liveCities: _live, water: _water, boundary: _boundary, citizens: _citizens, runOver: _runOver, openBuildings: _open, enterableHouses: _enter, naturalEdge, mapWater, ...mapOptions } = options;
   // 📏 A SIZE THE USER ASKED FOR (failedbr #2495: "map ko 40km*40km banao"). The places spread across that square; a loop world
   // smaller than it is raised to it (never lowered: a smaller loop would only squeeze the same land). 0 = no spread asked.
   const spread = Number.isFinite(Number(spreadMeters)) && Number(spreadMeters) > 0 ? Math.min(1000000, Math.max(1000, Number(spreadMeters))) : 0;
@@ -532,7 +536,31 @@ export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}
   // the first draw, but a game feature that levels ground later used to leave the drawn terrain at the old height while the
   // player walked on the new one — one place on two layers. Nothing is redrawn while nothing changes, so it costs nothing then.
   const lateEdits = options.lateEdits !== false;
-  const map = createAthreeMap({ profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...(naturalEdge ? { boundary: naturalEdge } : {}), ...(mapWater ? { water: mapWater } : {}), ...sized, lateEdits, three: THREE } as AthreeMapOptions);
+  const athreeOptions = { profile: 'open-world', quality: softwareRenderer() ? 'phone' : 'mid', skyOptions: { lights: false }, ...mapOptions, ...(naturalEdge ? { boundary: naturalEdge } : {}), ...(mapWater ? { water: mapWater } : {}), ...sized, lateEdits } as Omit<AthreeMapOptions, 'three'>;
+  return { spread, looping, askedArea, worldSize, lateEdits, athreeOptions };
+}
+
+/**
+ * ⏱️ PLAN THE MAP BEFORE THE FIRST FRAME (Q-3763). An open world reads the ground all through its setup (its places, its spawn), so the
+ * town plan of its map (roads, ponds, colonies: up to a few seconds on a big dense map) would freeze the game's first frame. This plans
+ * the SAME map a few milliseconds at a time — OpenWorldGame calls step() every frame while it shows "Preparing the map…" — and the map
+ * createOpenWorld then makes takes the finished plan at once (the kit keeps it by the options that shaped it). step() returns true when
+ * done; a map with nothing to plan is done at once.
+ */
+export function prepareOpenWorld(options: OpenWorldOptions = {}): { step(budgetMs?: number): boolean; readonly done: boolean } {
+  const { athreeOptions } = openWorldMapSetup(options);
+  const world = createAthreeMap(athreeOptions as AthreeMapOptions).world as unknown as { planStep?(ms?: number): boolean; planned?(): boolean };
+  let done = !world.planStep || !world.planned || world.planned();
+  return {
+    step(budgetMs = 6) { if (!done) done = world.planStep!(budgetMs); return done; },
+    get done() { return done; },
+  };
+}
+
+export function createOpenWorld(ctx: GameContext, options: OpenWorldOptions = {}): OpenWorld {
+  const { patchSize = 96, city: cityOption = false, regions: regionList, spreadMeters, liveCities, water: waterMode = 'drown', boundary: edgeOption, citizens: citizensOption, runOver = false, openBuildings = false, enterableHouses, naturalEdge, mapWater, ...mapOptions } = options;
+  const { spread, looping, askedArea, worldSize, lateEdits, athreeOptions } = openWorldMapSetup(options);
+  const map = createAthreeMap({ ...athreeOptions, three: THREE } as AthreeMapOptions);
   const chunks = map.chunks!;
   ctx.scene.add(chunks.group);
   // Dry ground for a place (PLACE_DRY_M), one test for every planner below: above the sea in this map's own metres, and not in a
@@ -2238,9 +2266,22 @@ export function OpenWorldGame({ title = 'Open World', subtitle, world: worldOpti
     const id = setInterval(() => { if (exploring.current) setFound(exploring.current.status()); }, 250);
     return () => { clearInterval(id); exploring.current?.dispose(); exploring.current = null; };
   }, []);
+  // ⏱️ The map's town (roads, ponds, colonies) is planned a few ms a frame BEFORE the game mounts (Q-3763): the game's setup reads the
+  // ground everywhere, and a plan made there would freeze its first frame for up to a few seconds on a big dense map.
+  const [mapReady, setMapReady] = useState(false);
+  useEffect(() => {
+    const prep = prepareOpenWorld(worldOptions);
+    if (prep.done) { setMapReady(true); return; }
+    let handle: ReturnType<typeof setTimeout> | number = 0, cancelled = false;
+    const later = (f: () => void) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(f) : setTimeout(f, 0));
+    const tick = () => { if (cancelled) return; if (prep.step(8)) setMapReady(true); else handle = later(tick); };
+    handle = later(tick);
+    return () => { cancelled = true; if (typeof cancelAnimationFrame === 'function' && typeof handle === 'number') cancelAnimationFrame(handle); else clearTimeout(handle as ReturnType<typeof setTimeout>); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const chip = { background: '#0f172acc', color: 'white', borderRadius: 8, padding: '4px 10px', fontSize: 13 } as const;
   return <>
-    <GameCanvas options={gameOptions} />
+    {mapReady ? <GameCanvas options={gameOptions} /> : <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b1220', color: 'white', fontSize: 16 }}>Preparing the map…</div>}
     {/* THE EXPLORING BAR — places found, relics, the next place and the last discovery. Move or restyle it here. */}
     {found && <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }}>
       {found.places > 0 && <span style={chip}>📍 {found.found}/{found.places} places</span>}

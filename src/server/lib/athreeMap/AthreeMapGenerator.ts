@@ -502,6 +502,8 @@ export const PLAN_SLICE_MS = 4;
 // before its first frame, the map preview — plans nothing again). The plan is never changed after it is made: a world keeps the plots its
 // game took away in its own colonyGone.
 const colonyPlanCache = new Map<string, ColonyPlan>();
+// The ponds placed in this page, by everything that places them (the same reason: a prepared world hands them to the game's world).
+const pondCache = new Map<string, Pond[]>();
 
 const ISLAND_BASE = 0.45;
 const ISLAND_SWING = 0.3;
@@ -897,9 +899,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const pondCount = Math.max(0, Math.floor(typeof waterOpt.ponds === 'number' && Number.isFinite(waterOpt.ponds) ? waterOpt.ponds : 0));
   let pondList: Pond[] | null = null;
   let placingPonds = false;
+  const pondKey = JSON.stringify([seed, mode, sizeMeters, profile, withRivers, style, options.roadStyle ?? '', withRoads, edgeKind, shelfOn, seaMaxDepth, pondCount]);
   function pondsOf(): Pond[] {
     if (pondList) return pondList;
     if (!pondCount) { pondList = []; return pondList; }
+    const cached = pondCache.get(pondKey);
+    if (cached) { pondList = cached; return pondList; }
     placingPonds = true;
     try {
       const reach = mode === 'bounded' ? gameRadius * 0.7 : Math.min(3000, sizeMeters * 0.2);
@@ -911,6 +916,8 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       });
     } finally { placingPonds = false; }
     if (pondList.length < pondCount) console.info('[map] ' + pondList.length + ' of ' + pondCount + ' ponds found flat, dry ground away from water and roads.');
+    if (pondCache.size >= 8) pondCache.delete(pondCache.keys().next().value as string);
+    pondCache.set(pondKey, pondList);
     return pondList;
   }
   function pondAt(x: number, z: number): Pond | null {

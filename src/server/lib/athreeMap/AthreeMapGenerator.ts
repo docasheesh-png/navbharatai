@@ -604,7 +604,9 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
 
   const withRivers = options.rivers !== false;
   let network: ReturnType<typeof riverNetworkFor> | null = null;
-  const riverKey = seed + '|' + mode + '|' + refSize + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers;
+  // The island's mask (baseInner) follows the natural edge, and the rivers are traced on it: the edge is part of the key (2026-11-28,
+  // tests/aRoadNetworkIsNotSharedAcrossEdges.test.ts — a second world of one seed with another edge took the first one's rivers).
+  const riverKey = seed + '|' + mode + '|' + refSize + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + edgeKind;
   const riverOptions = () => ({ seed, period, radius: mode === 'bounded' ? radius : 0, baseHeight: baseInner, minSource: mode === 'bounded' ? 12 : 20, density: style.rivers });
   const net = (): ReturnType<typeof riverNetworkFor> => {
     if (!network) network = riverNetworkFor(riverKey, riverOptions());
@@ -694,7 +696,9 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     if (!roadNet) {
       // A small map squeezes its heights (vs < 1), so its sea line is squeezed with them: 1.5 m at the reference size.
       const landLine = 1.5 * Math.min(1, vs);
-      roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + (options.roadStyle ?? '') + '|' + landLine, {
+      // The key names everything the roads are laid on: the natural edge and the sea floor shape the ground too (found 2026-11-28: two
+      // worlds of one seed with different edges shared the first one's roads; tests/aRoadNetworkIsNotSharedAcrossEdges.test.ts).
+      roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers + '|' + (options.roadStyle ?? '') + '|' + landLine + '|' + edgeKind + '|' + (shelfOn ? seaMaxDepth : 'noshelf'), {
         seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile, roadStyle: options.roadStyle, landLine,
         terrain: terrainNoRoads,
         // 🔁 ROADS FIRST, PONDS AFTER (found 2026-11-27 building the colonies: a planned-network map with ponds overflowed the stack on its

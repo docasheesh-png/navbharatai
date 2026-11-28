@@ -7074,4 +7074,8 @@ The admin's map order is frame → natural boundary → water → ground → roa
 - **Honest limits / OPEN:** a house is a solid shell (no walk-in); colony people stay on their block's footpaths and never cross a road;
   junctions have no traffic lights (one vehicle at a time instead); a non-open-world game that reads heightAt in its own setup still plans
   at once there (the map's update() and `prepareOpenWorld` are the sliced paths); a slice can still overrun its budget by one step
-  (worst seen 21 ms, mostly GC). Found, not fixed (outside this PR): `roadNetworkFor`'s cache key does not include the natural edge kind.
+  (worst seen 21 ms, mostly GC).
+- **Q-3764 (found while slicing): a cache key that left out an input.** The road network's cache key left out the natural edge and the sea
+  floor, and the river network's left out the edge (the island mask the rivers are traced on follows it), so a second world of one seed
+  with another edge (the map preview, a prepared world) took the first one's rivers and roads. Both keys now name them; the new colony and
+  pond keys were written with every input from the start. `tests/aRoadNetworkIsNotSharedAcrossEdges.test.ts` (reverted keys → fails).

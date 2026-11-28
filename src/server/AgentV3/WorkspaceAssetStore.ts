@@ -33,6 +33,7 @@ import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { parseDataUri } from './ProjectImport';
 import { runInPass } from './greenFreeze';
 import { IMPORT_LIMITS } from '../../lib/importRules';
+import { withIndexQueue } from './WorkspaceFileStore';
 
 const COLLECTION = 'workspace_assets_v3';
 /** Firestore's hard per-document limit is 1 MB; a base64 data URI for a ≤200KB asset is ~270KB. */
@@ -140,6 +141,34 @@ function assetDocId(path: string): string {
   return Buffer.from(path, 'utf8').toString('base64url').slice(0, 1500);
 }
 
+/** The slice of a Firestore document the index merge needs (a fake in tests). */
+export interface AssetIndexDoc {
+  get(): Promise<{ exists: boolean; data(): { paths?: unknown; oversized?: unknown } | undefined }>;
+  set(value: { paths: string[]; count: number; oversized: string[]; savedAt: number }, options: { merge: true }): Promise<unknown>;
+}
+
+/**
+ * 🔒 THE INDEX IS READ → UNIONED → WRITTEN ONE SAVE AT A TIME PER WORKSPACE (Q-3471). Two saves interleaved here would let
+ * the later write drop the earlier one's paths — and a path missing from the index is an asset no reader returns
+ * (`readWorkspaceAssetBytes` checks it, so the seed's read-back fails and the model or sound is dropped). The new-game
+ * seed now saves 3D models and recorded sounds side by side (seedMedia.ts), so this is no longer theoretical. The same
+ * per-workspace queue the text-file index uses (`withIndexQueue`), under its own key; the asset docs still commit in
+ * parallel, only this step waits.
+ */
+export function mergeAssetIndex(doc: AssetIndexDoc, workspaceId: string, added: readonly string[], oversized: readonly string[]): Promise<void> {
+  return withIndexQueue(`assets:${workspaceId}`, async () => {
+    const meta = await doc.get();
+    const data = meta.exists ? meta.data() : undefined;
+    const existing: string[] = Array.isArray(data?.paths) ? (data!.paths as string[]) : [];
+    const union = Array.from(new Set([...existing, ...added]));
+    const priorOversized: string[] = Array.isArray(data?.oversized) ? (data!.oversized as string[]) : [];
+    // An asset that fits on a LATER save leaves the oversized list — the user resized it, and a stale
+    // warning about a file we now hold would send them hunting for a problem that no longer exists.
+    const oversizedUnion = Array.from(new Set([...priorOversized, ...oversized])).filter((p) => !union.includes(p));
+    await doc.set({ paths: union, count: union.length, oversized: oversizedUnion, savedAt: Date.now() }, { merge: true });
+  });
+}
+
 /**
  * MERGE (upsert + UNION) a set of assets into the durable workspace asset store. Never drops an
  * existing asset — assets are only ever removed explicitly (a file the user deleted flows through
@@ -196,14 +225,7 @@ export async function saveWorkspaceAssets(
       await assetsCol.doc(assetDocId(path)).set({ path, storageObject: object, mime });
       spilled.push(path);
     }
-    const meta = await root.get();
-    const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    const union = Array.from(new Set([...existing, ...entries.map(([p]) => p), ...spilled]));
-    const priorOversized: string[] = meta.exists && Array.isArray(meta.data()?.oversized) ? meta.data()!.oversized : [];
-    // An asset that fits on a LATER save leaves the oversized list — the user resized it, and a stale
-    // warning about a file we now hold would send them hunting for a problem that no longer exists.
-    const oversizedUnion = Array.from(new Set([...priorOversized, ...oversized])).filter((p) => !union.includes(p));
-    await root.set({ paths: union, count: union.length, oversized: oversizedUnion, savedAt: Date.now() }, { merge: true });
+    await mergeAssetIndex(root, workspaceId, [...entries.map(([p]) => p), ...spilled], oversized);
   } catch (e) {
     notePersistenceFailure('workspace_assets', 'write', e);
   }

@@ -110,7 +110,9 @@ describe('the missing-import healer does not touch correct recipe code', () => {
   it('adds nothing to the whole recipe set (it added state/load imports to motor, ai and audio on every run)', async () => {
     const r = await addMissingProjectImports(all());
     expect(r.added).toEqual([]);
-  });
+    // Its own timeout (2026-11-27, PR #4619's red CI): this parses EVERY recipe file at once — 147 files, 2.3 MB — so its
+    // cost grows with each kit added. ~4 s locally, over 20 s under CI coverage. Census: aKitCompileTestHasItsOwnTimeout.
+  }, 120_000);
 
   it('walks each file ONCE, not once per exported name (17 s → under 2 s on the recipe set, 2026-10-05)', () => {
     // The candidate loop used to call getDescendantsOfKind for every name the project exports, so its

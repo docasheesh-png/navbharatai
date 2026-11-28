@@ -26,4 +26,29 @@ describe('census: kit compiles carry an explicit timeout', () => {
     }
     expect(offenders, 'give the compiling test its own timeout: }, 120_000);').toEqual([]);
   });
+
+  // The same class, second shape (2026-11-27, PR #4619's red CI): the import healer run over the WHOLE recipe set parses
+  // every recipe file at once (147 files, 2.3 MB that day). Its cost grows with every kit added, so it crosses the 20 s
+  // default under coverage on some unrelated PR. Every test handing the whole recipe set to an analysis owns ≥ 60 s.
+  it('every test that runs an analysis over the whole game-recipe set has its own timeout of at least 60 s', () => {
+    const offenders: string[] = [];
+    let seen = 0;
+    for (const f of readdirSync('tests').filter((n) => n.endsWith('.test.ts'))) {
+      const src = readFileSync(`tests/${f}`, 'utf8');
+      // The helper that joins every recipe's files: `const NAME = (...) => ... Object.values(GAME_RECIPES) ...`.
+      for (const h of src.matchAll(/const (\w+) = \([^)]*\)[^\n]*=>[^\n]*Object\.values\(GAME_RECIPES\)/g)) {
+        for (const m of src.matchAll(new RegExp(`await \\w+\\(${h[1]}\\(\\)`, 'g'))) {
+          seen++;
+          const before = src.slice(0, m.index!);
+          const itAt = Math.max(...[...before.matchAll(/\n([ \t]*)it\(/g)].map((x) => x.index!));
+          const indent = (/\n([ \t]*)it\(/.exec(src.slice(itAt)) ?? ['', ''])[1];
+          const close = new RegExp('\\n' + indent + '\\}\\s*(?:,\\s*(\\d[\\d_]*)\\s*)?\\);').exec(src.slice(m.index!));
+          const ms = close && close[1] ? Number(close[1].replace(/_/g, '')) : 0;
+          if (!(ms >= 60_000)) offenders.push(`${f}: ${m[0]}`);
+        }
+      }
+    }
+    expect(seen, 'the census must find the whole-recipe healer test it was written for').toBeGreaterThan(0);
+    expect(offenders, 'give the test its own timeout: }, 120_000);').toEqual([]);
+  });
 });

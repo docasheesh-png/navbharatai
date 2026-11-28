@@ -479,6 +479,7 @@ import { sweepScratchAtTurnEnd } from '../AgentV3/buildPhases/turnEndScratch';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gameAssets/assetSeed';
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
+import { prepareSeedMediaSideBySide, seedMediaTimingDetail } from '../AgentV3/gameAssets/seedMedia';
 import { gameLibraryPlanningHandoff, gameLibraryMenuHandoff, withLibraryMenuForExistingGame } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt, useAsCharacterPrompt } from '../AgentV3/gameAssets/libraryThumbnails';
@@ -19658,9 +19659,8 @@ async function noteBuildOutcome(
               // The two halves of the seed's wait, said apart (autopsy 61279465: "72.7 s" with no split, so the
               // 45 s after the last recipe could not be attributed to the 3D-asset step or to anything else).
               let kitRecipesMs = 0;
-              let kitAssetsMs: number | null = null;
               let kitAssetsStatus = '';
-              let kitSoundsNote = '';
+              let kitMediaDetail = ' · 3D assets not prepared';
               platformSeedInFlight = true;
               try {
                 for (const recipe of kitPlan) {
@@ -19679,30 +19679,32 @@ async function noteBuildOutcome(
                 // unless at least as many files landed as recipes that said they succeeded.
                 const recipeFiles = [...writtenFiles].filter(([p, c]) => writtenBeforeKit.get(p) !== c).length;
                 downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles);
-                if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
-                  // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
-                  // Source/provider failures leave the successful L1/L2 kit intact.
-                  const assetsStartedAt = Date.now();
-                  try {
-                    const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid, starterPlayerSource: writtenBeforeKit.has('src/game/player.ts') ? undefined : writtenFiles.get('src/game/player.ts') });
-                    kitAssetsMs = Date.now() - assetsStartedAt;
-                    kitAssetsStatus = String(assets.status);
-                    for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
-                    // The menu only when the library is on for this account (status 'off' = gated): choosing by meaning needs it.
-                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt), assets.status !== 'off' ? gameLibraryMenuHandoff() : ''].filter(Boolean).join('\n');
-                  } catch { /* The procedural kit remains the floor. */ }
+                // 🎧🧊 The 3D assets and the recorded sounds are prepared SIDE BY SIDE (seedMedia.ts, Q-3471 — failedbr #2523 ran
+                // them one after the other: 21.4 s + 13.8 s). Both still wait for the recipes: the assets need the 3D layer and
+                // starter player file, the sounds the kit's audio module. Each part keeps its floor: a failed asset step leaves
+                // the procedural kit, a sound that does not arrive keeps its built-in voice; the kit is never undone for either.
+                // Default-off L3 assets; all bytes and manifests are acknowledged durably before handoff.
+                const prepareAssets = gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted;
+                const prepareSounds = writtenFiles.has('src/game/fx/audio.ts') && !abort.signal.aborted;
+                const starterPlayerSource = writtenBeforeKit.has('src/game/player.ts') ? undefined : writtenFiles.get('src/game/player.ts');
+                const media = await prepareSeedMediaSideBySide({
+                  assets: prepareAssets ? () => prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid, starterPlayerSource }) : undefined,
+                  sounds: prepareSounds ? () => prepareGameSounds({ prompt, workspaceId, workspace: actuator, persistence: workspaceGameAssetPersistence(verified?.uid), signal: abort.signal }) : undefined,
+                });
+                const assets = media.assets?.value;
+                if (assets) {
+                  kitAssetsStatus = String(assets.status);
+                  for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
+                  // The menu only when the library is on for this account (status 'off' = gated): choosing by meaning needs it.
+                  localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt), assets.status !== 'off' ? gameLibraryMenuHandoff() : ''].filter(Boolean).join('\n');
                 }
-                // Recorded sounds (soundSeed.ts): only when the kit laid down the audio module they replace voices in.
-                // A sound that does not arrive keeps its built-in voice; the kit is never undone for it.
-                if (writtenFiles.has('src/game/fx/audio.ts') && !abort.signal.aborted) {
-                  const soundsStartedAt = Date.now();
-                  try {
-                    const sounds = await prepareGameSounds({ prompt, workspaceId, workspace: actuator, persistence: workspaceGameAssetPersistence(verified?.uid), signal: abort.signal });
-                    for (const [path, content] of Object.entries(sounds.files)) writtenFiles.set(path, content);
-                    if (sounds.handoff) localGameAssetHandoff = [localGameAssetHandoff, sounds.handoff].filter(Boolean).join('\n');
-                    kitSoundsNote = ` · sounds ${((Date.now() - soundsStartedAt) / 1000).toFixed(1)} s (${sounds.status}${sounds.prepared.length ? `, ${sounds.prepared.length} ready` : ''}${sounds.skipped.length ? `, ${sounds.skipped.length} kept built-in` : ''})`;
-                  } catch { /* Built-in voices remain the floor. */ }
+                const sounds = media.sounds?.value;
+                if (sounds) {
+                  for (const [path, content] of Object.entries(sounds.files)) writtenFiles.set(path, content);
+                  if (sounds.handoff) localGameAssetHandoff = [localGameAssetHandoff, sounds.handoff].filter(Boolean).join('\n');
                 }
+                kitMediaDetail = seedMediaTimingDetail(media, { assetsStatus: kitAssetsStatus,
+                  soundsSummary: sounds ? `${sounds.status}${sounds.prepared.length ? `, ${sounds.prepared.length} ready` : ''}${sounds.skipped.length ? `, ${sounds.skipped.length} kept built-in` : ''}` : undefined });
               } finally {
                 platformSeedInFlight = false;
               }
@@ -19722,7 +19724,7 @@ async function noteBuildOutcome(
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
-                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s (${seedRecipeTimes(kitResults)})` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') + kitSoundsNote });
+                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s (${seedRecipeTimes(kitResults)})` + kitMediaDetail });
                 if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
                 // 🖥️ The mounted game goes on screen NOW, before the builder's first call (seedPreview.ts, Q-3233).
                 const seedPreview = await startPreviewAfterSeed({ seeded: gameKitSeeded, alreadyUp: !!lastPreviewUrl, port: oneShotDevPort(framework),

@@ -147,7 +147,7 @@ describe('BR1977 — five successful recipes and three files is not a seeded kit
     expect(ROUTE).toContain('downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles)');
     expect(ROUTE).toContain('const recipeFiles = [...writtenFiles].filter(([p, c]) => writtenBeforeKit.get(p) !== c).length;');
     const downgradeAt = ROUTE.indexOf('downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles)');
-    const assetsAt = ROUTE.indexOf('if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted)');
+    const assetsAt = ROUTE.indexOf('const prepareAssets = gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted;'); // Q-3471: beside the sounds
     expect(downgradeAt).toBeGreaterThan(0);
     expect(assetsAt).toBeGreaterThan(downgradeAt);
   });

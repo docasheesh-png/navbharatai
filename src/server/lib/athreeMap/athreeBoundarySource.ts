@@ -316,6 +316,9 @@ export interface PondSite {
   reach: number;
 }
 
+/** How far from a pond's rim the nearest road or other water must be, metres (a town's talab fits inside a block of colony streets). */
+export const POND_CLEAR = 20;
+
 /** Place up to count ponds on FLAT dry ground away from water and roads, seeded: the same seed gives the same ponds. */
 export function placePonds(seed: number, count: number, site: PondSite): Pond[] {
   const want = Math.max(0, Math.min(MAX_PONDS, Math.floor(Number.isFinite(count) ? count : 0)));
@@ -331,7 +334,7 @@ export function placePonds(seed: number, count: number, site: PondSite): Pond[] 
     if (out.some((p) => Math.hypot(p.x - x, p.z - z) < (p.radius + radius) * 2.5)) continue;
     const h0 = site.ground(x, z);
     if (!(h0 > site.minLand + 1)) continue;
-    // Flat: the centre and 16 points on the outer reach within 1.5 m of each other; no water or road within 60 m of the rim.
+    // Flat: the centre and 16 points on the outer reach within 1.5 m of each other; no water or road near the rim (read below).
     let lo = h0, hi = h0, ok = true;
     for (let i = 0; i < 16 && ok; i++) {
       const b = (i / 16) * Math.PI * 2;
@@ -339,9 +342,22 @@ export function placePonds(seed: number, count: number, site: PondSite): Pond[] 
       const g = site.ground(px, pz);
       lo = Math.min(lo, g); hi = Math.max(hi, g);
       if (!(hi - lo <= 1.5) || !site.allowed(px, pz)) ok = false;
-      else if (i % 2 === 0 && site.busy(x + Math.cos(b) * (radius + 60), z + Math.sin(b) * (radius + 60))) ok = false;
     }
     if (!ok || site.busy(x, z)) continue;
+    // No water or road within POND_CLEAR metres of the rim, and none may slip between the samples (found 2026-11-27: on a planned town
+    // grid, ponds landed ON 7 m streets that crossed the old 60 m ring between its 8 points — and a 60 m ring, read properly, leaves no
+    // room for a talab anywhere in a town). A road that comes that near the rim crosses the ring, so the ring is read every 4 m (narrower
+    // than the narrowest lane); the pond's bank ring is read too, for a dead-end that stops inside it.
+    const ringN = Math.ceil((Math.PI * 2 * (radius + POND_CLEAR)) / 4);
+    for (let i = 0; i < ringN && ok; i++) {
+      const b = (i / ringN) * Math.PI * 2;
+      if (site.busy(x + Math.cos(b) * (radius + POND_CLEAR), z + Math.sin(b) * (radius + POND_CLEAR))) ok = false;
+    }
+    for (let i = 0; i < 16 && ok; i++) {
+      const b = ((i + 0.5) / 16) * Math.PI * 2;
+      if (site.busy(x + Math.cos(b) * radius * 1.4, z + Math.sin(b) * radius * 1.4)) ok = false;
+    }
+    if (!ok) continue;
     // The rim sits on the lowest land round it, so the water never stands above the ground beside the pond.
     const level = lo - RIM;
     out.push({ id: out.length, x, z, radius, level, bottom: level - POND_DEPTH, ghat });

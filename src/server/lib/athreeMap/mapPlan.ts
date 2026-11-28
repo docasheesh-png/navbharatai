@@ -412,7 +412,7 @@ export function mapPlanWorldOptions(plan: MapPlan): MapPlanWorldOptions {
 // ---------------------------------------------------------------------------------------------------------------------------------
 // WHAT WAS REALLY APPLIED — read from the emitted world's own source, never assumed.
 
-export type MapLayer = 'frame' | 'land' | 'boundary' | 'water' | 'roadStyle' | 'density' | 'timeOfDay';
+export type MapLayer = 'frame' | 'land' | 'boundary' | 'water' | 'roadStyle' | 'density' | 'colonies' | 'timeOfDay';
 
 /**
  * Which of the plan's layers the emitted world really consumes. frame and land always are (sizeMeters, mode and style are in
@@ -430,6 +430,8 @@ export function appliedMapLayers(worldSource: string, plan: MapPlan): Record<Map
     water: reads('water') && /\.ponds\b/.test(worldSource),
     roadStyle: reads('roadStyle'),
     density: reads('density'),
+    // The colonies (wave 2) count only when the world both reads the density AND lays the plots from it.
+    colonies: reads('density') && /\bplanColonies\s*\(/.test(worldSource),
     timeOfDay: false,
   };
 }
@@ -462,6 +464,7 @@ export function describeMapPlan(plan: MapPlan, applied: Record<MapLayer, boolean
   lines.push(layer('water', waterWhat(plan.water, plan.waterRefused)) + (applied.water && (plan.water.rivers || plan.water.lakes || plan.water.canals) ? ' (the ponds; the world makes its own rivers and lakes, so their counts and canals are recorded only)' : ''));
   lines.push(layer('roadStyle', ROAD_WHAT[plan.roadStyle] + (plan.roadStyleSource === 'user' ? ' (asked for)' : ' (default)')));
   lines.push(layer('density', plan.density));
+  lines.push(layer('colonies', 'plots facing every road between the roads: shops on main roads, homes inside, a park, school, temple, clinic and playground per colony, taller near the town centre (map.world.colonies())'));
   if (plan.timeOfDay) lines.push(`  - timeOfDay: ${plan.timeOfDay} — not set by the map: pass skyOptions { hours: ${plan.hours} } to createAthreeMap (the sky module) to show it.`);
   for (const n of plan.notes) lines.push('  * ' + n);
   const missing = (Object.keys(applied) as MapLayer[]).filter((k) => !applied[k] && k !== 'timeOfDay' && !(k === 'frame' || k === 'land'));

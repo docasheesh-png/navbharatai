@@ -14,6 +14,7 @@ import { RIVER_TIERS } from './riverwater';
 import { SKY_TIERS, domeTriangles } from './sky';
 import { ROAD_TIERS } from './roadmesh';
 import { VEHICLE_TRIANGLES_MAX } from './vehicles';
+import { COLONY_TIERS } from './colonies';
 
 const terrainAndSea = (q: AthreeQuality): number => QUALITY[q].budgetTriangles - maxTriangles(QUALITY[q]) - oceanTriangles(OCEAN_TIERS[q]);
 
@@ -32,8 +33,13 @@ export function roadBudget(q: AthreeQuality): number {
   return skyBudget(q) - domeTriangles(SKY_TIERS[q]);
 }
 
-/** How many vehicles of the largest size fit in what is left after everything else, roads included. */
+/** What is left for the colonies (houses, shops, trees between the roads) once everything before them, roads included, has taken its worst case. */
+export function colonyBudget(q: AthreeQuality): number {
+  return roadBudget(q) - ROAD_TIERS[q].maxTriangles;
+}
+
+/** How many vehicles of the largest size fit in what is left after everything else, roads and colonies included. */
 export function vehicleBudget(q: AthreeQuality): number {
-  return Math.floor((roadBudget(q) - ROAD_TIERS[q].maxTriangles) / VEHICLE_TRIANGLES_MAX[q]);
+  return Math.floor((colonyBudget(q) - COLONY_TIERS[q].maxTriangles) / VEHICLE_TRIANGLES_MAX[q]);
 }
 `;

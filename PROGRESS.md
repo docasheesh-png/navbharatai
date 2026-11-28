@@ -6761,6 +6761,14 @@ Ledger: 4 workarounds (GLM 150 s reasoning-only, KIMI 429 no balance, three ENGI
   no balance, no build. #2555's own stop (₹126.14 > ₹112.36) would still happen; the before-preview real-cost idea is undecided.
 
 
+### 2026-11-27 — Kadam 4 camera kit: the shooter's camera (branch `claude/camera-kit-shooter`)
+Audit of the kit's camera against a reference third-person shooter. Already there: behind-and-above (CameraRig third-person),
+wall collision (ray from the head, hit − 0.3), the centre-ray shot (ctx.aim → aimFrom). Built into the one CameraRig, on by itself:
+over-the-shoulder framing (3.7 m / 0.6 m right, auto for a hero holding a gun, `GameOptions.shoulderCamera`), aim mode on the
+existing 'aim' action (2.3 m, side 0.75, FOV × 0.82; the rig now owns the FOV so the scope zoom composes), the on-foot camera
+kept 0.4 m above `getGround()`, freefall / parachute framing (`forceAirMode` for a game's own drop), and aimFrom searching the
+crosshair ray from the hero's depth. Locked by `tests/theShooterCameraSeesPastTheHero.test.ts` (8 reversions each fail it).
+Open: no touch Aim button yet (phones have Zoom); the hero's arms are not raised while aiming (`hero.aim`) — left to avoid #4611.
 ### 2026-11-27 — Q-3471 (failedbr #2523), admin option A: 3D assets and sounds prepared side by side (#4617)
 - `assetProviderBudget.ts`: the permit now QUEUES a request FIFO for up to 8 s instead of refusing it. Still one request a
   second per origin, and a Retry-After is never shortened. A turn past 8 s is refused at once, as before. A waiter that a

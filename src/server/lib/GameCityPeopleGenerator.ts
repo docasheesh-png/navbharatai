@@ -177,17 +177,10 @@ export function crossingsAt(plan: CityPlan, i: number, j: number, sx: 1 | -1, sz
 }
 
 /** Walk people around a city's pavements and across its zebra crossings. */
-export function createCityPeople(city: City, options: CityPeopleOptions = {}): CityPeople {
-  const plan = city.plan;
-  const rand = rngOf(options.seed ?? plan.seed + 303);
-  const light = (options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier()) === 'light';
-  const count = Math.max(1, Math.min(light ? LIGHT_PEOPLE : 150, Math.round(options.count ?? 30)));
-  const baseSpeed = Math.max(0.3, options.speed ?? 1.3);
-  const crossChance = Math.min(1, Math.max(0, options.crossChance ?? 0.35));
-  const traffic = options.traffic ?? null;
-  const pave = CITY_ROAD_Y + CITY_KERB;
-  const root = new THREE.Group();
-  root.name = 'City people';
+// ---- SHARED BY EVERY CROWD (the city's pavements below and the map's colony footpaths, createPathPeople): one body, one rule each ----------
+
+/** The crowd's three instanced parts (one draw call each for every person) and how each person is coloured, drawn and freed. */
+export function crowdMeshes(count: number, light: boolean) {
   // 🧍 A PERSON, NOT A CYLINDER WITH A BALL (admin 2026-11-25, open-world problem #7: "villeges human jaise nahi … gol cylinder
   // ke upar ek ball"). A low-poly person in three instanced parts — shirt (torso and arms), trousers (two legs), skin (neck,
   // head and hands) — each part one draw call for the whole crowd, so a city full of people costs what the old shapes did.
@@ -216,6 +209,84 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
   const skins = [0x8d5524, 0xc68642, 0xe0ac69, 0x6b3e26, 0xf1c27d];
   const trousers = [0x1f2937, 0x334155, 0x1e3a8a, 0x78350f, 0x111827, 0x57534e, 0xf5f5f4];
   const colour = new THREE.Color();
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
+  const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  return {
+    bodies, legs, heads,
+    /** Person k's shirt and skin from rand (two draws, in this order) and trousers from k (the look never changes the walks). */
+    colour(k: number, rand: () => number): void {
+      bodies.setColorAt(k, colour.setHex(shirts[Math.floor(rand() * shirts.length)]));
+      heads.setColorAt(k, colour.setHex(skins[Math.floor(rand() * skins.length)]));
+      // From the index, never from rand(): the look must not change the crowd's walks (the same seed, the same crossings).
+      legs.setColorAt(k, colour.setHex(trousers[(k * 5 + 2) % trousers.length]));
+    },
+    /** Every person where they stand (feet at groundOf), bobbing as they walk, flat on the ground when down. */
+    draw<W extends { state: string; x: number; z: number; heading: number; body: THREE.Object3D }>(walkers: ReadonlyArray<W>, clock: number, groundOf: (w: W) => number): void {
+      walkers.forEach((w, k) => {
+        const moving = w.state === 'walk' || w.state === 'toCrossing' || w.state === 'cross' || w.state === 'leave';
+        const bob = moving ? Math.abs(Math.sin(clock * 7 + k)) * 0.04 : 0;
+        const y = groundOf(w) + bob;
+        q.setFromAxisAngle(up, w.heading);
+        if (w.state === 'down') q.multiply(lying);           // flat on the ground, along the way they faced
+        m.compose(at.set(w.x, y, w.z), q, one);
+        bodies.setMatrixAt(k, m); legs.setMatrixAt(k, m); heads.setMatrixAt(k, m);
+        w.body.position.set(w.x, y, w.z);
+      });
+      bodies.instanceMatrix.needsUpdate = true; legs.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
+      if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+      if (legs.instanceColor) legs.instanceColor.needsUpdate = true;
+      if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
+    },
+    dispose(): void {
+      bodyGeo.dispose(); legGeo.dispose(); headGeo.dispose(); bodyMat.dispose(); legMat.dispose(); headMat.dispose();
+      bodies.dispose(); legs.dispose(); heads.dispose();
+    },
+  };
+}
+
+/**
+ * Move a point (in the crowd's frame, in place) at least min from every standing person. edge: how close to min already counts as
+ * clear; sideways: a point exactly on a person is pushed out to their side (else along +x). True when it moved. PURE but for the point.
+ */
+export function pushOutOfWalkers(at: { x: number; z: number }, walkers: ReadonlyArray<{ state: string; x: number; z: number; heading: number }>, min: number, edge: number, sideways: boolean): boolean {
+  let moved = false;
+  for (const w of walkers) {
+    if (w.state === 'down') continue;
+    const dx = at.x - w.x, dz = at.z - w.z, d = Math.hypot(dx, dz);
+    if (d >= min - edge) continue;
+    const ux = d > 1e-6 ? dx / d : sideways ? Math.sin(w.heading + Math.PI / 2) : 1, uz = d > 1e-6 ? dz / d : sideways ? Math.cos(w.heading + Math.PI / 2) : 0;
+    at.x = w.x + ux * min; at.z = w.z + uz * min;
+    moved = true;
+  }
+  return moved;
+}
+
+/** The nearest standing person within range of o and inside the arc round the direction f (crowd frame), or null. PURE. */
+export function walkerInFront<W extends { state: string; x: number; z: number }>(walkers: ReadonlyArray<W>, o: { x: number; z: number }, f: { x: number; z: number }, range: number, arc: number): W | null {
+  let best: W | null = null, bestD = Infinity;
+  for (const w of walkers) {
+    if (w.state === 'down') continue;
+    const dx = w.x - o.x, dz = w.z - o.z, d = Math.hypot(dx, dz);
+    if (d > range || d >= bestD) continue;
+    if (d > 0.05 && Math.acos(Math.max(-1, Math.min(1, (dx * f.x + dz * f.z) / d))) > arc / 2) continue;
+    best = w; bestD = d;
+  }
+  return best;
+}
+
+export function createCityPeople(city: City, options: CityPeopleOptions = {}): CityPeople {
+  const plan = city.plan;
+  const rand = rngOf(options.seed ?? plan.seed + 303);
+  const light = (options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier()) === 'light';
+  const count = Math.max(1, Math.min(light ? LIGHT_PEOPLE : 150, Math.round(options.count ?? 30)));
+  const baseSpeed = Math.max(0.3, options.speed ?? 1.3);
+  const crossChance = Math.min(1, Math.max(0, options.crossChance ?? 0.35));
+  const traffic = options.traffic ?? null;
+  const pave = CITY_ROAD_Y + CITY_KERB;
+  const root = new THREE.Group();
+  root.name = 'City people';
+  const crowd = crowdMeshes(count, light);
+  const { bodies, legs, heads } = crowd;
   const walkers: Walker[] = [];
   for (let k = 0; k < count; k++) {
     const block: [number, number] = [Math.floor(rand() * plan.blocksX), Math.floor(rand() * plan.blocksZ)];
@@ -223,35 +294,15 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
     const s = rand() * L.length;
     const p = pointOnLoop(plan, block[0], block[1], s);
     walkers.push({ block, s, dir: rand() < 0.5 ? 1 : -1, speed: baseSpeed * (0.8 + rand() * 0.4), state: 'walk', x: p.x, z: p.z, heading: 0, crossing: null, waited: 0, body: new THREE.Object3D() });
-    bodies.setColorAt(k, colour.setHex(shirts[Math.floor(rand() * shirts.length)]));
-    heads.setColorAt(k, colour.setHex(skins[Math.floor(rand() * skins.length)]));
-    // From the index, never from rand(): the look must not change the crowd's walks (the same seed, the same crossings).
-    legs.setColorAt(k, colour.setHex(trousers[(k * 5 + 2) % trousers.length]));
+    crowd.colour(k, rand);
   }
   root.add(bodies, legs, heads);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
-  const lying = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   const solid = options.solid === true, hittable = options.hittable === true;
   const local = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   let clock = 0;
 
-  const draw = () => {
-    walkers.forEach((w, k) => {
-      const moving = w.state === 'walk' || w.state === 'toCrossing' || w.state === 'cross' || w.state === 'leave';
-      const bob = moving ? Math.abs(Math.sin(clock * 7 + k)) * 0.04 : 0;
-      const y = (w.state === 'cross' || (w.state === 'down' && (w.upTo === 'cross' || (!w.upTo && w.crossing))) ? CITY_ROAD_Y : pave) + bob;
-      q.setFromAxisAngle(up, w.heading);
-      if (w.state === 'down') q.multiply(lying);           // flat on the ground, along the way they faced
-      m.compose(at.set(w.x, y, w.z), q, one);
-      bodies.setMatrixAt(k, m); legs.setMatrixAt(k, m); heads.setMatrixAt(k, m);
-      w.body.position.set(w.x, y, w.z);
-    });
-    bodies.instanceMatrix.needsUpdate = true; legs.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
-    if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
-    if (legs.instanceColor) legs.instanceColor.needsUpdate = true;
-    if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
-  };
+  const draw = () => crowd.draw(walkers, clock, (w) => (w.state === 'cross' || (w.state === 'down' && (w.upTo === 'cross' || (!w.upTo && w.crossing))) ? CITY_ROAD_Y : pave));
 
   // Safe to cross: the cars on that street have red for the WHOLE time it takes to cross (every half second of it, not
   // only now and at the far kerb — a light can be red at both and green in between), and no car is near.
@@ -396,15 +447,7 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
         if (!object.parent) return false;
         const reach = radius ?? 0.4;
         inCity(object, tmp);
-        let pushed = false;
-        for (const w of walkers) {
-          if (w.state === 'down') continue;
-          const dx = tmp.x - w.x, dz = tmp.z - w.z, d = Math.hypot(dx, dz), min = reach + 0.25;
-          if (d >= min - 1e-4) continue;
-          const ux = d > 1e-6 ? dx / d : Math.sin(w.heading + Math.PI / 2), uz = d > 1e-6 ? dz / d : Math.cos(w.heading + Math.PI / 2);
-          tmp.x = w.x + ux * min; tmp.z = w.z + uz * min;
-          pushed = true;
-        }
+        const pushed = pushOutOfWalkers(tmp, walkers, reach + 0.25, 1e-4, true);
         if (pushed) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
         return pushed;
       }
@@ -412,14 +455,7 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       const position = target as THREE.Vector3;
       const reach = radius ?? PERSON_RADIUS;
       local.copy(position).applyMatrix4(toCity);
-      let moved = false;
-      for (const w of walkers) {
-        if (w.state === 'down') continue;
-        const dx = local.x - w.x, dz = local.z - w.z, d = Math.hypot(dx, dz), min = reach + PERSON_RADIUS;
-        if (d >= min) continue;
-        const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
-        local.x = w.x + nx * min; local.z = w.z + nz * min; moved = true;
-      }
+      const moved = pushOutOfWalkers(local, walkers, reach + PERSON_RADIUS, 0, false);
       if (moved) position.copy(local.applyMatrix4(root.matrixWorld));
       return moved;
     },
@@ -427,14 +463,7 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
       root.updateWorldMatrix(true, false); toCity.copy(root.matrixWorld).invert();
       const o = tmp.copy(origin).applyMatrix4(toCity);
       const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).transformDirection(toCity);
-      let best: Walker | null = null, bestD = Infinity;
-      for (const w of walkers) {
-        if (w.state === 'down') continue;
-        const dx = w.x - o.x, dz = w.z - o.z, d = Math.hypot(dx, dz);
-        if (d > range || d >= bestD) continue;
-        if (d > 0.05 && Math.acos(Math.max(-1, Math.min(1, (dx * f.x + dz * f.z) / d))) > arc / 2) continue;
-        best = w; bestD = d;
-      }
+      const best = walkerInFront(walkers, o, f, range, arc);
       if (!best) return null;
       if (best.state !== 'cross') best.crossing = null;
       best.upTo = best.state === 'cross' ? 'cross' : 'leave';
@@ -445,9 +474,203 @@ export function createCityPeople(city: City, options: CityPeopleOptions = {}): C
     },
     dispose: () => {
       root.removeFromParent();
-      bodyGeo.dispose(); legGeo.dispose(); headGeo.dispose(); bodyMat.dispose(); legMat.dispose(); headMat.dispose();
-      bodies.dispose(); legs.dispose(); heads.dispose();
+      crowd.dispose();
     },
   };
+}
+
+// ---- PEOPLE ON THE MAP'S COLONY FOOTPATHS (Q-3762) ------------------------------------------------------------------------------------
+// The colonies of the big map (athree/colonies.ts) have a footpath along every road, between the kerb and the plots, and nobody walked
+// on it. This walks the SAME people (crowdMeshes, pushOutOfWalkers, walkerInFront, the same knock-down) along those footpaths — each
+// path is a line the map measured off every road, plot, pond and river (athree world.colonyFootpaths()). They live only near the camera:
+// a walker left behind starts again on a footpath near the camera, so a town of any size costs only the people in view.
+
+/** What createPathPeople needs: the footpaths (WORLD metres; closed round a block, or open where a road or a plot cut it) and the ground. */
+export interface PathPeopleSource {
+  paths: ReadonlyArray<{ points: ReadonlyArray<{ x: number; z: number }>; closed: boolean }>;
+  heightAt(x: number, z: number): number;
+}
+
+export interface PathPeopleOptions {
+  /** People at most, near the camera (1 to 150, default 24; the light tier keeps LIGHT_PEOPLE). */
+  count?: number;
+  /** Walking speed, m/s (default 1.3). */
+  speed?: number;
+  /** People walk within this many metres of the camera (default 160). */
+  radius?: number;
+  seed?: number;
+  tier?: GeometryTier;
+  solid?: boolean;
+  hittable?: boolean;
+}
+
+export interface PathWalker {
+  path: number;
+  /** Metres along the path. */
+  s: number;
+  dir: 1 | -1;
+  speed: number;
+  state: 'walk' | 'down';
+  x: number; y: number; z: number; heading: number;
+  downFor?: number;
+  body: THREE.Object3D;
+}
+
+export interface PathPeople {
+  /** Put it in the scene and move it by the floating origin: root.position = -origin (its people are in WORLD metres). */
+  root: THREE.Group;
+  readonly walkers: PathWalker[];
+  /** A stand-in body per walker at its feet: pass them to a traffic's update so cars stop for people. */
+  readonly bodies: THREE.Object3D[];
+  /** Advance. camera: where the player is, WORLD metres. avoid: what people must not walk into (the player, cars). */
+  update(dt: number, camera: { x: number; z: number }, avoid?: THREE.Object3D[]): void;
+  hitAt(point: { x: number; y: number; z: number }, radius?: number): number;
+  pushOut(target: THREE.Vector3 | THREE.Object3D, radius?: number): boolean;
+  hit(origin: THREE.Vector3, yaw: number, range?: number, arc?: number): THREE.Vector3 | null;
+  dispose(): void;
+}
+
+/** Walk the kit's people along footpaths (the map's colonies), near the camera. */
+export function createPathPeople(source: PathPeopleSource, options: PathPeopleOptions = {}): PathPeople {
+  const rand = rngOf(options.seed ?? 5051);
+  const light = (options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier()) === 'light';
+  const max = Math.max(1, Math.min(light ? LIGHT_PEOPLE : 150, Math.round(options.count ?? 24)));
+  const baseSpeed = Math.max(0.3, options.speed ?? 1.3);
+  const R = Math.max(40, options.radius ?? 160);
+  const solid = options.solid === true, hittable = options.hittable === true;
+  const root = new THREE.Group();
+  root.name = 'Footpath people';
+  const crowd = crowdMeshes(max, light);
+  for (let k = 0; k < max; k++) crowd.colour(k, rand);
+  root.add(crowd.bodies, crowd.legs, crowd.heads);
+  const paths = source.paths.filter((p) => p.points.length >= 2).map((p) => {
+    const pts = p.points.map((q) => ({ x: q.x, z: q.z }));
+    if (p.closed) pts.push({ ...pts[0] });
+    const arcs = [0];
+    for (let i = 1; i < pts.length; i++) arcs.push(arcs[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const q of pts) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+    return { pts, arcs, length: arcs[arcs.length - 1], closed: p.closed, x0, z0, x1, z1 };
+  }).filter((p) => p.length >= 8);
+  const pointAt = (k: number, s: number): { x: number; z: number } => {
+    const p = paths[k];
+    const t = p.closed ? ((s % p.length) + p.length) % p.length : Math.max(0, Math.min(p.length, s));
+    let i = 1;
+    while (i < p.arcs.length - 1 && p.arcs[i] < t) i++;
+    const a = p.pts[i - 1], b = p.pts[i], seg = p.arcs[i] - p.arcs[i - 1] || 1, u = Math.max(0, Math.min(1, (t - p.arcs[i - 1]) / seg));
+    return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u };
+  };
+  const pathNear = (k: number, cam: { x: number; z: number }, r: number): boolean => {
+    const p = paths[k];
+    return Math.hypot(Math.max(p.x0 - cam.x, 0, cam.x - p.x1), Math.max(p.z0 - cam.z, 0, cam.z - p.z1)) <= r;
+  };
+  const walkers: PathWalker[] = [];
+  const set = (w: PathWalker): void => {
+    const q = pointAt(w.path, w.s);
+    w.x = q.x; w.z = q.z; w.y = source.heightAt(q.x, q.z);
+  };
+  /** Start a walker on a footpath near the camera, a stride from everyone else. */
+  const start = (cam: { x: number; z: number }): PathWalker | null => {
+    const near: number[] = [];
+    for (let k = 0; k < paths.length; k++) if (pathNear(k, cam, R)) near.push(k);
+    if (!near.length) return null;
+    const path = near[Math.floor(rand() * near.length)];
+    const w: PathWalker = { path, s: rand() * paths[path].length, dir: rand() < 0.5 ? 1 : -1, speed: baseSpeed * (0.8 + rand() * 0.4), state: 'walk', x: 0, y: 0, z: 0, heading: 0, body: new THREE.Object3D() };
+    set(w);
+    if (Math.hypot(w.x - cam.x, w.z - cam.z) > R) return null;
+    for (const o of walkers) if (Math.hypot(o.x - w.x, o.z - w.z) < 1) return null;
+    return w;
+  };
+  const toRoot = new THREE.Matrix4();
+  const local = new THREE.Vector3();
+  const tmp = new THREE.Vector3();
+  const frame = (): void => { root.updateWorldMatrix(true, false); toRoot.copy(root.matrixWorld).invert(); };
+  const inRoot = (o: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 => { o.getWorldPosition(out); return out.applyMatrix4(toRoot); };
+  let clock = 0;
+  const draw = (): void => {
+    crowd.draw(walkers, clock, (w) => w.y);
+    crowd.bodies.count = walkers.length; crowd.legs.count = walkers.length; crowd.heads.count = walkers.length;
+  };
+  draw();
+  const people: PathPeople = {
+    root,
+    get walkers() { return walkers; },
+    get bodies() { return walkers.map((w) => w.body); },
+    update: (dt, cam, avoid = []) => {
+      frame();
+      if (!(dt > 0) || !cam || !Number.isFinite(cam.x) || !Number.isFinite(cam.z)) return;
+      clock += dt;
+      // Near the camera only: one left behind starts again near the camera (a few a step).
+      for (let k = walkers.length - 1; k >= 0; k--) if (Math.hypot(walkers[k].x - cam.x, walkers[k].z - cam.z) > R * 1.3) walkers.splice(k, 1);
+      for (let n = 0; n < 4 && walkers.length < max; n++) { const w = start(cam); if (w) walkers.push(w); }
+      const points = avoid.map((a) => { const v = inRoot(a, new THREE.Vector3()); return { x: v.x, z: v.z }; });
+      for (const w of walkers) {
+        if (w.state === 'down') {
+          w.downFor = (w.downFor ?? 0) - dt;
+          if (w.downFor <= 0) { w.downFor = 0; w.state = 'walk'; }
+          continue;
+        }
+        const p = paths[w.path];
+        const ahead = pointAt(w.path, w.s + w.dir * 0.5);
+        const fx = ahead.x - w.x, fz = ahead.z - w.z, fl = Math.hypot(fx, fz) || 1;
+        // Somebody (the player, a car) right in front: wait for them.
+        let stop = false;
+        for (const q of points) {
+          const a = (q.x - w.x) * fx / fl + (q.z - w.z) * fz / fl, side = Math.abs((q.x - w.x) * fz / fl - (q.z - w.z) * fx / fl);
+          if (a > 0 && a < 1.2 && side < 0.6) stop = true;
+        }
+        if (stop) continue;
+        w.s += w.dir * w.speed * dt;
+        // An open footpath ends where a road or a plot cut it: turn round there.
+        if (!p.closed && (w.s <= 0 || w.s >= p.length)) { w.s = Math.max(0, Math.min(p.length, w.s)); w.dir = (w.dir * -1) as 1 | -1; }
+        const bx = w.x, bz = w.z;
+        set(w);
+        if (Math.hypot(w.x - bx, w.z - bz) > 1e-6) w.heading = Math.atan2(w.x - bx, w.z - bz);
+      }
+      draw();
+    },
+    hitAt: (point, radius = 0.9) => {
+      if (!hittable) return 0;
+      frame();
+      local.set(point.x, point.y, point.z).applyMatrix4(toRoot);
+      let fell = 0;
+      for (const w of walkers) {
+        if (w.state === 'down' || Math.hypot(w.x - local.x, w.z - local.z) > radius + PERSON_RADIUS) continue;
+        w.state = 'down'; w.downFor = DOWN_SECONDS; fell++;
+      }
+      if (fell) draw();
+      return fell;
+    },
+    pushOut: (target, radius) => {
+      frame();
+      const object = (target as THREE.Object3D).isObject3D ? target as THREE.Object3D : null;
+      if (object) {
+        if (!object.parent) return false;
+        inRoot(object, tmp);
+        const pushed = pushOutOfWalkers(tmp, walkers, (radius ?? 0.4) + 0.25, 1e-4, true);
+        if (pushed) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
+        return pushed;
+      }
+      if (!solid) return false;
+      const position = target as THREE.Vector3;
+      local.copy(position).applyMatrix4(toRoot);
+      const moved = pushOutOfWalkers(local, walkers, (radius ?? PERSON_RADIUS) + PERSON_RADIUS, 0, false);
+      if (moved) position.copy(local.applyMatrix4(root.matrixWorld));
+      return moved;
+    },
+    hit: (origin, yaw, range = 1.6, arc = Math.PI * 0.6) => {
+      frame();
+      const o = tmp.copy(origin).applyMatrix4(toRoot);
+      const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).transformDirection(toRoot);
+      const best = walkerInFront(walkers, o, f, range, arc);
+      if (!best) return null;
+      best.state = 'down'; best.downFor = DOWN_SECONDS;
+      best.heading = Math.atan2(best.x - o.x, best.z - o.z);
+      draw();
+      return root.localToWorld(new THREE.Vector3(best.x, best.y, best.z));
+    },
+    dispose: () => { root.removeFromParent(); crowd.dispose(); },
+  };
+  return people;
 }
 `;

@@ -30,6 +30,8 @@
 import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
 
 export const GAME_WORLD_STREAMING_PATH = 'src/game/three/worldStreaming.ts';
+/** Moving actors alive at once near the camera, by device tier: the streaming kit's maxActors, and the colonies' share (open world). */
+export const STREAM_ACTORS = { phone: 12, mid: 24, desktop: 48 } as const;
 
 const MODULE = String.raw`// World streaming — written by NavBharatAI. A world of any size: only what is near the camera is loaded and drawn.
 //   const world = createWorldStreamer(scene, { heightAt });
@@ -54,9 +56,9 @@ export interface StreamTier {
   maxTemplates: number;
 }
 export const STREAM_TIERS: Readonly<Record<StreamQuality, StreamTier>> = {
-  phone: { viewRadius: 3, farRing: 2, maxBuildsPerUpdate: 1, maxActors: 12, maxTemplates: 24 },
-  mid: { viewRadius: 4, farRing: 2, maxBuildsPerUpdate: 2, maxActors: 24, maxTemplates: 48 },
-  desktop: { viewRadius: 6, farRing: 3, maxBuildsPerUpdate: 3, maxActors: 48, maxTemplates: 96 },
+  phone: { viewRadius: 3, farRing: 2, maxBuildsPerUpdate: 1, maxActors: ${STREAM_ACTORS.phone}, maxTemplates: 24 },
+  mid: { viewRadius: 4, farRing: 2, maxBuildsPerUpdate: 2, maxActors: ${STREAM_ACTORS.mid}, maxTemplates: 48 },
+  desktop: { viewRadius: 6, farRing: 3, maxBuildsPerUpdate: 3, maxActors: ${STREAM_ACTORS.desktop}, maxTemplates: 96 },
 };
 
 export interface Placement {

@@ -256,7 +256,7 @@ import { riverNetworkFor, riverNetworkStepsFor, type River, type Lake, type Wate
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
 import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, type Boundary, type BoundaryKind, type Pond } from './boundary';
-import { planColonySteps, plotBoxes, boxesTouch, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity, type ColonyInput } from './colonies';
+import { planColonySteps, plotBoxes, boxesTouch, footpathPaths, type ColonyFootpath, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity, type ColonyInput } from './colonies';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 /** The world rectangle a ground edit can change (with a few metres for the normals beside it). */
@@ -476,6 +476,11 @@ export interface AthreeWorld {
    * kit characters) are already stopped by the tile walls colonyMesh carries.
    */
   colonySolidAt?(x: number, z: number, radius?: number): boolean;
+  /**
+   * 🚶 The colony footpaths (Q-3762): a walking line along every footpath, closed round a block or open where a road, a junction, a plot
+   * or water cuts it; never on a road, in a plot or in water. The kit's createPathPeople walks the people here. Empty without colonies.
+   */
+  colonyFootpaths?(): ColonyFootpath[];
   /** True when this world lays colonies (a density on a planned road network), answered WITHOUT planning them. */
   hasColonies?(): boolean;
   /**
@@ -1151,6 +1156,20 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     return hit;
   }
+  let footpaths: { key: string; paths: ColonyFootpath[] } | null = null;
+  function colonyFootpaths(): ColonyFootpath[] {
+    if (!withColonies) return [];
+    const plan = coloniesOf();
+    if (!plan.plots.length) return [];
+    const key = colonyGone.size + '|' + pads.length + '|' + gameRoads.length;
+    if (footpaths && footpaths.key === key) return footpaths.paths;
+    const landLine = 1.5 * Math.min(1, vs);
+    const roads = roadsOf();
+    const ok = (x: number, z: number): boolean => !roads.roadAt(x, z) && !colonyAt(x, z, 0.3) && !waterAt(x, z) && boundary.inside(x, z, 12) && heightAt(x, z) >= landLine + 0.2 && !gameRoadAt(x, z);
+    footpaths = { key, paths: footpathPaths(roads.blocks(), ok) };
+    return footpaths.paths;
+  }
+  function gameRoadAt(x: number, z: number): boolean { const r = gameRoads.length ? gameRoadNear(x, z) : null; return !!r && r.d <= r.half + ROAD_SHOULDER; }
   function hasColonies(): boolean {
     if (!withColonies || roadsOf().style() === null) return false;
     return colonyPlan ? colonyPlan.plots.length > 0 : true;
@@ -1431,7 +1450,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt, colonySolidAt, hasColonies, planStep, planned };
+  return { seed, profile, mode, sizeMeters, seaLevel, heightScale: vs, nature: options.nature !== false, editCount: () => groundEdits.length, editsSince: (n: number) => groundEdits.slice(Math.max(0, Math.floor(Number(n) || 0))), heightAt, surfaceAt, plantableAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, levelGround, clearAt, setLand, openFieldAt, addRoad, gameRoadAt: (x: number, z: number) => { const r = gameRoadNear(x, z); return !!r && r.d <= r.half; }, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints, boundary, ponds: () => pondsOf().slice(), colonies, colonyAt, colonySolidAt, colonyFootpaths, hasColonies, planStep, planned };
 }
 `;
 

@@ -712,6 +712,76 @@ export function buildingHeight(kind: ColonyKind, floors: number): number {
   return floors * 3.1 + (kind === 'flats' || kind === 'hospital' ? 1.6 : 0.6);
 }
 
+// ---- footpaths (Q-3762: the people of the colonies walk here) --------------------------------------------------------------------------
+
+/** How far a footpath's walking line runs from the kerb, metres (inside the 3 m footpath, behind the trees at 1.3 m). */
+export const COLONY_WALK_LINE = 2.4;
+
+/** A walking line along a footpath: closed round a block, or open where a road, a plot or water cut it. */
+export interface ColonyFootpath { block: number; points: ColonyPoint[]; closed: boolean; length: number }
+
+/**
+ * The footpaths of the blocks: each block's road centre lines inset by their own half width and COLONY_WALK_LINE, sampled every 2 m and
+ * cut wherever ok(x, z) is false (a road, a junction pad, a plot, water, outside the map), so nobody is ever led onto a road or into a house.
+ * PURE given ok.
+ */
+export function footpathPaths(blocks: ReadonlyArray<Block>, ok: (x: number, z: number) => boolean): ColonyFootpath[] {
+  const out: ColonyFootpath[] = [];
+  for (const block of blocks) {
+    const poly = block.polygon, n = poly.length;
+    if (n < 3) continue;
+    // One offset line per side (the block is on the left of its counter-clockwise sides), joined at the corners by their meeting point.
+    const lines: Array<{ ax: number; az: number; bx: number; bz: number; ux: number; uz: number } | null> = [];
+    for (let i = 0; i < n; i++) {
+      const a = poly[i], b = poly[(i + 1) % n];
+      const L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (L < 1e-6) { lines.push(null); continue; }
+      const ux = (b.x - a.x) / L, uz = (b.z - a.z) / L, nx = -uz, nz = ux;
+      const d = (block.sides[i] ? block.sides[i].half : 3.5) + COLONY_WALK_LINE;
+      lines.push({ ax: a.x + nx * d, az: a.z + nz * d, bx: b.x + nx * d, bz: b.z + nz * d, ux, uz });
+    }
+    const ring: ColonyPoint[] = [];
+    for (let i = 0; i < n; i++) {
+      const l0 = lines[(i - 1 + n) % n], l1 = lines[i];
+      if (!l1) continue;
+      if (!l0) { ring.push({ x: l1.ax, z: l1.az }); continue; }
+      const cr = l0.ux * l1.uz - l0.uz * l1.ux;
+      let p = { x: (l0.bx + l1.ax) / 2, z: (l0.bz + l1.az) / 2 };
+      if (Math.abs(cr) > 0.05) {
+        const t = ((l1.ax - l0.ax) * l1.uz - (l1.az - l0.az) * l1.ux) / cr;
+        const q = { x: l0.ax + l0.ux * t, z: l0.az + l0.uz * t };
+        if (Math.hypot(q.x - poly[i].x, q.z - poly[i].z) < 30) p = q;
+      }
+      ring.push(p);
+    }
+    if (ring.length < 3) continue;
+    // Sampled every 2 m round the ring; cut into runs of good points.
+    const samples: Array<{ x: number; z: number; good: boolean }> = [];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      const L = Math.hypot(b.x - a.x, b.z - a.z), k = Math.max(1, Math.ceil(L / 2));
+      for (let j = 0; j < k; j++) { const x = a.x + ((b.x - a.x) * j) / k, z = a.z + ((b.z - a.z) * j) / k; samples.push({ x, z, good: ok(x, z) }); }
+    }
+    const all = samples.every((q) => q.good);
+    const lengthOf = (pts: ColonyPoint[], closed: boolean): number => {
+      let len = 0;
+      for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      return closed && pts.length > 1 ? len + Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].z - pts[pts.length - 1].z) : len;
+    };
+    if (all) { const pts = samples.map((q) => ({ x: q.x, z: q.z })); out.push({ block: block.id, points: pts, closed: true, length: lengthOf(pts, true) }); continue; }
+    // Start just after a bad point so no run wraps round the start.
+    const first = samples.findIndex((q) => !q.good);
+    let run: ColonyPoint[] = [];
+    const flush = (): void => { if (run.length >= 4) { const len = lengthOf(run, false); if (len >= 8) out.push({ block: block.id, points: run, closed: false, length: len }); } run = []; };
+    for (let k = 1; k <= samples.length; k++) {
+      const q = samples[(first + k) % samples.length];
+      if (q.good) run.push({ x: q.x, z: q.z }); else flush();
+    }
+    flush();
+  }
+  return out;
+}
+
 // ---- drawing -------------------------------------------------------------------------------------------------------------------------
 
 /**

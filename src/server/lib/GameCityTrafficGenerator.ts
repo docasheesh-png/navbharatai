@@ -165,6 +165,75 @@ export function edgeLength(plan: CityPlan, from: [number, number], to: [number, 
   return Math.hypot(plan.streetsX[to[0]] - plan.streetsX[from[0]], plan.streetsZ[to[1]] - plan.streetsZ[from[1]]);
 }
 
+// ---- SHARED BY EVERY TRAFFIC (the city grid below and the map's planned roads, createRoadTraffic): one rule each, never a copy ----------
+
+const TRAFFIC_PAINTS = [0xb42b2b, 0x1d4ed8, 0xf3f4f6, 0x111827, 0x9ca3af, 0x0f766e, 0xf59e0b];
+/** How long each kind of vehicle is, metres (its body along its heading). */
+export const VEHICLE_LENGTH: Record<CityTrafficKind, number> = { car: 4.4, auto: 3, bus: 10 };
+/** The gap a vehicle keeps to the one ahead in its lane, metres. */
+export const TRAFFIC_GAP = 3;
+
+/** The kit's vehicles for a traffic: built full, or (light tier) as one mesh each; dispose() frees only what it merged. */
+export function trafficFleet(rand: () => number, light: boolean): { build(kind: CityTrafficKind): THREE.Group; dispose(): void } {
+  const model = (k: CityTrafficKind): THREE.Group => {
+    if (k === 'auto') return createAutoRickshaw({ detail: 'lite' });
+    if (k === 'bus') return createBus({ detail: 'lite' });
+    return createCar({ detail: 'lite', color: TRAFFIC_PAINTS[Math.floor(rand() * TRAFFIC_PAINTS.length)] });
+  };
+  // Light tier: the same model, drawn as one mesh inside a group that moves exactly as the model would have.
+  const bodyMat = light ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 }) : null;
+  const merged: THREE.BufferGeometry[] = [];
+  return {
+    build: (k) => {
+      const full = model(k);
+      if (!bodyMat) return full;
+      const one = flattenModel(full, bodyMat);
+      merged.push(one.geometry);
+      const g = new THREE.Group(); g.name = full.name; g.userData = { ...full.userData }; g.add(one);
+      return g;
+    },
+    dispose: () => { for (const g of merged) g.dispose(); bodyMat?.dispose(); },
+  };
+}
+
+/** A vehicle's next speed: brake to stop within the room left (limit, metres), else ease up to cruise. PURE. */
+export function followSpeed(speed: number, cruise: number, limit: number, dt: number): number {
+  const room = Math.max(0, limit);
+  const safe = Math.sqrt(2 * 6 * room);
+  const target = Math.min(cruise, safe);
+  let v = speed + Math.max(-8 * dt, Math.min(3 * dt, target - speed));
+  v = Math.max(0, Math.min(v, room / dt));
+  return v;
+}
+
+/** The room a vehicle at (x, z) facing heading (length long) has before something at (px, pz) ahead in its lane, or Infinity. PURE. */
+export function roomBefore(x: number, z: number, heading: number, length: number, px: number, pz: number): number {
+  const fx = Math.sin(heading), fz = Math.cos(heading);
+  const ahead = (px - x) * fx + (pz - z) * fz;
+  const side = Math.abs((px - x) * fz - (pz - z) * fx);
+  return ahead > 0 && ahead < 12 && side < 1.8 ? ahead - length / 2 - 2 : Infinity;
+}
+
+/**
+ * Push a point (in the traffic's frame, moved in place) out of every vehicle body it is inside: a box its length along its heading,
+ * 2 m wide, grown by radius. True when it touched one. PURE but for the point.
+ */
+export function pushOutOfVehicles(at: { x: number; z: number }, bodies: Iterable<{ x: number; z: number; heading: number; length: number }>, radius: number): boolean {
+  let hit = false;
+  for (const p of bodies) {
+    const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+    const dx = at.x - p.x, dz = at.z - p.z;
+    const along = dx * fx + dz * fz, side = dx * fz - dz * fx;
+    const hl = p.length / 2 + radius, hw = 1 + radius;
+    if (Math.abs(along) >= hl || Math.abs(side) >= hw) continue;
+    const outAlong = hl - Math.abs(along), outSide = hw - Math.abs(side);
+    if (outAlong < outSide) { const s = Math.sign(along) || 1; at.x += fx * outAlong * s; at.z += fz * outAlong * s; }
+    else { const s = Math.sign(side) || 1; at.x += fz * outSide * s; at.z -= fx * outSide * s; }
+    hit = true;
+  }
+  return hit;
+}
+
 /** Drive the kit's vehicles around a city's street grid. */
 export function createCityTraffic(city: City, options: CityTrafficOptions = {}): CityTraffic {
   const plan = city.plan;
@@ -178,24 +247,9 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
   const useLights = options.lights !== false;
   const root = new THREE.Group();
   root.name = 'City traffic';
-  const paints = [0xb42b2b, 0x1d4ed8, 0xf3f4f6, 0x111827, 0x9ca3af, 0x0f766e, 0xf59e0b];
-  const model = (k: CityTrafficKind): THREE.Group => {
-    if (k === 'auto') return createAutoRickshaw({ detail: 'lite' });
-    if (k === 'bus') return createBus({ detail: 'lite' });
-    return createCar({ detail: 'lite', color: paints[Math.floor(rand() * paints.length)] });
-  };
-  // Light tier: the same model, drawn as one mesh inside a group that moves exactly as the model would have.
-  const bodyMat = light ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 }) : null;
-  const merged: THREE.BufferGeometry[] = [];
-  const build = (k: CityTrafficKind): THREE.Group => {
-    const full = model(k);
-    if (!bodyMat) return full;
-    const one = flattenModel(full, bodyMat);
-    merged.push(one.geometry);
-    const g = new THREE.Group(); g.name = full.name; g.userData = { ...full.userData }; g.add(one);
-    return g;
-  };
-  const lengthOf: Record<CityTrafficKind, number> = { car: 4.4, auto: 3, bus: 10 };
+  const fleet = trafficFleet(rand, light);
+  const build = fleet.build;
+  const lengthOf = VEHICLE_LENGTH;
   const cars: TrafficCar[] = [];
   // Spread the vehicles over distinct streets so none starts inside another.
   const used = new Set<string>();
@@ -257,7 +311,7 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
   if (useLights) paintLights();
 
   const sameLane = (a: TrafficCar, b: TrafficCar) => a.from[0] === b.from[0] && a.from[1] === b.from[1] && a.to[0] === b.to[0] && a.to[1] === b.to[1];
-  const GAP = 3;
+  const GAP = TRAFFIC_GAP;
   const key = (n: [number, number]) => n[0] + ',' + n[1];
   // ONE VEHICLE IN A CROSSING AT A TIME: whoever holds a crossing has passed its stop line and is not yet clear of the
   // crossing on the far side. Without it, two vehicles turning in from opposite sides met inside the crossing, and a
@@ -292,18 +346,7 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
       if (!object.parent) return false;
       frame();
       inCity(object, tmp);
-      let hit = false;
-      for (const c of cars) {
-        const p = carAt(c), fx = Math.sin(p.heading), fz = Math.cos(p.heading);
-        const dx = tmp.x - p.x, dz = tmp.z - p.z;
-        const along = dx * fx + dz * fz, side = dx * fz - dz * fx;
-        const hl = c.length / 2 + radius, hw = 1 + radius;
-        if (Math.abs(along) >= hl || Math.abs(side) >= hw) continue;
-        const outAlong = hl - Math.abs(along), outSide = hw - Math.abs(side);
-        if (outAlong < outSide) { const s = Math.sign(along) || 1; tmp.x += fx * outAlong * s; tmp.z += fz * outAlong * s; }
-        else { const s = Math.sign(side) || 1; tmp.x += fz * outSide * s; tmp.z -= fx * outSide * s; }
-        hit = true;
-      }
+      const hit = pushOutOfVehicles(tmp, cars.map((c) => ({ ...carAt(c), length: c.length })), radius);
       if (hit) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
       return hit;
     },
@@ -333,19 +376,12 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
         }
         // Never drive into the player (or anything passed as avoid) ahead in this lane.
         const p = trafficPose(plan, c.from, c.to, c.along);
-        const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
         for (const a of avoid) {
           inCity(a, tmp);
-          const ahead = (tmp.x - p.x) * fx + (tmp.z - p.z) * fz;
-          const side = Math.abs((tmp.x - p.x) * fz - (tmp.z - p.z) * fx);
-          if (ahead > 0 && ahead < 12 && side < 1.8) limit = Math.min(limit, ahead - c.length / 2 - 2);
+          limit = Math.min(limit, roomBefore(p.x, p.z, p.heading, c.length, tmp.x, tmp.z));
         }
         // Speed: brake to stop within the room left, otherwise ease up to cruise.
-        const room = Math.max(0, limit);
-        const safe = Math.sqrt(2 * 6 * room);
-        const target = Math.min(c.cruise, safe);
-        c.speed += Math.max(-8 * dt, Math.min(3 * dt, target - c.speed));
-        c.speed = Math.max(0, Math.min(c.speed, room / dt));
+        c.speed = followSpeed(c.speed, c.cruise, limit, dt);
         const wasBefore = c.along <= stopAt + 0.01;
         c.along += c.speed * dt;
         if (wasBefore && c.along > stopAt + 0.01) holder.set(key(c.to), c);   // into the crossing: it is ours
@@ -366,10 +402,237 @@ export function createCityTraffic(city: City, options: CityTrafficOptions = {}):
       root.removeFromParent();
       lampGeo.dispose(); lampMat.dispose(); poleGeo.dispose(); poleMat.dispose();
       lampsZ.dispose(); lampsX.dispose(); poles.dispose();
-      for (const g of merged) g.dispose();
-      bodyMat?.dispose();
+      fleet.dispose();
       // The vehicles' own geometry is NOT freed here: the kit shares parts (wheels, shells) between every vehicle,
       // the player's car included, so disposing them would break cars that are still on screen.
+    },
+  };
+}
+
+// ---- TRAFFIC ON THE MAP'S PLANNED ROADS (Q-3762) --------------------------------------------------------------------------------------
+// The colonies of the big map (athree/colonies.ts) stand between the roads of its planned network, which is not a grid: a graph of
+// junctions and roundabouts. This drives the SAME vehicles with the SAME rules (trafficFleet, followSpeed, roomBefore, pushOutOfVehicles,
+// one vehicle in a junction at a time, the gap to the vehicle ahead) along that network's own driving routes: route() gives each one in
+// the LEFT lane, round a roundabout with its island on the right, at road height. Vehicles live only near the camera (radius): one that
+// falls behind is taken off and a new one starts near the camera, so a town of any size costs only the vehicles in view.
+
+/** What createRoadTraffic needs from a road network (athree's world.roadNetwork() is one, plus its junction pads). WORLD metres. */
+export interface RoadTrafficSource {
+  /**
+   * The places vehicles drive between: a point in the middle of each road (never a junction's centre, which is a roundabout's island).
+   * athree: world.roadNetwork().home().roads, each road's middle point.
+   */
+  targets: ReadonlyArray<{ x: number; z: number }>;
+  route(from: { x: number; z: number }, to: { x: number; z: number }): Array<{ x: number; y: number; z: number }>;
+  /** The junction pads and roundabouts: one vehicle inside each at a time. */
+  junctions?: ReadonlyArray<{ x: number; z: number; radius: number }>;
+}
+
+export interface RoadTrafficOptions {
+  /** Vehicles at most, near the camera (1 to 60, default 10; the light tier keeps LIGHT_TRAFFIC). */
+  count?: number;
+  kinds?: CityTrafficKind[];
+  /** Cruising speed, m/s (default 9). */
+  speed?: number;
+  /** Vehicles drive within this many metres of the camera (default 260). */
+  radius?: number;
+  seed?: number;
+  tier?: GeometryTier;
+}
+
+export interface RoadCar {
+  object: THREE.Object3D;
+  kind: CityTrafficKind;
+  /** The route it drives (WORLD metres, left lane, road height) and the metres along it. */
+  path: Array<{ x: number; y: number; z: number }>;
+  along: number;
+  speed: number;
+  cruise: number;
+  length: number;
+  x: number; y: number; z: number; heading: number;
+}
+
+export interface RoadTraffic {
+  /** Put it in the scene and move it by the floating origin: root.position = -origin (its children are in WORLD metres). */
+  root: THREE.Group;
+  readonly cars: RoadCar[];
+  /** Advance. camera: where the player is, WORLD metres. avoid: objects no vehicle may drive into (the player, people). */
+  update(dt: number, camera: { x: number; z: number }, avoid?: THREE.Object3D[]): void;
+  /** Push an object (the player, the car they drive) out of any vehicle it is inside. True when it touched one. */
+  pushOut(object: THREE.Object3D, radius?: number): boolean;
+  dispose(): void;
+}
+
+interface RoadPath { pts: Array<{ x: number; y: number; z: number }>; arcs: number[]; length: number; gates: Array<{ j: number; s0: number; s1: number }> }
+
+/** Where a route is s metres along it, and the way it faces there. PURE. */
+export function poseOnRoute(pts: ReadonlyArray<{ x: number; y: number; z: number }>, arcs: ReadonlyArray<number>, s: number): { x: number; y: number; z: number; heading: number } {
+  const length = arcs[arcs.length - 1];
+  const t = Math.max(0, Math.min(length, s));
+  let i = 1;
+  while (i < arcs.length - 1 && arcs[i] < t) i++;
+  const a = pts[i - 1], b = pts[i];
+  const seg = arcs[i] - arcs[i - 1] || 1;
+  const u = Math.max(0, Math.min(1, (t - arcs[i - 1]) / seg));
+  return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u, heading: Math.atan2(b.x - a.x, b.z - a.z) };
+}
+
+/** Drive the kit's vehicles on a planned road network (the map's colonies), near the camera. */
+export function createRoadTraffic(source: RoadTrafficSource, options: RoadTrafficOptions = {}): RoadTraffic {
+  const rand = rngOf(options.seed ?? 4041);
+  const light = (options.tier === 'light' || options.tier === 'full' ? options.tier : geometryTier()) === 'light';
+  const count = Math.max(1, Math.min(light ? LIGHT_TRAFFIC : 60, Math.round(options.count ?? 10)));
+  const kinds: CityTrafficKind[] = options.kinds && options.kinds.length ? options.kinds : ['car', 'car', 'auto', 'car', 'bus', 'auto'];
+  const cruiseBase = Math.max(2, options.speed ?? 9);
+  const R = Math.max(60, options.radius ?? 260);
+  const root = new THREE.Group();
+  root.name = 'Road traffic';
+  const fleet = trafficFleet(rand, light);
+  const nodes = source.targets;
+  const junctions = source.junctions ?? [];
+  const jCells = new Map<string, number[]>();
+  junctions.forEach((j, i) => {
+    for (let cx = Math.floor((j.x - j.radius) / 64); cx <= Math.floor((j.x + j.radius) / 64); cx++) {
+      for (let cz = Math.floor((j.z - j.radius) / 64); cz <= Math.floor((j.z + j.radius) / 64); cz++) {
+        const k = cx + ',' + cz; const l = jCells.get(k); if (l) l.push(i); else jCells.set(k, [i]);
+      }
+    }
+  });
+  const junctionAt = (x: number, z: number): number => {
+    for (const i of jCells.get(Math.floor(x / 64) + ',' + Math.floor(z / 64)) ?? []) if (Math.hypot(junctions[i].x - x, junctions[i].z - z) < junctions[i].radius) return i;
+    return -1;
+  };
+  /** A route as arc lengths, with the stretches of it inside each junction pad (gates). */
+  const pathOf = (pts: Array<{ x: number; y: number; z: number }>): RoadPath | null => {
+    if (pts.length < 2) return null;
+    const arcs = [0];
+    for (let i = 1; i < pts.length; i++) arcs.push(arcs[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+    const length = arcs[arcs.length - 1];
+    if (length < 30) return null;
+    const gates: RoadPath['gates'] = [];
+    let cur = -1;
+    for (let s = 0; s <= length; s += 2) {
+      const p = poseOnRoute(pts, arcs, s);
+      const j = junctionAt(p.x, p.z);
+      if (j !== cur) {
+        if (cur >= 0) gates[gates.length - 1].s1 = s;
+        if (j >= 0) gates.push({ j, s0: s, s1: length });
+        cur = j;
+      }
+    }
+    return { pts, arcs, length, gates };
+  };
+  const near = (x: number, z: number, cam: { x: number; z: number }, r: number): boolean => Math.hypot(x - cam.x, z - cam.z) <= r;
+  /**
+   * A route from a point to a road picked at random near the camera; null when the network has none there. With a heading, a route that
+   * would turn the vehicle round where it stands is the last choice (a U-turn mid-road is not how traffic drives).
+   */
+  const routeFrom = (x: number, z: number, cam: { x: number; z: number }, heading?: number): RoadPath | null => {
+    const pool = nodes.filter((n) => near(n.x, n.z, cam, R * 1.2) && Math.hypot(n.x - x, n.z - z) > 40);
+    let fallback: RoadPath | null = null;
+    for (let tries = 0; tries < 6 && pool.length; tries++) {
+      const n = pool[Math.floor(rand() * pool.length)];
+      const path = pathOf(source.route({ x, z }, { x: n.x, z: n.z }));
+      if (!path) continue;
+      if (heading === undefined) return path;
+      const h = poseOnRoute(path.pts, path.arcs, 3).heading;
+      if (Math.cos(h - heading) > 0) return path;
+      fallback = fallback ?? path;
+    }
+    return fallback;
+  };
+  type Live = RoadCar & { route: RoadPath; waited: number };
+  const cars: Live[] = [];
+  const holder = new Map<number, Live>();
+  const place = (c: Live): void => {
+    const p = poseOnRoute(c.route.pts, c.route.arcs, c.along);
+    c.x = p.x; c.y = p.y; c.z = p.z; c.heading = p.heading;
+    c.object.position.set(p.x, p.y, p.z);
+    c.object.rotation.y = p.heading;
+  };
+  const release = (c: Live): void => { for (const [j, h] of [...holder.entries()]) if (h === c) holder.delete(j); };
+  /** Start a vehicle near the camera, on a free stretch of a route (never inside another vehicle or inside a junction pad). */
+  const spawn = (cam: { x: number; z: number }): boolean => {
+    const pool = nodes.filter((n) => near(n.x, n.z, cam, R));
+    if (!pool.length) return false;
+    const from = pool[Math.floor(rand() * pool.length)];
+    const route = routeFrom(from.x, from.z, cam);
+    if (!route) return false;
+    const along = route.length * (0.15 + 0.5 * rand());
+    const kind = kinds[cars.length % kinds.length];
+    const length = VEHICLE_LENGTH[kind];
+    const p = poseOnRoute(route.pts, route.arcs, along);
+    if (route.gates.some((g) => along > g.s0 - length && along < g.s1 + length)) return false;
+    for (const o of cars) if (Math.hypot(o.x - p.x, o.z - p.z) < (o.length + length) / 2 + TRAFFIC_GAP + 2) return false;
+    const object = fleet.build(kind);
+    const cruise = cruiseBase * (kind === 'bus' ? 0.8 : kind === 'auto' ? 0.85 : 1) * (0.9 + rand() * 0.2);
+    const c: Live = { object, kind, path: route.pts, route, along, speed: cruise * 0.5, cruise, length, x: p.x, y: p.y, z: p.z, heading: p.heading, waited: 0 };
+    cars.push(c);
+    root.add(object);
+    place(c);
+    return true;
+  };
+  const remove = (c: Live): void => { release(c); root.remove(c.object); cars.splice(cars.indexOf(c), 1); };
+  const toRoot = new THREE.Matrix4();
+  const tmp = new THREE.Vector3();
+  const inRoot = (o: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 => { o.getWorldPosition(out); return out.applyMatrix4(toRoot); };
+  const frame = (): void => { root.updateWorldMatrix(true, false); toRoot.copy(root.matrixWorld).invert(); };
+
+  return {
+    root,
+    get cars() { return cars; },
+    update: (dt, cam, avoid = []) => {
+      if (!(dt > 0) || !cam || !Number.isFinite(cam.x) || !Number.isFinite(cam.z)) return;
+      frame();
+      // Near the camera only: a vehicle left behind gives its place to a new one ahead (two starts a step at most, never a burst).
+      for (const c of [...cars]) if (!near(c.x, c.z, cam, R * 1.3)) remove(c);
+      for (let starts = 0; starts < 2 && cars.length < count; starts++) if (!spawn(cam)) break;
+      const points = avoid.map((a) => { const v = inRoot(a, new THREE.Vector3()); return { x: v.x, z: v.z }; });
+      for (const c of cars) {
+        let limit = Infinity;
+        // The vehicle ahead in its lane (the same way within 50 degrees, inside the lane's width): keep the gap.
+        const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
+        for (const o of cars) {
+          if (o === c) continue;
+          const ahead = (o.x - c.x) * fx + (o.z - c.z) * fz;
+          const side = Math.abs((o.x - c.x) * fz - (o.z - c.z) * fx);
+          if (ahead > 0 && ahead < 40 && side < 1.8 && Math.cos(o.heading - c.heading) > 0.64) limit = Math.min(limit, ahead - (o.length + c.length) / 2 - TRAFFIC_GAP);
+        }
+        // One vehicle in a junction at a time: wait at its edge until the one inside has left (after 8 s of waiting it goes: no deadlock).
+        const gate = c.route.gates.find((g) => g.s1 + c.length / 2 > c.along);
+        if (gate) {
+          const owner = holder.get(gate.j);
+          const before = c.along + c.length / 2 < gate.s0;
+          if (before && owner && owner !== c && c.waited < 8) limit = Math.min(limit, gate.s0 - c.length / 2 - 1 - c.along);
+          if (before && c.speed < 0.5) c.waited += dt; else if (!before) c.waited = 0;
+          if (!before && (!owner || owner === c)) holder.set(gate.j, c);
+        }
+        for (const q of points) limit = Math.min(limit, roomBefore(c.x, c.z, c.heading, c.length, q.x, q.z));
+        c.speed = followSpeed(c.speed, c.cruise, limit, dt);
+        c.along += c.speed * dt;
+        // Clear of a junction behind it: let it go.
+        for (const g of c.route.gates) if (holder.get(g.j) === c && c.along - c.length / 2 > g.s1) holder.delete(g.j);
+        // The end of its route: on to a new one from there.
+        if (c.along >= c.route.length) {
+          const end = c.route.pts[c.route.pts.length - 1];
+          const next = routeFrom(end.x, end.z, cam, c.heading);
+          if (next) { release(c); c.route = next; c.path = next.pts; c.along = 0; } else { c.along = c.route.length; c.speed = 0; }
+        }
+        place(c);
+      }
+    },
+    pushOut: (object, radius = 0.45) => {
+      if (!object.parent) return false;
+      frame();
+      inRoot(object, tmp);
+      const hit = pushOutOfVehicles(tmp, cars, radius);
+      if (hit) { root.localToWorld(tmp); object.parent.worldToLocal(tmp); object.position.x = tmp.x; object.position.z = tmp.z; }
+      return hit;
+    },
+    dispose: () => {
+      for (const c of [...cars]) remove(c);
+      root.removeFromParent();
+      fleet.dispose();
     },
   };
 }

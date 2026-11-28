@@ -13,8 +13,8 @@
 // PURE: no I/O. Never throws.
 
 import { ARCHETYPES } from './athreeMapKinds';
-import { areaKm2In, boundaryIn, COUNT_WORDS, densityIn, roadStyleIn, WATER_KINDS, type BoundaryKind, type Density, type MapLayer, type RoadStyle, type WaterPlan } from './mapPlan';
-import type { MapPlanData } from './mapPlanData';
+import { areaKm2In, boundaryIn, COUNT_WORDS, densityIn, roadStyleIn, WATER_KINDS, type BoundaryKind, type Density, type MapLayer, type MeasuredLayers, type RoadStyle, type WaterPlan, layerVerdicts } from './mapPlan';
+import { mapPlanFromData, type MapPlanData } from './mapPlanData';
 
 export type EditableLayer = 'frame' | 'boundary' | 'water' | 'roadStyle' | 'density';
 
@@ -206,22 +206,22 @@ export function mapLayerEditsIn(request: string | null | undefined, current: Map
 }
 
 /**
- * Per change, is it built into this world or only recorded? Read from the world's own layer verdict (appliedMapLayers) — and the two
- * honest exceptions inside a layer: a road style is laid only on maps up to 25 km, and of the water only the ponds are built (the world
- * makes its own rivers and lakes).
+ * Per change, is it REALLY built? With a measurement of the built world (the robot-check run: ponds placed, the edge it has, the road
+ * style it laid, colony plots) the verdict is that measurement — the same verdicts the build note uses (mapPlan.layerVerdicts). Without
+ * one, a layer the world can take is "not measured", never "built" (2026-11-28: a plan for 3 ponds that placed 0 was reported built).
+ * River and lake counts are always recorded only: the world makes its own rivers and lakes.
  */
-export function changeVerdict(c: LayerChange, applied: Record<MapLayer, boolean>, d: MapPlanData): { built: boolean; why?: string } {
+export function changeVerdict(c: LayerChange, applied: Record<MapLayer, boolean>, d: MapPlanData, measured?: MeasuredLayers | null): { built: boolean; why?: string } {
   if (c.layer === 'frame') return { built: true };
-  if (c.layer === 'roadStyle') {
-    if (!applied.roadStyle) return { built: false, why: 'this world does not lay road styles yet' };
-    return d.sideKm <= 25 ? { built: true } : { built: false, why: `a map wider than 25 km keeps its regional village roads (this one is ${d.sideKm} km)` };
-  }
-  if (c.layer === 'boundary') return applied.boundary ? { built: true } : { built: false, why: 'this world does not build natural edges yet' };
-  if (c.layer === 'density') return applied.density ? { built: true } : { built: false, why: 'the colonies layer (the houses between the roads) is not built into this world yet' };
   const kinds = c.waterKinds ?? [];
-  if (kinds.length && kinds.every((k) => k === 'ponds')) return applied.water ? { built: true } : { built: false, why: 'this world does not carve ponds yet' };
-  if (kinds.includes('ponds') && applied.water) return { built: true, why: 'the ponds are carved; the world makes its own rivers and lakes, so their counts are recorded only' };
-  return { built: false, why: 'the world makes its own rivers and lakes, so their counts are recorded in the plan, not carved' };
+  if (c.layer === 'water' && !kinds.includes('ponds')) return { built: false, why: 'the world makes its own rivers and lakes, so their counts are recorded in the plan, not carved' };
+  const layer: MapLayer = c.layer === 'density' ? 'colonies' : c.layer;
+  const v = layerVerdicts(mapPlanFromData(d), applied, measured)[layer];
+  const rest = c.layer === 'water' && kinds.some((k) => k !== 'ponds') ? '; the world makes its own rivers and lakes, so their counts are recorded only' : '';
+  if (v.state === 'built') return rest ? { built: true, why: (v.detail ?? 'built') + rest } : { built: true };
+  if (v.state === 'recorded') return { built: false, why: `this world does not build ${LAYER_NAME[c.layer].replace(/^the /, '')} yet` };
+  if (v.state === 'unmeasured') return { built: false, why: 'what the world built could not be measured (the checks did not run), so it is not claimed' };
+  return { built: false, why: (v.detail ?? 'the world did not build it') + rest };
 }
 
 export const LAYER_NAME: Record<EditableLayer, string> = { frame: 'the map size', boundary: 'the edge', water: 'the water', roadStyle: 'the roads', density: 'the colonies' };

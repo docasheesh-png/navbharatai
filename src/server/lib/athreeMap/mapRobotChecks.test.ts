@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { generateAthreeMap } from './AthreeMapGenerator';
 import { MAP_CHECKS } from './athreeMapCheckSource';
 import { loadEmittedAthree, runRobotChecksOnFiles, runRobotChecksInWorker, describeRobotRun } from './mapRobotRun';
-import { applyMapPlanToFiles, planAthreeMap, MAP_CHECKS_PATH } from './mapPlanWiring';
+import { applyMapPlanToFiles, measuredMapNote, planAthreeMap, MAP_CHECKS_PATH } from './mapPlanWiring';
 
 vi.setConfig({ testTimeout: 120000 });
 
@@ -187,10 +187,10 @@ describe('with the natural edges on main (#4624): the planned edge is applied an
     expect(plan.boundary).toBe('mountains');
     const out = applyMapPlanToFiles(generateAthreeMap(undefined, plan.choice).files, plan, plan.choice);
     expect(out.applied.boundary).toBe(true);
-    expect(out.note).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
     const world = (loadEmittedAthree(files) as any).createAthreeMap({ seed: 3, profile: 'explore' }).world;
     expect(world.boundary.kind).toBe('mountains');
     const run = runRobotChecksOnFiles(files, 'explore', [3]);
+    expect(measuredMapNote(out, run.measured)).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED \(measured: the world's edge is a ring of mountains\)/);
     expect(run.results.find((r) => r.id === 'boundary-closed')).toMatchObject({ applicable: true, ok: true });
   });
   it('ponds asked for are applied (water reads its ponds)', () => {

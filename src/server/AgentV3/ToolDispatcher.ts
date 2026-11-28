@@ -423,7 +423,7 @@ import { forgeNotUsedFor, forgeNotUsedWarning, type MissingObject } from './forg
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, type Archetype } from '../lib/athreeMap/athreeMapKinds';
-import { applyMapPlanToFiles, planAthreeMap } from '../lib/athreeMap/mapPlanWiring';
+import { applyMapPlanToFiles, measuredMapNote, planAthreeMap } from '../lib/athreeMap/mapPlanWiring';
 import { describeRobotRun, runRobotChecksInWorker } from '../lib/athreeMap/mapRobotRun';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { mapPlanFromData } from '../lib/athreeMap/mapPlanData';
@@ -10643,7 +10643,8 @@ export class ToolDispatcher {
         ]);
         this.events?.emit({ type: 'map_preview', card: athCard.card, ts: Date.now() });
         const athRobots = describeRobotRun(athRobotRun);
-        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${athPlanned.note}\n${athRobots}\n${athCard.note}\n\n${ath.instructions}${athLayers}`;
+        // 📏 The plan's verdicts are what the world MEASURABLY built (ponds placed, the edge it has, the roads it laid, plots), never the source.
+        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${measuredMapNote(athPlanned, athRobotRun.measured)}\n${athRobots}\n${athCard.note}\n\n${ath.instructions}${athLayers}`;
       }
 
       case 'generate_game_2d': {

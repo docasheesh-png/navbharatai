@@ -3,8 +3,8 @@
 // follows the land unless the user names one — and the plan never claims a layer the world does not build.
 import { describe, it, expect } from 'vitest';
 import { planMap, areaKm2In, boundaryIn, waterIn, roadStyleIn, densityIn, timeOfDayIn, regionIn, mapGameTypeIn, appliedMapLayers, describeMapPlan, circuitRunwayFloorFromWorldSource, mapPlanWorldOptions, DEFAULT_AREA_KM2 } from './mapPlan';
-import { athreeCircuitRunwayFloor, planAthreeMap, applyMapPlanToFiles, MAP_CHECKS_PATH } from './mapPlanWiring';
-import { loadEmittedAthree } from './mapRobotRun';
+import { athreeCircuitRunwayFloor, planAthreeMap, applyMapPlanToFiles, measuredMapNote, MAP_CHECKS_PATH } from './mapPlanWiring';
+import { loadEmittedAthree, runRobotChecksOnFiles } from './mapRobotRun';
 import { generateAthreeMap } from './AthreeMapGenerator';
 import { mapChoiceFor } from './athreeMapKinds';
 
@@ -175,18 +175,30 @@ describe('boundary, water, roads, density, region, time of day', () => {
 
 describe('honesty: what the world applies is read from its source, never assumed', () => {
   const p = plan('5 km ka registan shooter, pahaadon se ghira, do talab');
+  /** A measurement of a world that built exactly what the plan asked (the verdict then is APPLIED). */
+  const asPlanned = (q: typeof p) => ({ ponds: q.water.ponds, rivers: 1, lakes: 0, boundary: q.boundary, roadStyle: q.roadStyle, plots: 40, colonies: 3 });
   it('today\'s world builds the road style (#4626), the edge and the ponds (#4624), and the density and colonies (wave 2), and is reported as applying them', () => {
     const world = generateAthreeMap().files['src/game/athree/world.ts'];
     const a = appliedMapLayers(world, p);
     // Since #4626 (road styles), #4624 (natural edges, ponds) and the colonies the world reads roadStyle, boundary, water.ponds and density,
     // and lays the colony plots from the density (planColonies).
     expect(a).toMatchObject({ frame: true, land: true, roadStyle: true, boundary: true, water: true, density: true, colonies: true });
-    const note = describeMapPlan(p, a);
-    expect(note).toMatch(/roadStyle: .* — APPLIED/);
+    // 📏 The source says the world CAN take each layer; only a measurement says it did. Unmeasured, nothing is claimed.
+    const unmeasured = describeMapPlan(p, a);
+    expect(unmeasured).toMatch(/roadStyle: .* — the world reads it, but what it built was not measured/);
+    expect(unmeasured).toMatch(/do not claim/);
+    const note = describeMapPlan(p, a, asPlanned(p));
+    expect(note).toMatch(/roadStyle: .* — APPLIED \(measured: roads laid as/);
     expect(note).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
+    expect(note).toMatch(/water: 2 ponds — APPLIED \(measured: 2 ponds placed\)/);
     expect(note).toMatch(/density: normal — APPLIED/);
     expect(note).toMatch(/colonies: .* — APPLIED/);
     expect(note).not.toMatch(/do not claim/);
+    // The same plan, measured as a real 5 km LOOP builds it: a loop has no edge; ponds placed fewer than asked are said with numbers.
+    const real = describeMapPlan(p, a, { ...asPlanned(p), boundary: 'none', ponds: 0 });
+    expect(real).toMatch(/boundary: a ring of mountains \(asked for\) — NOT BUILT \(measured: this map loops round at its edges/);
+    expect(real).toMatch(/water: 2 ponds — NOT BUILT \(measured: ponds: 2 asked, 0 placed/);
+    expect(real).toMatch(/Say plainly to the user that boundary, water are not \(fully\) built/);
   });
   it('the colonies layer is APPLIED only when the world reads the density AND lays plots from it (reading the option alone is not enough)', () => {
     expect(appliedMapLayers('const { density } = options;', p)).toMatchObject({ density: true, colonies: false });
@@ -194,19 +206,19 @@ describe('honesty: what the world applies is read from its source, never assumed
     expect(appliedMapLayers('const d = options.density; const c = planColonies({ seed, density: d });', p)).toMatchObject({ density: true, colonies: true });
     const note = describeMapPlan(p, appliedMapLayers('const { density } = options;', p));
     expect(note).toMatch(/colonies: .* — recorded, not built into this world yet/);
-    expect(note).toMatch(/colonies are planned but not yet built into the world; do not claim them/);
+    expect(note).toMatch(/colonies are not \(fully\) built into this map, as said above; do not claim them/);
   });
   it('the water layer is APPLIED only when the world reads its ponds (the #4624 shape: options.water ?? {} … .ponds); counts it does not use are said', () => {
     const p2 = plan('do nadiyan aur ek talab wala explore game');
     expect(appliedMapLayers('const w = options.water ?? {};', p2).water).toBe(false);
     const a = appliedMapLayers('const waterOpt = options.water ?? {}; placePonds(waterOpt.ponds);', p2);
     expect(a.water).toBe(true);
-    expect(describeMapPlan(p2, a)).toMatch(/water: .* — APPLIED \(the ponds; the world makes its own rivers and lakes/);
+    expect(describeMapPlan(p2, a, asPlanned(p2))).toMatch(/water: .* — APPLIED \(measured: 1 pond placed\) \(the ponds; the world makes its own rivers and lakes/);
   });
   it('a world that reads an option is reported as applying it (the day the boundary layer lands)', () => {
     const a = appliedMapLayers('const b = options.boundary ?? "sea"; const { roadStyle, density } = options;', p);
     expect(a).toMatchObject({ boundary: true, roadStyle: true, density: true, water: false });
-    expect(describeMapPlan(p, a)).toMatch(/boundary: .* — APPLIED/);
+    expect(describeMapPlan(p, a, asPlanned(p))).toMatch(/boundary: .* — APPLIED/);
   });
   it('the circuit/runway floor is read from the emitted world (CIRCUIT_RUNWAY_MIN_SIZE), never from MIN_ROAD_SIZE', () => {
     const world = generateAthreeMap().files['src/game/athree/world.ts'];
@@ -220,7 +232,9 @@ describe('honesty: what the world applies is read from its source, never assumed
     expect(p.roadStyle).toBe('hill');
     const out = applyMapPlanToFiles(generateAthreeMap(undefined, p.choice).files, p, p.choice);
     expect(out.applied.roadStyle).toBe(true);
-    expect(out.note).toMatch(/roadStyle: .* — APPLIED/);
+    const run = runRobotChecksOnFiles(out.files, 'explore', [5]);
+    expect(run.measured?.roadStyle).toBe('hill');
+    expect(measuredMapNote(out, run.measured)).toMatch(/roadStyle: .* — APPLIED \(measured: roads laid as curvy hill roads\)/);
     const A = loadEmittedAthree(out.files) as any;
     const map = A.createAthreeMap({ seed: 5 });
     expect(map.world.roadNetwork().style()).toBe('hill');

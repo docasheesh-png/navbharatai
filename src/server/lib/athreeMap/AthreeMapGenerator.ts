@@ -227,7 +227,7 @@ import { PROFILE_DEFAULTS, SEA_BREAK_RATIO, SEA_CREST_MAX, type AthreeProfile, t
 import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
 import { createDunes } from './dunes';
 import { roadNetworkFor, type RoadNetwork, type RoadHit, type Region, type RoadStyle } from './roads';
-import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, type Boundary, type BoundaryKind, type Pond } from './boundary';
+import { createBoundary, shelfDepth, shoreRadii, shoreAt, placePonds, pondHeight, BOUNDARY_KINDS, POND_CLEAR, type Boundary, type BoundaryKind, type Pond } from './boundary';
 import { planColonies, COLONY_DENSITIES, COLONY_PAD_MARGIN, type ColonyPlan, type ColonyPlot, type ColonyDensity } from './colonies';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
@@ -847,11 +847,37 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
         ground: naturalHeightAt,
         busy: (x, z) => !!waterAt(x, z) || naturalHeightAt(x, z) < minLand || (withRoads && !!roadsOf().roadAt(x, z)),
         allowed: (x, z) => boundary.inside(x, z, 60),
-        minLand, reach,
+        minLand, reach, rise: Math.min(1, vs), sites: pondTownSites(),
       });
     } finally { placingPonds = false; }
     if (pondList.length < pondCount) console.info('[map] ' + pondList.length + ' of ' + pondCount + ' ponds found flat, dry ground away from water and roads.');
     return pondList;
+  }
+  /**
+   * 🪷 A town's talab sites: the middle of every block of the planned road network, with the biggest pond radius that keeps POND_CLEAR
+   * (and a metre) from every kerb round it. The roads never read the ponds (ROADS FIRST, PONDS AFTER above), so asking the network for
+   * its blocks here cannot loop. A map with the regional network (no blocks) has none: its ponds are searched for at random, as before.
+   */
+  function pondTownSites(): Array<{ x: number; z: number; maxRadius: number }> {
+    if (!withRoads) return [];
+    const net = roadsOf();
+    if (typeof net.blocks !== 'function' || net.style() === null) return [];
+    const out: Array<{ x: number; z: number; maxRadius: number }> = [];
+    for (const b of net.blocks()) {
+      // The middle of the block, then half way from it toward each corner: a long block can hold a talab at each end.
+      const spots = [b.centroid, ...b.polygon.map((v) => ({ x: (b.centroid.x + v.x) / 2, z: (b.centroid.z + v.z) / 2 }))];
+      for (const c of spots) {
+        let clear = Infinity;
+        for (let i = 0; i < b.polygon.length; i++) {
+          const a = b.polygon[i], e = b.polygon[(i + 1) % b.polygon.length];
+          const vx = e.x - a.x, vz = e.z - a.z, len2 = vx * vx + vz * vz;
+          const t = len2 > 0 ? Math.max(0, Math.min(1, ((c.x - a.x) * vx + (c.z - a.z) * vz) / len2)) : 0;
+          clear = Math.min(clear, Math.hypot(c.x - (a.x + vx * t), c.z - (a.z + vz * t)) - (b.sides[i]?.half ?? 4));
+        }
+        out.push({ x: c.x, z: c.z, maxRadius: clear - POND_CLEAR - 1 });
+      }
+    }
+    return out;
   }
   function pondAt(x: number, z: number): Pond | null {
     if (placingPonds || !pondCount) return null;

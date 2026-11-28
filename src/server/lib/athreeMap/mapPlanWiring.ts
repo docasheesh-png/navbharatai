@@ -12,7 +12,7 @@
 
 import { athreeFiles } from './AthreeMapGenerator';
 import { MAP_CHECKS } from './athreeMapCheckSource';
-import { appliedMapLayers, circuitRunwayFloorFromWorldSource, describeMapPlan, planMap, type MapLayer, type MapPlan, type MapPlanInput } from './mapPlan';
+import { appliedMapLayers, circuitRunwayFloorFromWorldSource, describeMapPlan, planMap, type MapLayer, type MapPlan, type MapPlanInput, type MeasuredLayers } from './mapPlan';
 import type { MapChoice } from './athreeMapKinds';
 import type { MapProfile } from './athreeMapLibrary';
 import { mapPlanBlock, mapPlanData, WORLD_DEFAULT_SEED, type MapPlanData } from './mapPlanData';
@@ -37,7 +37,17 @@ export interface AppliedMapPlan {
   /** The plan as written into config.ts (with its seed and profile). */
   data: MapPlanData;
   applied: Record<MapLayer, boolean>;
+  /** The plan as really used (a composition's width can change its side). */
+  plan: MapPlan;
+  /** The note WITHOUT a measurement (every layer the world reads is "not measured"). Use measuredMapNote once the checks have run. */
   note: string;
+}
+
+export const MAP_CHECKS_INSTRUCTION = 'ROBOT CHECKS: import { publishMapChecks } from \'./game/athree/mapChecks\' and call publishMapChecks(map.world, { placed }) once, after createAthreeMap and after the game has placed its houses and props (leave lots out and the world\'s own colony plots are checked; pass lots only for plots the game made itself). It measures: spawns on dry land, no lot in water or on a road, the road graph in one piece, nothing under the ground, the boundary closed. Every failure is printed to the console and left on window.__nbMapChecks for the playtest; show failures honestly, never hide them.';
+
+/** The build note with each layer's MEASURED verdict (what the world really built, from the robot-check run). */
+export function measuredMapNote(planned: Pick<AppliedMapPlan, 'plan' | 'applied'>, measured: MeasuredLayers | null | undefined): string {
+  return describeMapPlan(planned.plan, planned.applied, measured) + '\n' + MAP_CHECKS_INSTRUCTION;
 }
 
 /**
@@ -62,7 +72,6 @@ export function applyMapPlanToFiles(
   // Every emitted world module except the plan's own data and the checks: a layer may be read by any of them.
   const worldSource = Object.entries(out).filter(([p]) => p.startsWith(DIR + '/') && p !== `${DIR}/config.ts` && p !== MAP_CHECKS_PATH).map(([, src]) => src).join('\n');
   const applied = appliedMapLayers(worldSource, effective);
-  const note = describeMapPlan(effective, applied)
-    + '\nROBOT CHECKS: import { publishMapChecks } from \'./game/athree/mapChecks\' and call publishMapChecks(map.world, { placed }) once, after createAthreeMap and after the game has placed its houses and props (leave lots out and the world\'s own colony plots are checked; pass lots only for plots the game made itself). It measures: spawns on dry land, no lot in water or on a road, the road graph in one piece, nothing under the ground, the boundary closed. Every failure is printed to the console and left on window.__nbMapChecks for the playtest; show failures honestly, never hide them.';
-  return { files: out, applied, note, data };
+  const note = measuredMapNote({ plan: effective, applied }, null);
+  return { files: out, applied, plan: effective, note, data };
 }

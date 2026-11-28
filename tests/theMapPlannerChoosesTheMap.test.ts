@@ -40,8 +40,10 @@ describe('real prompts choose the map through the one planner', () => {
     expect(planIn()).toMatchObject({ areaKm2: 25, archetype: 'desert', boundary: 'mountains', water: { ponds: 2 }, timeOfDay: 'night', gameType: 'shooter' });
     const text = String(r.content);
     expect(text).toMatch(/MAP PLAN: a shooter game; desert land, 5 x 5 km \(25 km², the size you asked for\)/);
-    expect(text).toMatch(/boundary: a ring of mountains \(asked for\) — APPLIED/);
-    expect(text).toMatch(/water: 2 ponds — APPLIED/);
+    // 📏 MEASURED, NOT READ FROM THE SOURCE (2026-11-28): a 5 km map LOOPS round, so it has no edge at all — this note used to say
+    // "a ring of mountains — APPLIED" over a map with no ring. The two ponds really are placed now (in the town's blocks), and say so.
+    expect(text).toMatch(/boundary: a ring of mountains \(asked for\) — NOT BUILT \(measured: this map loops round at its edges/);
+    expect(text).toMatch(/water: 2 ponds — APPLIED \(measured: 2 ponds placed\)/);
     expect(text).toMatch(/pass skyOptions \{ hours: 22 \}/);
     // Since the colonies (wave 2) the world reads the density and lays the plots: both are APPLIED, and the build-time robot check now
     // measures real lots. Before the roads-then-ponds order was fixed this very map (ponds on a planned network) overflowed the stack

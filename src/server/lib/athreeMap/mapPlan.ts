@@ -453,11 +453,69 @@ function waterWhat(w: WaterPlan, refused: boolean): string {
   return parts.length ? parts.join(', ') : 'whatever the land has';
 }
 
-/** The build-note block: the plan in plain words, what was APPLIED to this world and what is recorded but not built yet. */
-export function describeMapPlan(plan: MapPlan, applied: Record<MapLayer, boolean>): string {
+/**
+ * 📏 WHAT THE WORLD REALLY BUILT, MEASURED (2026-11-28). `appliedMapLayers` reads the world's SOURCE: it says the world CAN take a layer,
+ * never that it did. A plan for 3 ponds on a 5 km loop placed 0 (no flat dry ground clear of the roads) while the note said "water:
+ * 3 ponds — APPLIED"; a "ring of mountains" on a LOOPING map has no edge at all, and said APPLIED; a road style on a map over 25 km is
+ * never laid. The robot-check worker measures the built world (mapRobotRun.ts measureLayers) and the note says what it found.
+ */
+export interface MeasuredLayers {
+  /** Ponds really carved (world.ponds()). */
+  ponds: number;
+  rivers: number;
+  /** Lakes, not counting the ponds. */
+  lakes: number;
+  /** The world's own edge kind ('none' on a loop). */
+  boundary: string;
+  /** The planned network's style, or null where the map keeps the regional village roads. */
+  roadStyle: string | null;
+  /** Colony plots and colonies really laid. */
+  plots: number;
+  colonies: number;
+}
+
+export type LayerVerdict = { state: 'built' | 'partial' | 'not-built' | 'recorded' | 'unmeasured'; detail?: string };
+
+/** Each layer's verdict: the measured truth when there is a measurement; "recorded" when the world cannot take it; "unmeasured" otherwise. PURE. */
+export function layerVerdicts(plan: MapPlan, applied: Record<MapLayer, boolean>, measured?: MeasuredLayers | null): Record<MapLayer, LayerVerdict> {
+  const v = (layer: MapLayer, measure: (m: MeasuredLayers) => LayerVerdict): LayerVerdict =>
+    !applied[layer] ? { state: 'recorded' } : measured ? measure(measured) : { state: 'unmeasured' };
+  const asked = plan.water.ponds;
+  return {
+    frame: { state: 'built' },
+    land: { state: 'built' },
+    boundary: v('boundary', (m) => m.boundary === plan.boundary ? { state: 'built', detail: `the world's edge is ${BOUNDARY_WHAT[plan.boundary]}` }
+      : m.boundary === 'none' ? { state: 'not-built', detail: 'this map loops round at its edges, so it has no edge at all — an edge needs a map with a shore, such as an island' }
+        : { state: 'not-built', detail: `the world's edge is ${m.boundary}` }),
+    water: v('water', (m) => asked === 0 ? { state: 'built', detail: `no ponds asked; the world's own water: ${m.rivers} river${m.rivers === 1 ? '' : 's'}, ${m.lakes} lake${m.lakes === 1 ? '' : 's'}` }
+      : m.ponds >= asked ? { state: 'built', detail: `${m.ponds} pond${m.ponds === 1 ? '' : 's'} placed` }
+        : { state: m.ponds > 0 ? 'partial' : 'not-built', detail: `ponds: ${asked} asked, ${m.ponds} placed — no more flat, dry ground clear of the roads and water was found` }),
+    roadStyle: v('roadStyle', (m) => m.roadStyle === plan.roadStyle ? { state: 'built', detail: `roads laid as ${ROAD_WHAT[plan.roadStyle]}` }
+      : m.roadStyle === null ? { state: 'not-built', detail: `this map is ${plan.sideKm} km across, and a map wider than 25 km keeps its regional village roads instead of a road style` }
+        : { state: 'not-built', detail: `the roads were laid as ${m.roadStyle}` }),
+    density: v('density', (m) => m.plots > 0 ? { state: 'built', detail: `${m.plots} plots in ${m.colonies} colonies` } : { state: 'not-built', detail: 'no colony plots were laid (colonies need a planned town network: a map up to 25 km with blocks between its roads)' }),
+    colonies: v('colonies', (m) => m.plots > 0 ? { state: 'built', detail: `${m.plots} plots in ${m.colonies} colonies` } : { state: 'not-built', detail: 'no colony plots were laid (colonies need a planned town network: a map up to 25 km with blocks between its roads)' }),
+    timeOfDay: { state: 'recorded' },
+  };
+}
+
+const VERDICT_WORDS: Record<LayerVerdict['state'], string> = {
+  built: 'APPLIED', partial: 'ONLY PARTLY BUILT', 'not-built': 'NOT BUILT', recorded: 'recorded, not built into this world yet',
+  unmeasured: 'the world reads it, but what it built was not measured (the checks did not run) — do not claim it',
+};
+
+/**
+ * The build-note block: the plan in plain words, and per layer what the world REALLY built (measured) — never only what its source can
+ * take. Without a measurement a layer the world reads is said to be unmeasured, not applied.
+ */
+export function describeMapPlan(plan: MapPlan, applied: Record<MapLayer, boolean>, measured?: MeasuredLayers | null): string {
+  const verdict = layerVerdicts(plan, applied, measured);
   const lines: string[] = [];
   lines.push(`MAP PLAN: ${plan.gameType === 'unknown' ? 'a game' : `a ${plan.gameType} game`}; ${plan.choice ? `${plan.archetype} land, ${plan.sideKm} x ${plan.sideKm} km (${plan.areaKm2} km², ${plan.areaSource === 'user' ? 'the size you asked for' : plan.areaSource === 'builder' ? 'the size the builder chose' : 'the default for this game'})` : 'the default world (a 100 km loop)'}${plan.region ? `; ${REGIONS[plan.region].what}` : ''}.`);
-  const layer = (name: MapLayer, what: string): string => `  - ${name}: ${what} — ${applied[name] ? 'APPLIED' : 'recorded, not built into this world yet'}`;
+  const layer = (name: MapLayer, what: string): string => {
+    const x = verdict[name];
+    return `  - ${name}: ${what} — ${VERDICT_WORDS[x.state]}${x.detail ? ` (measured: ${x.detail})` : ''}`;
+  };
   lines.push(layer('frame', plan.choice ? `${plan.sideKm} km across` : 'the default 100 km loop'));
   lines.push(layer('land', plan.archetype));
   lines.push(layer('boundary', BOUNDARY_WHAT[plan.boundary] + (plan.boundarySource === 'user' ? ' (asked for)' : '')));
@@ -467,7 +525,7 @@ export function describeMapPlan(plan: MapPlan, applied: Record<MapLayer, boolean
   lines.push(layer('colonies', 'plots facing every road between the roads: shops on main roads, homes inside, a park, school, temple, clinic and playground per colony, taller near the town centre (map.world.colonies())'));
   if (plan.timeOfDay) lines.push(`  - timeOfDay: ${plan.timeOfDay} — not set by the map: pass skyOptions { hours: ${plan.hours} } to createAthreeMap (the sky module) to show it.`);
   for (const n of plan.notes) lines.push('  * ' + n);
-  const missing = (Object.keys(applied) as MapLayer[]).filter((k) => !applied[k] && k !== 'timeOfDay' && !(k === 'frame' || k === 'land'));
-  if (missing.length) lines.push(`Say plainly to the user that ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} planned but not yet built into the world; do not claim ${missing.length === 1 ? 'it' : 'them'}.`);
+  const missing = (Object.keys(verdict) as MapLayer[]).filter((k) => k !== 'timeOfDay' && verdict[k].state !== 'built');
+  if (missing.length) lines.push(`Say plainly to the user that ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not (fully) built into this map, as said above; do not claim ${missing.length === 1 ? 'it' : 'them'}.`);
   return lines.join('\n');
 }

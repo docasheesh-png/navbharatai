@@ -17,10 +17,11 @@
  */
 import { readMapPlanFromConfig, rewriteMapPlanInConfig, mapPlanFromData, type MapPlanData } from '../../lib/athreeMap/mapPlanData';
 import { mapLayerEditsIn, changeVerdict, LAYER_NAME, type LayerChange } from '../../lib/athreeMap/mapLayerEdit';
-import { appliedMapLayers } from '../../lib/athreeMap/mapPlan';
+import { appliedMapLayers, type MeasuredLayers } from '../../lib/athreeMap/mapPlan';
 import { MAP_CHECKS_PATH } from '../../lib/athreeMap/mapPlanWiring';
 import { describeRobotRun, runRobotChecksInWorker } from '../../lib/athreeMap/mapRobotRun';
-import { gameWorldSeed, mapPreviewCardFor } from '../../lib/athreeMap/mapPreviewCard';
+import { gameWorldSeed, mapCardFor } from '../../lib/athreeMap/mapPreviewCard';
+import { previewMapInWorker } from '../../lib/athreeMap/mapPreviewRun';
 import { savedMapNamed } from '../../lib/athreeMap/savedMapRequest';
 import type { MapPreviewCard } from '../../../lib/mapPreview';
 
@@ -31,13 +32,13 @@ const WORLD_FILE = 'src/game/world.ts';
 interface Issue { phase: 'build'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }
 
 /** One sentence per change, with its honest verdict. PURE. */
-export function describeLayerChanges(changes: readonly LayerChange[], applied: ReturnType<typeof appliedMapLayers>, d: MapPlanData): { sentence: string; recorded: string[] } {
+export function describeLayerChanges(changes: readonly LayerChange[], applied: ReturnType<typeof appliedMapLayers>, d: MapPlanData, measured?: MeasuredLayers | null): { sentence: string; recorded: string[] } {
   const parts: string[] = [];
   const recorded: string[] = [];
   for (const c of changes) {
-    const v = changeVerdict(c, applied, d);
+    const v = changeVerdict(c, applied, d, measured);
     parts.push(`${LAYER_NAME[c.layer]}: ${c.from} → ${c.to}`);
-    if (!v.built) recorded.push(`${LAYER_NAME[c.layer]} is recorded in the plan but not built into this world yet (${v.why})`);
+    if (!v.built) recorded.push(`${LAYER_NAME[c.layer]} is in the plan but not (fully) built into this world (${v.why})`);
     else if (v.why) recorded.push(`${LAYER_NAME[c.layer]}: ${v.why}`);
   }
   return { sentence: `Changed only ${parts.join('; ')}. Everything else on the map, and its seed, stayed the same.`, recorded };
@@ -99,12 +100,15 @@ export async function mapLayerEditAtTurnStart(io: {
     }
     const worldSource = Object.entries(files).filter(([p]) => p !== ATHREE_CONFIG && p !== MAP_CHECKS_PATH).map(([, s]) => s).join('\n');
     const applied = appliedMapLayers(worldSource, mapPlanFromData(next));
-    if (!saved) { const said = describeLayerChanges(changes, applied, next); changedText = said.sentence; recorded = said.recorded; }
     const seed = gameWorldSeed(worldTs, next.seed);
-    const [robots, map] = await Promise.all([
-      MAP_CHECKS_PATH in files ? runRobotChecksInWorker(files, next.profile, { seeds: [seed] }).then(describeRobotRun) : Promise.resolve('ROBOT CHECKS: this game has no map checks file, so none were run.'),
-      mapPreviewCardFor(files, next, seed, { title: saved ? `Your saved map "${saved.name}", from above` : 'Your map, from above (changed)', changed: [changedText, ...recorded].join(' ') }),
+    // The checks MEASURE what the world built (ponds placed, its edge, its road style, colony plots); the picture runs beside them.
+    const [robotRun, previewRun] = await Promise.all([
+      MAP_CHECKS_PATH in files ? runRobotChecksInWorker(files, next.profile, { seeds: [seed] }) : Promise.resolve(null),
+      previewMapInWorker(files, { seed, profile: next.profile }),
     ]);
+    const robots = robotRun ? describeRobotRun(robotRun) : 'ROBOT CHECKS: this game has no map checks file, so none were run.';
+    if (!saved) { const said = describeLayerChanges(changes, applied, next, robotRun?.measured ?? null); changedText = said.sentence; recorded = said.recorded; }
+    const map = mapCardFor(previewRun, next, seed, { title: saved ? `Your saved map "${saved.name}", from above` : 'Your map, from above (changed)', changed: [changedText, ...recorded].join(' ') });
     io.showMap(map.card);
     io.record({ phase: 'build', severity: 'info', code: 'MAP_LAYER_CHANGED', autoResolved: true, message: `${changedText}${recorded.length ? ' ' + recorded.join('; ') + '.' : ''} The platform rewrote src/game/athree/config.ts; no model call made this change.` });
     return [

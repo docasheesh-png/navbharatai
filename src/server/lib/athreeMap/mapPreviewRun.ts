@@ -119,11 +119,14 @@ function samplePreview(index, opts) {
     var lots = plan && Array.isArray(plan.plots) ? plan.plots : [];
     for (var l = 0; l < lots.length; l++) {
       var lc = pix(lots[l].x, lots[l].z);
-      if (lc < 0 || cells[lc] === 'c' || cells[lc] === 'b' || w.waterAt(lots[l].x, lots[l].z) || w.heightAt(lots[l].x, lots[l].z) < w.seaLevel) continue;
+      if (lc < 0 || cells[lc] === 'c' || cells[lc] === 'b' || cells[lc] === '4' || w.waterAt(lots[l].x, lots[l].z) || w.heightAt(lots[l].x, lots[l].z) < w.seaLevel) continue;
       if (cells[lc] !== 'd') plots++;
       cells[lc] = 'd';
     }
   }
+  // A pond drawn over the cell a road crosses keeps the pond (its water is at the cell's centre): count the road cells that remain.
+  roadCells = 0;
+  for (var rc = 0; rc < cells.length; rc++) if (cells[rc] === 'b') roadCells++;
   var sp = w.spawnPoints('player', 1)[0];
   var spawn = sp && Number.isFinite(sp.x) && Number.isFinite(sp.z) ? { u: Math.min(1, Math.max(0, (sp.x + half) / S)), v: Math.min(1, Math.max(0, (sp.z + half) / S)) } : null;
   return {

@@ -314,7 +314,23 @@ export interface PondSite {
   minLand: number;
   /** Search this far from the centre, metres. */
   reach: number;
+  /**
+   * How far above minLand a pond's centre must stand, metres (default 1). A stretched map passes 1 x its height scale: on a 5 km map
+   * every height is about 0.07 of the reference world's, so an absolute 1 m left almost no land high enough (found 2026-11-28).
+   */
+  rise?: number;
+  /**
+   * 🪷 THE TOWN'S OWN TALAB SITES, tried FIRST and in order (2026-11-28): the middle of each block enclosed by roads, with the biggest
+   * radius that keeps POND_CLEAR from every kerb. A planned town has its roads every 100 to 250 m, so a random point almost never has
+   * a 20 m clear ring all round it; the middle of a block always does when the block is big enough. The ponds are placed BEFORE the
+   * colonies plan their plots (the colonies read the ponds as water and build round them), so a block with a talab becomes the
+   * colony's park — very Indian. Every check below still applies to a site (dry, clear of roads and water, inside the edge).
+   */
+  sites?: ReadonlyArray<{ x: number; z: number; maxRadius: number }>;
 }
+
+/** On a town site the pond's own rim levels the ground round it (pondHeight), so it may stand on a gentler slope than open land. */
+export const POND_TOWN_FLAT = 3;
 
 /** How far from a pond's rim the nearest road or other water must be, metres (a town's talab fits inside a block of colony streets). */
 export const POND_CLEAR = 20;
@@ -325,23 +341,28 @@ export function placePonds(seed: number, count: number, site: PondSite): Pond[] 
   const out: Pond[] = [];
   if (!want) return out;
   const rng = mulberry32((seed ^ 0x7a1ab) | 0);
-  for (let attempt = 0; attempt < 6000 && out.length < want; attempt++) {
-    const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * site.reach;
-    const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const radius = 12 + rng() * 14;
+  const rise = typeof site.rise === 'number' && Number.isFinite(site.rise) && site.rise >= 0 ? site.rise : 1;
+  // The town's block sites first (in a seeded order), then random points over the reach, as before.
+  const sites = (site.sites ?? []).filter((t) => t.maxRadius >= 12).map((t) => ({ t, k: rng() })).sort((a, b) => a.k - b.k).map((e) => e.t);
+  for (let attempt = 0; attempt < 6000 + sites.length && out.length < want; attempt++) {
+    const town = attempt < sites.length ? sites[attempt] : null;
+    let x: number, z: number, radius: number;
+    if (town) { x = town.x; z = town.z; radius = Math.min(26, town.maxRadius); rng(); }
+    else { const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * site.reach; x = Math.cos(a) * r; z = Math.sin(a) * r; radius = 12 + rng() * 14; }
     const ghat = rng() * Math.PI * 2;
+    const flatness = town ? POND_TOWN_FLAT : 1.5;
     if (!site.allowed(x, z)) continue;
     if (out.some((p) => Math.hypot(p.x - x, p.z - z) < (p.radius + radius) * 2.5)) continue;
     const h0 = site.ground(x, z);
-    if (!(h0 > site.minLand + 1)) continue;
-    // Flat: the centre and 16 points on the outer reach within 1.5 m of each other; no water or road near the rim (read below).
+    if (!(h0 > site.minLand + rise)) continue;
+    // Flat: the centre and 16 points on the outer reach within 1.5 m of each other (3 m on a town site, whose rim levels it); no water or road near the rim (read below).
     let lo = h0, hi = h0, ok = true;
     for (let i = 0; i < 16 && ok; i++) {
       const b = (i / 16) * Math.PI * 2;
       const px = x + Math.cos(b) * radius * 1.4, pz = z + Math.sin(b) * radius * 1.4;
       const g = site.ground(px, pz);
       lo = Math.min(lo, g); hi = Math.max(hi, g);
-      if (!(hi - lo <= 1.5) || !site.allowed(px, pz)) ok = false;
+      if (!(hi - lo <= flatness) || !site.allowed(px, pz)) ok = false;
     }
     if (!ok || site.busy(x, z)) continue;
     // No water or road within POND_CLEAR metres of the rim, and none may slip between the samples (found 2026-11-27: on a planned town
